@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
 import { getFollowedUsers } from '../api/posts';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
+import { resolveStoryMediaUrl } from './storyMediaNative';
 
 export type Stories24RailItem = {
     handle: string;
@@ -110,9 +111,11 @@ export async function buildStories24RailItems(
         const latest = sortedStories[0];
         if (!latest) continue;
 
-        const latestMediaUrl = latest.mediaUrl;
+        const latestMediaUrl = resolveStoryMediaUrl(latest.mediaUrl);
         const latestMediaType = latest.mediaType;
-        const firstImage = sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl;
+        const firstImage = resolveStoryMediaUrl(
+            sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
+        );
         let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined);
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||

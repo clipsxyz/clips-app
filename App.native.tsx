@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StatusBar, Text, useColorScheme, View } from 'react-native';
+import { Pressable, ScrollView, StatusBar, Text, useColorScheme, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -98,22 +98,26 @@ const TAB_BAR_STYLE = {
   borderTopWidth: 1,
 } as const;
 
-type FeedHomeBoundaryState = { error: Error | null };
+type FeedHomeBoundaryState = { error: Error | null; retryKey: number };
 
 /** Catches Home feed crashes so the tab shows an error instead of a blank screen. */
 class FeedHomeErrorBoundary extends React.Component<
   { children: React.ReactNode },
   FeedHomeBoundaryState
 > {
-  state: FeedHomeBoundaryState = { error: null };
+  state: FeedHomeBoundaryState = { error: null, retryKey: 0 };
 
-  static getDerivedStateFromError(error: Error): FeedHomeBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<FeedHomeBoundaryState> {
     return { error };
   }
 
   componentDidCatch(error: Error) {
     console.error('Home feed render error:', error);
   }
+
+  private retry = () => {
+    this.setState((prev) => ({ error: null, retryKey: prev.retryKey + 1 }));
+  };
 
   render() {
     if (this.state.error) {
@@ -122,13 +126,28 @@ class FeedHomeErrorBoundary extends React.Component<
           <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
             Home feed failed
           </Text>
+          <Pressable
+            onPress={this.retry}
+            style={{
+              alignSelf: 'flex-start',
+              backgroundColor: '#7c3aed',
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 8,
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Reload feed</Text>
+          </Pressable>
           <ScrollView>
             <Text style={{ color: '#e5e7eb', fontSize: 13 }}>{this.state.error.message}</Text>
           </ScrollView>
         </View>
       );
     }
-    return this.props.children;
+    return (
+      <React.Fragment key={this.state.retryKey}>{this.props.children}</React.Fragment>
+    );
   }
 }
 

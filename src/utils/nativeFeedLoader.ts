@@ -1,4 +1,4 @@
-import { fetchPostsPage } from '../api/posts';
+import { fetchPostsPage, isDevMockFeedVideoPost } from '../api/posts';
 import { isUserBlocked } from '../api/messages';
 import type { Post } from '../types';
 import {
@@ -35,7 +35,9 @@ export async function filterVisibleFeedPosts(
     }
     const archivedIds = await getArchivedFeedPostIdsMobile(opts.viewerUserId);
     visible = visible.filter((item) => !archivedIds.has(item.id));
-    return filterPostsByContentPrefs(visible, opts.prefs);
+    return filterPostsByContentPrefs(visible, opts.prefs, {
+        isProtectedDevMockVideo: isDevMockFeedVideoPost,
+    });
 }
 
 export async function fetchVisibleFeedPage(

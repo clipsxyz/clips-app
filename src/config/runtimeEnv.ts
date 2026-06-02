@@ -30,7 +30,7 @@ export function getRuntimeEnv(key: string): string | undefined {
   return undefined;
 }
 
-function isReactNativeRuntime(): boolean {
+export function isReactNativeRuntime(): boolean {
   try {
     if (typeof navigator !== 'undefined' && (navigator as any).product === 'ReactNative') {
       return true;
@@ -50,7 +50,19 @@ function isReactNativeRuntime(): boolean {
   return false;
 }
 
+/** Set after a connection refused / failed fetch so local dev skips Laravel until reload. */
+let laravelUnreachableThisSession = false;
+
+export function markLaravelUnreachable(): void {
+  laravelUnreachableThisSession = true;
+}
+
+export function isLaravelUnreachableThisSession(): boolean {
+  return laravelUnreachableThisSession;
+}
+
 export function isLaravelApiEnabled(): boolean {
+  if (laravelUnreachableThisSession) return false;
   const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');
   if (raw === 'true') return true;
   if (raw === 'false') return false;

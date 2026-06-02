@@ -330,13 +330,44 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     useEffect(() => {
         if (!collapsePayload) return;
 
+        const handleKey = normalizeStories24Handle(collapsePayload.handle);
+        const hasCard = items.some((item) => normalizeStories24Handle(item.handle) === handleKey);
+        if (!hasCard) {
+            onCollapseHandled?.();
+            return;
+        }
+
         let cancelled = false;
         let frameId = 0;
+        let measureAttempts = 0;
+        const maxMeasureAttempts = 45;
         const startedAt = Date.now();
-        const handleKey = normalizeStories24Handle(collapsePayload.handle);
+
+        const finishWithoutAnimation = async () => {
+            if (cancelled) return;
+            try {
+                await onScrollCardIntoView?.();
+            } catch {
+                /* ignore */
+            }
+            if (!cancelled) onCollapseHandled?.();
+        };
+
+        // Fullscreen shrink is fragile on Android (measure loops + Fabric); scroll rail into view only.
+        if (Platform.OS === 'android') {
+            void finishWithoutAnimation();
+            return () => {
+                cancelled = true;
+            };
+        }
 
         const measureCard = () => {
             if (cancelled) return;
+            measureAttempts += 1;
+            if (measureAttempts > maxMeasureAttempts) {
+                onCollapseHandled?.();
+                return;
+            }
             const node = cardRefs.current[handleKey];
             if (!node) {
                 frameId = requestAnimationFrame(measureCard);
@@ -375,7 +406,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             cancelled = true;
             cancelAnimationFrame(frameId);
         };
-    }, [collapsePayload, onCollapseHandled, onScrollCardIntoView]);
+    }, [collapsePayload, items, onCollapseHandled, onScrollCardIntoView]);
 
     const railHandles = useMemo(
         () => items.map((i) => i.handle).filter((h) => h && h !== STORIES24_ADD_YOURS_HANDLE),
@@ -424,7 +455,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     };
 
     return (
-        <>
+        <View collapsable={false}>
             <LinearGradient
                 colors={[...GOLD_BORDER_GRADIENT]}
                 locations={[...GOLD_BORDER_LOCATIONS]}
@@ -438,7 +469,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                     collapsable={false}
                     {...(Platform.OS === 'android' ? { needsOffscreenAlphaCompositing: true } : {})}
                 >
-                    {ambientSize.width > 0 && ambientSize.height > 0 ? (
+                    {ambientSize.width > 0 && ambientSize.height > 0 && Platform.OS !== 'android' ? (
                         <GoldChromeAmbientCanvas
                             width={ambientSize.width}
                             height={ambientSize.height}
@@ -499,7 +530,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                     }}
                 />
             ) : null}
-        </>
+        </View>
     );
 });
 

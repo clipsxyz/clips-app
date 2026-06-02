@@ -52,6 +52,106 @@ export const FEED_POST_CARD_STYLE = {
     overflow: 'visible' as const,
 };
 
+/** Web FeedCard sponsored row: `px-4 pt-2 pb-1.5`. */
+export const FEED_CARD_SPONSORED_PADDING = {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+} as const;
+
+/** Web caption block under media: `px-3 py-2.5`. */
+export const FEED_CARD_CAPTION_PADDING = {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+} as const;
+
+/** Web EngagementBar shell: `px-3 pt-2 pb-2.5 border-t` with borderColor #030712. */
+export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: FEED_PAGE_BG,
+} as const;
+
+/** Full-bleed media column (black, overlaid PostHeader). */
+export const FEED_CARD_MEDIA_WRAP = {
+    width: '100%' as const,
+    backgroundColor: '#000000',
+    position: 'relative' as const,
+    overflow: 'hidden' as const,
+};
+
+/** Client upload / failure overlay on media. */
+export const FEED_CARD_UPLOAD_OVERLAY = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 20,
+    gap: 6,
+};
+
+export const FEED_CARD_UPLOAD_TITLE = {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700' as const,
+    marginTop: 4,
+};
+
+export const FEED_CARD_UPLOAD_SUBTITLE = {
+    color: '#D1D5DB',
+    fontSize: 12,
+    textAlign: 'center' as const,
+};
+
+/** Web sponsored row container: flex + px-4 pt-2 pb-1.5. */
+export const FEED_CARD_SPONSORED_ROW = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    ...FEED_CARD_SPONSORED_PADDING,
+};
+
+/** Web `inline-flex … px-2.5 py-0.5 rounded-full text-xs … bg-amber-500/20`. */
+export const FEED_CARD_SPONSORED_PILL = {
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+};
+
+export const FEED_CARD_SPONSORED_TEXT = {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: '#FBBF24',
+};
+
+export const FEED_CARD_SPONSORED_FEED_TYPE = {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textTransform: 'capitalize' as const,
+};
+
+/** Web EngagementBar flex row + border-t padding. */
+export const FEED_CARD_ENGAGEMENT_BAR = {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    minWidth: 0,
+    ...FEED_CARD_ENGAGEMENT_BAR_PADDING,
+};
+
+export const FEED_CARD_ENGAGEMENT_BAR_DIMMED = {
+    opacity: 0.45,
+};
+
 export type FeedPageLayoutProps = {
     /** PillTabs row (Stories · location pill · Passport). */
     header: ReactNode;

@@ -64,6 +64,8 @@ type Props = {
     commentAuthorHandle: string;
     currentUserHandle?: string;
     onAfterClose?: () => void;
+    /** `scenesEmbed` — no Modal; parent positions sheet (Scenes viewer). */
+    variant?: 'modal' | 'scenesEmbed';
 };
 
 function formatTime(timestamp: number): string {
@@ -453,7 +455,9 @@ export default function PostCommentsSheet({
     commentAuthorHandle,
     currentUserHandle,
     onAfterClose,
+    variant = 'modal',
 }: Props) {
+    const isScenesEmbed = variant === 'scenesEmbed';
     const { user } = useAuth();
     const navigation = useNavigation<any>();
     const insets = useSafeAreaInsets();
@@ -834,15 +838,16 @@ export default function PostCommentsSheet({
 
     if (!isOpen) return null;
 
-    return (
-        <Modal visible={isOpen} animationType="slide" transparent onRequestClose={handleClose}>
-            <KeyboardAvoidingView
-                style={styles.modalOverlay}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-                <Pressable style={styles.backdrop} onPress={handleClose} />
-                <View style={[styles.sheet, { height: SHEET_HEIGHT, paddingBottom: insets.bottom }]}>
-                    {post?.mediaUrl ? (
+    const sheetBody = (
+        <View
+            style={[
+                styles.sheet,
+                isScenesEmbed
+                    ? { flex: 1, paddingBottom: insets.bottom }
+                    : { height: SHEET_HEIGHT, paddingBottom: insets.bottom },
+            ]}
+        >
+                    {!isScenesEmbed && post?.mediaUrl ? (
                         <View style={styles.mediaPreviewRow}>
                             <View style={styles.mediaPreviewThumb}>
                                 {post.mediaType === 'video' ? (
@@ -870,9 +875,11 @@ export default function PostCommentsSheet({
                         </View>
                     ) : null}
 
-                    <View style={styles.dragHandleRow}>
-                        <View style={styles.dragHandle} />
-                    </View>
+                    {!isScenesEmbed ? (
+                        <View style={styles.dragHandleRow}>
+                            <View style={styles.dragHandle} />
+                        </View>
+                    ) : null}
 
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>
@@ -960,13 +967,37 @@ export default function PostCommentsSheet({
                         onSubmit={handleAddComment}
                         isLoading={submitting}
                     />
-                </View>
+        </View>
+    );
+
+    if (isScenesEmbed) {
+        return (
+            <KeyboardAvoidingView
+                style={styles.scenesEmbedRoot}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+                {sheetBody}
+            </KeyboardAvoidingView>
+        );
+    }
+
+    return (
+        <Modal visible={isOpen} animationType="slide" transparent onRequestClose={handleClose}>
+            <KeyboardAvoidingView
+                style={styles.modalOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+                <Pressable style={styles.backdrop} onPress={handleClose} />
+                {sheetBody}
             </KeyboardAvoidingView>
         </Modal>
     );
 }
 
 const styles = StyleSheet.create({
+    scenesEmbedRoot: {
+        flex: 1,
+    },
     modalOverlay: {
         flex: 1,
         justifyContent: 'flex-end',

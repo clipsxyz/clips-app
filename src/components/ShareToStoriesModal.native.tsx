@@ -13,6 +13,7 @@ import { createStory } from '../api/stories';
 import { incrementShares } from '../api/posts';
 import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
+import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import type { Post } from '../types';
 import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import ShareTextStoryCapture, {
@@ -31,6 +32,15 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
     const [isSharing, setIsSharing] = useState(false);
     const textCaptureRef = useRef<ShareTextStoryCaptureHandle>(null);
 
+    const resolveOverlayThumbUri = (targetPost: Post, payloadMediaUrl?: string, payloadMediaType?: 'image' | 'video') => {
+        const firstImageItem = (targetPost.mediaItems || []).find((m) => m?.type === 'image' && m.url)?.url;
+        if (payloadMediaType === 'video') {
+            return targetPost.videoPosterUrl || firstImageItem;
+        }
+        if (payloadMediaUrl) return payloadMediaUrl;
+        return firstImageItem || targetPost.videoPosterUrl;
+    };
+
     const handleShare = async () => {
         if (!user?.id || !post) {
             Alert.alert('Sign in required', 'Please sign in to share to Stories.');
@@ -40,6 +50,9 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
         setIsSharing(true);
         onShareSuccess?.(post.id);
 
+        let overlay:
+            | ReturnType<typeof showUploadOverlayNative>
+            | null = null;
         try {
             let payload = buildSharePostToStoriesPayload(post);
 
@@ -54,6 +67,15 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                 }
                 payload = { ...payload, mediaUrl: generated, mediaType: 'image' };
             }
+
+            overlay = showUploadOverlayNative({
+                thumbUri: resolveOverlayThumbUri(post, payload.mediaUrl, payload.mediaType),
+                thumbType: payload.mediaType === 'video' ? 'video' : 'image',
+                initialMessage: 'Sharing to Stories 24...',
+                uploadingTitle: 'Preparing story...',
+                successTitle: 'Story shared!',
+                errorTitle: 'Story share failed',
+            });
 
             onClose();
 
@@ -84,10 +106,14 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
             }
 
             emitStoriesRefresh();
-            Alert.alert('Stories', 'Successfully shared to Stories 24!');
+            overlay.success('Shared to Stories 24.');
         } catch (e) {
             console.error('Failed to share to stories:', e);
-            Alert.alert('Stories', 'Failed to share to Stories 24. Please try again.');
+            if (overlay) {
+                overlay.error('Failed to share to Stories 24. Please try again.');
+            } else {
+                Alert.alert('Stories', 'Failed to share to Stories 24. Please try again.');
+            }
         } finally {
             setIsSharing(false);
         }
@@ -96,7 +122,7 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
     if (!visible || !post) return null;
 
     return (
-        <>
+        <View pointerEvents="box-none">
             <ShareTextStoryCapture ref={textCaptureRef} />
         <Modal visible transparent animationType="fade" onRequestClose={onClose}>
             <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
@@ -129,7 +155,7 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                 </TouchableOpacity>
             </TouchableOpacity>
         </Modal>
-        </>
+        </View>
     );
 }
 

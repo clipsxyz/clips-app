@@ -17,10 +17,10 @@ import {
 import type { StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import Video from 'react-native-video';
+import Video, { type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import { subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
-import { setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
@@ -29,6 +29,10 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import { postHasVideoMedia } from '../utils/postMedia';
+import {
+    MOCK_FEED_VIDEO_REMOTE_FALLBACK,
+    resolveMockFeedVideoUrl,
+} from '../constants/mockFeedVideos';
 import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 
@@ -77,11 +81,14 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const [loadingByUrl, setLoadingByUrl] = useState<Record<string, boolean>>({});
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
+    /** Per-raw-URL remote fallback after local/demo path fails (mirrors web Media). */
+    const [videoUrlFallbackByRaw, setVideoUrlFallbackByRaw] = useState<Record<string, string>>({});
     const [soundOn, setSoundOn] = useState(!muted);
     const [muteFlash, setMuteFlash] = useState(false);
     const loadedUrlsRef = useRef<Set<string>>(new Set());
     const mediaLoadReportedRef = useRef(false);
     const carouselScrollRef = useRef<ScrollView>(null);
+    const feedVideoRef = useRef<VideoRef>(null);
     const lastEmittedIndexRef = useRef(0);
 
     const carouselItems = useMemo(
@@ -137,6 +144,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         setLoadingByUrl({});
         setCurrentIndex(0);
         lastEmittedIndexRef.current = 0;
+        setPlayFailed(false);
+        setVideoUrlFallbackByRaw({});
     }, [post.id]);
 
     /** Thumb-rail tap only — do not scrollTo when the swipe already moved us there. */
@@ -156,7 +165,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         carouselItems.length > 0
             ? carouselItems[Math.min(currentIndex, maxCarouselIndex)]
             : undefined;
-    const mediaUrl = activeItem?.url || post.mediaUrl;
+    const rawMediaUrl = activeItem?.url || post.mediaUrl;
+    const getPlaybackUrl = (raw: string) =>
+        videoUrlFallbackByRaw[raw] || resolveMockFeedVideoUrl(raw);
+    const mediaUrl = rawMediaUrl;
+    const playbackUrl = rawMediaUrl ? getPlaybackUrl(rawMediaUrl) : undefined;
     const postLevelPoster = post.videoPosterUrl;
     const activeIsVideo = activeItem?.type === 'video' || (!activeItem && isVideoPost(post));
     const activeIsImage = !activeIsVideo && !!mediaUrl;
@@ -197,9 +210,28 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         return subscribeActiveFeedVideo((activeId) => {
             if (activeId !== post.id) {
                 setPlayFailed(false);
+                setPaused(true);
             }
         });
     }, [mode, post.id, video]);
+
+    useEffect(() => {
+        if (mode !== 'feed' || !video) return;
+        setPaused(!isActive);
+    }, [isActive, mode, video]);
+
+    useEffect(() => {
+        if (mode !== 'feed' || !video || !isActive) return;
+        const handoff = consumeFeedVideoHandoff(post.id);
+        if (!handoff || handoff.currentTime <= 0) {
+            if (handoff) setSoundOn(!handoff.muted);
+            return;
+        }
+        setSoundOn(!handoff.muted);
+        requestAnimationFrame(() => {
+            feedVideoRef.current?.seek(handoff.currentTime);
+        });
+    }, [isActive, mode, post.id, video]);
 
     useEffect(() => {
         setSoundOn(!muted);
@@ -236,21 +268,47 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const frameStyle = { width, height, backgroundColor: '#000000' };
 
-    const onVideoError = (url: string, error?: unknown) => {
-        console.warn('Video playback failed:', url, error);
+    const videoSource = (uri: string) => ({ uri, type: 'mp4' as const });
+
+    const onVideoError = (rawUrl: string, error?: unknown) => {
+        const played = getPlaybackUrl(rawUrl);
+        if (
+            !videoUrlFallbackByRaw[rawUrl] &&
+            played !== MOCK_FEED_VIDEO_REMOTE_FALLBACK &&
+            (rawUrl.includes('/demo-videos/') || rawUrl.startsWith('/'))
+        ) {
+            setVideoUrlFallbackByRaw((prev) => ({
+                ...prev,
+                [rawUrl]: MOCK_FEED_VIDEO_REMOTE_FALLBACK,
+            }));
+            setPlayFailed(false);
+            beginUrlLoad(rawUrl);
+            return;
+        }
+        console.warn('Video playback failed:', played, error);
         setPlayFailed(true);
-        markUrlLoaded(url);
+        markUrlLoaded(rawUrl);
     };
 
-    const renderSlide = (item: (typeof carouselItems)[number], slideIndex: number) => {
-        const slideUrl = item?.url || post.mediaUrl;
-        if (!slideUrl) return <View style={frameStyle} />;
+    const retryVideoPlayback = () => {
+        setPlayFailed(false);
+        if (mediaUrl) beginUrlLoad(mediaUrl);
+    };
 
+    const showVideoPoster = video && postLevelPoster && !feedShouldPlay;
+    const showVideoPlayFailed = video && playFailed && mode === 'feed';
+
+    const renderSlide = (item: (typeof carouselItems)[number], slideIndex: number) => {
+        const slideRawUrl = item?.url || post.mediaUrl;
+        if (!slideRawUrl) return <View style={frameStyle} />;
+
+        const slideUrl = getPlaybackUrl(slideRawUrl);
         const slideIsVideo = item?.type === 'video' || (!item && isVideoPost(post));
         const slideVideo = !textOnly && slideIsVideo;
         const slideFeedPlay =
             mode === 'feed' && slideVideo && isActive && slideIndex === currentIndex && !playFailed;
-        const showLoader = !slideVideo && !!loadingByUrl[slideUrl] && !loadedUrlsRef.current.has(slideUrl);
+        const showLoader =
+            !slideVideo && !!loadingByUrl[slideRawUrl] && !loadedUrlsRef.current.has(slideRawUrl);
 
         const slidePoster =
             (item as { posterUrl?: string } | undefined)?.posterUrl || postLevelPoster;
@@ -258,19 +316,19 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slideInner = slideVideo ? (
             mode === 'detail' ? (
                 <Video
-                    source={{ uri: slideUrl }}
+                    source={videoSource(slideUrl)}
                     style={frameStyle}
                     resizeMode="contain"
                     controls
                     paused={paused}
                     poster={slidePoster}
                     posterResizeMode="cover"
-                    onLoad={() => markUrlLoaded(slideUrl)}
-                    onError={(e) => onVideoError(slideUrl, e)}
+                    onLoad={() => markUrlLoaded(slideRawUrl)}
+                    onError={(e) => onVideoError(slideRawUrl, e)}
                 />
             ) : slideFeedPlay ? (
                 <Video
-                    source={{ uri: slideUrl }}
+                    source={videoSource(slideUrl)}
                     style={frameStyle}
                     resizeMode="cover"
                     paused={false}
@@ -281,9 +339,9 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     playInBackground={false}
                     playWhenInactive={false}
                     ignoreSilentSwitch="ignore"
-                    onLoad={() => markUrlLoaded(slideUrl)}
+                    onLoad={() => markUrlLoaded(slideRawUrl)}
                     onProgress={(e) => onFeedVideoProgress(e.currentTime)}
-                    onError={(e) => onVideoError(slideUrl, e)}
+                    onError={(e) => onVideoError(slideRawUrl, e)}
                 />
             ) : slidePoster ? (
                 <Image
@@ -291,9 +349,9 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     style={frameStyle}
                     resizeMode="cover"
                     resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                    onLoadStart={() => beginUrlLoad(slideUrl)}
-                    onLoad={() => markUrlLoaded(slideUrl)}
-                    onError={() => markUrlLoaded(slideUrl)}
+                    onLoadStart={() => beginUrlLoad(slideRawUrl)}
+                    onLoad={() => markUrlLoaded(slideRawUrl)}
+                    onError={() => markUrlLoaded(slideRawUrl)}
                 />
             ) : (
                 <View style={[frameStyle, styles.videoFallback]}>
@@ -308,9 +366,9 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 resizeMode="cover"
                 resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                 progressiveRenderingEnabled
-                onLoadStart={() => beginUrlLoad(slideUrl)}
-                onLoad={() => markUrlLoaded(slideUrl)}
-                onError={() => markUrlLoaded(slideUrl)}
+                onLoadStart={() => beginUrlLoad(slideRawUrl)}
+                onLoad={() => markUrlLoaded(slideRawUrl)}
+                onError={() => markUrlLoaded(slideRawUrl)}
             />
         );
 
@@ -334,10 +392,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         );
     };
 
-    const inner = video ? (
+    const inner = video && playbackUrl ? (
         mode === 'detail' ? (
             <Video
-                source={{ uri: mediaUrl }}
+                source={videoSource(playbackUrl)}
                 style={frameStyle}
                 resizeMode="contain"
                 controls
@@ -345,14 +403,16 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 poster={postLevelPoster}
                 posterResizeMode="cover"
                 onLoad={() => mediaUrl && markUrlLoaded(mediaUrl)}
-                onError={() => mediaUrl && markUrlLoaded(mediaUrl)}
+                onError={(e) => mediaUrl && onVideoError(mediaUrl, e)}
             />
         ) : feedShouldPlay ? (
             <Video
-                source={{ uri: mediaUrl }}
+                key={`${post.id}-${playbackUrl}`}
+                ref={feedVideoRef}
+                source={videoSource(playbackUrl)}
                 style={frameStyle}
                 resizeMode="cover"
-                paused={false}
+                paused={paused}
                 muted={!soundOn}
                 repeat
                 poster={postLevelPoster}
@@ -366,6 +426,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             />
         ) : postLevelPoster ? (
             <Image
+                key={`${post.id}-poster`}
                 source={{ uri: postLevelPoster }}
                 style={frameStyle}
                 resizeMode="cover"
@@ -457,6 +518,19 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     containerHeight={height}
                 />
             ) : null}
+            {video && mode === 'feed' && !feedShouldPlay ? (
+                <View style={styles.videoTypeBadge} pointerEvents="none">
+                    <Icon name="videocam" size={12} color="#FFFFFF" />
+                    <Text style={styles.videoTypeBadgeText}>VIDEO</Text>
+                </View>
+            ) : null}
+            {showVideoPlayFailed ? (
+                <Pressable style={styles.videoErrorOverlay} onPress={retryVideoPlayback}>
+                    <Icon name="refresh-circle" size={32} color="#FFFFFF" />
+                    <Text style={styles.videoErrorTitle}>Video could not play</Text>
+                    <Text style={styles.videoErrorHint}>Tap to retry</Text>
+                </Pressable>
+            ) : null}
         </View>
     );
 });
@@ -520,5 +594,45 @@ const styles = StyleSheet.create({
         textShadowColor: 'rgba(0,0,0,0.85)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 4,
+    },
+    videoTypeBadge: {
+        position: 'absolute',
+        top: 10,
+        left: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        zIndex: 5,
+    },
+    videoTypeBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '700',
+        letterSpacing: 0.6,
+    },
+    videoErrorOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        paddingHorizontal: 16,
+        zIndex: 6,
+    },
+    videoErrorTitle: {
+        marginTop: 8,
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    videoErrorHint: {
+        marginTop: 4,
+        color: '#D1D5DB',
+        fontSize: 12,
+        textAlign: 'center',
     },
 });

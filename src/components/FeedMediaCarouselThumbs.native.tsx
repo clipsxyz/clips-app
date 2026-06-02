@@ -33,12 +33,12 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
                             activeOpacity={0.9}
                         >
                             {item.type === 'video' ? (
-                                <>
+                                <View style={styles.thumbImgWrap}>
                                     <Image source={{ uri: item.url }} style={styles.thumbImg} />
                                     <View style={styles.vidBadge}>
                                         <Text style={styles.vidBadgeText}>VID</Text>
                                     </View>
-                                </>
+                                </View>
                             ) : (
                                 <Image source={{ uri: item.url }} style={styles.thumbImg} />
                             )}
@@ -79,6 +79,10 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: 8,
         paddingBottom: 4,
+    },
+    thumbImgWrap: {
+        width: '100%',
+        height: '100%',
     },
     thumb: {
         width: 56,

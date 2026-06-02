@@ -38,12 +38,13 @@ import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
-import { loadFeed, saveFeed } from './utils/feedCache';
+import { loadFeed, saveFeed, clearFeed } from './utils/feedCache';
+import { MOCK_FEED_VIDEO_REMOTE_FALLBACK, resolveMockFeedVideoUrl } from './constants/mockFeedVideos';
 import { getStableUserId } from './utils/userId';
 import {
   filterPostsByContentPrefs,
@@ -2744,15 +2745,15 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const rewriteMediaUrl = React.useCallback((u: string): string => {
     if (!u || typeof u !== 'string') return u;
     const h = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (h === 'localhost' || h === '127.0.0.1') return u;
-    // Blob URLs are origin-bound and won't work from phone when created on laptop
-    // Keep `blob:` URLs so media still renders when created on the same device/session.
-    // If the blob can't be resolved, the Media component will show its error/placeholder UI.
-    if (u.startsWith('blob:')) return u;
-    return u
-      .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-      .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-      .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    if (u.startsWith('blob:')) return resolveMockFeedVideoUrl(u);
+    let out = u;
+    if (h !== 'localhost' && h !== '127.0.0.1') {
+      out = u
+        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
+        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
+        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    }
+    return resolveMockFeedVideoUrl(out);
   }, []);
 
   // Determine if we have multiple media items (carousel); rewrite URLs for network (e.g. phone)
@@ -3194,6 +3195,19 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   };
 
   const handleVideoError = (_e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = videoRef.current;
+    const src = v?.currentSrc || v?.src || currentItem?.url || '';
+    if (
+      v &&
+      src.includes('/demo-videos/') &&
+      !src.includes(MOCK_FEED_VIDEO_REMOTE_FALLBACK)
+    ) {
+      v.src = MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+      v.load();
+      setIsLoading(true);
+      setHasError(false);
+      return;
+    }
     setIsLoading(false);
     setHasError(true);
   };
@@ -3659,6 +3673,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 item.type === 'video' && item.url && item.url.trim().length > 0;
               let slideElement: React.ReactNode = hasValidVideoSrc ? (
                 <video
+                  key={item.url}
                   src={item.url}
                   className="w-full h-full"
                   style={{ objectFit: 'cover' }}
@@ -3780,6 +3795,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           const hasValidVideoSrc = currentItem.type === 'video' && currentItem.url && currentItem.url.trim().length > 0;
           let mediaElement = hasValidVideoSrc ? (
             <video
+              key={currentItem.url}
               ref={videoRef}
               src={currentItem.url}
               className="w-full h-full"
@@ -3858,11 +3874,14 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
               {/* Error State */}
               {hasError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-50">
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-50">
                   <div className="text-center text-white px-4">
-                    <div className="text-2xl mb-2">âš ï¸</div>
-                    <div className="text-sm">Failed to load {currentItem.type}</div>
-                    <div className="text-xs text-gray-400 mt-1">Check your connection</div>
+                    <div className="text-sm font-medium">
+                      {currentItem.type === 'video' ? 'Video could not play' : `Failed to load ${currentItem.type}`}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {currentItem.type === 'video' ? 'Showing cover image · check connection' : 'Check your connection'}
+                    </div>
                   </div>
                 </div>
               )}
@@ -4904,12 +4923,14 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const rewriteMediaUrlForThumbs = React.useCallback((u?: string): string => {
     if (!u || typeof u !== 'string') return '';
     const h = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (h === 'localhost' || h === '127.0.0.1') return u;
-    if (u.startsWith('blob:')) return u;
-    return u
-      .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-      .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-      .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    let out = u;
+    if (h !== 'localhost' && h !== '127.0.0.1' && !u.startsWith('blob:')) {
+      out = u
+        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
+        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
+        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    }
+    return resolveMockFeedVideoUrl(out);
   }, []);
   const carouselThumbItems = React.useMemo(
     () =>
@@ -6998,6 +7019,9 @@ function FeedPageWrapper() {
       try {
         // In mock mode, skip cache and always fetch fresh so new posts appear immediately
         const useMock = (import.meta as any).env?.VITE_USE_LARAVEL_API === 'false';
+        if (useMock) {
+          await clearFeed(userId, currentFilter).catch(() => {});
+        }
         const cached = useMock ? null : await loadFeed(userId, currentFilter);
         if (cancelled) return;
         const hasCache = cached && cached.length > 0;
@@ -7485,7 +7509,11 @@ function FeedPageWrapper() {
       setFeedPrefsVersion((v) => v + 1);
       setPages((prev) =>
         prev
-          .map((page) => filterPostsByContentPrefs(page, prefs))
+          .map((page) =>
+            filterPostsByContentPrefs(page, prefs, {
+              isProtectedDevMockVideo: isDevMockFeedVideoPost,
+            }),
+          )
           .filter((page) => page.length > 0),
       );
     });
@@ -7497,7 +7525,11 @@ function FeedPageWrapper() {
   const applyFeedContentPrefsToPages = React.useCallback(() => {
     setPages((prev) =>
       prev
-        .map((page) => filterPostsByContentPrefs(page, feedContentPrefsRef.current))
+        .map((page) =>
+          filterPostsByContentPrefs(page, feedContentPrefsRef.current, {
+            isProtectedDevMockVideo: isDevMockFeedVideoPost,
+          }),
+        )
         .filter((page) => page.length > 0),
     );
     setFeedPrefsVersion((v) => v + 1);
@@ -7597,7 +7629,9 @@ function FeedPageWrapper() {
 
     // Apply current follow/like/bookmark state so UI is correct after cache or tab switch
     const decoratedPosts = uniquePosts.map(p => decorateForUser(userId, p));
-    const visiblePosts = filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current);
+    const visiblePosts = filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current, {
+      isProtectedDevMockVideo: isDevMockFeedVideoPost,
+    });
 
     // Merge posts and ads, sort by epoch time (createdAt) - newest first
     const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [

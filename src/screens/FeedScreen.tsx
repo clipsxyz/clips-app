@@ -3,6 +3,7 @@
 /* eslint-disable */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-refresh/only-export-components */
+// @refresh reset — FeedScreen is large; full remount on edit avoids hook-order HMR glitches.
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -21,8 +22,8 @@ import {
     Linking,
     Pressable,
     Platform,
+    useWindowDimensions,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
@@ -51,7 +52,7 @@ import { isUserBlocked } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
-import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDimensions';
+import { isLikelyImageUri } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
 import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
@@ -66,11 +67,28 @@ import {
 } from '../utils/feedAutoplayPrefNative';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import { consumeFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
     getGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import FeedPageLayout, { FEED_CARD_BG, FEED_PAGE_BG, FEED_POST_CARD_STYLE } from '../components/FeedPageLayout.native';
+import FeedPageLayout, {
+    FEED_CARD_CAPTION_PADDING,
+    FEED_CARD_ENGAGEMENT_BAR,
+    FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+    FEED_CARD_MEDIA_WRAP,
+    FEED_CARD_SPONSORED_FEED_TYPE,
+    FEED_CARD_SPONSORED_PILL,
+    FEED_CARD_SPONSORED_ROW,
+    FEED_CARD_SPONSORED_TEXT,
+    FEED_CARD_UPLOAD_OVERLAY,
+    FEED_CARD_UPLOAD_SUBTITLE,
+    FEED_CARD_UPLOAD_TITLE,
+    FEED_PAGE_BG,
+    FEED_POST_CARD_STYLE,
+} from '../components/FeedPageLayout.native';
+import FeedPostProfileQuickMenu from '../components/FeedPostProfileQuickMenu.native';
+import { isDevMockFeedVideoPost } from '../api/posts';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigateMainTab } from '../navigation/mainTabs';
@@ -101,12 +119,11 @@ import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/S
 import {
     buildStories24RailItems,
     consumeStories24FeedScrollRestore,
-    consumeStories24FeedScrollRestore,
-    consumeStories24FeedScrollRestore,
     consumeStories24RailReturn,
     persistStories24RailOpenHandle,
     buildStories24StoryNavParams,
     isStories24AddYoursHandle,
+    normalizeStories24Handle,
     resolveStories24OpenTarget,
     snapshotStories24FeedScroll,
     type Stories24RailItem,
@@ -167,7 +184,7 @@ import {
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { clearPendingLocationFeed, readPendingLocationFeed } from '../utils/pendingLocationNative';
 import type { FeedScope } from '../utils/placeFeedLevels';
-import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal';
+import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import FeedDmSheet from '../components/FeedDmSheet.native';
 import FeedDmDeliveryFx, { type FeedDmDeliveryFxState } from '../components/FeedDmDeliveryFx.native';
@@ -178,7 +195,7 @@ import {
     saveLocationNotifyPrefs,
 } from '../utils/locationNotifyPrefNative';
 import { useMutualFollow } from '../hooks/useMutualFollow';
-import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard';
+import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard.native';
 import SuggestedPlacesFeedSection from '../components/SuggestedPlacesFeedSection.native';
 import LocalBusinessSuggestionCard from '../components/LocalBusinessSuggestionCard.native';
 import FeedAdCard from '../components/FeedAdCard.native';
@@ -669,7 +686,7 @@ function PillTabs({
 
                 <View style={styles.feedHeaderRightActions}>
                     {customLocation ? (
-                        <>
+                        <View style={styles.feedHeaderIconGroup}>
                             <TouchableOpacity
                                 onPress={() => setPlaceInfoOpen(true)}
                                 style={styles.feedHeaderIconButton}
@@ -683,7 +700,7 @@ function PillTabs({
                                 locationLabel={customLocationLabel || customLocation}
                                 placeId={customLocationPlaceId}
                             />
-                        </>
+                        </View>
                     ) : null}
                     <TouchableOpacity
                         onPress={onOpenPassport}
@@ -707,68 +724,6 @@ function PillTabs({
                 </View>
             </View>
         </View>
-    );
-}
-
-function Avatar({
-    src,
-    name,
-    size = 32,
-    hasStory = false,
-    onPress
-}: {
-    src?: string;
-    name: string;
-    size?: number;
-    hasStory?: boolean;
-    onPress?: () => void;
-}) {
-    const getInitials = (fullName: string): string => {
-        const names = fullName.trim().split(' ');
-        if (names.length === 1) {
-            return names[0].charAt(0).toUpperCase();
-        }
-        return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase();
-    };
-
-    const initials = getInitials(name);
-    const Component = onPress ? TouchableOpacity : View;
-
-    if (hasStory) {
-        return (
-            <Component onPress={onPress} style={styles.avatarContainer}>
-                <LinearGradient
-                    colors={['#a78bfa', '#7c3aed']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[styles.storyBorder, { width: size + 4, height: size + 4, borderRadius: (size + 4) / 2 }]}
-                >
-                    <View style={[styles.avatarInner, { width: size, height: size }]}>
-                        {src ? (
-                            <Image source={{ uri: src }} style={styles.avatarImage} />
-                        ) : (
-                            <View style={[styles.avatarFallback, { width: size, height: size }]}>
-                                <Text style={styles.avatarInitials}>{initials}</Text>
-                            </View>
-                        )}
-                    </View>
-                </LinearGradient>
-            </Component>
-        );
-    }
-
-    return (
-        <Component onPress={onPress} style={styles.avatarContainer}>
-            <View style={[styles.avatarInner, { width: size, height: size }]}>
-                {src ? (
-                    <Image source={{ uri: src }} style={styles.avatarImage} />
-                ) : (
-                    <View style={[styles.avatarFallback, { width: size, height: size }]}>
-                        <Text style={styles.avatarInitials}>{initials}</Text>
-                    </View>
-                )}
-            </View>
-        </Component>
     );
 }
 
@@ -843,9 +798,11 @@ const FeedCard = React.memo(function FeedCard({
     const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
     const postViewRecordedRef = React.useRef(false);
-    const screenWidth = Dimensions.get('window').width;
-    const cardMediaWidth = screenWidth;
+    const { width: windowWidth } = useWindowDimensions();
+    const cardMediaWidth = windowWidth;
     const DOUBLE_TAP_DELAY_MS = 260;
+    const MEDIA_MIN_ASPECT = 1 / 1.91;
+    const MEDIA_MAX_ASPECT = 5 / 4;
 
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
@@ -905,23 +862,27 @@ const FeedCard = React.memo(function FeedCard({
             Image.getSize(
                 mediaSizingUrl,
                 (width, height) => {
-                    // Calculate Instagram-style dimensions with clamping
-                    const dimensions = getInstagramImageDimensions(width, height, cardMediaWidth);
-                    const minHeight = cardMediaWidth * FEED_UI.media.minAspect;
-                    const maxHeight = cardMediaWidth * FEED_UI.media.maxAspect;
-                    const portraitFirstHeight = Math.min(Math.max(dimensions.height, minHeight), maxHeight);
-                    setImageDimensions({ width: dimensions.width, height: portraitFirstHeight });
+                    // Keep feed media height stable and web-parity within Instagram bounds.
+                    const aspectRatio = height / width;
+                    const clampedAspect = Math.min(
+                        Math.max(aspectRatio, MEDIA_MIN_ASPECT),
+                        MEDIA_MAX_ASPECT,
+                    );
+                    setImageDimensions({
+                        width: cardMediaWidth,
+                        height: cardMediaWidth * clampedAspect,
+                    });
                 },
                 (error) => {
                     console.warn('Skipping invalid image sizing URL:', mediaSizingUrl, error);
                     // Fallback to default dimensions
-                    setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * FEED_UI.media.maxAspect });
+                    setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
                 }
             );
         } else if (mediaSizingUrl && !imageDimensions) {
-            setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * FEED_UI.media.maxAspect });
+            setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
         }
-    }, [mediaSizingUrl, cardMediaWidth, imageDimensions]);
+    }, [MEDIA_MAX_ASPECT, MEDIA_MIN_ASPECT, mediaSizingUrl, cardMediaWidth, imageDimensions]);
 
     // Calculate image style with Instagram clamping
     const imageStyle = React.useMemo(() => {
@@ -935,10 +896,10 @@ const FeedCard = React.memo(function FeedCard({
         // Default while loading
         return {
             width: cardMediaWidth,
-            height: cardMediaWidth * FEED_UI.media.maxAspect, // Default to max portrait aspect ratio
+            height: cardMediaWidth * MEDIA_MAX_ASPECT, // Default to max portrait aspect ratio
             backgroundColor: '#000000',
         };
-    }, [imageDimensions, cardMediaWidth]);
+    }, [MEDIA_MAX_ASPECT, imageDimensions, cardMediaWidth]);
 
     const triggerHeartDrop = React.useCallback((pageX: number, pageY: number) => {
         setHeartDrop({ startX: pageX, startY: pageY });
@@ -974,10 +935,10 @@ const FeedCard = React.memo(function FeedCard({
             lastMediaTapRef.current = now;
             singleMediaTapTimerRef.current = setTimeout(() => {
                 if (postHasVideoMedia(post)) {
+                    // Video posts: single-tap toggles mute (Reels-style).
                     videoMediaRef.current?.toggleVideoMute();
-                } else if (onPostPress) {
-                    onPostPress();
                 } else {
+                    // Still-image posts: single-tap opens fullscreen viewer (web parity).
                     const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
                     onOpenImageFullscreen?.(startIndex);
                 }
@@ -989,7 +950,6 @@ const FeedCard = React.memo(function FeedCard({
             carouselIndex,
             onLike,
             onOpenImageFullscreen,
-            onPostPress,
             post,
             resolveTapCoords,
             triggerHeartDrop,
@@ -1005,17 +965,17 @@ const FeedCard = React.memo(function FeedCard({
     }, []);
 
     return (
-        <View style={styles.feedCard}>
+        <View style={FEED_POST_CARD_STYLE}>
             <FeedPostTagRow tags={postTags} />
 
             {post.isBoosted && (
-                <View style={styles.sponsoredBadge}>
-                    <View style={styles.sponsoredPill}>
-                        <Text style={styles.sponsoredText}>Sponsored</Text>
+                <View style={FEED_CARD_SPONSORED_ROW}>
+                    <View style={FEED_CARD_SPONSORED_PILL}>
+                        <Text style={FEED_CARD_SPONSORED_TEXT}>Sponsored</Text>
                     </View>
-                    {post.boostFeedType && (
-                        <Text style={styles.sponsoredFeedType}>· {post.boostFeedType} boost</Text>
-                    )}
+                    {post.boostFeedType ? (
+                        <Text style={FEED_CARD_SPONSORED_FEED_TYPE}>· {post.boostFeedType} boost</Text>
+                    ) : null}
                 </View>
             )}
 
@@ -1036,10 +996,11 @@ const FeedCard = React.memo(function FeedCard({
                     onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (
-                <>
+                <View>
                     {hasFeedMedia ? (
-                        <View style={styles.mediaWrap} ref={mediaWrapRef} collapsable={false}>
+                        <View style={FEED_CARD_MEDIA_WRAP} ref={mediaWrapRef} collapsable={false}>
                             <FeedPostMedia
+                                key={`${post.id}-${isVideoActive ? 'active' : 'idle'}`}
                                 ref={videoMediaRef}
                                 post={post}
                                 carouselIndex={carouselIndex}
@@ -1077,17 +1038,17 @@ const FeedCard = React.memo(function FeedCard({
                                 onRegisterDmAnchor={onRegisterDmAnchor}
                             />
                             {isClientUploading ? (
-                                <View style={styles.uploadingOverlay} pointerEvents="none">
+                                <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
                                     <ActivityIndicator size="large" color="#FFFFFF" />
-                                    <Text style={styles.uploadingOverlayTitle}>Posting…</Text>
-                                    <Text style={styles.uploadingOverlaySubtitle}>Preparing your post</Text>
+                                    <Text style={FEED_CARD_UPLOAD_TITLE}>Posting…</Text>
+                                    <Text style={FEED_CARD_UPLOAD_SUBTITLE}>Preparing your post</Text>
                                 </View>
                             ) : null}
                             {isClientUploadFailed ? (
-                                <View style={styles.uploadingOverlay}>
+                                <View style={FEED_CARD_UPLOAD_OVERLAY}>
                                     <Icon name="alert-circle-outline" size={28} color="#FCA5A5" />
-                                    <Text style={styles.uploadingOverlayTitle}>Post failed</Text>
-                                    <Text style={styles.uploadingOverlaySubtitle} numberOfLines={2}>
+                                    <Text style={FEED_CARD_UPLOAD_TITLE}>Post failed</Text>
+                                    <Text style={FEED_CARD_UPLOAD_SUBTITLE} numberOfLines={2}>
                                         {post.clientUploadError || 'Could not post. Tap to dismiss.'}
                                     </Text>
                                 </View>
@@ -1122,12 +1083,12 @@ const FeedCard = React.memo(function FeedCard({
                         />
                     ) : null}
 
-                </>
+                </View>
             )}
 
             {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
                 <Pressable
-                    style={styles.captionWrap}
+                    style={FEED_CARD_CAPTION_PADDING}
                     onPress={onPostPress}
                     disabled={!onPostPress}
                     accessibilityRole="button"
@@ -1151,30 +1112,33 @@ const FeedCard = React.memo(function FeedCard({
                 onComplete={() => setHeartDrop(null)}
             />
 
-            <View style={[styles.engagementBar, (isClientUploading || isClientUploadFailed) && styles.engagementBarDimmed]}>
-                <View style={styles.actionButtons}>
-                    <FeedEngagementRow
-                        likeButtonRef={likeButtonRef}
-                        likes={post.stats.likes}
-                        comments={post.stats.comments}
-                        shares={post.stats.shares}
-                        reclips={post.stats.reclips}
-                        views={post.stats.views}
-                        userLiked={post.userLiked}
-                        userReclipped={post.userReclipped}
-                        isSaved={post.isBookmarked}
-                        onLike={() => { void onLike(); }}
-                        onLikesPress={() => {
-                            if (post.stats.likes > 0) setLikesSheetVisible(true);
-                        }}
-                        onComment={onComment}
-                        onShareToStories={() => setShareToStoriesVisible(true)}
-                        onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
-                        onSave={() => { void onBookmark(); }}
-                        showReclip={!isCurrentUser}
-                        tone="feed"
-                    />
-                </View>
+            <View
+                style={[
+                    FEED_CARD_ENGAGEMENT_BAR,
+                    (isClientUploading || isClientUploadFailed) && FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+                ]}
+            >
+                <FeedEngagementRow
+                    likeButtonRef={likeButtonRef}
+                    likes={post.stats.likes}
+                    comments={post.stats.comments}
+                    shares={post.stats.shares}
+                    reclips={post.stats.reclips}
+                    views={post.stats.views}
+                    userLiked={post.userLiked}
+                    userReclipped={post.userReclipped}
+                    isSaved={post.isBookmarked}
+                    onLike={() => { void onLike(); }}
+                    onLikesPress={() => {
+                        if (post.stats.likes > 0) setLikesSheetVisible(true);
+                    }}
+                    onComment={onComment}
+                    onShareToStories={() => setShareToStoriesVisible(true)}
+                    onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                    onSave={() => { void onBookmark(); }}
+                    showReclip={!isCurrentUser}
+                    tone="feed"
+                />
 
                 <FeedEngagementRightActions
                     showMetrics={showBoostMetrics}
@@ -1220,89 +1184,26 @@ const FeedCard = React.memo(function FeedCard({
             ) : null}
 
             {/* Profile quick actions menu (Visit profile / Follow-Unfollow / View stories) */}
-            {profileMenuVisible && (
-                <View style={styles.profileMenuCard}>
-                    <TouchableOpacity
-                        style={styles.profileMenuItem}
-                        onPress={() => {
-                            setProfileMenuVisible(false);
-                            if (onVisitHandle) onVisitHandle(profileHandle);
-                            else onVisitProfile?.();
-                        }}
-                    >
-                        <Icon name="person-outline" size={18} color="#FFFFFF" />
-                        <Text style={styles.profileMenuItemText}>Visit profile</Text>
-                    </TouchableOpacity>
-
-                    {!isCurrentUser && onFollow && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={async () => {
-                                setProfileMenuVisible(false);
-                                await onFollow();
-                            }}
-                        >
-                            <Icon
-                                name={post.isFollowing ? 'person-remove-outline' : 'person-add-outline'}
-                                size={18}
-                                color="#FFFFFF"
-                            />
-                            <Text style={styles.profileMenuItemText}>
-                                {post.isFollowing ? 'Unfollow' : 'Follow'}
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-
-                    {onViewStories && headerHasStory && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={() => {
-                                setProfileMenuVisible(false);
-                                onViewStories();
-                            }}
-                        >
-                            <Icon name="play-circle-outline" size={18} color="#FFFFFF" />
-                            <Text style={styles.profileMenuItemText}>View stories</Text>
-                        </TouchableOpacity>
-                    )}
-                    {!isCurrentUser && isMutualFollow && onOpenDM && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={() => {
-                                setProfileMenuVisible(false);
-                                onOpenDM(post.userHandle, post.id);
-                            }}
-                        >
-                            <Icon name="chatbubble-outline" size={18} color="#67E8F9" />
-                            <Text style={[styles.profileMenuItemText, { color: '#A5F3FC' }]}>Message</Text>
-                        </TouchableOpacity>
-                    )}
-                    {!isCurrentUser && onBlockUser && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={async () => {
-                                setProfileMenuVisible(false);
-                                await onBlockUser();
-                            }}
-                        >
-                            <Icon name="ban-outline" size={18} color="#FCA5A5" />
-                            <Text style={[styles.profileMenuItemText, { color: '#FCA5A5' }]}>Block user</Text>
-                        </TouchableOpacity>
-                    )}
-                    {!isCurrentUser && onReportUser && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={async () => {
-                                setProfileMenuVisible(false);
-                                await onReportUser();
-                            }}
-                        >
-                            <Icon name="flag-outline" size={18} color="#FDE68A" />
-                            <Text style={[styles.profileMenuItemText, { color: '#FDE68A' }]}>Report</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            )}
+            <FeedPostProfileQuickMenu
+                visible={profileMenuVisible}
+                profileHandle={profileHandle}
+                isCurrentUser={isCurrentUser}
+                isMutualFollow={isMutualFollow}
+                hasStory={headerHasStory}
+                isFollowing={post.isFollowing === true}
+                onClose={() => setProfileMenuVisible(false)}
+                onVisitProfile={() => {
+                    if (onVisitHandle) onVisitHandle(profileHandle);
+                    else onVisitProfile?.();
+                }}
+                onFollow={onFollow}
+                onViewStories={onViewStories ? () => onViewStories() : undefined}
+                onMessage={
+                    onOpenDM ? () => onOpenDM(post.userHandle, post.id) : undefined
+                }
+                onBlock={onBlockUser}
+                onReport={onReportUser}
+            />
         </View>
     );
 }, (prev, next) => {
@@ -1319,6 +1220,7 @@ const FeedCard = React.memo(function FeedCard({
         a.stats.reclips === b.stats.reclips &&
         a.stats.shares === b.stats.shares &&
         a.mediaUrl === b.mediaUrl &&
+        a.mediaType === b.mediaType &&
         a.videoPosterUrl === b.videoPosterUrl &&
         a.templateId === b.templateId &&
         a.text === b.text &&
@@ -1427,9 +1329,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [serverPlaceSuggestions, setServerPlaceSuggestions] = useState<PlaceMatchedPost[] | undefined>(
         undefined,
     );
+    const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
+    const [interestsSaving, setInterestsSaving] = React.useState(false);
+    const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
+    const [onboardingDismissed, setOnboardingDismissed] = React.useState<boolean | null>(null);
+    const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(false);
+    const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(new Set());
+    const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
+    const [stories24CollapsePayload, setStories24CollapsePayload] =
+        React.useState<Stories24RailReturnPayload | null>(null);
+    const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
     const pendingFeedScrollRestoreRef = useRef<number | null>(null);
+    const pendingStories24CollapseRef = useRef<Stories24RailReturnPayload | null>(null);
     const feedLoadGenRef = useRef(0);
     const pagesRef = useRef<Post[][]>([]);
     const feedFetchCtxRef = useRef({
@@ -1444,8 +1357,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        itemVisiblePercentThreshold: 55,
-        minimumViewTime: 180,
+        // Prefer the card the user is actually reading (not a sliver of the row above).
+        itemVisiblePercentThreshold: 72,
+        minimumViewTime: 220,
     });
 
     const feedAutoplayPrefRef = useRef<FeedAutoplayPref>('always');
@@ -1497,6 +1411,77 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, []);
 
+    useFocusEffect(
+        useCallback(() => {
+            let active = true;
+            void (async () => {
+                const [payload, scrollY] = await Promise.all([
+                    consumeStories24RailReturn(),
+                    consumeStories24FeedScrollRestore(),
+                ]);
+                if (!active) return;
+                if (payload) pendingStories24CollapseRef.current = payload;
+                if (scrollY != null) pendingFeedScrollRestoreRef.current = scrollY;
+            })();
+            return () => {
+                active = false;
+            };
+        }, []),
+    );
+
+    React.useEffect(() => {
+        if (!user?.id || customLocation || showFollowingFeed) {
+            setStories24Items([]);
+            return;
+        }
+        let cancelled = false;
+        const load = () => {
+            void buildStories24RailItems(user.id, user.handle).then((items) => {
+                if (!cancelled) setStories24Items(items);
+            });
+        };
+        load();
+        const interval = setInterval(load, 12000);
+        const unsubRefresh = subscribeStoriesRefresh(load);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+            unsubRefresh();
+        };
+    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
+
+    React.useEffect(() => {
+        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_DISMISSED_KEY).then((v) => {
+            if (v === '1') setSuggestedFollowerDismissed(true);
+        });
+        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY).then((raw) => {
+            try {
+                setHiddenFollowerHandles(new Set(raw ? JSON.parse(raw) : []));
+            } catch {
+                setHiddenFollowerHandles(new Set());
+            }
+        });
+    }, []);
+
+    React.useEffect(() => {
+        setInterestsDraft(user?.interests ?? []);
+        setInterestsCardDismissed(false);
+    }, [user?.id]);
+
+    React.useEffect(() => {
+        if (!user?.id) {
+            setOnboardingDismissed(null);
+            return;
+        }
+        void AsyncStorage.getItem(INTERESTS_ONBOARDING_DISMISSED_KEY).then((v) => {
+            setOnboardingDismissed(v === '1');
+        });
+    }, [user?.id]);
+
+    useEffect(() => {
+        void loadLocationNotifyPrefs().then(setNotifyLocations);
+    }, []);
+
     const feedAutoplayAllowedRef = useRef(feedAutoplayAllowed);
     feedAutoplayAllowedRef.current = feedAutoplayAllowed;
 
@@ -1541,7 +1526,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 return;
             }
             let best: Post | null = null;
-            let bestIndex = Number.POSITIVE_INFINITY;
+            let bestIndex = -1;
             for (const token of viewableItems) {
                 if (!token.isViewable || !token.item) continue;
                 const row = token.item;
@@ -1549,7 +1534,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 const candidate = row.post;
                 if (!postHasVideoMedia(candidate)) continue;
                 const idx = token.index ?? 0;
-                if (idx < bestIndex) {
+                // Bottom-most visible video wins (matches scroll-down reading; avoids activating a peek of the row above).
+                if (idx > bestIndex) {
                     best = candidate;
                     bestIndex = idx;
                 }
@@ -1626,8 +1612,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     React.useEffect(() => {
         let cancelled = false;
-        const useLaravel = isLaravelApiEnabled() && !!getAuthToken();
-        if (!useLaravel || !user || customLocation) {
+        const laravelApiActive = isLaravelApiEnabled() && !!getAuthToken();
+        if (!laravelApiActive || !user || customLocation) {
             setServerPlaceSuggestions(undefined);
             return () => {
                 cancelled = true;
@@ -1685,7 +1671,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 feedContentPrefsRef.current = prefs;
                 setPages((prev) => {
                     const next = prev
-                        .map((page) => filterPostsByContentPrefs(page, prefs))
+                        .map((page) =>
+                            filterPostsByContentPrefs(page, prefs, {
+                                isProtectedDevMockVideo: isDevMockFeedVideoPost,
+                            }),
+                        )
                         .filter((page) => page.length > 0);
                     // Avoid wiping a loaded feed if prefs were empty on first paint.
                     if (next.flat().length === 0 && prev.flat().length > 0) {
@@ -1951,6 +1941,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             updateUnreadCount();
         }, [updateUnreadCount])
     );
+
+    const applyScenesPostUpdates = React.useCallback((updates: Post[]) => {
+        if (!updates.length) return;
+        setPages((prev) =>
+            prev.map((page) =>
+                page.map((p) => {
+                    const next = updates.find((u) => u.id === p.id);
+                    if (!next) return p;
+                    return {
+                        ...p,
+                        ...next,
+                        stats: { ...p.stats, ...next.stats },
+                    };
+                }),
+            ),
+        );
+    }, []);
+
+    useEffect(() => subscribeScenesPostUpdates(applyScenesPostUpdates), [applyScenesPostUpdates]);
 
     useEffect(() => {
         if (!route?.params?.forceRefreshAt) return;
@@ -2292,84 +2301,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const flat = flatPosts;
 
-    const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
-    const [interestsSaving, setInterestsSaving] = React.useState(false);
-    const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
-    const [onboardingDismissed, setOnboardingDismissed] = React.useState<boolean | null>(null);
-    const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(false);
-    const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(new Set());
-    const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
-    const [stories24CollapsePayload, setStories24CollapsePayload] =
-        React.useState<Stories24RailReturnPayload | null>(null);
-    const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
-
-    useFocusEffect(
-        useCallback(() => {
-            let active = true;
-            void (async () => {
-                const [payload, scrollY] = await Promise.all([
-                    consumeStories24RailReturn(),
-                    consumeStories24FeedScrollRestore(),
-                ]);
-                if (!active) return;
-                if (payload) setStories24CollapsePayload(payload);
-                if (scrollY != null) pendingFeedScrollRestoreRef.current = scrollY;
-            })();
-            return () => {
-                active = false;
-            };
-        }, []),
-    );
-
-    React.useEffect(() => {
-        if (!user?.id || customLocation || showFollowingFeed) {
-            setStories24Items([]);
-            return;
-        }
-        let cancelled = false;
-        const load = () => {
-            void buildStories24RailItems(user.id, user.handle).then((items) => {
-                if (!cancelled) setStories24Items(items);
-            });
-        };
-        load();
-        const interval = setInterval(load, 12000);
-        const unsubRefresh = subscribeStoriesRefresh(load);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-            unsubRefresh();
-        };
-    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
-
-    React.useEffect(() => {
-        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_DISMISSED_KEY).then((v) => {
-            if (v === '1') setSuggestedFollowerDismissed(true);
-        });
-        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY).then((raw) => {
-            try {
-                setHiddenFollowerHandles(new Set(raw ? JSON.parse(raw) : []));
-            } catch {
-                setHiddenFollowerHandles(new Set());
-            }
-        });
-    }, []);
-
-    React.useEffect(() => {
-        setInterestsDraft(user?.interests ?? []);
-        setInterestsCardDismissed(false);
-    }, [user?.id]);
-
-    React.useEffect(() => {
-        if (!user?.id) {
-            setOnboardingDismissed(null);
-            return;
-        }
-        void AsyncStorage.getItem(INTERESTS_ONBOARDING_DISMISSED_KEY).then((v) => {
-            setOnboardingDismissed(v === '1');
-        });
-    }, [user?.id]);
-
     const showInterestsFeedCard = React.useMemo(() => {
         if (!user || interestsCardDismissed) return false;
         if ((user.interests?.length ?? 0) >= MAX_INTEREST_SELECTIONS) return false;
@@ -2397,6 +2328,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const showSuggestedFollowerCard = Boolean(suggestedFollowerSuggestion);
 
     const showStories24Rail = !customLocation && !showFollowingFeed && stories24Items.length > 0;
+
+    React.useEffect(() => {
+        const pending = pendingStories24CollapseRef.current;
+        if (!pending) return;
+        if (!showStories24Rail) {
+            pendingStories24CollapseRef.current = null;
+            return;
+        }
+        const handleKey = normalizeStories24Handle(pending.handle);
+        const hasCard = stories24Items.some(
+            (item) => normalizeStories24Handle(item.handle) === handleKey,
+        );
+        if (!hasCard) {
+            pendingStories24CollapseRef.current = null;
+            return;
+        }
+        pendingStories24CollapseRef.current = null;
+        setStories24CollapsePayload(pending);
+    }, [showStories24Rail, stories24Items]);
 
     const openStoryFromRail = React.useCallback(
         (item: Stories24RailItem, railHandles: string[]) => {
@@ -2554,6 +2504,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     React.useEffect(() => {
         const pendingY = pendingFeedScrollRestoreRef.current;
         if (pendingY == null || flatForRender.length === 0) return;
+        if (stories24CollapsePayload) return;
         pendingFeedScrollRestoreRef.current = null;
         requestAnimationFrame(() => {
             flatListRef.current?.scrollToOffset({ offset: pendingY, animated: false });
@@ -2572,10 +2523,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const videoPostsForScenes = React.useMemo(() => flat.filter(postHasVideoMedia), [flat]);
 
     const customLocationDisplay = customLocationLabel || customLocation;
-
-    useEffect(() => {
-        void loadLocationNotifyPrefs().then(setNotifyLocations);
-    }, []);
 
     const isNotifyOnForCurrentLocation = useMemo(() => {
         if (!customLocation) return false;
@@ -2707,21 +2654,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [user, userId],
     );
 
-    const feedListCellRenderer = React.useCallback(
-        ({ children, style, ...rest }: { children: React.ReactNode; style?: object }) => (
-            <View {...rest} style={[style, styles.feedListCell]}>
-                {children}
-            </View>
-        ),
-        [],
-    );
-
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
         ({ item }: { item: FeedListRow }) => {
+            const wrapRow = (row: React.ReactElement) => (
+                <View collapsable={false}>{row}</View>
+            );
             if (item.kind === 'suggested_follower') {
                 const sug = item.suggestion;
-                return (
+                return wrapRow(
                     <SuggestedFollowerFeedCard
                         suggestion={sug}
                         onFollow={async (post) => {
@@ -2752,11 +2693,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             });
                         }}
                         onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'stories24') {
-                return (
+                return wrapRow(
                     <Stories24FeedRail
                         ref={stories24RailRef}
                         items={stories24Items}
@@ -2765,11 +2706,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onScrollCardIntoView={scrollStories24RailIntoView}
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'interests') {
-                return (
+                return wrapRow(
                     <InterestsFeedCard
                         selected={interestsDraft}
                         saving={interestsSaving}
@@ -2796,12 +2737,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             void AsyncStorage.setItem(INTERESTS_ONBOARDING_DISMISSED_KEY, '1');
                             setInterestsCardDismissed(true);
                         }}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'ad') {
                 const ad = item.ad;
-                return (
+                return wrapRow(
                     <FeedAdCard
                         ad={ad}
                         onImpression={async () => {
@@ -2818,11 +2759,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 console.error('Error tracking ad click:', err);
                             }
                         }}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'local_business') {
-                return (
+                return wrapRow(
                     <LocalBusinessSuggestionCard
                         posts={item.posts}
                         userLocal={user?.local}
@@ -2851,11 +2792,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onStripShown={() => {
                             void markBusinessStripInserted().then(() => setBusinessStripEligible(false));
                         }}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'suggested_places') {
-                return (
+                return wrapRow(
                     <SuggestedPlacesFeedSection
                         bundleKey={item.bundleKey}
                         suggestions={item.suggestions}
@@ -2865,7 +2806,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
                         onScrollToPost={scrollToFeedPost}
                         onAdjust={() => navigation.navigate('ContentPreferences')}
-                    />
+                    />,
                 );
             }
             if (item.kind !== 'post') {
@@ -2879,10 +2820,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             const isPendingUpload =
                 mergedPost.clientUploadStatus === 'uploading' ||
                 mergedPost.clientUploadStatus === 'failed';
-            return (
+            const isVideoPostRow = postHasVideoMedia(mergedPost);
+            return wrapRow(
                 <FeedCard
+                    key={mergedPost.id}
                     post={mergedPost}
-                    isVideoActive={activeVideoPostId === mergedPost.id}
+                    isVideoActive={
+                        isVideoPostRow && activeVideoPostId === mergedPost.id
+                    }
                     feedVideoMuted={feedVideoMuted}
                     onLike={async () => {
                         if (isPendingUpload) return;
@@ -2958,11 +2903,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onOpenScenes={() => {
                         if (isPendingUpload) return;
                         const handoff = consumeFeedVideoHandoff(mergedPost.id);
+                        const scenesFeedLabel = showFollowingFeed
+                            ? 'Following'
+                            : String(active || user?.national || 'Ireland');
                         navigation.navigate('Scenes', {
                             initialPostId: mergedPost.id,
                             posts: videoPostsForScenes,
                             initialVideoTime: handoff?.currentTime,
                             initialMuted: handoff?.muted ?? feedVideoMuted,
+                            feedLabel: scenesFeedLabel,
                         });
                     }}
                     onPostPress={() => {
@@ -3015,12 +2964,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     viewerUserId={userId}
                     onOpenDM={user?.handle ? openDmSheet : undefined}
                     onRegisterDmAnchor={registerDmAnchor}
-                />
+                />,
             );
         },
         [
             userId,
             user,
+            active,
             showFollowingFeed,
             currentFilter,
             navigation,
@@ -3101,13 +3051,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                   : item.kind === 'suggested_places'
                                     ? `suggested-places-${item.bundleKey}`
                                     : item.post.id;
-                    // Keep keys stable but collision-safe for mixed/demo feeds.
+                    if (item.kind === 'post') {
+                        return `post:${baseKey}`;
+                    }
                     return `${item.kind}:${baseKey}:${index}`;
                 }}
                 extraData={`${activeVideoPostId}-${pendingUploadTick}`}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfigRef.current}
-                {...(Platform.OS === 'android' ? { CellRendererComponent: feedListCellRenderer } : {})}
                 // Performance optimizations - Instagram-style
                 initialNumToRender={2}
                 maxToRenderPerBatch={2}
@@ -3148,7 +3099,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ) : end ? (
                         <View style={styles.emptyContainer}>
                             {customLocation ? (
-                                <>
+                                <View>
                                     <View style={styles.emptyFeedCard}>
                                         <Text style={styles.emptyFeedBadge}>
                                             {isVisitorInCustomLocation ? "YOU'RE EARLY TO THIS FEED" : 'YOUR HOME FEED'}
@@ -3164,7 +3115,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                                 : 'You can be the first to post here. Share what’s happening around you.'}
                                         </Text>
                                         {isVisitorInCustomLocation ? (
-                                            <>
+                                            <View>
                                                 <TouchableOpacity
                                                     style={[
                                                         styles.emptyFeedNotifyBtn,
@@ -3193,7 +3144,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                                     Feed warming up · we'll only ping you when real clips from{' '}
                                                     {customLocationDisplay} start to appear.
                                                 </Text>
-                                            </>
+                                            </View>
                                         ) : (
                                             <TouchableOpacity
                                                 style={styles.emptyFeedPrimaryBtn}
@@ -3207,9 +3158,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                         locationLabel={customLocationDisplay || customLocation}
                                         placeId={customLocationPlaceId}
                                     />
-                                </>
+                                </View>
                             ) : (
-                                <>
+                                <View>
                                     <Text style={styles.emptyText}>
                                         {showFollowingFeed
                                             ? 'No posts from people you follow yet.'
@@ -3223,7 +3174,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                     <TouchableOpacity style={styles.emptyFeedPrimaryBtn} onPress={retryFeedLoad}>
                                         <Text style={styles.emptyFeedPrimaryBtnText}>Reload feed</Text>
                                     </TouchableOpacity>
-                                </>
+                                </View>
                             )}
                         </View>
                     ) : null
@@ -3231,7 +3182,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[
                     styles.feedListContent,
-                    styles.feedContent,
                     {
                         paddingBottom: Math.max(insets.bottom, 8) + 12,
                     },
@@ -3282,6 +3232,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     imageFullscreenPost
                         ? () => {
                               void openShareForPost(imageFullscreenPost);
+                          }
+                        : undefined
+                }
+                onMenu={
+                    imageFullscreenPost
+                        ? () => {
+                              setOverflowPost(imageFullscreenPost);
+                              setOverflowVisible(true);
                           }
                         : undefined
                 }
@@ -3617,9 +3575,6 @@ const styles = StyleSheet.create({
         backgroundColor: FEED_PAGE_BG,
         flexGrow: 1,
     },
-    feedListCell: {
-        backgroundColor: FEED_PAGE_BG,
-    },
     feedHeaderTopRow: {
         paddingTop: 12,
         paddingBottom: 4,
@@ -3695,31 +3650,6 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 9,
         fontWeight: 'bold',
-    },
-    profileMenuCard: {
-        marginTop: 60,
-        marginLeft: 16,
-        borderRadius: 12,
-        paddingVertical: 4,
-        minWidth: 170,
-        shadowColor: '#000',
-        shadowOpacity: 0.35,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 6 },
-        elevation: 12,
-        ...glassPanel,
-    },
-    profileMenuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        columnGap: 8,
-    },
-    profileMenuItemText: {
-        fontSize: 14,
-        color: '#F9FAFB',
-        fontWeight: '500',
     },
     tabContainer: {
         backgroundColor: 'transparent',
@@ -3899,262 +3829,6 @@ const styles = StyleSheet.create({
         fontSize: 9,
         color: '#FFFFFF',
         fontWeight: '600',
-    },
-    feedContent: {},
-    feedCard: {
-        ...FEED_POST_CARD_STYLE,
-        backgroundColor: FEED_CARD_BG,
-        marginHorizontal: 0,
-        borderRadius: 0,
-        overflow: 'visible',
-    },
-    mediaWrap: {
-        width: '100%',
-        backgroundColor: '#000000',
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    uploadingOverlay: {
-        ...StyleSheet.absoluteFill,
-        backgroundColor: 'rgba(0,0,0,0.55)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 20,
-        gap: 6,
-    },
-    uploadingOverlayTitle: {
-        color: '#FFFFFF',
-        fontSize: 15,
-        fontWeight: '700',
-        marginTop: 4,
-    },
-    uploadingOverlaySubtitle: {
-        color: '#D1D5DB',
-        fontSize: 12,
-        textAlign: 'center',
-    },
-    engagementBarDimmed: {
-        opacity: 0.45,
-    },
-    captionWrap: {
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-    },
-    sponsoredBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 6,
-    },
-    sponsoredPill: {
-        paddingHorizontal: 10,
-        paddingVertical: 2,
-        borderRadius: 999,
-        backgroundColor: 'rgba(245, 158, 11, 0.2)',
-        borderWidth: 1,
-        borderColor: 'rgba(245, 158, 11, 0.4)',
-    },
-    sponsoredText: {
-        fontSize: 12,
-        fontWeight: '500',
-        color: '#FBBF24',
-    },
-    sponsoredFeedType: {
-        fontSize: 12,
-        color: '#9CA3AF',
-        textTransform: 'capitalize',
-    },
-    postHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        paddingHorizontal: FEED_UI.spacing.inset,
-        paddingTop: 10,
-        paddingBottom: 6,
-    },
-    postHeaderLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-    },
-    avatarWrapper: {
-        position: 'relative',
-        marginRight: 10,
-    },
-    avatarContainer: {
-        position: 'relative',
-    },
-    storyBorder: {
-        padding: 2,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarInner: {
-        borderRadius: 16,
-        overflow: 'hidden',
-        backgroundColor: '#000000',
-    },
-    avatarImage: {
-        width: '100%',
-        height: '100%',
-    },
-    avatarFallback: {
-        backgroundColor: '#000000',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarInitials: {
-        color: '#FFFFFF',
-        fontWeight: 'bold',
-        fontSize: 12,
-    },
-    followPlusButton: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#d91b5c',
-        borderWidth: 2,
-        borderColor: 'rgba(26, 21, 36, 0.95)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 30,
-    },
-    followCheckButton: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#22c55e',
-        borderWidth: 2,
-        borderColor: 'rgba(26, 21, 36, 0.95)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 30,
-    },
-    postHeaderInfo: {
-        flex: 1,
-    },
-    userHandle: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    postMeta: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 3,
-        gap: 4,
-    },
-    locationText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    separator: {
-        fontSize: 12,
-        color: '#6B7280',
-    },
-    timeText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    postHeaderRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    postOverflowButton: {
-        padding: 4,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    gazetteerOverlayText: {
-        fontSize: 12,
-        fontWeight: '300',
-        color: '#FFFFFF',
-        letterSpacing: 0.5,
-    },
-    locationButton: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: 'rgba(217, 27, 92, 0.18)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    postImage: {
-        width: '100%',
-        height: 400,
-        backgroundColor: '#111827',
-    },
-    textCardWrapper: {
-        marginHorizontal: 16,
-        marginVertical: 10,
-        alignItems: 'center',
-    },
-    textCard: {
-        padding: 16,
-        borderRadius: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        width: '100%',
-        ...glassSurface,
-    },
-    textCardDecorativeLine: {
-        width: 2,
-        height: 40,
-        backgroundColor: 'rgba(255, 255, 255, 0.18)',
-        marginHorizontal: 8,
-    },
-    textCardContent: {
-        flex: 1,
-        fontSize: 16,
-        color: '#F3F4F6',
-        lineHeight: 22,
-    },
-    textCardTail: {
-        width: 0,
-        height: 0,
-        borderLeftWidth: 8,
-        borderRightWidth: 8,
-        borderTopWidth: 8,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderTopColor: 'rgba(24, 24, 28, 0.65)',
-        marginTop: -1,
-    },
-    engagementBar: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingTop: 8,
-        paddingBottom: 10,
-        borderTopWidth: 1,
-        borderTopColor: FEED_PAGE_BG,
-    },
-    actionButtons: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: FEED_UI.spacing.groupGap,
-    },
-    rightActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: FEED_UI.spacing.groupGapTight,
-    },
-    externalShareButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     errorContainer: {
         padding: 16,

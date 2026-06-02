@@ -4,7 +4,7 @@ import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Story } from '../../types';
 import { getStoryTextContent, getTextStoryStyle } from '../../utils/storyTextStyleNative';
-import { isStoryVideo } from '../../utils/storyMediaNative';
+import { isStoryVideo, resolveStoryMediaUrl } from '../../utils/storyMediaNative';
 
 type Props = {
     story: Story;
@@ -15,13 +15,14 @@ type Props = {
 /** Regular (non–shared-post) story media: video, image, or text-only template. */
 export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
     const text = getStoryTextContent(story);
-    const hasMedia = !!(story.mediaUrl && story.mediaUrl.trim());
+    const mediaUri = resolveStoryMediaUrl(story.mediaUrl);
+    const hasMedia = !!mediaUri;
     const isVideo = isStoryVideo(story);
 
     if (hasMedia && isVideo) {
         return (
             <Video
-                source={{ uri: story.mediaUrl! }}
+                source={{ uri: mediaUri! }}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
                 repeat
@@ -35,7 +36,7 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
 
     if (hasMedia) {
         return (
-            <Image source={{ uri: story.mediaUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <Image source={{ uri: mediaUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         );
     }
 

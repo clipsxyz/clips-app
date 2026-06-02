@@ -45,17 +45,17 @@ function WaveSvg({ size, radius, gradId, variant }: WaveSvgProps) {
                     gradientUnits="userSpaceOnUse"
                 >
                     {isScreen ? (
-                        <>
-                            <Stop offset="0" stopColor={palette.wave2Primary} />
-                            <Stop offset="0.5" stopColor={palette.wave2Mid} />
-                            <Stop offset="1" stopColor={palette.wave2End} />
-                        </>
+                        [
+                            <Stop key="s0" offset="0" stopColor={palette.wave2Primary} />,
+                            <Stop key="s1" offset="0.5" stopColor={palette.wave2Mid} />,
+                            <Stop key="s2" offset="1" stopColor={palette.wave2End} />,
+                        ]
                     ) : (
-                        <>
-                            <Stop offset="0" stopColor={palette.wavePrimary} />
-                            <Stop offset="0.4" stopColor={palette.waveMid} />
-                            <Stop offset="1" stopColor={palette.waveDeep} />
-                        </>
+                        [
+                            <Stop key="p0" offset="0" stopColor={palette.wavePrimary} />,
+                            <Stop key="p1" offset="0.4" stopColor={palette.waveMid} />,
+                            <Stop key="p2" offset="1" stopColor={palette.waveDeep} />,
+                        ]
                     )}
                 </RadialGradient>
             </Defs>

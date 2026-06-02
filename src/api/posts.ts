@@ -1,12 +1,14 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import { evaluateCommentModeration } from '../utils/commentModeration';
-import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
+import { isLaravelApiEnabled, isLaravelUnreachableThisSession, isViteDevMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { MOCK_FEED_VIDEO_POSTERS, MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -366,7 +368,7 @@ if (!postsInitialized) {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1514931109608-ef9bcc8af3c0?w=800',
       mediaType: 'image',
       caption: 'Amazing sunset over Galway Bay! The west of Ireland never disappoints.',
       createdAt: artaneNow - 9000000, // 2.5 hours ago
@@ -416,9 +418,9 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.escapes,
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: artaneNow - 7200000, // 2 hours ago
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -434,9 +436,9 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.fun,
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: artaneNow - 86400000, // 1 day ago
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -469,7 +471,7 @@ if (!postsInitialized) {
       venue: 'Phoenix Park',
       landmark: 'Phoenix Park',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800',
       mediaType: 'image',
       caption: 'Perfect morning walk in Phoenix Park! The deer are out and about 🦌',
       createdAt: artaneNow - 259200000, // 3 days ago
@@ -764,7 +766,13 @@ export function getState(userId: string): UserState {
 
 const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
-export type Page = { items: Post[]; nextCursor: string | number | null; fromMock?: boolean };
+export type Page = {
+  items: Post[];
+  nextCursor: string | number | null;
+  fromMock?: boolean;
+  /** True when Laravel was skipped because the backend was unreachable this session. */
+  laravelBypassed?: boolean;
+};
 
 function isFirstFeedPageCursor(cursor: string | number | null): boolean {
   if (cursor === null) return true;
@@ -1020,9 +1028,9 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.escapes,
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: now - 7200000,
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -1038,9 +1046,9 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.fun,
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: now - 86400000,
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -1056,9 +1064,9 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.joyrides,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=1200',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.joyrides,
       caption: 'Amazing sunset over Galway Bay!',
       createdAt: now - 9000000,
       stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
@@ -1070,6 +1078,71 @@ function getMockScenesVideoPosts(): Post[] {
       userNational: 'Ireland'
     }
   ];
+}
+
+/** Demo MP4 feed cards — never hide via mute/hide/not-interested prefs. */
+export function isDevMockFeedVideoPost(post: Post): boolean {
+  const id = String(post.id || '');
+  if (id.startsWith('mock-scenes-')) return true;
+  if (id.startsWith('artane-post-') && postHasVideoMedia(post)) return true;
+  return false;
+}
+
+/** Stable mock-scenes-* posts plus in-memory seed videos (Sarah/Bob Artane posts). */
+function collectDevMockVideoPostCandidates(): Post[] {
+  const byId = new Map<string, Post>();
+  const add = (p: Post) => {
+    const id = String(p.id);
+    if (!byId.has(id)) byId.set(id, p);
+  };
+  for (const p of getMockScenesVideoPosts()) add(p);
+  for (const p of posts) {
+    if (!postHasVideoMedia(p)) continue;
+    if (isMockPostId(p.id) || String(p.id).startsWith('mock-scenes-')) add(p);
+  }
+  return [...byId.values()];
+}
+
+function devMockVideosForDiscoverTab(userId: string): Post[] {
+  const all = collectDevMockVideoPostCandidates();
+  // Pure mock mode: always surface Sarah/Bob MP4 demos on Following (no Laravel).
+  if (!isLaravelApiEnabled()) return all;
+  const follows = getFollowsForDiscover(userId);
+  const followsSarah = getFollowState(follows, 'Sarah@Artane');
+  const followsBob = getFollowState(follows, 'Bob@Ireland');
+  if (!followsSarah && !followsBob) return [];
+  return all.filter((p) => {
+    const h = (p.userHandle || '').toLowerCase();
+    if (followsSarah && h.includes('sarah')) return true;
+    if (followsBob && h.includes('bob')) return true;
+    return false;
+  });
+}
+
+/** Which demo MP4 posts belong on this tab (mock mode is permissive on core location tabs). */
+function collectDevMockVideoPostsForTab(tab: string, userId: string): Post[] {
+  const t = tab.toLowerCase();
+  if (t === 'clips') return [];
+  if (t === 'discover') return devMockVideosForDiscoverTab(userId);
+  const all = collectDevMockVideoPostCandidates();
+  if (!isLaravelApiEnabled() && (t === 'finglas' || t === 'dublin' || t === 'ireland')) {
+    return all;
+  }
+  return all.filter((p) => postMatchesLocationTab(p, tab));
+}
+
+/** Prepend demo MP4 cards on feed page 0 (location tabs + Following when you follow Sarah/Bob). */
+function prependDevMockVideoPostsForFirstPage(items: Post[], tab: string, userId: string): Post[] {
+  const t = tab.toLowerCase();
+  if (t === 'clips') return items;
+
+  const candidates = collectDevMockVideoPostsForTab(tab, userId);
+
+  if (!candidates.length) return items;
+
+  const existingIds = new Set(items.map((p) => String(p.id)));
+  const toPrepend = candidates.filter((p) => !existingIds.has(String(p.id)));
+  return toPrepend.length > 0 ? [...toPrepend, ...items] : items;
 }
 
 /** Ava's normal (non-sponsored) mock post for Ireland feed. Stable id for dedupe. */
@@ -1172,8 +1245,13 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
     const userRegionalLower = normalize(p.userRegional);
     const userNationalLower = normalize(p.userNational);
     if (t === 'finglas') return userLocalLower === 'finglas';
-    if (t === 'dublin') return userRegionalLower === 'dublin';
-    if (t === 'ireland') return userNationalLower === 'ireland';
+    if (t === 'dublin') return userRegionalLower === 'dublin' || userLocalLower === 'dublin';
+    if (t === 'ireland') {
+      if (userNationalLower === 'ireland') return true;
+      // Match mock-feed rules: Dublin-area authors also appear on Ireland tab.
+      if (userRegionalLower === 'dublin' || userLocalLower === 'dublin') return true;
+      return false;
+    }
     return false;
   }
   const query = t.trim().toLowerCase();
@@ -1290,15 +1368,14 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       );
       const allApiAndMockIds = new Set(transformedItems.map(p => p.id));
 
-      // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
       const isFirstPage = isFirstFeedPageCursor(cursor);
-      const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
-      const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-      const dedupedMock = mockVideoPosts.filter(p => !allApiAndMockIds.has(p.id));
       const dedupedUserCreated = userCreatedMatchingTab.filter(p => !allApiAndMockIds.has(p.id));
 
-      // Order: user-created first (newest), then mock videos, then API posts
-      let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
+      // Order: user-created first (newest), then API posts; demo MP4 cards prepended on page 0
+      let items = [...dedupedUserCreated, ...transformedItems];
+      if (isFirstPage) {
+        items = prependDevMockVideoPostsForFirstPage(items, tab, userId);
+      }
       const itemIds = new Set(items.map(p => p.id));
 
       // Dev/test: inject Ava's Galway demo on first page only when this feed is actually Ireland/Galway (not London, Paris, etc.).
@@ -1356,18 +1433,19 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         userNational: p.userNational,
       }),
     }));
-    // Keep current in-memory mock/seed posts (don't reload mock from storage)
-    const mockPosts = posts.filter(p => isMockPostId(p.id));
-    // Merge: user-created first, then mock/seed (single copy of each)
-    if (userCreatedPosts.length > 0 || posts.length === 0) {
-      const seen = new Set<string>();
-      posts = [...userCreatedPosts, ...mockPosts].filter(p => {
+    // Always keep mock/seed posts (Sarah MP4 demos, JSON seed) even when localStorage has user posts.
+    const mockSeedPosts = posts.filter((p) => isMockPostId(p.id));
+    const nonMockPosts = posts.filter((p) => !isMockPostId(p.id));
+    const userCreatedIds = new Set(userCreatedPosts.map((p) => String(p.id)));
+    const seen = new Set<string>();
+    posts = [...userCreatedPosts, ...mockSeedPosts, ...nonMockPosts.filter((p) => !userCreatedIds.has(String(p.id)))].filter(
+      (p) => {
         const id = String(p.id);
         if (seen.has(id)) return false;
         seen.add(id);
         return true;
-      });
-    }
+      },
+    );
 
     await delay(0);
 
@@ -1535,12 +1613,9 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
     const start = typeof cursor === 'number' ? cursor : 0;
     const isFirstPage = start === 0;
-    // Only add mock Sarah/Bob posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, not in Galway
-    const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
-    const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-    const existingIdsInSorted = new Set(sorted.map(p => p.id));
-    const dedupedMock = mockVideoPosts.filter(p => !existingIdsInSorted.has(p.id));
-    const sortedWithMock = dedupedMock.length > 0 ? [...dedupedMock, ...sorted] : sorted;
+    const sortedWithMock = isFirstPage
+      ? prependDevMockVideoPostsForFirstPage(sorted, tab, userId)
+      : sorted;
 
     const slice = sortedWithMock.slice(start, start + limit).map(p => decorateForUser(userId, p));
 
@@ -1615,7 +1690,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
-    return { items: items.map(normalizeCaptionFields), nextCursor: next, fromMock: true };
+    return {
+      items: items.map(normalizeCaptionFields),
+      nextCursor: next,
+      fromMock: true,
+      laravelBypassed: isLaravelUnreachableThisSession(),
+    };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
     throw error;
@@ -1854,17 +1934,43 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
   // Mock implementation (fallback)
   await delay(100);
   const idStr = String(id);
-  const p = posts.find(x => String(x.id) === idStr);
+  const normalizedIdStr = idStr
+    .trim()
+    .replace(/\s+/g, '-')
+    // Common typo seen in mock scenes IDs.
+    .replace('srarh', 'sarah');
+  const p =
+    posts.find(x => String(x.id) === idStr) ||
+    posts.find(x => String(x.id) === normalizedIdStr);
   if (!p) {
     // Try storage (user-created posts may exist only there if feed just reloaded)
     const fromStorage = getPostsFromStorage();
-    const inStorage = fromStorage.find(x => String(x.id) === idStr);
+    const inStorage =
+      fromStorage.find(x => String(x.id) === idStr) ||
+      fromStorage.find(x => String(x.id) === normalizedIdStr);
     if (inStorage) {
       inStorage.stats = inStorage.stats || { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
       inStorage.stats.shares += 1;
-      const updated = fromStorage.map(x => (String(x.id) === idStr ? inStorage : x));
+      const updated = fromStorage.map(x =>
+        String(x.id) === idStr || String(x.id) === normalizedIdStr ? inStorage : x
+      );
       savePostsToStorage(updated);
       return decorateForUser(userId, inStorage);
+    }
+    // Frontend-only mock scenes IDs may be stale/misspelled in some paths.
+    // Don't hard-fail share UX when this optimistic increment cannot resolve a mock post.
+    if (idStr.startsWith('mock-scenes-') || normalizedIdStr.startsWith('mock-scenes-')) {
+      const mockCandidates = posts.filter(x => String(x.id).startsWith('mock-scenes-'));
+      if (mockCandidates.length > 0) {
+        const suffix = normalizedIdStr.match(/-(\d+)$/)?.[1];
+        const fallback =
+          (suffix
+            ? mockCandidates.find(x => String(x.id).endsWith(`-${suffix}`))
+            : undefined) || mockCandidates[0];
+        return decorateForUser(userId, fallback);
+      }
+      // As a last resort, no-op fallback to avoid noisy errors in RN share flow.
+      return decorateForUser(userId, posts[0]);
     }
     console.error('Post not found for incrementShares:', id);
     throw new Error(`Post with id ${id} not found`);

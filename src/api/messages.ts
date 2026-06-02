@@ -335,9 +335,12 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     emitMessage(from, to, msg);
     emitInboxUnreadChanged(to, unreadByHandle.get(to) || 0);
     
-    // Also dispatch Custom Events as fallback for compatibility
-    window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: msg } }));
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: to, unread: unreadByHandle.get(to) || 0 } }));
+    // Also dispatch Custom Events as fallback for web compatibility.
+    // RN has no `window`, so guard these browser-only events.
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: msg } }));
+        window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: to, unread: unreadByHandle.get(to) || 0 } }));
+    }
     return msg;
 }
 

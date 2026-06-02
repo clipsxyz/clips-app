@@ -532,6 +532,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 onLike={handleLike}
                 onComment={() => setCommentsOpen(true)}
                 onReclip={tryReclip}
+                onMenu={() => setOverflowVisible(true)}
             />
 
             {post && editModalVisible ? (

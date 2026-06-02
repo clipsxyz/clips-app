@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getApiBaseUrl } from './apiBaseUrl';
 
 const API_BASE_URL = getApiBaseUrl();
@@ -49,6 +49,7 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
 
         if (isConnectionError) {
             // Re-throw with a specific error type that can be caught and handled gracefully
+            markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
             throw connectionError;

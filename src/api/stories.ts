@@ -1,5 +1,6 @@
 import type { Story, StoryGroup, StickerOverlay } from '../types';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { resolveStoryMediaUrl } from '../utils/storyMediaNative';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
 export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
@@ -618,7 +619,7 @@ function mapLaravelStoryToStory(story: any): Story {
         id: story.id,
         userId: story.user_id,
         userHandle: story.user_handle,
-        mediaUrl: story.media_url || undefined,
+        mediaUrl: resolveStoryMediaUrl(story.media_url) || undefined,
         mediaType: story.media_type || undefined,
         text: story.text || undefined,
         textColor: story.text_color || undefined,
@@ -786,6 +787,62 @@ export async function createStory(
     venue?: string, // Venue / place name (for metadata when story is shown on feed)
     audience: 'public' | 'close_friends' | 'only_me' = 'public'
 ): Promise<Story> {
+    const buildMockStory = async (): Promise<Story> => {
+        await delay();
+
+        const now = Date.now();
+        const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
+
+        const newStory: Story = {
+            id: `story-${Date.now()}`,
+            userId,
+            userHandle,
+            mediaUrl: resolveStoryMediaUrl(mediaUrl) || undefined,
+            mediaType: mediaType || undefined,
+            text,
+            textColor,
+            textSize,
+            textStyle: textStyle || undefined,
+            stickers: stickers || undefined,
+            taggedUsers: taggedUsers || undefined,
+            createdAt: now,
+            expiresAt,
+            location,
+            venue: venue || undefined,
+            audience: audience || 'public',
+            views: 0,
+            viewerHandles: [],
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+            userReaction: undefined,
+            sharedFromPost,
+            sharedFromUser,
+            poll: poll ? {
+                question: poll.question,
+                option1: poll.option1,
+                option2: poll.option2,
+                option3: poll.option3,
+                votes1: 0,
+                votes2: 0,
+                votes3: poll.option3 ? 0 : undefined,
+                userVote: undefined
+            } : undefined,
+            question: question ? {
+                prompt: question,
+                responses: []
+            } : undefined
+        };
+
+        stories.push(newStory);
+        return newStory;
+    };
+
+    // In mock mode, skip API call completely to avoid noisy fallback errors.
+    if (!isLaravelApiEnabled()) {
+        return buildMockStory();
+    }
+
     // Use real Laravel API
     const { apiRequest } = await import('./client');
     
@@ -818,7 +875,7 @@ export async function createStory(
             id: response.id,
             userId: response.user_id || userId,
             userHandle: response.user_handle || userHandle,
-            mediaUrl: response.media_url || mediaUrl || undefined,
+            mediaUrl: resolveStoryMediaUrl(response.media_url || mediaUrl) || undefined,
             mediaType: response.media_type || mediaType || undefined,
             // Keep local text data if backend response omits it (prevents blank text-only stories).
             text: response.text || text || undefined,
@@ -863,8 +920,12 @@ export async function createStory(
         stories.push(newStory);
 
         return newStory;
-    } catch (error) {
-        console.error('Error creating story via API, falling back to mock:', error);
+    } catch (error: any) {
+        const isConnectionFallback =
+            error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+        if (!isConnectionFallback) {
+            console.warn('createStory API failed, falling back to mock:', error);
+        }
         // Fallback to mock implementation if API fails
         await delay();
 
@@ -1174,8 +1235,28 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                 story.userId === userId || followedUserHandles.includes(story.userHandle),
             );
 
+            // Merge in local stories so createStory mock fallbacks (API create failed) still show
+            // immediately in RN Stories 24 rail/viewer while API mode is enabled.
+            const now = Date.now();
+            const localActive = stories.filter((s) => {
+                if (s.expiresAt <= now) return false;
+                const audience = s.audience || 'public';
+                if (s.userId === userId) return true;
+                if (!followedUserHandles.includes(s.userHandle)) return false;
+                if (audience === 'only_me') return false;
+                return true;
+            });
+            const merged = [...filtered];
+            const seenIds = new Set(filtered.map((s) => String(s.id)));
+            for (const local of localActive) {
+                const key = String(local.id);
+                if (seenIds.has(key)) continue;
+                merged.push(local);
+                seenIds.add(key);
+            }
+
             const byUser = new Map<string, StoryGroup>();
-            for (const story of filtered) {
+            for (const story of merged) {
                 const existing = byUser.get(story.userId);
                 if (existing) {
                     existing.stories.push(story);

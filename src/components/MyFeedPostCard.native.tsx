@@ -101,7 +101,7 @@ export default function MyFeedPostCard({
                     onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (
-                <>
+                <View>
                     {hasFeedMedia ? (
                         <View style={styles.mediaWrap}>
                             <FeedPostMedia
@@ -134,7 +134,7 @@ export default function MyFeedPostCard({
                             onSelect={setCarouselIndex}
                         />
                     ) : null}
-                </>
+                </View>
             )}
 
             {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
