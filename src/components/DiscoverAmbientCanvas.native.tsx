@@ -60,11 +60,13 @@ export default function DiscoverAmbientCanvas({
               ? layout.height
               : winH;
 
+    const useParentLayout = fillParent && !(widthProp && heightProp);
+    const ready = width > 0 && height > 0;
+
     const palette = getAmbientPalette(variant);
     const baseFill = variant === 'goldChrome' ? GOLD_CHROME_BASE : GAZETTEER_ABYSS;
     const geometry =
-        width > 0 && height > 0 ? getDiscoverAmbientWaveGeometry(width, height, time) : null;
-    const useParentLayout = fillParent && !(widthProp && heightProp);
+        ready ? getDiscoverAmbientWaveGeometry(width, height, time) : null;
 
     useEffect(() => {
         let mounted = true;
@@ -206,10 +208,23 @@ export default function DiscoverAmbientCanvas({
         </View>
     );
 
+    if (useParentLayout && !ready) {
+        return (
+            <View
+                style={styles.parentClip}
+                onLayout={onLayout}
+                pointerEvents="none"
+                collapsable={false}
+            />
+        );
+    }
+
+    if (!ready) return null;
+
     if (useParentLayout) {
         return (
             <View
-                style={StyleSheet.absoluteFill}
+                style={styles.parentClip}
                 onLayout={onLayout}
                 pointerEvents="none"
                 collapsable={false}
@@ -225,3 +240,10 @@ export default function DiscoverAmbientCanvas({
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    parentClip: {
+        ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden',
+    },
+});

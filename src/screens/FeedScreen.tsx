@@ -10,7 +10,6 @@ import {
     View,
     Text,
     StyleSheet,
-    FlatList,
     RefreshControl,
     TouchableOpacity,
     Image,
@@ -26,6 +25,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -72,10 +72,14 @@ import {
     getGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
+import { FlatList } from 'react-native-gesture-handler';
 import FeedPageLayout, {
+    FEED_CARD_BODY,
     FEED_CARD_CAPTION_PADDING,
     FEED_CARD_ENGAGEMENT_BAR,
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+    FEED_CARD_ENGAGEMENT_LEFT,
+    FEED_CARD_MEDIA_FRAME,
     FEED_CARD_MEDIA_WRAP,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
@@ -84,8 +88,39 @@ import FeedPageLayout, {
     FEED_CARD_UPLOAD_OVERLAY,
     FEED_CARD_UPLOAD_SUBTITLE,
     FEED_CARD_UPLOAD_TITLE,
+    FEED_HEADER_ACTIVE_DOT,
+    FEED_HEADER_CENTER,
+    FEED_HEADER_DROPDOWN_MENU,
+    FEED_HEADER_DROPDOWN_MENU_ITEM,
+    FEED_HEADER_DROPDOWN_MENU_TEXT,
+    FEED_HEADER_DROPDOWN_META,
+    FEED_HEADER_DROPDOWN_SEARCH_HINT,
+    FEED_HEADER_DROPDOWN_SEARCH_INPUT,
+    FEED_HEADER_DROPDOWN_SEARCH_WRAP,
+    FEED_HEADER_DROPDOWN_SUGGESTION_ITEM,
+    FEED_HEADER_DROPDOWN_SUGGESTION_TEXT,
+    FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP,
+    FEED_HEADER_ICON_BUTTON,
+    FEED_HEADER_LOCATION_PILL,
+    FEED_HEADER_LOCATION_TITLE,
+    FEED_HEADER_PASSPORT_AVATAR,
+    FEED_HEADER_PASSPORT_INITIALS,
+    FEED_HEADER_PICKER_ROW,
+    FEED_HEADER_RIGHT_ACTIONS,
+    FEED_HEADER_SIDE_ACTION,
+    FEED_HEADER_SIDE_LABEL,
     FEED_PAGE_BG,
     FEED_POST_CARD_STYLE,
+    FEED_EMPTY_BADGE,
+    FEED_EMPTY_CARD,
+    FEED_EMPTY_CREATE_GRADIENT,
+    FEED_EMPTY_FOLLOWING_SUBTITLE,
+    FEED_EMPTY_FOLLOWING_TITLE,
+    FEED_EMPTY_GRADIENT_BTN,
+    FEED_EMPTY_GRADIENT_BTN_TEXT,
+    FEED_EMPTY_NOTIFY_GRADIENT,
+    FEED_EMPTY_SUBTITLE,
+    FEED_EMPTY_TITLE,
 } from '../components/FeedPageLayout.native';
 import FeedPostProfileQuickMenu from '../components/FeedPostProfileQuickMenu.native';
 import { isDevMockFeedVideoPost } from '../api/posts';
@@ -101,7 +136,6 @@ import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedPostTagRow from '../components/FeedPostTagRow.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
-import FeedHeartDrop from '../components/FeedHeartDrop.native';
 import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
@@ -557,45 +591,44 @@ function PillTabs({
 
     return (
         <View style={styles.tabContainer}>
-            <View style={styles.feedHeaderPickerRow}>
+            <View style={FEED_HEADER_PICKER_ROW}>
                 <TouchableOpacity
                     onPress={() => onOpenStories24?.()}
-                    style={styles.feedHeaderSideAction}
+                    style={FEED_HEADER_SIDE_ACTION}
                     accessibilityLabel="Stories 24"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
                         <Stories24HeaderIcon size={32} />
-                        <Text style={styles.feedHeaderPassportLabel}>Stories</Text>
+                        <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
                     </View>
                 </TouchableOpacity>
 
-                <View style={styles.feedHeaderCenter}>
+                <View style={FEED_HEADER_CENTER}>
                     <TouchableOpacity
                         onPress={() => setMenuOpen((prev) => !prev)}
-                        style={styles.feedDropdownTrigger}
+                        style={FEED_HEADER_LOCATION_PILL}
                         activeOpacity={0.85}
                     >
                         <Icon
                             name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
                             size={16}
                             color="#FFFFFF"
-                            style={styles.feedDropdownActiveIcon}
                         />
-                        <View style={[styles.feedDropdownActiveDot, { backgroundColor: activeIndicatorColor }]} />
+                        <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
                         <Text
-                            style={styles.feedDropdownActiveText}
+                            style={FEED_HEADER_LOCATION_TITLE}
                             numberOfLines={1}
                             ellipsizeMode="tail"
                         >
                             {headerLabel}
                         </Text>
-                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="#E5E7EB" />
+                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="rgba(255,255,255,0.9)" />
                     </TouchableOpacity>
 
                     {menuOpen && (
-                        <View style={styles.feedDropdownMenu}>
-                            <View style={styles.feedDropdownSearchWrap}>
-                                <Icon name="search-outline" size={16} color="#CBD5E1" />
+                        <View style={FEED_HEADER_DROPDOWN_MENU}>
+                            <View style={FEED_HEADER_DROPDOWN_SEARCH_WRAP}>
+                                <Icon name="search-outline" size={16} color="rgba(255,255,255,0.75)" />
                                 <TextInput
                                     value={locationQuery}
                                     onChangeText={setLocationQuery}
@@ -607,21 +640,21 @@ function PillTabs({
                                     onSubmitEditing={submitLocationSearch}
                                     returnKeyType="search"
                                     autoCapitalize="words"
-                                    style={styles.feedDropdownSearchInput}
+                                    style={FEED_HEADER_DROPDOWN_SEARCH_INPUT}
                                 />
                             </View>
-                            <Text style={styles.feedDropdownSearchHint}>
+                            <Text style={FEED_HEADER_DROPDOWN_SEARCH_HINT}>
                                 Tip: use venue: or landmark:
                             </Text>
                             {locationQuery.trim().length >= 2 ? (
-                                <View style={styles.feedDropdownSuggestionsWrap}>
+                                <View style={FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP}>
                                     {loadingSuggestions ? (
-                                        <Text style={styles.feedDropdownSuggestionsMeta}>Searching places...</Text>
+                                        <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
                                     ) : locationSuggestions.length > 0 ? (
                                         locationSuggestions.map((s, idx) => (
                                             <TouchableOpacity
                                                 key={`${s.name}-${idx}`}
-                                                style={styles.feedDropdownSuggestionItem}
+                                                style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
                                                 onPress={() => {
                                                     const raw = locationQuery.trim();
                                                     const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
@@ -641,7 +674,7 @@ function PillTabs({
                                                     setMenuOpen(false);
                                                 }}
                                             >
-                                                <Text style={styles.feedDropdownSuggestionText}>
+                                                <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
                                                     {s.name}
                                                     {s.type === 'venue'
                                                         ? ' · venue'
@@ -652,48 +685,48 @@ function PillTabs({
                                             </TouchableOpacity>
                                         ))
                                     ) : (
-                                        <Text style={styles.feedDropdownSuggestionsMeta}>No matches yet</Text>
+                                        <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
                                     )}
                                 </View>
                             ) : null}
                             {customLocation ? (
                                 <TouchableOpacity
-                                    style={styles.feedDropdownMenuItem}
+                                    style={FEED_HEADER_DROPDOWN_MENU_ITEM}
                                     onPress={() => {
                                         onClearCustom?.();
                                         setMenuOpen(false);
                                     }}
                                 >
-                                    <Icon name="home-outline" size={18} color="#E5E7EB" />
-                                    <Text style={styles.feedDropdownMenuText}>Back to home feed</Text>
+                                    <Icon name="home-outline" size={18} color="rgba(255,255,255,0.8)" />
+                                    <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
                                 </TouchableOpacity>
                             ) : null}
                             {menuItems.map((item) => (
                                 <TouchableOpacity
                                     key={item.key}
-                                    style={styles.feedDropdownMenuItem}
+                                    style={FEED_HEADER_DROPDOWN_MENU_ITEM}
                                     onPress={() => {
                                         item.onPress();
                                         setMenuOpen(false);
                                     }}
                                 >
                                     <Icon name={item.icon} size={18} color={item.iconColor} />
-                                    <Text style={styles.feedDropdownMenuText}>{item.label}</Text>
+                                    <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
                     )}
                 </View>
 
-                <View style={styles.feedHeaderRightActions}>
+                <View style={FEED_HEADER_RIGHT_ACTIONS}>
                     {customLocation ? (
                         <View style={styles.feedHeaderIconGroup}>
                             <TouchableOpacity
                                 onPress={() => setPlaceInfoOpen(true)}
-                                style={styles.feedHeaderIconButton}
+                                style={FEED_HEADER_ICON_BUTTON}
                                 accessibilityLabel={`About ${activeLabel}`}
                             >
-                                <Icon name="information-circle-outline" size={22} color="#FFFFFF" />
+                                <Icon name="information-circle-outline" size={20} color="#FFFFFF" />
                             </TouchableOpacity>
                             <LocationPlaceSummaryModal
                                 open={placeInfoOpen}
@@ -705,21 +738,21 @@ function PillTabs({
                     ) : null}
                     <TouchableOpacity
                         onPress={onOpenPassport}
-                        style={styles.feedHeaderSideAction}
+                        style={FEED_HEADER_SIDE_ACTION}
                         accessibilityLabel="My Passport"
                     >
                         <View style={styles.feedHeaderNotifWrap}>
-                            <View style={styles.feedHeaderPassportAvatarWrap}>
+                            <View style={FEED_HEADER_PASSPORT_AVATAR}>
                                 {user?.avatarUrl ? (
                                     <Image
                                         source={{ uri: user.avatarUrl }}
                                         style={styles.feedHeaderPassportAvatarImage}
                                     />
                                 ) : (
-                                    <Text style={styles.feedHeaderPassportInitials}>{passportInitials}</Text>
+                                    <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
                                 )}
                             </View>
-                            <Text style={styles.feedHeaderPassportLabel}>Passport</Text>
+                            <Text style={FEED_HEADER_SIDE_LABEL}>Passport</Text>
                         </View>
                     </TouchableOpacity>
                 </View>
@@ -790,20 +823,15 @@ const FeedCard = React.memo(function FeedCard({
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
     const [carouselIndex, setCarouselIndex] = React.useState(0);
-    const [heartDrop, setHeartDrop] = React.useState<{ startX: number; startY: number } | null>(null);
     const likeButtonRef = React.useRef<View>(null);
-    const mediaWrapRef = React.useRef<View>(null);
     const [shareToStoriesVisible, setShareToStoriesVisible] = React.useState(false);
     const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
     const [boostMetricsActive, setBoostMetricsActive] = React.useState(Boolean(post.isBoosted));
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
-    const lastMediaTapRef = React.useRef(0);
-    const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
     const postViewRecordedRef = React.useRef(false);
     const { width: windowWidth } = useWindowDimensions();
     const cardMediaWidth = windowWidth;
-    const DOUBLE_TAP_DELAY_MS = 260;
     const MEDIA_MIN_ASPECT = 1 / 1.91;
     const MEDIA_MAX_ASPECT = 5 / 4;
 
@@ -906,79 +934,36 @@ const FeedCard = React.memo(function FeedCard({
             return {
                 width: imageDimensions.width,
                 height: imageDimensions.height,
-                backgroundColor: '#000000',
+                ...FEED_CARD_MEDIA_FRAME,
             };
         }
         // Default while loading
         return {
             width: cardMediaWidth,
-            height: cardMediaWidth * MEDIA_MAX_ASPECT, // Default to max portrait aspect ratio
-            backgroundColor: '#000000',
+            height: cardMediaWidth * MEDIA_MAX_ASPECT,
+            ...FEED_CARD_MEDIA_FRAME,
         };
     }, [MEDIA_MAX_ASPECT, imageDimensions, cardMediaWidth]);
 
-    const triggerHeartDrop = React.useCallback((pageX: number, pageY: number) => {
-        setHeartDrop({ startX: pageX, startY: pageY });
-    }, []);
+    const mediaFrameHeight =
+        typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth;
 
-    const resolveTapCoords = React.useCallback((pageX?: number, pageY?: number): Promise<{ x: number; y: number }> => {
-        if (typeof pageX === 'number' && typeof pageY === 'number') {
-            return Promise.resolve({ x: pageX, y: pageY });
+    const handleOpenScenesPress = React.useCallback(() => {
+        onOpenScenes?.();
+    }, [onOpenScenes]);
+
+    const handleMediaDoubleLike = React.useCallback(() => {
+        void onLike();
+    }, [onLike]);
+
+    const handleMediaSingleTap = React.useCallback(() => {
+        if (postHasVideoMedia(post)) {
+            videoMediaRef.current?.flashMuteControl();
+            return;
         }
-        return new Promise((resolve) => {
-            mediaWrapRef.current?.measureInWindow((x, y, w, h) => {
-                resolve({ x: x + w / 2, y: y + h / 2 });
-            });
-        });
-    }, []);
-
-    const handleMediaPress = React.useCallback(
-        (event?: { nativeEvent?: { pageX?: number; pageY?: number } }) => {
-            const now = Date.now();
-            if (now - lastMediaTapRef.current <= DOUBLE_TAP_DELAY_MS) {
-                if (singleMediaTapTimerRef.current) {
-                    clearTimeout(singleMediaTapTimerRef.current);
-                    singleMediaTapTimerRef.current = null;
-                }
-                lastMediaTapRef.current = 0;
-                if (!post.userLiked) {
-                    onLike().catch((error) => console.error('Error in media double-tap like:', error));
-                }
-                const { pageX, pageY } = event?.nativeEvent || {};
-                void resolveTapCoords(pageX, pageY).then(({ x, y }) => triggerHeartDrop(x, y));
-                return;
-            }
-            lastMediaTapRef.current = now;
-            singleMediaTapTimerRef.current = setTimeout(() => {
-                if (postHasVideoMedia(post)) {
-                    // Video posts: single-tap toggles mute (Reels-style).
-                    videoMediaRef.current?.toggleVideoMute();
-                } else {
-                    // Still-image posts: single-tap opens fullscreen viewer (web parity).
-                    const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
-                    onOpenImageFullscreen?.(startIndex);
-                }
-                singleMediaTapTimerRef.current = null;
-            }, DOUBLE_TAP_DELAY_MS + 20);
-        },
-        [
-            DOUBLE_TAP_DELAY_MS,
-            carouselIndex,
-            onLike,
-            onOpenImageFullscreen,
-            post,
-            resolveTapCoords,
-            triggerHeartDrop,
-        ],
-    );
-
-    React.useEffect(() => {
-        return () => {
-            if (singleMediaTapTimerRef.current) {
-                clearTimeout(singleMediaTapTimerRef.current);
-            }
-        };
-    }, []);
+        const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
+        onOpenImageFullscreen?.(startIndex);
+    }, [carouselIndex, onOpenImageFullscreen, post]);
 
     return (
         <View style={FEED_POST_CARD_STYLE}>
@@ -1012,9 +997,9 @@ const FeedCard = React.memo(function FeedCard({
                     onShowTaggedUsers={() => onOpenTaggedSheet?.()}
                 />
             ) : (
-                <View>
+                <View style={FEED_CARD_BODY}>
                     {hasFeedMedia ? (
-                        <View style={FEED_CARD_MEDIA_WRAP} ref={mediaWrapRef} collapsable={false}>
+                        <View style={FEED_CARD_MEDIA_WRAP}>
                             <FeedPostMedia
                                 ref={videoMediaRef}
                                 post={post}
@@ -1022,8 +1007,17 @@ const FeedCard = React.memo(function FeedCard({
                                 onCarouselIndexChange={setCarouselIndex}
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
-                                height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
-                                onPress={isClientUploading || isClientUploadFailed ? undefined : handleMediaPress}
+                                height={mediaFrameHeight}
+                                onDoubleLike={
+                                    isClientUploading || isClientUploadFailed
+                                        ? undefined
+                                        : handleMediaDoubleLike
+                                }
+                                onSingleTap={
+                                    isClientUploading || isClientUploadFailed
+                                        ? undefined
+                                        : handleMediaSingleTap
+                                }
                                 onMediaLoad={
                                     isClientUploading
                                         ? undefined
@@ -1037,7 +1031,7 @@ const FeedCard = React.memo(function FeedCard({
                                 isActive={isVideoActive && !isClientUploading}
                                 muted={feedVideoMuted}
                                 onOpenScenes={
-                                    isClientUploading || isClientUploadFailed ? undefined : onOpenScenes
+                                    isClientUploading || isClientUploadFailed ? undefined : handleOpenScenesPress
                                 }
                             />
                             <FeedPostHeader
@@ -1119,41 +1113,36 @@ const FeedCard = React.memo(function FeedCard({
                 </Pressable>
             ) : null}
 
-            <FeedHeartDrop
-                visible={heartDrop != null}
-                startX={heartDrop?.startX ?? 0}
-                startY={heartDrop?.startY ?? 0}
-                targetRef={likeButtonRef}
-                onComplete={() => setHeartDrop(null)}
-            />
-
             <View
                 style={[
                     FEED_CARD_ENGAGEMENT_BAR,
                     (isClientUploading || isClientUploadFailed) && FEED_CARD_ENGAGEMENT_BAR_DIMMED,
                 ]}
             >
-                <FeedEngagementRow
-                    likeButtonRef={likeButtonRef}
-                    likes={post.stats.likes}
-                    comments={post.stats.comments}
-                    shares={post.stats.shares}
-                    reclips={post.stats.reclips}
-                    views={post.stats.views}
-                    userLiked={post.userLiked}
-                    userReclipped={post.userReclipped}
-                    isSaved={post.isBookmarked}
-                    onLike={() => { void onLike(); }}
-                    onLikesPress={() => {
-                        if (post.stats.likes > 0) onOpenLikesSheet?.();
-                    }}
-                    onComment={onComment}
-                    onShareToStories={() => setShareToStoriesVisible(true)}
-                    onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
-                    onSave={() => { void onBookmark(); }}
-                    showReclip={!isCurrentUser}
-                    tone="feed"
-                />
+                <View style={FEED_CARD_ENGAGEMENT_LEFT}>
+                    <FeedEngagementRow
+                        likeButtonRef={likeButtonRef}
+                        likes={post.stats.likes}
+                        comments={post.stats.comments}
+                        shares={post.stats.shares}
+                        reclips={post.stats.reclips}
+                        views={post.stats.views}
+                        userLiked={post.userLiked}
+                        userReclipped={post.userReclipped}
+                        isSaved={post.isBookmarked}
+                        onLike={() => { void onLike(); }}
+                        onLikesPress={() => {
+                            if (post.stats.likes > 0) onOpenLikesSheet?.();
+                        }}
+                        onComment={onComment}
+                        onShareToStories={() => setShareToStoriesVisible(true)}
+                        onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                        reclipDisabled={isCurrentUser}
+                        onSave={() => { void onBookmark(); }}
+                        showReclip
+                        tone="feed"
+                    />
+                </View>
 
                 <FeedEngagementRightActions
                     showMetrics={showBoostMetrics}
@@ -1342,6 +1331,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const pendingFeedScrollRestoreRef = useRef<number | null>(null);
     const pendingStories24CollapseRef = useRef<Stories24RailReturnPayload | null>(null);
     const feedLoadGenRef = useRef(0);
+    const feedRetryBusyRef = useRef(false);
     const pagesRef = useRef<Post[][]>([]);
     const feedFetchCtxRef = useRef({
         filter: 'ireland',
@@ -2035,17 +2025,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setEnd(false);
         setInitialLoading(true);
         setError(null);
-        const timeoutMs = 12000;
-        let loadTimeoutId: ReturnType<typeof setTimeout> | undefined;
-        const loadTimeoutPromise = new Promise<never>((_, reject) => {
-            loadTimeoutId = setTimeout(
-                () => reject(new Error('Feed load timed out')),
-                timeoutMs,
-            );
-        });
+        const timeoutMs = Platform.OS === 'web' ? 12000 : 25000;
+
+        const makeLoadTimeout = () => {
+            let loadTimeoutId: ReturnType<typeof setTimeout> | undefined;
+            const promise = new Promise<never>((_, reject) => {
+                loadTimeoutId = setTimeout(
+                    () => reject(new Error('Feed load timed out')),
+                    timeoutMs,
+                );
+            });
+            return { promise, clear: () => loadTimeoutId && clearTimeout(loadTimeoutId) };
+        };
+
         const runFetch = () => fetchInitialVisibleFeed(buildFeedFetchParams(0));
+        const firstTimeout = makeLoadTimeout();
         try {
-            const result = await Promise.race([runFetch(), loadTimeoutPromise]);
+            const result = await Promise.race([runFetch(), firstTimeout.promise]);
             if (gen !== feedLoadGenRef.current) return;
             applyFeedPageResult(result.items, result.nextCursor);
         } catch (err) {
@@ -2053,13 +2049,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             console.error('Error loading feed:', err);
             if (isLaravelApiEnabled()) {
                 markLaravelUnreachable();
+                const retryTimeout = makeLoadTimeout();
                 try {
-                    const retryResult = await Promise.race([runFetch(), loadTimeoutPromise]);
+                    const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
                     if (gen !== feedLoadGenRef.current) return;
                     applyFeedPageResult(retryResult.items, retryResult.nextCursor);
                     return;
                 } catch (retryErr) {
                     console.error('Feed mock fallback failed:', retryErr);
+                } finally {
+                    retryTimeout.clear();
                 }
             }
             const msg = err instanceof Error ? err.message : '';
@@ -2067,7 +2066,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setPages([]);
             setEnd(true);
         } finally {
-            if (loadTimeoutId) clearTimeout(loadTimeoutId);
+            firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
                 setInitialLoading(false);
             }
@@ -2127,8 +2126,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const feedPostCount = useMemo(() => pages.flat().length, [pages]);
 
     const retryFeedLoad = React.useCallback(() => {
+        if (feedRetryBusyRef.current) return;
+        feedRetryBusyRef.current = true;
         setError(null);
         setReloadTick((t) => t + 1);
+        setTimeout(() => {
+            feedRetryBusyRef.current = false;
+        }, 800);
     }, []);
 
     const onRefresh = async () => {
@@ -3170,8 +3174,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyFeedTitle}>Could not load feed</Text>
                             <Text style={styles.emptyFeedSubtitle}>{error}</Text>
-                            <TouchableOpacity style={styles.emptyFeedNotifyBtn} onPress={retryFeedLoad}>
-                                <Text style={styles.emptyFeedNotifyBtnText}>Try again</Text>
+                            <TouchableOpacity style={styles.emptyFeedSecondaryBtn} onPress={retryFeedLoad}>
+                                <Text style={styles.emptyFeedSecondaryBtnText}>Try again</Text>
                             </TouchableOpacity>
                         </View>
                     ) : initialLoading && flatForRender.length === 0 && pages.flat().length === 0 ? (
@@ -3179,40 +3183,51 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ) : end && flatForRender.length === 0 ? (
                         <View style={styles.emptyContainer}>
                             {customLocation ? (
-                                <View>
-                                    <View style={styles.emptyFeedCard}>
-                                        <Text style={styles.emptyFeedBadge}>
-                                            {isVisitorInCustomLocation ? "YOU'RE EARLY TO THIS FEED" : 'YOUR HOME FEED'}
+                                <View style={styles.emptyDefaultWrap}>
+                                    <View style={FEED_EMPTY_CARD}>
+                                        <Text style={FEED_EMPTY_BADGE}>
+                                            {isVisitorInCustomLocation ? "You're early to this feed" : 'Your home feed'}
                                         </Text>
-                                        <Text style={styles.emptyFeedTitle}>
+                                        <Text style={FEED_EMPTY_TITLE}>
                                             {isVisitorInCustomLocation
                                                 ? `No locals are posting in ${customLocationDisplay} yet`
                                                 : `No posts in your ${customLocationDisplay} feed yet`}
                                         </Text>
-                                        <Text style={styles.emptyFeedSubtitle}>
+                                        <Text style={FEED_EMPTY_SUBTITLE}>
                                             {isVisitorInCustomLocation
                                                 ? `We'll light up this feed once people in ${customLocationDisplay} start sharing.`
-                                                : 'You can be the first to post here. Share what’s happening around you.'}
+                                                : 'You can be the first to post here. Share what\'s happening around you to start this feed.'}
                                         </Text>
                                         {isVisitorInCustomLocation ? (
-                                            <View>
+                                            <View style={styles.emptyCustomActions}>
                                                 <TouchableOpacity
-                                                    style={[
-                                                        styles.emptyFeedNotifyBtn,
-                                                        isNotifyOnForCurrentLocation && styles.emptyFeedNotifyBtnActive,
-                                                    ]}
+                                                    activeOpacity={0.85}
                                                     onPress={toggleNotifyForCurrentLocation}
+                                                    style={styles.emptyNotifyBtnWrap}
                                                 >
-                                                    <Text
-                                                        style={[
-                                                            styles.emptyFeedNotifyBtnText,
-                                                            isNotifyOnForCurrentLocation && styles.emptyFeedNotifyBtnTextActive,
-                                                        ]}
-                                                    >
-                                                        {isNotifyOnForCurrentLocation
-                                                            ? "You'll be notified"
-                                                            : `Notify me when ${customLocationDisplay} wakes up`}
-                                                    </Text>
+                                                    {isNotifyOnForCurrentLocation ? (
+                                                        <View
+                                                            style={[
+                                                                FEED_EMPTY_GRADIENT_BTN,
+                                                                styles.emptyFeedNotifyBtnActive,
+                                                            ]}
+                                                        >
+                                                            <Text style={styles.emptyFeedNotifyBtnTextActive}>
+                                                                You&apos;ll be notified
+                                                            </Text>
+                                                        </View>
+                                                    ) : (
+                                                        <LinearGradient
+                                                            colors={[...FEED_EMPTY_NOTIFY_GRADIENT]}
+                                                            start={{ x: 0, y: 0.5 }}
+                                                            end={{ x: 1, y: 0.5 }}
+                                                            style={FEED_EMPTY_GRADIENT_BTN}
+                                                        >
+                                                            <Text style={styles.emptyFeedNotifyBtnText}>
+                                                                {`Notify me when ${customLocationDisplay} wakes up`}
+                                                            </Text>
+                                                        </LinearGradient>
+                                                    )}
                                                 </TouchableOpacity>
                                                 <TouchableOpacity
                                                     style={styles.emptyFeedSecondaryBtn}
@@ -3221,16 +3236,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                                     <Text style={styles.emptyFeedSecondaryBtnText}>Back to your home feed</Text>
                                                 </TouchableOpacity>
                                                 <Text style={styles.emptyFeedNotifyHint}>
-                                                    Feed warming up · we'll only ping you when real clips from{' '}
+                                                    Feed warming up · we&apos;ll only ping you when real clips from{' '}
                                                     {customLocationDisplay} start to appear.
                                                 </Text>
                                             </View>
                                         ) : (
                                             <TouchableOpacity
-                                                style={styles.emptyFeedPrimaryBtn}
+                                                activeOpacity={0.85}
                                                 onPress={() => navigation.navigate('CreateComposer')}
                                             >
-                                                <Text style={styles.emptyFeedPrimaryBtnText}>Create a clip in this feed</Text>
+                                                <LinearGradient
+                                                    colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                    start={{ x: 0, y: 0.5 }}
+                                                    end={{ x: 1, y: 0.5 }}
+                                                    style={FEED_EMPTY_GRADIENT_BTN}
+                                                >
+                                                    <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                        Create a clip in this feed
+                                                    </Text>
+                                                </LinearGradient>
                                             </TouchableOpacity>
                                         )}
                                     </View>
@@ -3240,20 +3264,46 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                     />
                                 </View>
                             ) : (
-                                <View>
-                                    <Text style={styles.emptyText}>
-                                        {showFollowingFeed
-                                            ? 'No posts from people you follow yet.'
-                                            : 'No posts found for this feed.'}
-                                    </Text>
-                                    {showFollowingFeed ? (
-                                        <Text style={styles.emptyFeedSubtitle}>
-                                            In demo mode, tap Ireland or Dublin for local posts.
-                                        </Text>
-                                    ) : null}
-                                    <TouchableOpacity style={styles.emptyFeedPrimaryBtn} onPress={retryFeedLoad}>
-                                        <Text style={styles.emptyFeedPrimaryBtnText}>Reload feed</Text>
-                                    </TouchableOpacity>
+                                <View style={styles.emptyDefaultWrap}>
+                                    {showFollowingFeed || String(currentFilter).toLowerCase() === 'discover' ? (
+                                        <View style={FEED_EMPTY_CARD}>
+                                            <Text style={FEED_EMPTY_FOLLOWING_TITLE}>
+                                                Unlock Your Following News Feed
+                                            </Text>
+                                            <Text style={FEED_EMPTY_FOLLOWING_SUBTITLE}>
+                                                This feed only populates with the accounts you follow. Start
+                                                tapping Follow to personalize your stream.
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View style={FEED_EMPTY_CARD}>
+                                            <Text style={FEED_EMPTY_BADGE}>Your home feed</Text>
+                                            <Text style={FEED_EMPTY_TITLE}>
+                                                {currentFilter
+                                                    ? `No posts in your ${currentFilter} feed yet`
+                                                    : 'No posts yet'}
+                                            </Text>
+                                            <Text style={FEED_EMPTY_SUBTITLE}>
+                                                You can be the first to post here. Share what&apos;s happening
+                                                around you to start this feed.
+                                            </Text>
+                                            <TouchableOpacity
+                                                activeOpacity={0.85}
+                                                onPress={() => navigation.navigate('CreateComposer')}
+                                            >
+                                                <LinearGradient
+                                                    colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                    start={{ x: 0, y: 0.5 }}
+                                                    end={{ x: 1, y: 0.5 }}
+                                                    style={FEED_EMPTY_GRADIENT_BTN}
+                                                >
+                                                    <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                        Create a clip in this feed
+                                                    </Text>
+                                                </LinearGradient>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
                                 </View>
                             )}
                         </View>
@@ -3692,260 +3742,19 @@ const styles = StyleSheet.create({
         backgroundColor: FEED_PAGE_BG,
         flexGrow: 1,
     },
-    feedHeaderTopRow: {
-        paddingTop: 12,
-        paddingBottom: 4,
-        alignItems: 'stretch',
-        justifyContent: 'center',
-        zIndex: 1,
-        paddingHorizontal: 12,
-    },
-    topHeaderRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    topHeaderActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    headerMiniAction: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        borderRadius: 999,
-        ...glassSurface,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-    },
-    boostHeaderAction: {
-        borderColor: '#FDE68A',
-        backgroundColor: '#FBBF24',
-    },
-    headerMiniActionText: {
-        color: '#F9FAFB',
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    storiesHeaderAction: {
-        borderColor: '#6B7280',
-        backgroundColor: '#0B1220',
-    },
-    storiesHeaderActionText: {
-        color: '#E5E7EB',
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    gazetteerButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    gazetteerText: {
-        fontSize: 18,
-        fontWeight: '300',
-        color: '#FFFFFF',
-        letterSpacing: 0.5,
-    },
-    notificationButton: {
-        position: 'relative',
-    },
-    notificationBadge: {
-        position: 'absolute',
-        top: -4,
-        right: -4,
-        minWidth: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: '#3B82F6',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 4,
-    },
-    notificationBadgeText: {
-        color: '#FFFFFF',
-        fontSize: 9,
-        fontWeight: 'bold',
-    },
     tabContainer: {
         backgroundColor: 'transparent',
-        paddingVertical: 8,
-        position: 'relative',
-        zIndex: 1,
-    },
-    tabGrid: {
-        flexDirection: 'row',
-        paddingHorizontal: 12,
-        gap: 8,
-    },
-    feedHeaderPickerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        minHeight: 40,
-        zIndex: 30,
-    },
-    feedHeaderIconButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    feedHeaderSideAction: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 2,
-    },
-    feedHeaderRightActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    feedHeaderCenter: {
-        flex: 1,
-        minWidth: 0,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    feedDropdownTrigger: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        maxWidth: '100%',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 10,
-        backgroundColor: '#36454F',
-    },
-    feedDropdownActiveIcon: {
-        marginTop: 1,
-    },
-    feedDropdownActiveDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 999,
-    },
-    feedDropdownActiveText: {
-        flexShrink: 1,
-        maxWidth: 160,
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#E5E7EB',
-        letterSpacing: 0.2,
-    },
-    feedDropdownMenu: {
-        position: 'absolute',
-        top: 44,
-        alignSelf: 'center',
-        width: 232,
-        backgroundColor: 'rgba(36, 40, 49, 0.94)',
-        borderRadius: 24,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
-        paddingVertical: 7,
-        zIndex: 60,
-        shadowColor: '#000',
-        shadowOpacity: 0.5,
-        shadowRadius: 14,
-        shadowOffset: { width: 0, height: 12 },
-        elevation: 36,
-    },
-    feedDropdownSearchWrap: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginHorizontal: 12,
-        marginTop: 8,
-        marginBottom: 4,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#FFFFFF',
-        backgroundColor: 'transparent',
-    },
-    feedDropdownSearchInput: {
-        flex: 1,
-        color: '#F9FAFB',
-        fontSize: 14,
-        marginLeft: 8,
-        paddingVertical: 0,
-        borderWidth: 0,
-        includeFontPadding: false,
-    },
-    feedDropdownSearchHint: {
-        marginTop: 5,
-        marginBottom: 4,
-        marginHorizontal: 14,
-        color: 'rgba(255,255,255,0.48)',
-        fontSize: 11,
-    },
-    feedDropdownSuggestionsWrap: {
-        marginHorizontal: 12,
-        marginBottom: 4,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: 'rgba(0,0,0,0.2)',
-        overflow: 'hidden',
-    },
-    feedDropdownSuggestionItem: {
-        paddingHorizontal: 12,
-        paddingVertical: 9,
-    },
-    feedDropdownSuggestionText: {
-        color: '#F9FAFB',
-        fontSize: 13,
-    },
-    feedDropdownSuggestionsMeta: {
-        color: 'rgba(255,255,255,0.55)',
-        fontSize: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 9,
-    },
-    feedDropdownMenuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 11,
-        paddingHorizontal: 15,
-        paddingVertical: 11,
-    },
-    feedDropdownMenuText: {
-        fontSize: 16,
-        color: '#F9FAFB',
-        fontWeight: '600',
     },
     feedHeaderNotifWrap: {
-        position: 'relative',
         alignItems: 'center',
     },
-    feedHeaderPassportAvatarWrap: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        overflow: 'hidden',
-        backgroundColor: '#374151',
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
+    feedHeaderIconGroup: {
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
     },
     feedHeaderPassportAvatarImage: {
         width: '100%',
         height: '100%',
-    },
-    feedHeaderPassportInitials: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    feedHeaderPassportLabel: {
-        marginTop: 1,
-        fontSize: 9,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
     errorContainer: {
         padding: 16,
@@ -3963,32 +3772,22 @@ const styles = StyleSheet.create({
         padding: 24,
         alignItems: 'stretch',
     },
-    emptyText: {
-        color: '#6B7280',
-        fontSize: 16,
-        textAlign: 'center',
+    emptyDefaultWrap: {
+        alignItems: 'center',
+        width: '100%',
+    },
+    emptyCustomActions: {
+        width: '100%',
+        alignItems: 'stretch',
+        gap: 12,
+    },
+    emptyNotifyBtnWrap: {
+        width: '100%',
     },
     emptyLoadingText: {
         marginTop: 12,
         color: '#9CA3AF',
         fontSize: 15,
-        textAlign: 'center',
-    },
-    emptyFeedCard: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(55, 65, 81, 0.9)',
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        paddingHorizontal: 20,
-        paddingVertical: 24,
-        alignItems: 'center',
-    },
-    emptyFeedBadge: {
-        fontSize: 12,
-        fontWeight: '600',
-        letterSpacing: 0.5,
-        color: '#9CA3AF',
-        marginBottom: 12,
         textAlign: 'center',
     },
     emptyFeedTitle: {
@@ -4005,17 +3804,6 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginBottom: 16,
     },
-    emptyFeedPrimaryBtn: {
-        borderRadius: 999,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        backgroundColor: '#EF4444',
-    },
-    emptyFeedPrimaryBtnText: {
-        color: '#000000',
-        fontSize: 14,
-        fontWeight: '700',
-    },
     emptyFeedSecondaryBtn: {
         borderRadius: 999,
         paddingHorizontal: 20,
@@ -4028,17 +3816,9 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
-    emptyFeedNotifyBtn: {
-        marginTop: 4,
-        borderRadius: 999,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        backgroundColor: '#0EA5E9',
-        width: '100%',
-        alignItems: 'center',
-    },
     emptyFeedNotifyBtnActive: {
         backgroundColor: '#16A34A',
+        width: '100%',
     },
     emptyFeedNotifyBtnText: {
         color: '#FFFFFF',
@@ -4048,6 +3828,9 @@ const styles = StyleSheet.create({
     },
     emptyFeedNotifyBtnTextActive: {
         color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+        textAlign: 'center',
     },
     emptyFeedNotifyHint: {
         marginTop: 12,

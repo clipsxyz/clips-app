@@ -37,7 +37,7 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 12,
         bottom: 12,
-        zIndex: 8,
+        zIndex: 22,
     },
     wrapAboveMute: {
         bottom: 52,

@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingHorizontal: 8,
     paddingTop: 6,
-    backgroundColor: 'rgba(11, 7, 17, 0.94)',
+    backgroundColor: '#030712',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },

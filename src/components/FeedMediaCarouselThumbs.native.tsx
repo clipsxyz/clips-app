@@ -1,5 +1,15 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import {
+    FEED_CARD_CAROUSEL_COUNT,
+    FEED_CARD_CAROUSEL_HEADER,
+    FEED_CARD_CAROUSEL_RAIL,
+    FEED_CARD_CAROUSEL_THUMB,
+    FEED_CARD_CAROUSEL_THUMB_ACTIVE,
+    FEED_CARD_CAROUSEL_TITLE,
+    FEED_CARD_CAROUSEL_WRAP,
+} from './FeedPageLayout.native';
+
 export type CarouselThumbItem = {
     url: string;
     type: 'image' | 'video' | 'text';
@@ -15,20 +25,20 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
     if (items.length <= 1) return null;
 
     return (
-        <View style={styles.wrap}>
-            <View style={styles.header}>
-                <Text style={styles.title}>CAROUSEL</Text>
-                <Text style={styles.count}>
+        <View style={FEED_CARD_CAROUSEL_WRAP}>
+            <View style={FEED_CARD_CAROUSEL_HEADER}>
+                <Text style={FEED_CARD_CAROUSEL_TITLE}>Carousel</Text>
+                <Text style={FEED_CARD_CAROUSEL_COUNT}>
                     {activeIndex + 1} / {items.length}
                 </Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={FEED_CARD_CAROUSEL_RAIL}>
                 {items.map((item, index) => {
                     const active = index === activeIndex;
                     return (
                         <TouchableOpacity
                             key={`thumb-${index}`}
-                            style={[styles.thumb, active && styles.thumbActive]}
+                            style={[FEED_CARD_CAROUSEL_THUMB, active && FEED_CARD_CAROUSEL_THUMB_ACTIVE]}
                             onPress={() => onSelect(index)}
                             activeOpacity={0.9}
                         >
@@ -51,50 +61,9 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
 }
 
 const styles = StyleSheet.create({
-    wrap: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        backgroundColor: 'rgba(0,0,0,0.95)',
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(255,255,255,0.1)',
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-    },
-    title: {
-        fontSize: 11,
-        fontWeight: '700',
-        letterSpacing: 0.8,
-        color: 'rgba(255,255,255,0.85)',
-    },
-    count: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: 'rgba(255,255,255,0.8)',
-    },
-    rail: {
-        flexDirection: 'row',
-        gap: 8,
-        paddingBottom: 4,
-    },
     thumbImgWrap: {
         width: '100%',
         height: '100%',
-    },
-    thumb: {
-        width: 56,
-        height: 56,
-        borderRadius: 8,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-    },
-    thumbActive: {
-        borderColor: '#FFFFFF',
-        borderWidth: 2,
     },
     thumbImg: {
         width: '100%',

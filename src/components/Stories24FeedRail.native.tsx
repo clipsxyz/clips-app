@@ -520,11 +520,18 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                     collapsable={false}
                     {...(Platform.OS === 'android' ? { needsOffscreenAlphaCompositing: true } : {})}
                 >
-                    {ambientSize.width > 0 && ambientSize.height > 0 && Platform.OS !== 'android' ? (
-                        <GoldChromeAmbientCanvas
-                            width={ambientSize.width}
-                            height={ambientSize.height}
-                        />
+                    {ambientSize.width > 0 && ambientSize.height > 0 ? (
+                        Platform.OS === 'android' ? (
+                            <View
+                                style={[StyleSheet.absoluteFill, styles.androidAmbientFill]}
+                                pointerEvents="none"
+                            />
+                        ) : (
+                            <GoldChromeAmbientCanvas
+                                width={ambientSize.width}
+                                height={ambientSize.height}
+                            />
+                        )
                     ) : null}
                     <View style={styles.contentLayer}>
                         <View style={styles.headerRow}>
@@ -613,6 +620,9 @@ const styles = StyleSheet.create({
         backgroundColor: '#0a1323',
         padding: 12,
         overflow: 'hidden',
+    },
+    androidAmbientFill: {
+        backgroundColor: '#0a1323',
     },
     contentLayer: {
         position: 'relative',

@@ -3,17 +3,18 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
-import {
-    BottomSheetScrollView,
-    BottomSheetTextInput,
-    BottomSheetView,
-} from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Collection, Post } from '../types';
 import {
     addPostToCollection,
@@ -24,7 +25,7 @@ import {
     removePostFromCollection,
     savePostToDefaultCollection,
 } from '../api/collections';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_SAVE } from './GazetteerBottomSheetModal.native';
+import { GAZETTEER_SHEET_SAVE } from './GazetteerBottomSheetModal.native';
 
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 
@@ -37,6 +38,7 @@ type Props = {
 };
 
 export default function SavePostModal({ post, userId, visible, onClose, onSaved }: Props) {
+    const insets = useSafeAreaInsets();
     const [collections, setCollections] = useState<Collection[]>([]);
     const [postCollectionIds, setPostCollectionIds] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
@@ -122,121 +124,150 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         post.mediaUrl ||
         post.mediaItems?.find((m) => m?.url)?.url;
 
+    if (!visible) return null;
+
     return (
-        <GazetteerBottomSheetModal
-            visible={visible}
-            onDismiss={onClose}
-            snapPoints={['85%']}
-            horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_SAVE.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_SAVE.handle}
-            backdropOpacity={0.55}
-            keyboardBehavior="interactive"
-            android_keyboardInputMode="adjustResize"
-        >
-            <BottomSheetView style={styles.header}>
-                <Text style={styles.title}>Save Post</Text>
-                <View style={styles.headerActions}>
-                    <TouchableOpacity onPress={() => setCreating(true)} hitSlop={8}>
-                        <Icon name="add" size={24} color="#E5E7EB" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={onClose} hitSlop={8}>
-                        <Icon name="close" size={24} color="#E5E7EB" />
-                    </TouchableOpacity>
-                </View>
-            </BottomSheetView>
-
-            <BottomSheetScrollView contentContainerStyle={styles.scroll}>
-                {defaultCollection ? (
-                    <TouchableOpacity
-                        style={styles.row}
-                        onPress={() => void toggle(defaultCollection.id)}
-                        disabled={savingId === defaultCollection.id}
-                    >
-                        <View style={styles.thumb}>
-                            {previewUrl ? (
-                                <Image source={{ uri: previewUrl }} style={styles.thumbImg} />
-                            ) : (
-                                <Icon name="bookmark" size={28} color="#9CA3AF" />
-                            )}
-                        </View>
-                        <View style={styles.rowText}>
-                            <Text style={styles.rowTitle}>All Posts</Text>
-                            <Text style={styles.rowSub}>Private — every saved post</Text>
-                        </View>
-                        {postCollectionIds.includes(defaultCollection.id) ? (
-                            <Icon name="bookmark" size={22} color="#7A8AF0" />
-                        ) : null}
-                    </TouchableOpacity>
-                ) : null}
-
-                <Text style={styles.sectionTitle}>Collections</Text>
-
-                {creating ? (
-                    <View style={styles.createBox}>
-                        <BottomSheetTextInput
-                            style={styles.input}
-                            value={newName}
-                            onChangeText={setNewName}
-                            placeholder="Collection name"
-                            placeholderTextColor="#6B7280"
-                            autoFocus
-                        />
-                        <View style={styles.createActions}>
-                            <TouchableOpacity style={styles.createBtn} onPress={() => void createNew()}>
-                                <Text style={styles.createBtnText}>Create</Text>
+        <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+            <View style={styles.overlay}>
+                <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    style={[styles.sheet, GAZETTEER_SHEET_SAVE.background, { paddingBottom: Math.max(insets.bottom, 16) }]}
+                >
+                    <View style={styles.handleWrap}>
+                        <View style={[styles.handle, GAZETTEER_SHEET_SAVE.handle]} />
+                    </View>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>Save Post</Text>
+                        <View style={styles.headerActions}>
+                            <TouchableOpacity onPress={() => setCreating(true)} hitSlop={8}>
+                                <Icon name="add" size={24} color="#E5E7EB" />
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setCreating(false);
-                                    setNewName('');
-                                }}
-                            >
-                                <Text style={styles.cancelText}>Cancel</Text>
+                            <TouchableOpacity onPress={onClose} hitSlop={8}>
+                                <Icon name="close" size={24} color="#E5E7EB" />
                             </TouchableOpacity>
                         </View>
                     </View>
-                ) : null}
 
-                {loading && collections.length === 0 ? (
-                    <ActivityIndicator color="#8B5CF6" style={{ marginVertical: 24 }} />
-                ) : customCollections.length === 0 ? (
-                    <Text style={styles.empty}>No collections yet. Create one to get started.</Text>
-                ) : (
-                    customCollections.map((c) => {
-                        const thumb = getCollectionThumbnailUrl(c);
-                        const inCol = postCollectionIds.includes(c.id);
-                        return (
+                    <ScrollView
+                        keyboardShouldPersistTaps="handled"
+                        contentContainerStyle={styles.scroll}
+                    >
+                        {defaultCollection ? (
                             <TouchableOpacity
-                                key={c.id}
                                 style={styles.row}
-                                onPress={() => void toggle(c.id)}
-                                disabled={savingId === c.id}
+                                onPress={() => void toggle(defaultCollection.id)}
+                                disabled={savingId === defaultCollection.id}
                             >
                                 <View style={styles.thumb}>
-                                    {thumb ? (
-                                        <Image source={{ uri: thumb }} style={styles.thumbImg} />
+                                    {previewUrl ? (
+                                        <Image source={{ uri: previewUrl }} style={styles.thumbImg} />
                                     ) : (
-                                        <Icon name="folder-outline" size={26} color="#9CA3AF" />
+                                        <Icon name="bookmark" size={28} color="#9CA3AF" />
                                     )}
                                 </View>
                                 <View style={styles.rowText}>
-                                    <Text style={styles.rowTitle}>{c.name}</Text>
-                                    <Text style={styles.rowSub}>
-                                        {c.postIds?.length ?? 0} posts
-                                    </Text>
+                                    <Text style={styles.rowTitle}>All Posts</Text>
+                                    <Text style={styles.rowSub}>Private — every saved post</Text>
                                 </View>
-                                {inCol ? <Icon name="checkmark-circle" size={22} color="#7A8AF0" /> : null}
+                                {postCollectionIds.includes(defaultCollection.id) ? (
+                                    <Icon name="bookmark" size={22} color="#7A8AF0" />
+                                ) : null}
                             </TouchableOpacity>
-                        );
-                    })
-                )}
-            </BottomSheetScrollView>
-        </GazetteerBottomSheetModal>
+                        ) : null}
+
+                        <Text style={styles.sectionTitle}>Collections</Text>
+
+                        {creating ? (
+                            <View style={styles.createBox}>
+                                <TextInput
+                                    style={styles.input}
+                                    value={newName}
+                                    onChangeText={setNewName}
+                                    placeholder="Collection name"
+                                    placeholderTextColor="#6B7280"
+                                    autoFocus
+                                />
+                                <View style={styles.createActions}>
+                                    <TouchableOpacity style={styles.createBtn} onPress={() => void createNew()}>
+                                        <Text style={styles.createBtnText}>Create</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setCreating(false);
+                                            setNewName('');
+                                        }}
+                                    >
+                                        <Text style={styles.cancelText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ) : null}
+
+                        {loading && collections.length === 0 ? (
+                            <ActivityIndicator color="#8B5CF6" style={{ marginVertical: 24 }} />
+                        ) : customCollections.length === 0 ? (
+                            <Text style={styles.empty}>No collections yet. Create one to get started.</Text>
+                        ) : (
+                            customCollections.map((c) => {
+                                const thumb = getCollectionThumbnailUrl(c);
+                                const inCol = postCollectionIds.includes(c.id);
+                                return (
+                                    <TouchableOpacity
+                                        key={c.id}
+                                        style={styles.row}
+                                        onPress={() => void toggle(c.id)}
+                                        disabled={savingId === c.id}
+                                    >
+                                        <View style={styles.thumb}>
+                                            {thumb ? (
+                                                <Image source={{ uri: thumb }} style={styles.thumbImg} />
+                                            ) : (
+                                                <Icon name="folder-outline" size={26} color="#9CA3AF" />
+                                            )}
+                                        </View>
+                                        <View style={styles.rowText}>
+                                            <Text style={styles.rowTitle}>{c.name}</Text>
+                                            <Text style={styles.rowSub}>
+                                                {c.postIds?.length ?? 0} posts
+                                            </Text>
+                                        </View>
+                                        {inCol ? <Icon name="checkmark-circle" size={22} color="#7A8AF0" /> : null}
+                                    </TouchableOpacity>
+                                );
+                            })
+                        )}
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            </View>
+        </Modal>
     );
 }
 
 const styles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+    },
+    sheet: {
+        maxHeight: '85%',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+    },
+    handleWrap: {
+        alignItems: 'center',
+        paddingTop: 10,
+        paddingBottom: 4,
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',

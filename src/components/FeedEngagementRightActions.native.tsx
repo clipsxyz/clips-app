@@ -21,15 +21,6 @@ export default function FeedEngagementRightActions({
 }: Props) {
     return (
         <View style={styles.row}>
-            {showMetrics && onToggleMetrics ? (
-                <TouchableOpacity
-                    onPress={onToggleMetrics}
-                    style={styles.button}
-                    accessibilityLabel="Toggle boost metrics"
-                >
-                    <FeedBarChartIcon size={24} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
-                </TouchableOpacity>
-            ) : null}
             {onShare ? (
                 <TouchableOpacity
                     onPress={onShare}
@@ -37,6 +28,15 @@ export default function FeedEngagementRightActions({
                     accessibilityLabel="Share post"
                 >
                     <FeedLiveShareIcon size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+            ) : null}
+            {showMetrics && onToggleMetrics ? (
+                <TouchableOpacity
+                    onPress={onToggleMetrics}
+                    style={styles.button}
+                    accessibilityLabel="Toggle boost metrics"
+                >
+                    <FeedBarChartIcon size={24} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
                 </TouchableOpacity>
             ) : null}
         </View>

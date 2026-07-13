@@ -95,7 +95,7 @@ class AppErrorBoundary extends React.Component<
 const navigationRef = createNavigationContainerRef();
 
 const TAB_BAR_STYLE = {
-  backgroundColor: 'rgba(11, 7, 17, 0.94)',
+  backgroundColor: '#030712',
   borderTopColor: 'rgba(255, 255, 255, 0.1)',
   borderTopWidth: 1,
 } as const;
@@ -156,9 +156,11 @@ class FeedHomeErrorBoundary extends React.Component<
 /** Home uses FeedScreen.tsx (same as web feed logic); wrapped for render-error visibility. */
 function HomeTabScreen(props: React.ComponentProps<typeof FeedScreen>) {
   return (
-    <FeedHomeErrorBoundary>
-      <FeedScreen {...props} />
-    </FeedHomeErrorBoundary>
+    <View style={styles.homeTabRoot}>
+      <FeedHomeErrorBoundary>
+        <FeedScreen {...props} />
+      </FeedHomeErrorBoundary>
+    </View>
   );
 }
 
@@ -196,6 +198,8 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: TAB_BAR_STYLE,
+        sceneContainerStyle: { backgroundColor: '#030712' },
+        lazy: true,
       }}
       tabBar={(props) => <MainTabBar {...props} inboxBadgeCount={inboxBadgeCount} />}
     >
@@ -265,7 +269,7 @@ function App(): React.JSX.Element {
           <Stack.Navigator
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: '#0b0711' },
+              contentStyle: { backgroundColor: '#030712' },
             }}
           >
           <Stack.Screen name="MainTabs" component={MainTabs} />
@@ -370,6 +374,12 @@ function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
+    backgroundColor: '#030712',
+  },
+  homeTabRoot: {
+    flex: 1,
+    backgroundColor: '#030712',
+    overflow: 'hidden',
   },
 });
 

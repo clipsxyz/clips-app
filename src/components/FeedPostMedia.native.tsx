@@ -14,10 +14,13 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
+import { Pressable as GesturePressable } from 'react-native-gesture-handler';
+
+const FEED_DOUBLE_TAP_MS = 300;
 import type { StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import Video, { type VideoRef } from 'react-native-video';
+import Video, { ViewType, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import { subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
@@ -36,9 +39,14 @@ import {
 } from '../constants/mockFeedVideos';
 import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
+import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 
 export type FeedPostMediaHandle = {
     toggleVideoMute: () => void;
+    /** Web feed: single tap re-shows mute icon for ~2s without toggling. */
+    flashMuteControl: () => void;
+    /** Parent tap layer can trigger in-media burst at local coords. */
+    showLikeBurstAt: (x: number, y: number) => void;
 };
 
 type Props = {
@@ -48,7 +56,12 @@ type Props = {
     onCarouselIndexChange?: (index: number) => void;
     width: number;
     height: number;
+    /** @deprecated Feed uses onDoubleLike + onSingleTap (TextCard parity). */
     onPress?: (event?: GestureResponderEvent) => void;
+    /** Feed: double-tap like (web Media / TextCard parity). */
+    onDoubleLike?: () => void;
+    /** Feed: delayed single-tap — image fullscreen or video mute flash (web Media). */
+    onSingleTap?: () => void;
     stickers?: StickerOverlay[];
     onMediaLoad?: () => void;
     mode?: 'feed' | 'detail';
@@ -59,6 +72,8 @@ type Props = {
     style?: StyleProp<ViewStyle>;
     /** Feed video: opens vertical Scenes viewer. */
     onOpenScenes?: () => void;
+    /** Feed card tap layer lives in FeedScreen (above native media surfaces). */
+    feedTouchesHandledExternally?: boolean;
 };
 
 const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function FeedPostMedia(
@@ -69,6 +84,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         width,
         height,
         onPress,
+        onDoubleLike,
+        onSingleTap,
         stickers,
         onMediaLoad,
         mode = 'feed',
@@ -76,6 +93,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         muted = true,
         style,
         onOpenScenes,
+        feedTouchesHandledExternally = false,
     },
     ref,
 ) {
@@ -91,6 +109,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const carouselScrollRef = useRef<ScrollView>(null);
     const feedVideoRef = useRef<VideoRef>(null);
     const lastEmittedIndexRef = useRef(0);
+    const lastTapRef = useRef(0);
+    const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
+    const [burstKey, setBurstKey] = useState(0);
 
     const carouselItems = useMemo(
         () =>
@@ -195,6 +218,18 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         setFeedVideoHandoff(post.id, { currentTime, muted: !soundOn });
     };
 
+    const fireBurstAt = useCallback((x: number, y: number) => {
+        setBurstAt({ x, y });
+        setBurstKey((k) => k + 1);
+        if (clearBurstTimerRef.current) {
+            clearTimeout(clearBurstTimerRef.current);
+        }
+        clearBurstTimerRef.current = setTimeout(() => {
+            setBurstAt(null);
+            clearBurstTimerRef.current = null;
+        }, 500);
+    }, []);
+
     useImperativeHandle(
         ref,
         () => ({
@@ -204,8 +239,16 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 setMuteFlash(true);
                 setTimeout(() => setMuteFlash(false), 1100);
             },
+            flashMuteControl: () => {
+                if (!video || mode !== 'feed') return;
+                setMuteFlash(true);
+                setTimeout(() => setMuteFlash(false), 2000);
+            },
+            showLikeBurstAt: (x: number, y: number) => {
+                fireBurstAt(x, y);
+            },
         }),
-        [mode, soundOn, video],
+        [fireBurstAt, mode, soundOn, video],
     );
 
     useEffect(() => {
@@ -255,9 +298,101 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         };
     }, [post, textOnly]);
 
-    const suppressContextMenu = () => {
-        /* Best-effort: consume long-press on feed media (no web context menu on RN). */
-    };
+    const feedTapCapture =
+        mode === 'feed' &&
+        !feedTouchesHandledExternally &&
+        Boolean(onDoubleLike || onSingleTap || onPress);
+
+    const clearPendingSingleTap = useCallback(() => {
+        if (singleTapTimerRef.current) {
+            clearTimeout(singleTapTimerRef.current);
+            singleTapTimerRef.current = null;
+        }
+    }, []);
+
+    const resolveLocalTap = useCallback(
+        (e: GestureResponderEvent): { x: number; y: number } => {
+            const { locationX, locationY } = e.nativeEvent;
+            if (typeof locationX === 'number' && typeof locationY === 'number') {
+                return { x: locationX, y: locationY };
+            }
+            return { x: width / 2, y: height / 2 };
+        },
+        [height, width],
+    );
+
+    const handleMediaTap = useCallback(
+        (e: GestureResponderEvent) => {
+            if (onPress && !onDoubleLike && !onSingleTap) {
+                onPress(e);
+                return;
+            }
+
+            const now = Date.now();
+            const timeSinceLastTap = now - lastTapRef.current;
+
+            clearPendingSingleTap();
+
+            if (timeSinceLastTap < FEED_DOUBLE_TAP_MS && lastTapRef.current > 0) {
+                const local = resolveLocalTap(e);
+                fireBurstAt(local.x, local.y);
+                onDoubleLike?.();
+            } else if (onSingleTap) {
+                singleTapTimerRef.current = setTimeout(() => {
+                    onSingleTap();
+                    singleTapTimerRef.current = null;
+                }, FEED_DOUBLE_TAP_MS);
+            }
+
+            lastTapRef.current = now;
+        },
+        [
+            clearPendingSingleTap,
+            fireBurstAt,
+            onDoubleLike,
+            onPress,
+            onSingleTap,
+            resolveLocalTap,
+        ],
+    );
+
+    useEffect(
+        () => () => {
+            clearPendingSingleTap();
+            if (clearBurstTimerRef.current) {
+                clearTimeout(clearBurstTimerRef.current);
+            }
+        },
+        [clearPendingSingleTap],
+    );
+
+    const handleOpenScenesPress = useCallback(() => {
+        clearPendingSingleTap();
+        onOpenScenes?.();
+    }, [clearPendingSingleTap, onOpenScenes]);
+
+    const feedVideoSurfaceProps =
+        Platform.OS === 'android' && mode === 'feed'
+            ? { viewType: ViewType.TEXTURE as const }
+            : {};
+
+    const renderFeedTapOverlay = () =>
+        feedTapCapture && (video || hasCarousel) ? (
+            <GesturePressable
+                style={styles.tapCapture}
+                onPress={handleMediaTap}
+                android_disableSound
+                accessibilityRole="button"
+                accessibilityLabel="Double tap to like"
+            />
+        ) : null;
+
+    const mediaPointerEvents =
+        mode === 'feed' &&
+        (feedTapCapture || feedTouchesHandledExternally) &&
+        (video || hasCarousel)
+            ? ('none' as const)
+            : undefined;
 
     if (textOnly) {
         return (
@@ -316,7 +451,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
 
-    const renderSlide = (item: (typeof carouselItems)[number], slideIndex: number) => {
+    const renderSlide = (
+        item: (typeof carouselItems)[number],
+        slideIndex: number,
+    ) => {
         const slideRawUrl = item?.url || post.mediaUrl;
         if (!slideRawUrl) return <View style={frameStyle} />;
 
@@ -337,6 +475,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slideInner = slideVideo ? (
             slideUseNativePlayer ? (
                 <Video
+                    ref={
+                        mode === 'feed' && slideVideo && slideIndex === currentIndex
+                            ? feedVideoRef
+                            : undefined
+                    }
                     source={videoSource(slideUrl)}
                     style={frameStyle}
                     resizeMode={mode === 'detail' ? 'contain' : 'cover'}
@@ -349,6 +492,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     playInBackground={false}
                     playWhenInactive={false}
                     ignoreSilentSwitch="ignore"
+                    pointerEvents={mediaPointerEvents}
+                    {...feedVideoSurfaceProps}
                     onLoad={() => markUrlLoaded(slideRawUrl)}
                     onProgress={
                         slideFeedPlay
@@ -363,6 +508,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     style={frameStyle}
                     resizeMode="cover"
                     resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                    pointerEvents={mediaPointerEvents}
                     onLoad={() => markUrlLoaded(slideRawUrl)}
                     onError={() => markUrlLoaded(slideRawUrl)}
                 />
@@ -372,17 +518,36 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     <Icon name="videocam-outline" size={36} color="#6B7280" />
                 </View>
             )
-        ) : (
+        ) : hasCarousel || !feedTapCapture ? (
             <Image
                 source={{ uri: slideUrl }}
                 style={frameStyle}
                 resizeMode="cover"
                 resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                 progressiveRenderingEnabled
+                pointerEvents={feedTapCapture ? 'none' : undefined}
                 onLoadStart={() => beginUrlLoad(slideRawUrl)}
                 onLoad={() => markUrlLoaded(slideRawUrl)}
                 onError={() => markUrlLoaded(slideRawUrl)}
             />
+        ) : (
+            <GesturePressable
+                style={frameStyle}
+                onPress={handleMediaTap}
+                android_disableSound
+            >
+                <Image
+                    source={{ uri: slideUrl }}
+                    style={frameStyle}
+                    resizeMode="cover"
+                    resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                    progressiveRenderingEnabled
+                    pointerEvents="none"
+                    onLoadStart={() => beginUrlLoad(slideRawUrl)}
+                    onLoad={() => markUrlLoaded(slideRawUrl)}
+                    onError={() => markUrlLoaded(slideRawUrl)}
+                />
+            </GesturePressable>
         );
 
         return (
@@ -393,62 +558,23 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                         <ActivityIndicator color="#f472b6" />
                     </View>
                 ) : null}
-                {onPress ? (
-                    <Pressable
-                        style={StyleSheet.absoluteFill}
-                        onPress={onPress}
-                        onLongPress={suppressContextMenu}
-                        delayLongPress={400}
-                    />
-                ) : null}
             </View>
         );
     };
 
-    const inner = video && playbackUrl ? (
-        mode === 'detail' || feedVideoReady ? (
-            <Video
-                ref={mode === 'feed' ? feedVideoRef : undefined}
-                source={videoSource(playbackUrl)}
-                style={frameStyle}
-                resizeMode={mode === 'detail' ? 'contain' : 'cover'}
-                controls={mode === 'detail'}
-                paused={mode === 'detail' ? paused : !feedShouldPlay}
-                muted={mode === 'feed' ? !soundOn : undefined}
-                repeat={mode === 'feed'}
-                poster={postLevelPoster}
-                posterResizeMode="cover"
-                playInBackground={false}
-                playWhenInactive={false}
-                ignoreSilentSwitch="ignore"
-                onLoad={() => mediaUrl && markUrlLoaded(mediaUrl)}
-                onProgress={feedShouldPlay ? (e) => onFeedVideoProgress(e.currentTime) : undefined}
-                onError={(e) => mediaUrl && onVideoError(mediaUrl, e)}
-            />
-        ) : postLevelPoster ? (
-            <Image
-                source={{ uri: postLevelPoster }}
-                style={frameStyle}
-                resizeMode="cover"
-                resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                onLoadStart={() => mediaUrl && beginUrlLoad(mediaUrl)}
-                onLoad={() => mediaUrl && markUrlLoaded(mediaUrl)}
-                onError={() => mediaUrl && markUrlLoaded(mediaUrl)}
-            />
-        ) : (
-            <View style={[frameStyle, styles.videoFallback]}>
-                {mediaUrl && loadingByUrl[mediaUrl] && !loadedUrlsRef.current.has(mediaUrl) ? (
-                    <ActivityIndicator color="#f472b6" />
-                ) : null}
-                <Icon name="videocam-outline" size={36} color="#6B7280" />
-            </View>
-        )
-    ) : hasCarousel ? null : (
-        renderSlide(activeItem!, 0)
-    );
+    const primarySlideItem =
+        activeItem ??
+        (mediaUrl
+            ? {
+                  url: mediaUrl,
+                  type: (isVideoPost(post) ? 'video' : 'image') as 'video' | 'image',
+              }
+            : undefined);
+
+    const inner = hasCarousel ? null : primarySlideItem ? renderSlide(primarySlideItem, 0) : null;
 
     return (
-        <View style={[styles.wrap, { width, height }, style]}>
+        <View style={[styles.wrap, { width, height }, style]} collapsable={false}>
             {hasCarousel ? (
                 <ScrollView
                     ref={carouselScrollRef}
@@ -469,43 +595,16 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     ))}
                 </ScrollView>
             ) : (
-                <Pressable
-                    onPress={onPress}
-                    onLongPress={suppressContextMenu}
-                    delayLongPress={400}
-                    style={{ width, height }}
-                >
+                <View style={{ width, height }}>
                     {inner}
                     {mediaUrl && loadingByUrl[mediaUrl] && !loadedUrlsRef.current.has(mediaUrl) && !video ? (
                         <View style={styles.loadingOverlay} pointerEvents="none">
                             <ActivityIndicator color="#f472b6" />
                         </View>
                     ) : null}
-                </Pressable>
+                </View>
             )}
             {video ? <FeedVideoCaptionOverlay post={post} /> : null}
-            {showScenesCta ? (
-                <VideoCTAOverlay onPress={() => onOpenScenes?.()} userHandle={post.userHandle} />
-            ) : null}
-            {video && mode === 'feed' && (feedShouldPlay || muteFlash) ? (
-                <Pressable
-                    style={styles.muteButton}
-                    onPress={(e) => {
-                        e.stopPropagation?.();
-                        setFeedSoundOn(!soundOn);
-                        setMuteFlash(true);
-                        setTimeout(() => setMuteFlash(false), 1100);
-                    }}
-                    hitSlop={8}
-                >
-                    <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={20} color="#FFFFFF" />
-                </Pressable>
-            ) : null}
-            {video && mode === 'detail' && paused ? (
-                <Pressable style={styles.playBadge} onPress={() => setPaused(false)}>
-                    <Icon name="play-circle" size={64} color="rgba(255,255,255,0.95)" />
-                </Pressable>
-            ) : null}
             {imageText ? (
                 <View style={styles.imageTextOverlay} pointerEvents="none">
                     <Text style={styles.imageText}>{imageText}</Text>
@@ -524,12 +623,40 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     <Text style={styles.videoTypeBadgeText}>VIDEO</Text>
                 </View>
             ) : null}
+            {renderFeedTapOverlay()}
+            {showScenesCta ? (
+                <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={post.userHandle} />
+            ) : null}
+            {video && mode === 'feed' && (feedShouldPlay || muteFlash) ? (
+                <GesturePressable
+                    style={styles.muteButton}
+                    onPress={(e) => {
+                        e.stopPropagation?.();
+                        setFeedSoundOn(!soundOn);
+                        setMuteFlash(true);
+                        setTimeout(() => setMuteFlash(false), 1100);
+                    }}
+                    hitSlop={8}
+                >
+                    <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={20} color="#FFFFFF" />
+                </GesturePressable>
+            ) : null}
+            {video && mode === 'detail' && paused ? (
+                <Pressable style={styles.playBadge} onPress={() => setPaused(false)}>
+                    <Icon name="play-circle" size={64} color="rgba(255,255,255,0.95)" />
+                </Pressable>
+            ) : null}
             {showVideoPlayFailed ? (
                 <Pressable style={styles.videoErrorOverlay} onPress={retryVideoPlayback}>
                     <Icon name="refresh-circle" size={32} color="#FFFFFF" />
                     <Text style={styles.videoErrorTitle}>Video could not play</Text>
                     <Text style={styles.videoErrorHint}>Tap to retry</Text>
                 </Pressable>
+            ) : null}
+            {burstAt ? (
+                <View style={styles.burstLayer} pointerEvents="none">
+                    <FeedDoubleTapLikeBurst key={burstKey} x={burstAt.x} y={burstAt.y} />
+                </View>
             ) : null}
         </View>
     );
@@ -564,7 +691,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.55)',
-        zIndex: 4,
+        zIndex: 25,
+        elevation: Platform.OS === 'android' ? 25 : 0,
     },
     videoFallback: {
         alignItems: 'center',
@@ -620,7 +748,18 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.55)',
         paddingHorizontal: 16,
-        zIndex: 6,
+        zIndex: 14,
+    },
+    tapCapture: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 22,
+        elevation: Platform.OS === 'android' ? 22 : 0,
+        backgroundColor: 'rgba(0,0,0,0.001)',
+    },
+    burstLayer: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 50,
+        elevation: Platform.OS === 'android' ? 50 : 0,
     },
     videoErrorTitle: {
         marginTop: 8,

@@ -210,7 +210,7 @@ export default function FeedPostHeader({
     }
 
     return (
-        <View style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}>
+        <View style={[styles.wrap, isOverlaid && styles.wrapOverlaid]} pointerEvents="box-none">
             {isOverlaid ? (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}

@@ -32,6 +32,7 @@ if (typeof globalThis.localStorage === 'undefined') {
 import 'react-native-gesture-handler';
 import { AppRegistry, LogBox, Text, View } from 'react-native';
 import 'react-native-reanimated';
+import './src/utils/reanimatedBottomSheetCompat.native';
 // NativeWind global.css can prevent the first paint on some Android builds; styles live in StyleSheet on native screens.
 // import './global.css';
 import { name as appName } from './app.json';
