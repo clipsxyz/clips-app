@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuthorizationHeader } from './authTokenBridge';
 import { getReactNativeDefaultApiBaseUrl, getRuntimeEnv } from '../config/runtimeEnv';
 
 function getApiBaseUrl(): string {
@@ -26,22 +26,6 @@ function getApiBaseUrl(): string {
     return 'http://localhost:8000/api';
 }
 
-async function getAuthToken(): Promise<string | null> {
-    try {
-        if (typeof localStorage !== 'undefined') {
-            const token = localStorage.getItem('authToken');
-            if (token) return token;
-        }
-    } catch {
-        // ignore
-    }
-    try {
-        return await AsyncStorage.getItem('authToken');
-    } catch {
-        return null;
-    }
-}
-
 export type NativeUploadResult = {
     success?: boolean;
     fileUrl?: string;
@@ -54,7 +38,7 @@ export async function uploadFileFromUri(
     mimeType = 'image/jpeg',
     fileName = 'upload.jpg',
 ): Promise<NativeUploadResult> {
-    const token = await getAuthToken();
+    const authHeader = await getAuthorizationHeader();
     const formData = new FormData();
     formData.append('file', {
         uri,
@@ -69,7 +53,7 @@ export async function uploadFileFromUri(
         const response = await fetch(`${getApiBaseUrl()}/upload/single`, {
             method: 'POST',
             headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                ...authHeader,
             },
             body: formData,
             signal: controller.signal,

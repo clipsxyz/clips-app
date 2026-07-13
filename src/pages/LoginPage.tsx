@@ -9,6 +9,7 @@ import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/plac
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
+import { persistAuthToken } from '../utils/authTokenBridge';
 import { db } from '../utils/db';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
@@ -320,7 +321,7 @@ export default function LoginPage() {
         isBusiness: accountType === 'business',
       });
       const token = (apiResponse as { token?: string })?.token;
-      if (token) localStorage.setItem('authToken', token);
+      if (token) await persistAuthToken(token);
     } catch {
       // Keep local registration fallback behavior aligned with RN.
     }
@@ -372,7 +373,7 @@ export default function LoginPage() {
       const res = await loginUser(loginEmail.trim(), loginPassword);
       const token = (res as { token?: string }).token;
       const apiUser = (res as { user?: any }).user;
-      if (token) localStorage.setItem('authToken', token);
+      if (token) await persistAuthToken(token);
       if (apiUser) {
         const userData = {
           name: apiUser.display_name || apiUser.name || apiUser.username || '',

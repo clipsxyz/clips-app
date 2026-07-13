@@ -64,10 +64,15 @@ export function isLaravelUnreachableThisSession(): boolean {
 export function isLaravelApiEnabled(): boolean {
   if (laravelUnreachableThisSession) return false;
   const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');
-  if (raw === 'true') return true;
   if (raw === 'false') return false;
-  // On RN devices, default to mock/local mode unless explicitly enabled.
-  if (isReactNativeRuntime()) return false;
+  if (isReactNativeRuntime()) {
+    // Physical devices cannot reach Metro's localhost API URL — use bundled mock feed instead.
+    if (raw !== 'true') return false;
+    const base = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || '';
+    if (/localhost|127\.0\.0\.1/i.test(base)) return false;
+    return true;
+  }
+  if (raw === 'true') return true;
   return true;
 }
 

@@ -3,18 +3,19 @@ import {
     ActivityIndicator,
     Alert,
     Image,
-    Modal,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useAuth } from '../context/Auth';
 import { createChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { uploadFileFromUri } from '../utils/uploadFileNative';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DM } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -57,7 +58,19 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
         }
         setBusy(true);
         try {
-            const g = await createChatGroup(trimmed, user?.handle ?? null, avatarUri);
+            let avatarUrl: string | null = null;
+            if (avatarUri) {
+                if (isLaravelApiEnabled()) {
+                    const upload = await uploadFileFromUri(avatarUri);
+                    avatarUrl = upload.fileUrl || upload.url || null;
+                    if (!avatarUrl) {
+                        throw new Error('Could not upload group photo');
+                    }
+                } else {
+                    avatarUrl = avatarUri;
+                }
+            }
+            const g = await createChatGroup(trimmed, user?.handle ?? null, avatarUrl);
             if (g) {
                 onCreated?.(g);
                 onClose();
@@ -71,67 +84,74 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
         }
     };
 
-    if (!visible) return null;
-
     return (
-        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <View style={styles.sheet}>
-                    <View style={styles.header}>
-                        <Icon name="people" size={22} color="#FFF" />
-                        <Text style={styles.title}>New group</Text>
-                        <TouchableOpacity onPress={onClose} disabled={busy}>
-                            <Icon name="close" size={24} color="#FFF" />
-                        </TouchableOpacity>
-                    </View>
-                    <Text style={styles.hint}>
-                        After creating, open the group chat and invite people with + or from profiles.
-                    </Text>
-                    <Text style={styles.label}>Group name</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={name}
-                        onChangeText={setName}
-                        placeholder="e.g. Dublin photographers"
-                        placeholderTextColor="#6B7280"
-                        maxLength={120}
-                        editable={!busy}
-                    />
-                    <Text style={styles.label}>Group photo (optional)</Text>
-                    <View style={styles.photoRow}>
-                        <TouchableOpacity style={styles.photoBtn} onPress={() => void pickPhoto()} disabled={busy}>
-                            <Text style={styles.photoBtnText}>{avatarUri ? 'Change photo' : 'Choose photo'}</Text>
-                        </TouchableOpacity>
-                        {avatarUri ? (
-                            <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
-                        ) : null}
-                    </View>
-                    <TouchableOpacity
-                        style={[styles.submit, busy && styles.submitDisabled]}
-                        onPress={() => void submit()}
-                        disabled={busy}
-                    >
-                        {busy ? (
-                            <ActivityIndicator color="#000" />
-                        ) : (
-                            <Text style={styles.submitText}>Create group</Text>
-                        )}
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            enableDynamicSizing
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_DM.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_DM.handle}
+            backdropOpacity={0.7}
+            keyboardBehavior="interactive"
+            android_keyboardInputMode="adjustResize"
+        >
+            <BottomSheetView style={styles.sheetBody}>
+                <View style={styles.header}>
+                    <Icon name="people" size={22} color="#FFF" />
+                    <Text style={styles.title}>New group</Text>
+                    <TouchableOpacity onPress={onClose} disabled={busy}>
+                        <Icon name="close" size={24} color="#FFF" />
                     </TouchableOpacity>
                 </View>
-            </View>
-        </Modal>
+                <Text style={styles.hint}>
+                    After creating, open the group chat and invite people with + or from profiles.
+                </Text>
+                <Text style={styles.label}>Group name</Text>
+                <BottomSheetTextInput
+                    style={styles.input}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="e.g. Dublin photographers"
+                    placeholderTextColor="#6B7280"
+                    maxLength={120}
+                    editable={!busy}
+                />
+                <Text style={styles.label}>Group photo (optional)</Text>
+                <View style={styles.photoRow}>
+                    <TouchableOpacity
+                        style={styles.photoBtn}
+                        onPress={() => void pickPhoto()}
+                        disabled={busy}
+                    >
+                        <Text style={styles.photoBtnText}>
+                            {avatarUri ? 'Change photo' : 'Choose photo'}
+                        </Text>
+                    </TouchableOpacity>
+                    {avatarUri ? (
+                        <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
+                    ) : null}
+                </View>
+                <TouchableOpacity
+                    style={[styles.submit, busy && styles.submitDisabled]}
+                    onPress={() => void submit()}
+                    disabled={busy}
+                >
+                    {busy ? (
+                        <ActivityIndicator color="#000" />
+                    ) : (
+                        <Text style={styles.submitText}>Create group</Text>
+                    )}
+                </TouchableOpacity>
+            </BottomSheetView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-    sheet: {
-        backgroundColor: '#000',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
+    sheetBody: {
         padding: 16,
-        borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        paddingBottom: 24,
     },
     header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
     title: { flex: 1, color: '#FFF', fontSize: 17, fontWeight: '700' },

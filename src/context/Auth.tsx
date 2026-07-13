@@ -5,7 +5,11 @@ import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate } from '
 import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
-import { clearAuthToken, hydrateAuthTokenFromStorage } from '../utils/authTokenBridge';
+import {
+  clearAuthToken,
+  getAuthTokenAsync,
+  hydrateAuthTokenFromStorage,
+} from '../utils/authTokenBridge';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 
@@ -24,12 +28,15 @@ const Ctx = React.createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
+  const authRefreshGenRef = React.useRef(0);
 
   React.useEffect(() => {
     void hydrateAuthTokenFromStorage();
   }, []);
 
   React.useEffect(() => {
+    let cancelled = false;
+    const refreshGen = authRefreshGenRef.current;
     try {
       const s = localStorage.getItem('user');
       if (!s) {
@@ -136,30 +143,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
         // If we have an auth token (Laravel), refresh user from API so handle and profile are correct (fixes Share/DM list after refresh)
-        const token = localStorage.getItem('authToken');
-        if (token && isLaravelApiEnabled()) {
+        void getAuthTokenAsync().then((token) => {
+          if (cancelled || refreshGen !== authRefreshGenRef.current || !token || !isLaravelApiEnabled()) return;
           import('../api/client').then(({ getCurrentUser, mapLaravelUserToAppFields }) => {
             getCurrentUser()
               .then((apiUser: any) => {
-                const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
-                const updated: User = { ...userToSet };
-                for (const [key, val] of Object.entries(fromApi)) {
-                  if (val === undefined || val === null) continue;
-                  if (key === 'placesTraveled' && Array.isArray(val)) {
-                    updated.placesTraveled = val.length > 0 ? val : undefined;
-                    continue;
+                if (cancelled || refreshGen !== authRefreshGenRef.current) return;
+                void getAuthTokenAsync().then((stillToken) => {
+                  if (cancelled || refreshGen !== authRefreshGenRef.current || !stillToken) return;
+                  const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+                  const updated: User = { ...userToSet };
+                  for (const [key, val] of Object.entries(fromApi)) {
+                    if (val === undefined || val === null) continue;
+                    if (key === 'placesTraveled' && Array.isArray(val)) {
+                      updated.placesTraveled = val.length > 0 ? val : undefined;
+                      continue;
+                    }
+                    (updated as Record<string, unknown>)[key] = val;
                   }
-                  (updated as Record<string, unknown>)[key] = val;
-                }
-                setUser(updated);
-                localStorage.setItem('user', JSON.stringify(updated));
-                if (updated.handle && typeof updated.is_private === 'boolean') {
-                  setProfilePrivacy(updated.handle, updated.is_private);
-                }
+                  setUser(updated);
+                  localStorage.setItem('user', JSON.stringify(updated));
+                  if (updated.handle && typeof updated.is_private === 'boolean') {
+                    setProfilePrivacy(updated.handle, updated.is_private);
+                  }
+                });
               })
               .catch(() => {});
           });
-        }
+        });
         // Restore profile pic from IndexedDB (survives refresh on phone)
         if (!userToSet.avatarUrl) {
           db.get(AVATAR_KEY(userToSet.id))
@@ -188,6 +199,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     // Initialize mock private user for testing (Sarah@Artane)
     initializePrivateMockUser();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = (userData: any) => {
@@ -246,6 +260,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    authRefreshGenRef.current += 1;
     // Disconnect Socket.IO when user logs out
     disconnectSocket();
     import('../services/notifications')

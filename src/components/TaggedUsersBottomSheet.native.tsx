@@ -1,18 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import {
-    Modal,
-    View,
-    Text,
-    TouchableOpacity,
-    FlatList,
-    ActivityIndicator,
-    Pressable,
-    StyleSheet,
-} from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { BottomSheetFlatList, BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { unifiedSearch } from '../api/search';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_NAVY } from './GazetteerBottomSheetModal.native';
 
 type TaggedUser = {
     handle: string;
@@ -93,101 +86,92 @@ export default function TaggedUsersBottomSheet({
         };
     }, [visible, taggedUserHandles.join(',')]);
 
-    return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <Pressable style={styles.backdrop} onPress={onClose}>
-                <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-                    <View style={styles.handleBar} />
-                    <View style={styles.header}>
-                        <View style={styles.headerLeft}>
-                            <View style={styles.headerIcon}>
-                                <Icon name="people" size={20} color="#E5E7EB" />
-                            </View>
-                            <View>
-                                <Text style={styles.title}>Tagged people</Text>
-                                <Text style={styles.subtitle}>
-                                    {taggedUserHandles.length}{' '}
-                                    {taggedUserHandles.length === 1 ? 'person' : 'people'}
-                                </Text>
-                            </View>
-                        </View>
-                        <TouchableOpacity onPress={onClose} hitSlop={8}>
-                            <Icon name="close" size={24} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    </View>
+    const renderItem = useCallback(
+        ({ item }: { item: TaggedUser }) => (
+            <TouchableOpacity
+                style={styles.row}
+                onPress={() => {
+                    onClose();
+                    onVisitProfile?.(item.handle);
+                }}
+                disabled={!onVisitProfile}
+            >
+                <Avatar
+                    src={item.avatar_url}
+                    name={item.display_name || item.handle.split('@')[0]}
+                    size={40}
+                />
+                <View style={styles.rowText}>
+                    <Text style={styles.name} numberOfLines={1}>
+                        {item.display_name || item.handle}
+                    </Text>
+                    <Text style={styles.handle} numberOfLines={1}>
+                        {item.handle}
+                    </Text>
+                </View>
+            </TouchableOpacity>
+        ),
+        [onClose, onVisitProfile],
+    );
 
-                    {loading ? (
-                        <ActivityIndicator color="#7A8AF0" style={styles.loader} />
-                    ) : (
-                        <FlatList
-                            data={users}
-                            keyExtractor={(item) => item.handle}
-                            contentContainerStyle={styles.list}
-                            ListEmptyComponent={
-                                <Text style={styles.empty}>No tagged users found</Text>
-                            }
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={styles.row}
-                                    onPress={() => {
-                                        onClose();
-                                        onVisitProfile?.(item.handle);
-                                    }}
-                                    disabled={!onVisitProfile}
-                                >
-                                    <Avatar
-                                        src={item.avatar_url}
-                                        name={item.display_name || item.handle.split('@')[0]}
-                                        size={40}
-                                    />
-                                    <View style={styles.rowText}>
-                                        <Text style={styles.name} numberOfLines={1}>
-                                            {item.display_name || item.handle}
-                                        </Text>
-                                        <Text style={styles.handle} numberOfLines={1}>
-                                            {item.handle}
-                                        </Text>
-                                    </View>
-                                </TouchableOpacity>
-                            )}
-                        />
-                    )}
-                </Pressable>
-            </Pressable>
-        </Modal>
+    return (
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            snapPoints={['80%']}
+            backgroundStyle={GAZETTEER_SHEET_NAVY.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_NAVY.handle}
+        >
+            <BottomSheetView style={styles.headerBlock}>
+                <View style={styles.header}>
+                    <View style={styles.headerLeft}>
+                        <View style={styles.headerIcon}>
+                            <Icon name="people" size={20} color="#E5E7EB" />
+                        </View>
+                        <View>
+                            <Text style={styles.title}>Tagged people</Text>
+                            <Text style={styles.subtitle}>
+                                {taggedUserHandles.length}{' '}
+                                {taggedUserHandles.length === 1 ? 'person' : 'people'}
+                            </Text>
+                        </View>
+                    </View>
+                    <TouchableOpacity onPress={onClose} hitSlop={8}>
+                        <Icon name="close" size={24} color="#9CA3AF" />
+                    </TouchableOpacity>
+                </View>
+            </BottomSheetView>
+
+            {loading ? (
+                <BottomSheetView>
+                    <ActivityIndicator color="#7A8AF0" style={styles.loader} />
+                </BottomSheetView>
+            ) : (
+                <BottomSheetFlatList
+                    data={users}
+                    keyExtractor={(item) => item.handle}
+                    renderItem={renderItem}
+                    contentContainerStyle={styles.list}
+                    ListEmptyComponent={
+                        <Text style={styles.empty}>No tagged users found</Text>
+                    }
+                />
+            )}
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    backdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.55)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        maxHeight: '80%',
-        backgroundColor: '#0b1220',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        paddingBottom: 24,
-    },
-    handleBar: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: '#4B5563',
-        marginTop: 10,
-        marginBottom: 8,
+    headerBlock: {
+        paddingHorizontal: 16,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.1)',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
         paddingBottom: 12,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.1)',
     },
     headerLeft: {
         flexDirection: 'row',

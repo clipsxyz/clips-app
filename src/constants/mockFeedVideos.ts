@@ -53,6 +53,24 @@ function nativeRemoteForDemoPath(url: string): string {
 }
 
 /** Resolve mock video URL for feed Media — local path on web/Vite; per-slot HTTPS on React Native. */
+/** Poster image for a demo feed video path (RN rail / story fallback when MP4 fails). */
+export function resolveMockFeedVideoPosterUrl(url: string | undefined): string | undefined {
+    if (!url) return undefined;
+    if (url.includes(MOCK_FEED_VIDEO_URLS.escapes) || url.includes('escapes.mp4')) {
+        return MOCK_FEED_VIDEO_POSTERS.escapes;
+    }
+    if (url.includes(MOCK_FEED_VIDEO_URLS.fun) || url.includes('fun.mp4')) {
+        return MOCK_FEED_VIDEO_POSTERS.fun;
+    }
+    if (url.includes(MOCK_FEED_VIDEO_URLS.joyrides) || url.includes('joyrides.mp4')) {
+        return MOCK_FEED_VIDEO_POSTERS.joyrides;
+    }
+    if (url.includes('flower.mp4')) {
+        return MOCK_FEED_VIDEO_POSTERS.escapes;
+    }
+    return undefined;
+}
+
 export function resolveMockFeedVideoUrl(url: string | undefined): string {
     if (isReactNativeRuntime()) {
         if (!url) return MOCK_FEED_VIDEO_REMOTE_FALLBACK;

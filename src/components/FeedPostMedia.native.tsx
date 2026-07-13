@@ -21,6 +21,7 @@ import Video, { type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import { subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
@@ -102,6 +103,14 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const maxCarouselIndex = Math.max(0, carouselItems.length - 1);
     const safeCarouselIndex = Math.min(Math.max(0, carouselIndex), maxCarouselIndex);
     const [currentIndex, setCurrentIndex] = useState(safeCarouselIndex);
+    /** Mount native Video only after this card has been active once (keeps initial feed load stable). */
+    const [feedVideoReady, setFeedVideoReady] = useState(mode !== 'feed');
+
+    useEffect(() => {
+        if (mode === 'feed' && isActive) {
+            setFeedVideoReady(true);
+        }
+    }, [mode, isActive]);
 
     const markUrlLoaded = useCallback(
         (url: string) => {
@@ -191,12 +200,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         () => ({
             toggleVideoMute: () => {
                 if (!video || mode !== 'feed') return;
-                setSoundOn((v) => !v);
+                setFeedSoundOn(!soundOn);
                 setMuteFlash(true);
                 setTimeout(() => setMuteFlash(false), 1100);
             },
         }),
-        [mode, video],
+        [mode, soundOn, video],
     );
 
     useEffect(() => {
@@ -268,7 +277,17 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const frameStyle = { width, height, backgroundColor: '#000000' };
 
-    const videoSource = (uri: string) => ({ uri, type: 'mp4' as const });
+    const videoSource = (uri: string) => {
+        const lower = uri.toLowerCase();
+        if (lower.includes('.m3u8')) return { uri, type: 'm3u8' as const };
+        if (lower.includes('.webm')) return { uri, type: 'webm' as const };
+        return { uri };
+    };
+
+    const setFeedSoundOn = (nextSoundOn: boolean) => {
+        setSoundOn(nextSoundOn);
+        void setGlobalVideoMutedNative(!nextSoundOn);
+    };
 
     const onVideoError = (rawUrl: string, error?: unknown) => {
         const played = getPlaybackUrl(rawUrl);
@@ -295,7 +314,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         if (mediaUrl) beginUrlLoad(mediaUrl);
     };
 
-    const showVideoPoster = video && postLevelPoster && !feedShouldPlay;
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
 
     const renderSlide = (item: (typeof carouselItems)[number], slideIndex: number) => {
@@ -313,34 +331,30 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slidePoster =
             (item as { posterUrl?: string } | undefined)?.posterUrl || postLevelPoster;
 
+        const slideUseNativePlayer =
+            mode === 'detail' || (mode === 'feed' && feedVideoReady && slideVideo);
+
         const slideInner = slideVideo ? (
-            mode === 'detail' ? (
+            slideUseNativePlayer ? (
                 <Video
                     source={videoSource(slideUrl)}
                     style={frameStyle}
-                    resizeMode="contain"
-                    controls
-                    paused={paused}
-                    poster={slidePoster}
-                    posterResizeMode="cover"
-                    onLoad={() => markUrlLoaded(slideRawUrl)}
-                    onError={(e) => onVideoError(slideRawUrl, e)}
-                />
-            ) : slideFeedPlay ? (
-                <Video
-                    source={videoSource(slideUrl)}
-                    style={frameStyle}
-                    resizeMode="cover"
-                    paused={false}
-                    muted={!soundOn}
-                    repeat
+                    resizeMode={mode === 'detail' ? 'contain' : 'cover'}
+                    controls={mode === 'detail'}
+                    paused={mode === 'detail' ? paused : !slideFeedPlay}
+                    muted={mode === 'feed' ? !soundOn : undefined}
+                    repeat={mode === 'feed'}
                     poster={slidePoster}
                     posterResizeMode="cover"
                     playInBackground={false}
                     playWhenInactive={false}
                     ignoreSilentSwitch="ignore"
                     onLoad={() => markUrlLoaded(slideRawUrl)}
-                    onProgress={(e) => onFeedVideoProgress(e.currentTime)}
+                    onProgress={
+                        slideFeedPlay
+                            ? (e) => onFeedVideoProgress(e.currentTime)
+                            : undefined
+                    }
                     onError={(e) => onVideoError(slideRawUrl, e)}
                 />
             ) : slidePoster ? (
@@ -349,7 +363,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     style={frameStyle}
                     resizeMode="cover"
                     resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                    onLoadStart={() => beginUrlLoad(slideRawUrl)}
                     onLoad={() => markUrlLoaded(slideRawUrl)}
                     onError={() => markUrlLoaded(slideRawUrl)}
                 />
@@ -393,40 +406,27 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     };
 
     const inner = video && playbackUrl ? (
-        mode === 'detail' ? (
+        mode === 'detail' || feedVideoReady ? (
             <Video
+                ref={mode === 'feed' ? feedVideoRef : undefined}
                 source={videoSource(playbackUrl)}
                 style={frameStyle}
-                resizeMode="contain"
-                controls
-                paused={paused}
-                poster={postLevelPoster}
-                posterResizeMode="cover"
-                onLoad={() => mediaUrl && markUrlLoaded(mediaUrl)}
-                onError={(e) => mediaUrl && onVideoError(mediaUrl, e)}
-            />
-        ) : feedShouldPlay ? (
-            <Video
-                key={`${post.id}-${playbackUrl}`}
-                ref={feedVideoRef}
-                source={videoSource(playbackUrl)}
-                style={frameStyle}
-                resizeMode="cover"
-                paused={paused}
-                muted={!soundOn}
-                repeat
+                resizeMode={mode === 'detail' ? 'contain' : 'cover'}
+                controls={mode === 'detail'}
+                paused={mode === 'detail' ? paused : !feedShouldPlay}
+                muted={mode === 'feed' ? !soundOn : undefined}
+                repeat={mode === 'feed'}
                 poster={postLevelPoster}
                 posterResizeMode="cover"
                 playInBackground={false}
                 playWhenInactive={false}
                 ignoreSilentSwitch="ignore"
                 onLoad={() => mediaUrl && markUrlLoaded(mediaUrl)}
-                onProgress={(e) => onFeedVideoProgress(e.currentTime)}
+                onProgress={feedShouldPlay ? (e) => onFeedVideoProgress(e.currentTime) : undefined}
                 onError={(e) => mediaUrl && onVideoError(mediaUrl, e)}
             />
         ) : postLevelPoster ? (
             <Image
-                key={`${post.id}-poster`}
                 source={{ uri: postLevelPoster }}
                 style={frameStyle}
                 resizeMode="cover"
@@ -487,12 +487,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             {showScenesCta ? (
                 <VideoCTAOverlay onPress={() => onOpenScenes?.()} userHandle={post.userHandle} />
             ) : null}
-            {feedShouldPlay || muteFlash ? (
+            {video && mode === 'feed' && (feedShouldPlay || muteFlash) ? (
                 <Pressable
                     style={styles.muteButton}
                     onPress={(e) => {
                         e.stopPropagation?.();
-                        setSoundOn((v) => !v);
+                        setFeedSoundOn(!soundOn);
                         setMuteFlash(true);
                         setTimeout(() => setMuteFlash(false), 1100);
                     }}
@@ -518,7 +518,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     containerHeight={height}
                 />
             ) : null}
-            {video && mode === 'feed' && !feedShouldPlay ? (
+            {video && mode === 'feed' && !feedShouldPlay && !playFailed ? (
                 <View style={styles.videoTypeBadge} pointerEvents="none">
                     <Icon name="videocam" size={12} color="#FFFFFF" />
                     <Text style={styles.videoTypeBadgeText}>VIDEO</Text>

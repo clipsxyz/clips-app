@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
 import {
-    Modal,
     View,
     Text,
     TouchableOpacity,
-    Pressable,
     StyleSheet,
     Linking,
     Alert,
 } from 'react-native';
+import { BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { buildStoryShareUrl } from '../../utils/storyShareUrl';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_CHARCOAL } from '../GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -74,95 +74,83 @@ export default function StoryShareSheet({ visible, onClose, userHandle, storyId 
     const encodedText = encodeURIComponent(`Check out this story by @${bareHandle}`);
 
     return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <Pressable style={styles.backdrop} onPress={onClose}>
-                <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-                    <View style={styles.handle} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Share story</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                            <Icon name="close" size={22} color="#D1D5DB" />
-                        </TouchableOpacity>
-                    </View>
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            enableDynamicSizing
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_CHARCOAL.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_CHARCOAL.handle}
+        >
+            <BottomSheetView style={styles.sheetBody}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Share story</Text>
+                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                        <Icon name="close" size={22} color="#D1D5DB" />
+                    </TouchableOpacity>
+                </View>
 
-                    <ShareRow
-                        icon={<Icon name="link" size={16} color="#fff" />}
-                        iconBg="#374151"
-                        title={copied ? 'Copied' : 'Copy link'}
-                        subtitle="Share story link"
-                        onPress={copyLink}
-                    />
-                    <ShareRow
-                        icon={<Text style={styles.brandLetter}>W</Text>}
-                        iconBg="#22C55E"
-                        title="WhatsApp"
-                        subtitle="Share via WhatsApp"
-                        onPress={() =>
-                            void openExternal(`https://wa.me/?text=${encodedText}%20${encodedUrl}`)
-                        }
-                    />
-                    <ShareRow
-                        icon={<Text style={styles.brandLetter}>f</Text>}
-                        iconBg="#2563EB"
-                        title="Facebook"
-                        subtitle="Share to Facebook"
-                        onPress={() =>
-                            void openExternal(
-                                `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
-                            )
-                        }
-                    />
-                    <ShareRow
-                        icon={<Text style={styles.brandLetter}>X</Text>}
-                        iconBg="#000000"
-                        title="X (Twitter)"
-                        subtitle="Share to X"
-                        onPress={() =>
-                            void openExternal(
-                                `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
-                            )
-                        }
-                    />
-                    <ShareRow
-                        icon={<Text style={styles.brandLetter}>@</Text>}
-                        iconBg="#EF4444"
-                        title="Email"
-                        subtitle="Share via email"
-                        onPress={() => {
-                            const subject = encodeURIComponent('Check out this story');
-                            const body = encodeURIComponent(
-                                `Have a look at this story by @${bareHandle}:\n\n${shareUrl}`,
-                            );
-                            void openExternal(`mailto:?subject=${subject}&body=${body}`);
-                        }}
-                    />
-                </Pressable>
-            </Pressable>
-        </Modal>
+                <ShareRow
+                    icon={<Icon name="link" size={16} color="#fff" />}
+                    iconBg="#374151"
+                    title={copied ? 'Copied' : 'Copy link'}
+                    subtitle="Share story link"
+                    onPress={copyLink}
+                />
+                <ShareRow
+                    icon={<Text style={styles.brandLetter}>W</Text>}
+                    iconBg="#22C55E"
+                    title="WhatsApp"
+                    subtitle="Share via WhatsApp"
+                    onPress={() =>
+                        void openExternal(`https://wa.me/?text=${encodedText}%20${encodedUrl}`)
+                    }
+                />
+                <ShareRow
+                    icon={<Text style={styles.brandLetter}>f</Text>}
+                    iconBg="#2563EB"
+                    title="Facebook"
+                    subtitle="Share to Facebook"
+                    onPress={() =>
+                        void openExternal(
+                            `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
+                        )
+                    }
+                />
+                <ShareRow
+                    icon={<Text style={styles.brandLetter}>X</Text>}
+                    iconBg="#000000"
+                    title="X (Twitter)"
+                    subtitle="Share to X"
+                    onPress={() =>
+                        void openExternal(
+                            `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
+                        )
+                    }
+                />
+                <ShareRow
+                    icon={<Text style={styles.brandLetter}>@</Text>}
+                    iconBg="#EF4444"
+                    title="Email"
+                    subtitle="Share via email"
+                    onPress={() => {
+                        const subject = encodeURIComponent('Check out this story');
+                        const body = encodeURIComponent(
+                            `Have a look at this story by @${bareHandle}:\n\n${shareUrl}`,
+                        );
+                        void openExternal(`mailto:?subject=${subject}&body=${body}`);
+                    }}
+                />
+            </BottomSheetView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    backdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        backgroundColor: '#111827',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+    sheetBody: {
         paddingHorizontal: 16,
         paddingBottom: 28,
-        paddingTop: 8,
-    },
-    handle: {
-        width: 48,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-        alignSelf: 'center',
-        marginBottom: 12,
+        paddingTop: 4,
     },
     header: {
         flexDirection: 'row',

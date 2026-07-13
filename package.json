@@ -33,6 +33,7 @@
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@gorhom/bottom-sheet": "^5.1.6",
     "@mediapipe/camera_utils": "^0.3.1675466862",
     "@mediapipe/drawing_utils": "^0.3.1675466124",
     "@mediapipe/face_mesh": "^0.4.1633559619",
@@ -88,6 +89,8 @@
   "devDependencies": {
     "@react-native-community/cli": "^20.0.0",
     "@react-native-community/cli-platform-android": "^20.0.0",
+    "@react-native/babel-preset": "^0.85.3",
+    "@react-native/metro-config": "^0.85.3",
     "@react-native/jest-preset": "^0.85.3",
     "@size-limit/preset-app": "^12.0.0",
     "@testing-library/dom": "^10.4.0",

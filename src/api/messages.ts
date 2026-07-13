@@ -1,8 +1,5 @@
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
-
-function hasAuthToken(): boolean {
-    return typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
-}
+import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 
 export interface ChatMessage {
     id: string;
@@ -197,7 +194,7 @@ export async function fetchConversationMessagesPage(
     cursor: string | null = null,
     limit: number = 50,
 ): Promise<ConversationMessagesPage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const page = await apiClient.fetchConversationPage(b, cursor, limit);
@@ -224,7 +221,7 @@ export async function fetchConversationMessagesPage(
 }
 
 export async function fetchConversation(a: string, b: string): Promise<ChatMessage[]> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
@@ -260,7 +257,7 @@ export async function fetchConversation(a: string, b: string): Promise<ChatMessa
 }
 
 export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number; sourcePostId?: string }): Promise<ChatMessage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const raw = await apiClient.sendMessage(to, {
@@ -380,7 +377,7 @@ export async function editMessage(messageId: string, newText: string, from: stri
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
@@ -397,7 +394,7 @@ export async function getUnreadTotal(handle: string): Promise<number> {
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
     unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             await apiClient.markConversationRead(otherHandle);
@@ -463,7 +460,7 @@ export async function fetchGroupThreadMessagesPage(
     cursor: string | null = null,
     limit: number = 50,
 ): Promise<GroupThreadMessagesPage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const page = (await apiClient.fetchGroupConversationPage(groupId, cursor, limit)) as {
@@ -508,7 +505,7 @@ export async function fetchGroupChatMessages(_viewerHandle: string, groupId: str
 
 /** Group thread payload from GET /messages/group/:id (name + messages). */
 export async function fetchGroupThread(groupId: string): Promise<{ groupName: string; groupAvatarUrl?: string | null; messages: ChatMessage[] }> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
@@ -568,7 +565,7 @@ export async function appendGroupChatMessage(
     groupId: string,
     message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number },
 ): Promise<ChatMessage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const raw = await apiClient.sendGroupMessage(groupId, {
@@ -607,7 +604,7 @@ export async function appendGroupChatMessage(
 }
 
 export async function markGroupConversationReadById(groupId: string, viewerHandle?: string): Promise<void> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             await apiClient.markGroupConversationRead(groupId);
@@ -625,7 +622,7 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);

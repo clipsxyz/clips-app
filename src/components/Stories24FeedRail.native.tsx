@@ -10,6 +10,7 @@ import {
     Animated,
     Easing,
     Platform,
+    AppState,
     useWindowDimensions,
     type LayoutChangeEvent,
 } from 'react-native';
@@ -64,6 +65,8 @@ export type Stories24FeedRailHandle = {
 
 type Props = {
     items: Stories24RailItem[];
+    /** When true (feed scrolling), show posters instead of playing preview MP4s. */
+    previewVideosPaused?: boolean;
     onOpenStory: (item: Stories24RailItem, railHandles: string[]) => void;
     onAddYours: () => void;
     onScrollCardIntoView?: () => Promise<void>;
@@ -71,8 +74,23 @@ type Props = {
     onCollapseHandled?: () => void;
 };
 
-function StoryPreviewVideo({ uri }: { uri: string }) {
+function StoryPreviewVideo({
+    uri,
+    posterUri,
+    paused,
+}: {
+    uri: string;
+    posterUri?: string;
+    paused: boolean;
+}) {
     const videoRef = useRef<React.ElementRef<typeof Video>>(null);
+    const [failed, setFailed] = useState(false);
+
+    if ((paused || failed) && posterUri) {
+        return (
+            <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        );
+    }
 
     return (
         <Video
@@ -82,7 +100,8 @@ function StoryPreviewVideo({ uri }: { uri: string }) {
             resizeMode="cover"
             muted
             repeat
-            paused={false}
+            paused={paused}
+            onError={() => setFailed(true)}
             onProgress={({ currentTime }) => {
                 if (currentTime > 3) {
                     videoRef.current?.seek(0);
@@ -96,10 +115,14 @@ function StoryCard({
     item,
     onPress,
     registerCardRef,
+    playPreviewVideo,
+    previewVideosPaused,
 }: {
     item: Stories24RailItem;
     onPress: (rect: CardRect) => void;
     registerCardRef: (handle: string, node: View | null) => void;
+    playPreviewVideo: boolean;
+    previewVideosPaused: boolean;
 }) {
     const cardRef = useRef<View>(null);
     const handleKey = normalizeStories24Handle(item.handle);
@@ -167,8 +190,12 @@ function StoryCard({
                     end={{ x: 1, y: 0 }}
                     style={StyleSheet.absoluteFill}
                 />
-                {item.previewVideoUrl ? (
-                    <StoryPreviewVideo uri={item.previewVideoUrl} />
+                {item.previewVideoUrl && playPreviewVideo ? (
+                    <StoryPreviewVideo
+                        uri={item.previewVideoUrl}
+                        posterUri={item.thumb}
+                        paused={previewVideosPaused}
+                    />
                 ) : item.thumb ? (
                     <Image source={{ uri: item.thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 ) : null}
@@ -302,10 +329,20 @@ function Stories24CollapseOverlay({
 }
 
 const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function Stories24FeedRail(
-    { items, onOpenStory, onAddYours, onScrollCardIntoView, collapsePayload, onCollapseHandled },
+    {
+        items,
+        previewVideosPaused = false,
+        onOpenStory,
+        onAddYours,
+        onScrollCardIntoView,
+        collapsePayload,
+        onCollapseHandled,
+    },
     ref,
 ) {
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
+    const [railScrolling, setRailScrolling] = useState(false);
+    const [appActive, setAppActive] = useState(AppState.currentState === 'active');
     const [collapsing, setCollapsing] = useState<{
         payload: Stories24RailReturnPayload;
         rect: CardRect;
@@ -408,10 +445,24 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         };
     }, [collapsePayload, items, onCollapseHandled, onScrollCardIntoView]);
 
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (next) => {
+            setAppActive(next === 'active');
+        });
+        return () => sub.remove();
+    }, []);
+
     const railHandles = useMemo(
         () => items.map((i) => i.handle).filter((h) => h && h !== STORIES24_ADD_YOURS_HANDLE),
         [items],
     );
+
+    const firstStoryPreviewHandle = useMemo(
+        () => items.find((i) => i.handle !== STORIES24_ADD_YOURS_HANDLE)?.handle ?? null,
+        [items],
+    );
+
+    const previewsPaused = previewVideosPaused || railScrolling || !appActive;
 
     const openFirstStoryFromRail = React.useCallback(() => {
         const first = pickFirstStories24RailStory(items);
@@ -494,6 +545,9 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                             horizontal
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.scrollContent}
+                            onScrollBeginDrag={() => setRailScrolling(true)}
+                            onScrollEndDrag={() => setRailScrolling(false)}
+                            onMomentumScrollEnd={() => setRailScrolling(false)}
                         >
                             {items.map((item) => (
                                 <StoryCard
@@ -504,6 +558,11 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                                     }
                                     item={item}
                                     registerCardRef={registerCardRef}
+                                    playPreviewVideo={
+                                        !!item.previewVideoUrl &&
+                                        item.handle === firstStoryPreviewHandle
+                                    }
+                                    previewVideosPaused={previewsPaused}
                                     onPress={(rect) => {
                                         if (item.handle === STORIES24_ADD_YOURS_HANDLE) {
                                             onAddYours();

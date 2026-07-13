@@ -1,16 +1,17 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    Pressable,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
     Image,
 } from 'react-native';
+import {
+    BottomSheetFooter,
+    BottomSheetTextInput,
+    BottomSheetView,
+    type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Post } from '../types';
@@ -19,6 +20,7 @@ import { getAvatarForHandle } from '../api/users';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { getScenesMediaSlides, resolveScenesVideoUrl } from '../utils/scenesMediaNative';
 import { postHasVideoMedia } from '../utils/postMedia';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_LIGHT } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -56,47 +58,12 @@ export default function ScenesDmComposerSheet({
             : thumbSlide?.url || post.mediaUrl;
     const isVideo = thumbSlide?.type === 'video' || postHasVideoMedia(post);
 
-    return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <KeyboardAvoidingView
-                style={styles.root}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            >
-                <Pressable style={styles.backdrop} onPress={onClose} />
-                <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-                    <View style={styles.grabber} />
-                    <Text style={styles.title}>Message {displayHandle}</Text>
-
-                    <View style={styles.previewCard}>
-                        <View style={styles.previewHeader}>
-                            <Avatar
-                                src={getAvatarForHandle(post.userHandle)}
-                                name={displayHandle.split('@')[0]}
-                                size="sm"
-                            />
-                            <Text style={styles.previewHandle} numberOfLines={1}>
-                                {displayHandle}
-                            </Text>
-                        </View>
-                        {thumbUri ? (
-                            <View style={styles.thumbWrap}>
-                                <Image source={{ uri: thumbUri }} style={styles.thumb} resizeMode="cover" />
-                                {isVideo ? (
-                                    <View style={styles.playBadge}>
-                                        <Icon name="play" size={18} color="#FFFFFF" />
-                                    </View>
-                                ) : null}
-                            </View>
-                        ) : null}
-                        {caption ? (
-                            <Text style={styles.previewCaption} numberOfLines={3}>
-                                {caption}
-                            </Text>
-                        ) : null}
-                    </View>
-
+    const renderFooter = useCallback(
+        (props: BottomSheetFooterProps) => (
+            <BottomSheetFooter {...props} bottomInset={Math.max(insets.bottom, 12)}>
+                <View style={styles.footerInner}>
                     <View style={styles.composerRow}>
-                        <TextInput
+                        <BottomSheetTextInput
                             value={message}
                             onChangeText={onChangeMessage}
                             placeholder="Write a message..."
@@ -112,33 +79,72 @@ export default function ScenesDmComposerSheet({
                             <Icon name="send" size={18} color="#FFFFFF" />
                         </TouchableOpacity>
                     </View>
-
                     <TouchableOpacity style={styles.openChatLink} onPress={onOpenFullChat}>
                         <Text style={styles.openChatText}>Open full chat</Text>
                     </TouchableOpacity>
                 </View>
-            </KeyboardAvoidingView>
-        </Modal>
+            </BottomSheetFooter>
+        ),
+        [insets.bottom, message, onChangeMessage, onSend, onOpenFullChat],
+    );
+
+    return (
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            enableDynamicSizing
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_LIGHT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_LIGHT.handle}
+            backdropOpacity={0.55}
+            footerComponent={renderFooter}
+            keyboardBehavior="interactive"
+            keyboardBlurBehavior="restore"
+            android_keyboardInputMode="adjustResize"
+        >
+            <BottomSheetView style={styles.scroll}>
+                    <Text style={styles.title}>Message {displayHandle}</Text>
+
+                    <View style={styles.previewCard}>
+                        <View style={styles.previewHeader}>
+                            <Avatar
+                                src={getAvatarForHandle(post.userHandle)}
+                                name={displayHandle.split('@')[0]}
+                                size="sm"
+                            />
+                            <Text style={styles.previewHandle} numberOfLines={1}>
+                                {displayHandle}
+                            </Text>
+                        </View>
+                        {thumbUri ? (
+                            <View style={styles.thumbWrap}>
+                                <Image
+                                    source={{ uri: thumbUri }}
+                                    style={styles.thumb}
+                                    resizeMode="cover"
+                                />
+                                {isVideo ? (
+                                    <View style={styles.playBadge}>
+                                        <Icon name="play" size={18} color="#FFFFFF" />
+                                    </View>
+                                ) : null}
+                            </View>
+                        ) : null}
+                        {caption ? (
+                            <Text style={styles.previewCaption} numberOfLines={3}>
+                                {caption}
+                            </Text>
+                        ) : null}
+                    </View>
+            </BottomSheetView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1, justifyContent: 'flex-end' },
-    backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
-    sheet: {
-        backgroundColor: '#FFFFFF',
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
+    scroll: {
         paddingHorizontal: 16,
-        paddingTop: 8,
-    },
-    grabber: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 999,
-        backgroundColor: '#D1D5DB',
-        marginBottom: 12,
+        paddingTop: 4,
     },
     title: {
         fontSize: 16,
@@ -152,7 +158,7 @@ const styles = StyleSheet.create({
         borderColor: '#E5E7EB',
         backgroundColor: '#F9FAFB',
         overflow: 'hidden',
-        marginBottom: 12,
+        marginBottom: 8,
     },
     previewHeader: {
         flexDirection: 'row',
@@ -191,6 +197,11 @@ const styles = StyleSheet.create({
         color: '#374151',
         lineHeight: 18,
     },
+    footerInner: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        backgroundColor: '#FFFFFF',
+    },
     composerRow: {
         flexDirection: 'row',
         alignItems: 'flex-end',
@@ -222,6 +233,7 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
         marginTop: 10,
         paddingVertical: 8,
+        paddingBottom: 4,
     },
     openChatText: {
         color: '#155bd6',

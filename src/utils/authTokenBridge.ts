@@ -16,6 +16,26 @@ export function getAuthToken(): string | null {
     return null;
 }
 
+/** Async token read — used by shared Laravel `apiRequest` (web + RN). */
+export async function getAuthTokenAsync(): Promise<string | null> {
+    const token = getAuthToken();
+    return token?.trim() || null;
+}
+
+export function hasAuthToken(): boolean {
+    return !!getAuthToken();
+}
+
+export async function hasAuthTokenAsync(): Promise<boolean> {
+    return !!(await getAuthTokenAsync());
+}
+
+/** Bearer header for Laravel API calls. */
+export async function getAuthorizationHeader(): Promise<Record<string, string>> {
+    const token = await getAuthTokenAsync();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function persistAuthToken(token: string): Promise<void> {
     const value = token.trim();
     if (!value) return;

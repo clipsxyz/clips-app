@@ -1,20 +1,21 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    Pressable,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
+import {
+    BottomSheetFooter,
+    BottomSheetTextInput,
+    BottomSheetView,
+    type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DM } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     open: boolean;
@@ -34,49 +35,21 @@ export default function FeedDmSheet({
     onSend,
 }: Props) {
     const insets = useSafeAreaInsets();
-    const inputRef = useRef<TextInput>(null);
+    const inputRef = useRef<React.ComponentRef<typeof BottomSheetTextInput>>(null);
+    const sheetOpen = open && !!recipientHandle;
 
     useEffect(() => {
-        if (open) {
-            const t = setTimeout(() => inputRef.current?.focus(), 120);
-            return () => clearTimeout(t);
-        }
-        return undefined;
-    }, [open]);
+        if (!sheetOpen) return;
+        const t = setTimeout(() => inputRef.current?.focus(), 200);
+        return () => clearTimeout(t);
+    }, [sheetOpen, recipientHandle]);
 
-    if (!open || !recipientHandle) return null;
-
-    const displayName = recipientHandle.split('@')[0] || recipientHandle;
-
-    return (
-        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-            <KeyboardAvoidingView
-                style={styles.root}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            >
-                <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-                <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-                    <View style={styles.grabber} />
-                    <View style={styles.header}>
-                        <Avatar
-                            src={getAvatarForHandle(recipientHandle)}
-                            name={displayName}
-                            size={40}
-                        />
-                        <View style={styles.headerText}>
-                            <Text style={styles.headerTitle} numberOfLines={1}>
-                                {displayName}
-                            </Text>
-                            <Text style={styles.headerSub} numberOfLines={1}>
-                                {recipientHandle}
-                            </Text>
-                        </View>
-                        <TouchableOpacity onPress={onClose} hitSlop={12} accessibilityLabel="Close">
-                            <Icon name="close" size={22} color="#D1D5DB" />
-                        </TouchableOpacity>
-                    </View>
+    const renderFooter = useCallback(
+        (props: BottomSheetFooterProps) => (
+            <BottomSheetFooter {...props} bottomInset={Math.max(insets.bottom, 12)}>
+                <View style={styles.footerInner}>
                     <View style={styles.composerRow}>
-                        <TextInput
+                        <BottomSheetTextInput
                             ref={inputRef}
                             value={message}
                             onChangeText={onChangeMessage}
@@ -101,37 +74,57 @@ export default function FeedDmSheet({
                     </View>
                     <Text style={styles.hint}>Return to send · use newline for longer messages</Text>
                 </View>
-            </KeyboardAvoidingView>
-        </Modal>
+            </BottomSheetFooter>
+        ),
+        [insets.bottom, message, onChangeMessage, onSend],
+    );
+
+    if (!recipientHandle) return null;
+
+    const displayName = recipientHandle.split('@')[0] || recipientHandle;
+
+    return (
+        <GazetteerBottomSheetModal
+            visible={sheetOpen}
+            onDismiss={onClose}
+            enableDynamicSizing
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_DM.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_DM.handle}
+            footerComponent={renderFooter}
+            keyboardBehavior="interactive"
+            keyboardBlurBehavior="restore"
+            android_keyboardInputMode="adjustResize"
+            backdropOpacity={0.55}
+        >
+            <BottomSheetView style={styles.sheetBody}>
+                <View style={styles.header}>
+                    <Avatar
+                        src={getAvatarForHandle(recipientHandle)}
+                        name={displayName}
+                        size={40}
+                    />
+                    <View style={styles.headerText}>
+                        <Text style={styles.headerTitle} numberOfLines={1}>
+                            {displayName}
+                        </Text>
+                        <Text style={styles.headerSub} numberOfLines={1}>
+                            {recipientHandle}
+                        </Text>
+                    </View>
+                    <TouchableOpacity onPress={onClose} hitSlop={12} accessibilityLabel="Close">
+                        <Icon name="close" size={22} color="#D1D5DB" />
+                    </TouchableOpacity>
+                </View>
+            </BottomSheetView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    root: {
-        flex: 1,
-        justifyContent: 'flex-end',
-    },
-    backdrop: {
-        ...StyleSheet.absoluteFill,
-        backgroundColor: 'rgba(0,0,0,0.55)',
-    },
-    sheet: {
-        backgroundColor: '#000000',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.15)',
+    sheetBody: {
         paddingHorizontal: 16,
-        paddingTop: 8,
-    },
-    grabber: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-        marginBottom: 12,
+        paddingTop: 4,
     },
     header: {
         flexDirection: 'row',
@@ -155,11 +148,15 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         marginTop: 2,
     },
+    footerInner: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        backgroundColor: '#000000',
+    },
     composerRow: {
         flexDirection: 'row',
         alignItems: 'flex-end',
         gap: 8,
-        marginTop: 12,
     },
     input: {
         flex: 1,
@@ -191,5 +188,6 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#6B7280',
         paddingHorizontal: 4,
+        paddingBottom: 4,
     },
 });

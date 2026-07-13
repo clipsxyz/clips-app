@@ -3,7 +3,6 @@ import {
     View,
     Text,
     StyleSheet,
-    Modal,
     FlatList,
     TouchableOpacity,
     Image,
@@ -13,11 +12,17 @@ import {
     Dimensions,
     KeyboardAvoidingView,
     Platform,
-    Pressable,
     type ListRenderItem,
     type NativeSyntheticEvent,
     type NativeScrollEvent,
 } from 'react-native';
+import {
+    BottomSheetFlatList,
+    BottomSheetFooter,
+    BottomSheetView,
+    type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_LIGHT } from './GazetteerBottomSheetModal.native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Video from 'react-native-video';
@@ -461,7 +466,7 @@ export default function PostCommentsSheet({
     const { user } = useAuth();
     const navigation = useNavigation<any>();
     const insets = useSafeAreaInsets();
-    const listRef = useRef<FlatList<Comment>>(null);
+    const listRef = useRef<FlatList<Comment> | null>(null);
 
     const [post, setPost] = useState<Post | null>(postProp ?? null);
     const [comments, setComments] = useState<Comment[]>([]);
@@ -836,7 +841,49 @@ export default function PostCommentsSheet({
         </>
     );
 
-    if (!isOpen) return null;
+    const renderCommentsFooter = useCallback(
+        (props: BottomSheetFooterProps) => (
+            <BottomSheetFooter {...props} bottomInset={insets.bottom}>
+                <CommentInput
+                    placeholder="Join the conversation..."
+                    onSubmit={handleAddComment}
+                    isLoading={submitting}
+                />
+            </BottomSheetFooter>
+        ),
+        [handleAddComment, insets.bottom, submitting],
+    );
+
+    const commentsListProps = {
+        ref: listRef,
+        style: styles.commentsList,
+        data: sortedComments,
+        keyExtractor: (item: Comment) => item.id,
+        renderItem: renderComment,
+        ListHeaderComponent: listHeader,
+        ListEmptyComponent: (
+            <View style={styles.emptyState}>
+                <FeedMessageSquareIcon size={48} color="#6B7280" opacity={0.5} />
+                <Text style={styles.emptyTitle}>No comments yet</Text>
+                <Text style={styles.emptySubtitle}>Be the first to comment!</Text>
+            </View>
+        ),
+        ListFooterComponent: commentsHasMore ? (
+            <TouchableOpacity
+                style={styles.loadMoreButton}
+                disabled={commentsLoadingMore}
+                onPress={handleLoadMoreComments}
+            >
+                <Text style={styles.loadMoreText}>
+                    {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
+                </Text>
+            </TouchableOpacity>
+        ) : null,
+        contentContainerStyle: styles.commentsListContent,
+        onScroll: handleScroll,
+        scrollEventThrottle: 16 as const,
+        keyboardShouldPersistTaps: 'handled' as const,
+    };
 
     const sheetBody = (
         <View
@@ -844,7 +891,7 @@ export default function PostCommentsSheet({
                 styles.sheet,
                 isScenesEmbed
                     ? { flex: 1, paddingBottom: insets.bottom }
-                    : { height: SHEET_HEIGHT, paddingBottom: insets.bottom },
+                    : { flex: 1 },
             ]}
         >
                     {!isScenesEmbed && post?.mediaUrl ? (
@@ -927,50 +974,24 @@ export default function PostCommentsSheet({
                         <View style={styles.loadingWrap}>
                             <ActivityIndicator size="large" color={BRAND_600} />
                         </View>
+                    ) : isScenesEmbed ? (
+                        <FlatList {...commentsListProps} />
                     ) : (
-                        <FlatList
-                            ref={listRef}
-                            style={styles.commentsList}
-                            data={sortedComments}
-                            keyExtractor={(item) => item.id}
-                            renderItem={renderComment}
-                            ListHeaderComponent={listHeader}
-                            ListEmptyComponent={
-                                <View style={styles.emptyState}>
-                                    <FeedMessageSquareIcon size={48} color="#6B7280" opacity={0.5} />
-                                    <Text style={styles.emptyTitle}>No comments yet</Text>
-                                    <Text style={styles.emptySubtitle}>Be the first to comment!</Text>
-                                </View>
-                            }
-                            ListFooterComponent={
-                                commentsHasMore ? (
-                                    <TouchableOpacity
-                                        style={styles.loadMoreButton}
-                                        disabled={commentsLoadingMore}
-                                        onPress={handleLoadMoreComments}
-                                    >
-                                        <Text style={styles.loadMoreText}>
-                                            {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ) : null
-                            }
-                            contentContainerStyle={styles.commentsListContent}
-                            onScroll={handleScroll}
-                            scrollEventThrottle={16}
-                            keyboardShouldPersistTaps="handled"
-                        />
+                        <BottomSheetFlatList {...commentsListProps} />
                     )}
 
-                    <CommentInput
-                        placeholder="Join the conversation..."
-                        onSubmit={handleAddComment}
-                        isLoading={submitting}
-                    />
+                    {isScenesEmbed ? (
+                        <CommentInput
+                            placeholder="Join the conversation..."
+                            onSubmit={handleAddComment}
+                            isLoading={submitting}
+                        />
+                    ) : null}
         </View>
     );
 
     if (isScenesEmbed) {
+        if (!isOpen) return null;
         return (
             <KeyboardAvoidingView
                 style={styles.scenesEmbedRoot}
@@ -982,15 +1003,105 @@ export default function PostCommentsSheet({
     }
 
     return (
-        <Modal visible={isOpen} animationType="slide" transparent onRequestClose={handleClose}>
-            <KeyboardAvoidingView
-                style={styles.modalOverlay}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-                <Pressable style={styles.backdrop} onPress={handleClose} />
-                {sheetBody}
-            </KeyboardAvoidingView>
-        </Modal>
+        <GazetteerBottomSheetModal
+            visible={isOpen}
+            onDismiss={handleClose}
+            snapPoints={['75%']}
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_LIGHT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_LIGHT.handle}
+            footerComponent={renderCommentsFooter}
+            keyboardBehavior="interactive"
+            keyboardBlurBehavior="restore"
+            android_keyboardInputMode="adjustResize"
+        >
+            <BottomSheetView style={styles.sheet}>
+                {!post?.mediaUrl ? null : (
+                    <View style={styles.mediaPreviewRow}>
+                        <View style={styles.mediaPreviewThumb}>
+                            {post.mediaType === 'video' ? (
+                                <Video
+                                    source={{ uri: post.mediaUrl }}
+                                    style={styles.mediaPreviewMedia}
+                                    resizeMode="cover"
+                                    muted
+                                    repeat
+                                    paused={false}
+                                />
+                            ) : (
+                                <Image
+                                    source={{ uri: post.mediaUrl }}
+                                    style={styles.mediaPreviewMedia}
+                                    resizeMode="cover"
+                                />
+                            )}
+                        </View>
+                        {authorHandle ? (
+                            <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
+                                {authorHandle}
+                            </Text>
+                        ) : null}
+                    </View>
+                )}
+
+                <View style={styles.dragHandleRow}>
+                    <View style={styles.dragHandle} />
+                </View>
+
+                <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>
+                        {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+                    </Text>
+                    <View style={styles.modalHeaderRight}>
+                        <View style={styles.commentSortToggle}>
+                            <TouchableOpacity
+                                onPress={() => setSortMode('top')}
+                                style={[
+                                    styles.commentSortButton,
+                                    sortMode === 'top' && styles.commentSortButtonActive,
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.commentSortButtonText,
+                                        sortMode === 'top' && styles.commentSortButtonTextActive,
+                                    ]}
+                                >
+                                    Top
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => setSortMode('newest')}
+                                style={[
+                                    styles.commentSortButton,
+                                    sortMode === 'newest' && styles.commentSortButtonActive,
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.commentSortButtonText,
+                                        sortMode === 'newest' && styles.commentSortButtonTextActive,
+                                    ]}
+                                >
+                                    Newest
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                        <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                            <FeedCloseIcon size={20} color="#4B5563" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </BottomSheetView>
+
+            {loading ? (
+                <BottomSheetView style={styles.loadingWrap}>
+                    <ActivityIndicator size="large" color={BRAND_600} />
+                </BottomSheetView>
+            ) : (
+                <BottomSheetFlatList {...commentsListProps} />
+            )}
+        </GazetteerBottomSheetModal>
     );
 }
 

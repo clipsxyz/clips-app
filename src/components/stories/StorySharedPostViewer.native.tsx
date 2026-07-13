@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -11,12 +11,60 @@ import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import Avatar from '../Avatar';
 import type { Post, Story } from '../../types';
-import { getPostMediaUrl, isStoryVideo, postHasRealMedia } from '../../utils/storyMediaNative';
+import {
+    getPostMediaUrl,
+    getStoryVideoPosterFallback,
+    isStoryVideo,
+    postHasRealMedia,
+    resolveStoryMediaUrl,
+    resolveStoryVideoPlaybackUrl,
+} from '../../utils/storyMediaNative';
 import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
 import { getAvatarForHandle } from '../../api/users';
 import { timeAgo } from '../../utils/timeAgo';
 
 const SHARED_BACKDROP = ['#0f172a', '#111827', '#1f2937'];
+
+function StoryVideoLayer({
+    uri,
+    posterUri,
+    style,
+    muted = true,
+    repeat = true,
+    paused = false,
+}: {
+    uri: string;
+    posterUri?: string;
+    style: object;
+    muted?: boolean;
+    repeat?: boolean;
+    paused?: boolean;
+}) {
+    const playbackUri = resolveStoryVideoPlaybackUrl(uri) || resolveStoryMediaUrl(uri) || uri;
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        setFailed(false);
+    }, [playbackUri]);
+
+    if (failed && posterUri) {
+        return <Image source={{ uri: posterUri }} style={style} resizeMode="cover" />;
+    }
+
+    return (
+        <Video
+            source={{ uri: playbackUri }}
+            style={style}
+            resizeMode="cover"
+            muted={muted}
+            repeat={repeat}
+            paused={paused}
+            playInBackground={false}
+            playWhenInactive={false}
+            onError={() => setFailed(true)}
+        />
+    );
+}
 
 type Props = {
     story: Story;
@@ -45,9 +93,10 @@ export default function StorySharedPostViewer({
         );
     }
 
-    const fallbackUrl = (story.mediaUrl || '').trim();
+    const fallbackUrl = resolveStoryMediaUrl(story.mediaUrl) || '';
     const post = originalPost;
-    const mediaUrl = getPostMediaUrl(post) || fallbackUrl;
+    const mediaUrl = resolveStoryMediaUrl(getPostMediaUrl(post)) || fallbackUrl;
+    const posterUri = getStoryVideoPosterFallback(mediaUrl || story.mediaUrl, post);
     const hasRealMedia = post ? postHasRealMedia(post) : !!fallbackUrl;
     const isVideo = isStoryVideo(story, post) || (!!fallbackUrl && /\.(mp4|webm|mov|m4v)/i.test(fallbackUrl));
     const caption = (
@@ -63,12 +112,10 @@ export default function StorySharedPostViewer({
         return (
             <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
                 {isVideo ? (
-                    <Video
-                        source={{ uri: fallbackUrl }}
+                    <StoryVideoLayer
+                        uri={fallbackUrl}
+                        posterUri={posterUri}
                         style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        resizeMode="cover"
-                        muted
-                        repeat
                         paused
                     />
                 ) : (
@@ -78,11 +125,10 @@ export default function StorySharedPostViewer({
                 <View style={styles.cardColumn}>
                     <TouchableOpacity style={styles.card} onPress={onOpenModal} activeOpacity={0.95}>
                         {isVideo ? (
-                            <Video
-                                source={{ uri: fallbackUrl }}
+                            <StoryVideoLayer
+                                uri={fallbackUrl}
+                                posterUri={posterUri}
                                 style={styles.cardMedia}
-                                resizeMode="cover"
-                                repeat
                                 muted={isMuted}
                                 paused={paused}
                             />
@@ -107,12 +153,10 @@ export default function StorySharedPostViewer({
         return (
             <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
                 {isVideo ? (
-                    <Video
-                        source={{ uri: mediaUrl }}
+                    <StoryVideoLayer
+                        uri={mediaUrl}
+                        posterUri={posterUri}
                         style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        resizeMode="cover"
-                        muted
-                        repeat
                         paused
                     />
                 ) : (
@@ -122,11 +166,10 @@ export default function StorySharedPostViewer({
                 <View style={styles.cardColumn}>
                     <TouchableOpacity style={styles.card} onPress={onOpenModal} activeOpacity={0.95}>
                         {isVideo ? (
-                            <Video
-                                source={{ uri: mediaUrl }}
+                            <StoryVideoLayer
+                                uri={mediaUrl}
+                                posterUri={posterUri}
                                 style={styles.cardMedia}
-                                resizeMode="cover"
-                                repeat
                                 muted={isMuted}
                                 paused={paused}
                             />

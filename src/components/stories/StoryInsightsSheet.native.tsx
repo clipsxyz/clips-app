@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-    Modal,
     View,
     Text,
     TouchableOpacity,
-    Pressable,
-    ScrollView,
     StyleSheet,
     ActivityIndicator,
 } from 'react-native';
+import { BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
 import { getFollowedUsers } from '../../api/posts';
@@ -16,6 +14,7 @@ import { toggleFollow } from '../../api/client';
 import { getAvatarForHandle } from '../../api/users';
 import type { Story } from '../../types';
 import { timeAgo } from '../../utils/timeAgo';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_CHARCOAL } from '../GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -87,133 +86,122 @@ export default function StoryInsightsSheet({
     };
 
     return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <Pressable style={styles.backdrop} onPress={onClose}>
-                <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-                    <View style={styles.handle} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Story insights</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                            <Icon name="close" size={22} color="#D1D5DB" />
-                        </TouchableOpacity>
-                    </View>
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            snapPoints={['75%']}
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_CHARCOAL.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_CHARCOAL.handle}
+        >
+            <BottomSheetView style={styles.headerBlock}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Story insights</Text>
+                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                        <Icon name="close" size={22} color="#D1D5DB" />
+                    </TouchableOpacity>
+                </View>
 
-                    <View style={styles.tabRow}>
-                        <TouchableOpacity
-                            style={[styles.tab, tab === 'viewers' && styles.tabActive]}
-                            onPress={() => setTab('viewers')}
-                        >
-                            <Text style={[styles.tabText, tab === 'viewers' && styles.tabTextActive]}>
-                                Viewers ({viewsCount})
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.tab, tab === 'replies' && styles.tabActive]}
-                            onPress={() => setTab('replies')}
-                        >
-                            <Text style={[styles.tabText, tab === 'replies' && styles.tabTextActive]}>
-                                Replies ({replies.length})
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
+                <View style={styles.tabRow}>
+                    <TouchableOpacity
+                        style={[styles.tab, tab === 'viewers' && styles.tabActive]}
+                        onPress={() => setTab('viewers')}
+                    >
+                        <Text style={[styles.tabText, tab === 'viewers' && styles.tabTextActive]}>
+                            Viewers ({viewsCount})
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.tab, tab === 'replies' && styles.tabActive]}
+                        onPress={() => setTab('replies')}
+                    >
+                        <Text style={[styles.tabText, tab === 'replies' && styles.tabTextActive]}>
+                            Replies ({replies.length})
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            </BottomSheetView>
 
-                    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-                        {tab === 'viewers' ? (
-                            <>
-                                <View style={styles.summaryCard}>
-                                    <Text style={styles.summaryTitle}>{viewsCount} total views</Text>
-                                    <Text style={styles.summarySub}>
-                                        Unique viewers: {viewerHandles.length}
-                                    </Text>
-                                </View>
-                                {viewerHandles.length === 0 ? (
-                                    <Text style={styles.empty}>No viewer identities yet.</Text>
-                                ) : (
-                                    viewerHandles.map((handle) => (
-                                        <View key={handle} style={styles.viewerRow}>
-                                            <TouchableOpacity
-                                                style={styles.viewerMain}
-                                                onPress={() => {
-                                                    onBeforeNavigate();
-                                                    onClose();
-                                                    setTimeout(() => {
-                                                        navigation.navigate('ViewProfile', { handle });
-                                                    }, 100);
-                                                }}
-                                            >
-                                                <Avatar
-                                                    src={avatarMap[handle] || getAvatarForHandle(handle)}
-                                                    name={handle}
-                                                    size="sm"
-                                                />
-                                                <Text style={styles.viewerHandle} numberOfLines={1}>
-                                                    {handle}
-                                                </Text>
-                                            </TouchableOpacity>
-                                            {handle.toLowerCase() !== currentUserHandle.toLowerCase() ? (
-                                                <TouchableOpacity
-                                                    style={[
-                                                        styles.followBtn,
-                                                        viewerFollowMap[handle] && styles.followBtnActive,
-                                                    ]}
-                                                    disabled={followLoadingHandle === handle}
-                                                    onPress={() => void toggleViewerFollow(handle)}
-                                                >
-                                                    {followLoadingHandle === handle ? (
-                                                        <ActivityIndicator size="small" color="#fff" />
-                                                    ) : (
-                                                        <Text style={styles.followBtnText}>
-                                                            {viewerFollowMap[handle] ? 'Following' : 'Follow'}
-                                                        </Text>
-                                                    )}
-                                                </TouchableOpacity>
-                                            ) : null}
-                                        </View>
-                                    ))
-                                )}
-                            </>
-                        ) : replies.length === 0 ? (
-                            <Text style={styles.empty}>No replies yet.</Text>
+            <BottomSheetScrollView
+                contentContainerStyle={styles.scrollContent}
+                style={styles.scroll}
+            >
+                {tab === 'viewers' ? (
+                    <>
+                        <View style={styles.summaryCard}>
+                            <Text style={styles.summaryTitle}>{viewsCount} total views</Text>
+                            <Text style={styles.summarySub}>
+                                Unique viewers: {viewerHandles.length}
+                            </Text>
+                        </View>
+                        {viewerHandles.length === 0 ? (
+                            <Text style={styles.empty}>No viewer identities yet.</Text>
                         ) : (
-                            replies.map((reply) => (
-                                <View key={reply.id} style={styles.replyCard}>
-                                    <View style={styles.replyHeader}>
-                                        <Text style={styles.replyUser}>{reply.userHandle}</Text>
-                                        <Text style={styles.replyTime}>{timeAgo(reply.createdAt)}</Text>
-                                    </View>
-                                    <Text style={styles.replyText}>{reply.text}</Text>
+                            viewerHandles.map((handle) => (
+                                <View key={handle} style={styles.viewerRow}>
+                                    <TouchableOpacity
+                                        style={styles.viewerMain}
+                                        onPress={() => {
+                                            onBeforeNavigate();
+                                            onClose();
+                                            setTimeout(() => {
+                                                navigation.navigate('ViewProfile', { handle });
+                                            }, 100);
+                                        }}
+                                    >
+                                        <Avatar
+                                            src={avatarMap[handle] || getAvatarForHandle(handle)}
+                                            name={handle}
+                                            size="sm"
+                                        />
+                                        <Text style={styles.viewerHandle} numberOfLines={1}>
+                                            {handle}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    {handle.toLowerCase() !== currentUserHandle.toLowerCase() ? (
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.followBtn,
+                                                viewerFollowMap[handle] && styles.followBtnActive,
+                                            ]}
+                                            disabled={followLoadingHandle === handle}
+                                            onPress={() => void toggleViewerFollow(handle)}
+                                        >
+                                            {followLoadingHandle === handle ? (
+                                                <ActivityIndicator size="small" color="#fff" />
+                                            ) : (
+                                                <Text style={styles.followBtnText}>
+                                                    {viewerFollowMap[handle] ? 'Following' : 'Follow'}
+                                                </Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    ) : null}
                                 </View>
                             ))
                         )}
-                    </ScrollView>
-                </Pressable>
-            </Pressable>
-        </Modal>
+                    </>
+                ) : replies.length === 0 ? (
+                    <Text style={styles.empty}>No replies yet.</Text>
+                ) : (
+                    replies.map((reply) => (
+                        <View key={reply.id} style={styles.replyCard}>
+                            <View style={styles.replyHeader}>
+                                <Text style={styles.replyUser}>{reply.userHandle}</Text>
+                                <Text style={styles.replyTime}>{timeAgo(reply.createdAt)}</Text>
+                            </View>
+                            <Text style={styles.replyText}>{reply.text}</Text>
+                        </View>
+                    ))
+                )}
+            </BottomSheetScrollView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    backdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        backgroundColor: '#111827',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+    headerBlock: {
         paddingHorizontal: 16,
-        paddingBottom: 24,
-        paddingTop: 8,
-        maxHeight: '75%',
-    },
-    handle: {
-        width: 48,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-        alignSelf: 'center',
-        marginBottom: 12,
+        paddingTop: 4,
     },
     header: {
         flexDirection: 'row',
@@ -234,8 +222,14 @@ const styles = StyleSheet.create({
     tabActive: { backgroundColor: '#fff' },
     tabText: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '700' },
     tabTextActive: { color: '#000' },
-    scroll: { maxHeight: 420 },
-    scrollContent: { paddingBottom: 16, gap: 8 },
+    scroll: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingHorizontal: 16,
+        paddingBottom: 24,
+        gap: 8,
+    },
     summaryCard: {
         borderRadius: 16,
         borderWidth: 1,

@@ -222,6 +222,15 @@ export default function BoostSelectionModal({
         };
     }, [debouncedRadiusKm, debouncedSelectedOption, selectedDuration, user?.id]);
 
+    const commitSliderRadius = React.useCallback((value?: number) => {
+        setIsSliderDragging(false);
+        const source = typeof value === 'number' ? value : sliderRadiusKm;
+        const next = Number(source.toFixed(1));
+        if (Number.isFinite(next) && next > 0 && next !== radiusKm) {
+            setRadiusKm(next);
+        }
+    }, [sliderRadiusKm, radiusKm]);
+
     if (!isOpen || !post) return null;
 
     const handleSubmit = () => {
@@ -238,15 +247,6 @@ export default function BoostSelectionModal({
     const adjustRadius = (delta: number) => {
         setRadiusKm((prev) => Math.max(0.5, Number((prev + delta).toFixed(1))));
     };
-
-    const commitSliderRadius = React.useCallback((value?: number) => {
-        setIsSliderDragging(false);
-        const source = typeof value === 'number' ? value : sliderRadiusKm;
-        const next = Number(source.toFixed(1));
-        if (Number.isFinite(next) && next > 0 && next !== radiusKm) {
-            setRadiusKm(next);
-        }
-    }, [sliderRadiusKm, radiusKm]);
 
     return (
         <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClose}>

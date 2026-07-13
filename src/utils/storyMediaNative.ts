@@ -1,5 +1,9 @@
 import type { Post, Story } from '../types';
 import { getReactNativeDefaultApiBaseUrl, isReactNativeRuntime } from '../config/runtimeEnv';
+import {
+    resolveMockFeedVideoPosterUrl,
+    resolveMockFeedVideoUrl,
+} from '../constants/mockFeedVideos';
 
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
 
@@ -39,6 +43,25 @@ export function resolveStoryMediaUrl(url?: string | null): string | undefined {
         // keep as-is
     }
     return raw;
+}
+
+/** RN story video playback URL (API host rewrite + mock demo MP4 mapping). */
+export function resolveStoryVideoPlaybackUrl(url?: string | null): string | undefined {
+    const resolved = resolveStoryMediaUrl(url);
+    if (!resolved) return undefined;
+    return resolveMockFeedVideoUrl(resolved);
+}
+
+/** Static poster when story video cannot play (shared post poster or demo thumb). */
+export function getStoryVideoPosterFallback(
+    mediaUrl?: string | null,
+    originalPost?: Post | null,
+): string | undefined {
+    const fromPost =
+        originalPost?.videoPosterUrl ||
+        originalPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url;
+    if (fromPost) return resolveStoryMediaUrl(fromPost);
+    return resolveMockFeedVideoPosterUrl(mediaUrl || undefined);
 }
 
 export function isStoryVideo(story?: Story, originalPost?: Post | null): boolean {

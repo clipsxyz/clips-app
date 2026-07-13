@@ -1,9 +1,6 @@
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { hasAuthToken } from '../utils/authTokenBridge';
 import * as client from './client';
-
-function hasToken(): boolean {
-  return typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
-}
 
 export interface ChatGroupSummary {
   id: string;
@@ -36,7 +33,7 @@ export async function fetchMyChatGroups(viewerHandle?: string | null): Promise<C
     const { listMockChatGroupsAsSummaries } = await import('./messages');
     return listMockChatGroupsAsSummaries(h) as ChatGroupSummary[];
   }
-  if (!hasToken()) return [];
+  if (!hasAuthToken()) return [];
   const res = (await client.fetchChatGroups()) as { items?: ChatGroupSummary[] };
   return res.items ?? [];
 }
@@ -52,7 +49,7 @@ export async function createChatGroup(
     const { createMockChatGroup } = await import('./messages');
         return createMockChatGroup(name, h, avatarUrl);
   }
-  if (!hasToken()) return null;
+  if (!hasAuthToken()) return null;
   return client.createChatGroupApi(name, avatarUrl) as Promise<{ id: string; name: string; avatar_url?: string | null; conversation_id: string }>;
 }
 
@@ -77,7 +74,7 @@ export async function deleteChatGroup(groupId: string): Promise<unknown> {
 }
 
 export async function fetchPendingGroupInvites(): Promise<ChatGroupInviteRow[]> {
-  if (!isLaravelApiEnabled() || !hasToken()) return [];
+  if (!isLaravelApiEnabled() || !hasAuthToken()) return [];
   const res = (await client.fetchPendingChatGroupInvites()) as { items?: ChatGroupInviteRow[] };
   return res.items ?? [];
 }

@@ -2,7 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
 import { getFollowedUsers } from '../api/posts';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
-import { resolveStoryMediaUrl } from './storyMediaNative';
+import {
+    getStoryVideoPosterFallback,
+    resolveStoryMediaUrl,
+    resolveStoryVideoPlaybackUrl,
+} from './storyMediaNative';
 
 export type Stories24RailItem = {
     handle: string;
@@ -116,7 +120,10 @@ export async function buildStories24RailItems(
         const firstImage = resolveStoryMediaUrl(
             sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
         );
-        let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined);
+        let thumb =
+            firstImage ||
+            (latestMediaType !== 'video' ? latestMediaUrl : undefined) ||
+            getStoryVideoPosterFallback(latest.mediaUrl);
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.poll?.question || '').trim() ||
@@ -129,7 +136,10 @@ export async function buildStories24RailItems(
             title,
             subtitle,
             thumb,
-            previewVideoUrl: latestMediaType === 'video' ? latestMediaUrl : undefined,
+            previewVideoUrl:
+                latestMediaType === 'video'
+                    ? resolveStoryVideoPlaybackUrl(latest.mediaUrl)
+                    : undefined,
         });
         if (nextItems.length >= 12) break;
     }

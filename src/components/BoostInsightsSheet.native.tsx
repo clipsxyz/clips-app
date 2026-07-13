@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
     Image,
-    Modal,
-    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { getBoostAnalytics, type BoostAnalytics } from '../api/boost';
 import { buildInstantAnalytics } from '../utils/boostInsightsNative';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_BOOST } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -34,9 +33,10 @@ function sparkline(values: number[]): string {
 export default function BoostInsightsSheet({ visible, post, range, onClose }: Props) {
     const [data, setData] = useState<BoostAnalytics | null>(null);
     const [loading, setLoading] = useState(false);
+    const sheetOpen = visible && !!post;
 
     useEffect(() => {
-        if (!visible || !post) return;
+        if (!sheetOpen || !post) return;
         setData(buildInstantAnalytics(post));
         setLoading(true);
         let cancelled = false;
@@ -51,9 +51,9 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
         return () => {
             cancelled = true;
         };
-    }, [visible, post?.id, range]);
+    }, [sheetOpen, post?.id, range]);
 
-    if (!visible || !post) return null;
+    if (!post) return null;
 
     const analytics = data?.analytics;
     const metrics = {
@@ -77,83 +77,86 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
     const previewText = (post.text || post.caption || post.imageText || '').trim();
 
     return (
-        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <View style={styles.sheet}>
-                    <View style={styles.grabber} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Boost insights</Text>
-                        <TouchableOpacity onPress={onClose}>
-                            <Icon name="close" size={24} color="#FFF" />
-                        </TouchableOpacity>
+        <GazetteerBottomSheetModal
+            visible={sheetOpen}
+            onDismiss={onClose}
+            snapPoints={['88%']}
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_BOOST.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_BOOST.handle}
+            backdropOpacity={0.65}
+        >
+            <BottomSheetView style={styles.header}>
+                <Text style={styles.title}>Boost insights</Text>
+                <TouchableOpacity onPress={onClose}>
+                    <Icon name="close" size={24} color="#FFF" />
+                </TouchableOpacity>
+            </BottomSheetView>
+            <BottomSheetScrollView contentContainerStyle={styles.scroll}>
+                {loading ? (
+                    <View style={styles.loadingBanner}>
+                        <Text style={styles.loadingText}>Updating with latest analytics…</Text>
                     </View>
-                    <ScrollView style={styles.scroll}>
-                        {loading ? (
-                            <View style={styles.loadingBanner}>
-                                <Text style={styles.loadingText}>Updating with latest analytics…</Text>
-                            </View>
-                        ) : null}
-                        <View style={styles.previewCard}>
-                            <View style={styles.previewThumb}>
-                                {previewUrl ? (
-                                    <Image source={{ uri: previewUrl }} style={styles.previewImg} />
-                                ) : previewText ? (
-                                    <Text style={styles.previewText} numberOfLines={3}>
-                                        {previewText}
-                                    </Text>
-                                ) : (
-                                    <Text style={styles.previewText}>POST</Text>
-                                )}
-                            </View>
-                            <View>
-                                <Text style={styles.previewLabel}>Selected post</Text>
-                                <Text style={styles.previewHandle} numberOfLines={1}>
-                                    {post.userHandle}
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.statusRow}>
-                            <Text
-                                style={[
-                                    styles.statusPill,
-                                    data?.isActive ? styles.statusActive : styles.statusEnded,
-                                ]}
-                            >
-                                {data?.hasBoost
-                                    ? data.isActive
-                                        ? 'Active boost'
-                                        : 'Boost ended'
-                                    : 'No boost record yet'}
+                ) : null}
+                <View style={styles.previewCard}>
+                    <View style={styles.previewThumb}>
+                        {previewUrl ? (
+                            <Image source={{ uri: previewUrl }} style={styles.previewImg} />
+                        ) : previewText ? (
+                            <Text style={styles.previewText} numberOfLines={3}>
+                                {previewText}
                             </Text>
-                            {(data?.analytics?.sourceMatchedEventsCount ?? 0) > 0 ? (
-                                <Text style={styles.matchedPill}>Source matched</Text>
-                            ) : null}
-                        </View>
-                        <View style={styles.block}>
-                            <View style={styles.blockHeader}>
-                                <Text style={styles.blockTitle}>Trend ({range})</Text>
-                                <Text style={styles.spark}>{trendSpark}</Text>
-                            </View>
-                        </View>
-                        <View style={styles.block}>
-                            <Text style={styles.blockTitle}>Delivery</Text>
-                            <MetricRow label="Impressions" value={metrics.impressions} />
-                            <MetricRow label="Profile visits" value={metrics.profileVisits} />
-                            <MetricRow label="Message starts" value={metrics.messageStarts} />
-                        </View>
-                        <View style={styles.block}>
-                            <Text style={styles.blockTitle}>Engagement</Text>
-                            <MetricRow label="Likes" value={metrics.likes} />
-                            <MetricRow label="Comments" value={metrics.comments} />
-                            <MetricRow label="Shares" value={metrics.shares} />
-                        </View>
-                        <View style={[styles.block, styles.spendBlock]}>
-                            <MetricRow label="Spend" value={spend} valueIsText />
-                        </View>
-                    </ScrollView>
+                        ) : (
+                            <Text style={styles.previewText}>POST</Text>
+                        )}
+                    </View>
+                    <View>
+                        <Text style={styles.previewLabel}>Selected post</Text>
+                        <Text style={styles.previewHandle} numberOfLines={1}>
+                            {post.userHandle}
+                        </Text>
+                    </View>
                 </View>
-            </View>
-        </Modal>
+                <View style={styles.statusRow}>
+                    <Text
+                        style={[
+                            styles.statusPill,
+                            data?.isActive ? styles.statusActive : styles.statusEnded,
+                        ]}
+                    >
+                        {data?.hasBoost
+                            ? data.isActive
+                                ? 'Active boost'
+                                : 'Boost ended'
+                            : 'No boost record yet'}
+                    </Text>
+                    {(data?.analytics?.sourceMatchedEventsCount ?? 0) > 0 ? (
+                        <Text style={styles.matchedPill}>Source matched</Text>
+                    ) : null}
+                </View>
+                <View style={styles.block}>
+                    <View style={styles.blockHeader}>
+                        <Text style={styles.blockTitle}>Trend ({range})</Text>
+                        <Text style={styles.spark}>{trendSpark}</Text>
+                    </View>
+                </View>
+                <View style={styles.block}>
+                    <Text style={styles.blockTitle}>Delivery</Text>
+                    <MetricRow label="Impressions" value={metrics.impressions} />
+                    <MetricRow label="Profile visits" value={metrics.profileVisits} />
+                    <MetricRow label="Message starts" value={metrics.messageStarts} />
+                </View>
+                <View style={styles.block}>
+                    <Text style={styles.blockTitle}>Engagement</Text>
+                    <MetricRow label="Likes" value={metrics.likes} />
+                    <MetricRow label="Comments" value={metrics.comments} />
+                    <MetricRow label="Shares" value={metrics.shares} />
+                </View>
+                <View style={[styles.block, styles.spendBlock]}>
+                    <MetricRow label="Spend" value={spend} valueIsText />
+                </View>
+            </BottomSheetScrollView>
+        </GazetteerBottomSheetModal>
     );
 }
 
@@ -177,23 +180,6 @@ function MetricRow({
 }
 
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
-    sheet: {
-        backgroundColor: '#0a0a0a',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        maxHeight: '88%',
-        borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    grabber: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-        borderRadius: 2,
-        marginTop: 10,
-    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',

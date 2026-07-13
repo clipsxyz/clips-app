@@ -4,7 +4,9 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StatusBar, Text, useColorScheme, View } from 'react-native';
+import { Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -253,7 +255,9 @@ function App(): React.JSX.Element {
 
   return (
     <AppErrorBoundary>
+    <GestureHandlerRootView style={styles.appRoot}>
     <AuthProvider>
+      <BottomSheetModalProvider>
       <SafeAreaProvider>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <UploadProgressToast />
@@ -356,9 +360,17 @@ function App(): React.JSX.Element {
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>
+      </BottomSheetModalProvider>
     </AuthProvider>
+    </GestureHandlerRootView>
     </AppErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  appRoot: {
+    flex: 1,
+  },
+});
 
 export default App;

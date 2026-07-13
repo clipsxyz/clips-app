@@ -1,12 +1,13 @@
 /// <reference types="vite/client" />
 import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import { getAuthorizationHeader } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
 
 const API_BASE_URL = getApiBaseUrl();
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
 export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
-    const token = localStorage.getItem('authToken');
+    const authHeader = await getAuthorizationHeader();
     const { timeoutMs = 8000, ...fetchOptions } = options;
 
     const controller = new AbortController();
@@ -16,7 +17,7 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         ...fetchOptions,
         headers: {
             'Content-Type': 'application/json',
-            ...(token && { Authorization: `Bearer ${token}` }),
+            ...authHeader,
             ...fetchOptions.headers,
         },
         signal: controller.signal,
@@ -827,7 +828,7 @@ export async function uploadFile(file: File) {
     const formData = new FormData();
     formData.append('file', file);
 
-    const token = localStorage.getItem('authToken');
+    const authHeader = await getAuthorizationHeader();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
@@ -835,7 +836,7 @@ export async function uploadFile(file: File) {
         const response = await fetch(`${API_BASE_URL}/upload/single`, {
             method: 'POST',
             headers: {
-                ...(token && { Authorization: `Bearer ${token}` }),
+                ...authHeader,
             },
             body: formData,
             signal: controller.signal,

@@ -46,6 +46,7 @@ import {
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { buildFilterInfo, type InstantFilterName } from '../utils/instantFiltersNative';
 import { getUnreadTotal } from '../api/messages';
+import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
@@ -349,7 +350,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 }
             };
             updateUnreadCount();
-            const interval = setInterval(updateUnreadCount, 10000);
+            const interval = setInterval(updateUnreadCount, getInboxUnreadPollMs());
             return () => clearInterval(interval);
         }
     }, [user?.handle]);

@@ -26,6 +26,12 @@ import {
   type SuggestedFollowerSuggestion,
 } from './utils/suggestedFollowerFeed';
 import { resolveStories24OpenTarget } from './utils/stories24Rail';
+import {
+  getFeedNewPostsPollMs,
+  getHeaderCountsPollMs,
+  getInboxUnreadPollMs,
+  getStoriesRailPollMs,
+} from './utils/backgroundPollMs';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
@@ -588,7 +594,7 @@ function PillTabs(props: {
     updateCounts();
 
     // Poll for updates every 10 seconds
-    const interval = setInterval(updateCounts, 10000);
+    const interval = setInterval(updateCounts, getHeaderCountsPollMs());
 
     // Listen for notification updates
     const handleNotificationUpdate = (_event: CustomEvent) => {
@@ -5932,11 +5938,14 @@ function Stories24FeedRail({
   stories24Items,
   navigate,
   onBeforeOpenStoryFromRail,
+  previewVideosPaused = false,
 }: {
   stories24Items: Stories24RailItem[];
   navigate: ReturnType<typeof useNavigate>;
   /** Snapshot main feed scroll so /feed can restore after remount (route switch unmounts the feed). */
   onBeforeOpenStoryFromRail?: () => void;
+  /** Pause rail MP4 previews while the main feed is scrolling or tab is hidden. */
+  previewVideosPaused?: boolean;
 }) {
   const [expandingStory, setExpandingStory] = React.useState<{
     item: Stories24RailItem;
@@ -5993,6 +6002,11 @@ function Stories24FeedRail({
       window.clearTimeout(timer);
     };
   }, [expandingStory, openStoryFromRail]);
+
+  const firstStoryPreviewHandle = React.useMemo(
+    () => stories24Items.find((item) => item.handle !== '__add_yours__')?.handle ?? null,
+    [stories24Items],
+  );
 
   if (stories24Items.length === 0) return null;
   return (
@@ -6064,7 +6078,9 @@ function Stories24FeedRail({
               className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
             >
               <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
-              {storyItem.previewVideoUrl ? (
+              {storyItem.previewVideoUrl &&
+              storyItem.handle === firstStoryPreviewHandle &&
+              !previewVideosPaused ? (
                 <video
                   src={storyItem.previewVideoUrl}
                   className="absolute inset-0 w-full h-full object-cover"
@@ -6690,6 +6706,23 @@ function FeedPageWrapper() {
   // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
   const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
   const feedScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [feedScrolling, setFeedScrolling] = React.useState(false);
+  const feedScrollIdleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [feedTabVisible, setFeedTabVisible] = React.useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible',
+  );
+  React.useEffect(() => {
+    const onVisibility = () => {
+      setFeedTabVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+  const markFeedScrolling = React.useCallback(() => {
+    setFeedScrolling(true);
+    if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 180);
+  }, []);
   const snapshotStories24FeedScrollForRail = React.useCallback(() => {
     try {
       const y = feedScrollRef.current?.scrollTop ?? 0;
@@ -6879,7 +6912,7 @@ function FeedPageWrapper() {
     updateUnreadCount();
 
     // Poll for updates every 10 seconds
-    const interval = setInterval(updateUnreadCount, 10000);
+    const interval = setInterval(updateUnreadCount, getInboxUnreadPollMs());
 
     // Listen for unread changes
     const handleUnreadChanged = (event: CustomEvent) => {
@@ -7285,7 +7318,7 @@ function FeedPageWrapper() {
       } catch (e) {
         console.error('Error polling for new posts:', e);
       }
-    }, 10000); // Poll every 10 seconds
+    }, getFeedNewPostsPollMs());
 
     return () => clearInterval(pollInterval);
   }, [pages.length, loading, end, currentFilter, userId, user?.local, user?.regional, user?.national]);
@@ -8143,7 +8176,9 @@ function FeedPageWrapper() {
     };
 
     loadStoriesRail();
-    const interval = setInterval(loadStoriesRail, 12000);
+    const storiesRailPollMs = getStoriesRailPollMs();
+    const interval =
+      storiesRailPollMs != null ? setInterval(loadStoriesRail, storiesRailPollMs) : null;
     const refreshStoriesRail = () => { loadStoriesRail(); };
     window.addEventListener('storyCreated', refreshStoriesRail as EventListener);
     window.addEventListener('storiesUpdated', refreshStoriesRail as EventListener);
@@ -8154,7 +8189,7 @@ function FeedPageWrapper() {
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       window.removeEventListener('storyCreated', refreshStoriesRail as EventListener);
       window.removeEventListener('storiesUpdated', refreshStoriesRail as EventListener);
       window.removeEventListener('storiesViewed', refreshStoriesRail as EventListener);
@@ -8601,6 +8636,7 @@ function FeedPageWrapper() {
         ref={feedScrollRef}
         className="flex-1 min-h-0 overflow-y-auto overscroll-y-auto pb-2"
         style={{ WebkitOverflowScrolling: 'touch' }}
+        onScroll={markFeedScrolling}
         onTouchStart={handleFeedPullStart}
         onTouchMove={handleFeedPullMove}
         onTouchEnd={handleFeedPullEnd}
@@ -8922,6 +8958,7 @@ function FeedPageWrapper() {
                   stories24Items={stories24Items}
                   navigate={navigate}
                   onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
+                  previewVideosPaused={feedScrolling || !feedTabVisible}
                 />
               )}
               {showPreviewBusinessAfterThisPost && (

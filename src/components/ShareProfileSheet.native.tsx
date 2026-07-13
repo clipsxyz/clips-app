@@ -1,24 +1,24 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-    Modal,
     View,
     Text,
     TouchableOpacity,
     StyleSheet,
-    Pressable,
     ScrollView,
     ActivityIndicator,
     Linking,
     Alert,
-    Clipboard,
     useWindowDimensions,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import Avatar from './Avatar';
 import { glassPanel } from '../theme/gazetteerAmbientNative';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_PROFILE } from './GazetteerBottomSheetModal.native';
 import {
     buildProfileShareUrl,
     formatProfileDisplayHandle,
@@ -259,16 +259,26 @@ export default function ShareProfileSheet({
     ];
 
     const urlPreview = profileUrl.replace(/^https?:\/\//, '');
+    const horizontalInset = useMemo(() => {
+        const maxSheet = Math.min(width, 480);
+        return Math.max(12, Math.floor((width - maxSheet) / 2));
+    }, [width]);
+    const profileBackground = useMemo(
+        () => [GAZETTEER_SHEET_PROFILE.background, glassPanel],
+        [],
+    );
 
     return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <Pressable style={styles.overlay} onPress={onClose}>
-                <Pressable
-                    style={[styles.sheet, { maxWidth: Math.min(width, 480) }]}
-                    onPress={(e) => e.stopPropagation()}
-                >
-                    <View style={styles.handleBar} />
-
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            enableDynamicSizing
+            horizontalInset={horizontalInset}
+            backgroundStyle={profileBackground}
+            handleIndicatorStyle={GAZETTEER_SHEET_PROFILE.handle}
+            backdropOpacity={0.72}
+        >
+            <BottomSheetView style={styles.sheetBody}>
                     <View style={styles.headerRow}>
                         <View>
                             <Text style={styles.gazetteerLabel}>Gazetteer</Text>
@@ -321,38 +331,14 @@ export default function ShareProfileSheet({
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
-                </Pressable>
-            </Pressable>
-        </Modal>
+            </BottomSheetView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(11, 7, 17, 0.72)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        width: '100%',
-        alignSelf: 'center',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: '#1a1524',
+    sheetBody: {
         paddingBottom: 28,
-        ...glassPanel,
-    },
-    handleBar: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        marginTop: 10,
-        marginBottom: 12,
     },
     headerRow: {
         flexDirection: 'row',

@@ -1,5 +1,6 @@
 import { fetchPostsPage, isDevMockFeedVideoPost } from '../api/posts';
 import { isUserBlocked } from '../api/messages';
+import { isReactNativeRuntime } from '../config/runtimeEnv';
 import type { Post } from '../types';
 import {
     filterPostsByContentPrefs,
@@ -61,12 +62,14 @@ export async function fetchVisibleFeedPage(
     return { items, nextCursor: page.nextCursor ?? null };
 }
 
+const INITIAL_FEED_PAGE_WALK_MAX = isReactNativeRuntime() ? 16 : 24;
+
 /** Walk mock/API pages until we find visible posts or hit the end. */
 export async function fetchInitialVisibleFeed(
     params: Omit<NativeFeedFetchParams, 'cursor'>,
 ): Promise<{ items: Post[]; nextCursor: string | number | null }> {
     let cursor: string | number | null = 0;
-    for (let step = 0; step < 24; step += 1) {
+    for (let step = 0; step < INITIAL_FEED_PAGE_WALK_MAX; step += 1) {
         const page = await fetchVisibleFeedPage({ ...params, cursor });
         if (page.items.length > 0) {
             return page;
