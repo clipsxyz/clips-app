@@ -1,4 +1,5 @@
 import { createPost } from '../api/posts';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPostNative';
 import { prepareMediaForPostNative } from './prepareMediaForPostNative';
 import {
@@ -47,25 +48,45 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         Array.isArray(job.localMediaItems) && job.localMediaItems.length > 1;
 
     if (isCarousel && job.localMediaItems) {
-        const videoFilter =
-            job.mediaType === 'video' || job.localMediaItems.some((i) => i.type === 'video')
-                ? job.filterForExport
-                : null;
-        const { items: uploaded, videoPosterUrl } = await prepareCarouselMediaForPostNative(
-            job.localMediaItems,
-            {
-                filterInfo: job.filterForExport,
-                videoFilterInfo: videoFilter,
-                videoCoverTime: job.videoCoverTime,
-            },
-        );
+        let uploaded = job.localMediaItems.map((item) => ({
+            url: item.uri,
+            type: item.type,
+            duration: item.durationSec,
+        }));
+        let carouselVideoPoster: string | undefined =
+            job.localMediaItems.find((i) => i.type === 'video')?.uri || undefined;
+
+        if (isLaravelApiEnabled()) {
+            try {
+                const videoFilter =
+                    job.mediaType === 'video' ||
+                    job.localMediaItems.some((i) => i.type === 'video')
+                        ? job.filterForExport
+                        : null;
+                const prepared = await prepareCarouselMediaForPostNative(job.localMediaItems, {
+                    filterInfo: job.filterForExport,
+                    videoFilterInfo: videoFilter,
+                    videoCoverTime: job.videoCoverTime,
+                });
+                if (prepared.items.length > 0) {
+                    uploaded = prepared.items;
+                    carouselVideoPoster =
+                        prepared.videoPosterUrl ||
+                        prepared.items.find((item) => item.type === 'video' && item.posterUrl)
+                            ?.posterUrl;
+                }
+            } catch (err) {
+                console.warn(
+                    'runBackgroundFeedUploadNative: carousel upload failed, using local media',
+                    err,
+                );
+            }
+        }
+
         if (uploaded.length === 0) {
             throw new Error('No carousel media to upload.');
         }
         const first = uploaded[0];
-        const carouselVideoPoster =
-            videoPosterUrl ||
-            uploaded.find((item) => item.type === 'video' && item.posterUrl)?.posterUrl;
         const createdPost = await createPost(
             job.userId,
             job.userHandle,
@@ -101,24 +122,33 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         return;
     }
 
-    let preparedMedia: Awaited<ReturnType<typeof prepareMediaForPostNative>> = {};
+    let mediaUrl = job.localMediaUri || undefined;
+    let mediaType = job.mediaType || undefined;
+    let videoPosterUrl: string | undefined;
 
-    if (job.localMediaUri && job.mediaType) {
-        preparedMedia = await prepareMediaForPostNative({
-            mediaUrl: job.localMediaUri,
-            mediaType: job.mediaType,
-            filterInfo: job.filterForExport,
-            videoCoverTime: job.videoCoverTime,
-        });
-
-        if (preparedMedia.filterExportFailed && job.filterForExport) {
+    if (isLaravelApiEnabled() && job.localMediaUri && job.mediaType) {
+        try {
+            const preparedMedia = await prepareMediaForPostNative({
+                mediaUrl: job.localMediaUri,
+                mediaType: job.mediaType,
+                filterInfo: job.filterForExport,
+                videoCoverTime: job.videoCoverTime,
+            });
+            if (preparedMedia.filterExportFailed && job.filterForExport) {
+                console.warn('runBackgroundFeedUploadNative: filter bake partially failed');
+            }
+            if (preparedMedia.videoCompressFailed && job.mediaType === 'video') {
+                console.warn(
+                    'runBackgroundFeedUploadNative: video compression failed; uploading best-effort file',
+                );
+            }
+            mediaUrl = preparedMedia.mediaUrl || mediaUrl;
+            mediaType = preparedMedia.mediaType || mediaType;
+            videoPosterUrl = preparedMedia.videoPosterUrl;
+        } catch (err) {
             console.warn(
-                'runBackgroundFeedUploadNative: filter bake partially failed',
-            );
-        }
-        if (preparedMedia.videoCompressFailed && job.mediaType === 'video') {
-            console.warn(
-                'runBackgroundFeedUploadNative: video compression failed; uploading best-effort file',
+                'runBackgroundFeedUploadNative: media upload failed, using local media',
+                err,
             );
         }
     }
@@ -128,10 +158,10 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         job.userHandle,
         job.text,
         job.location,
-        preparedMedia.mediaUrl,
-        preparedMedia.mediaType,
+        mediaUrl,
+        mediaType,
         undefined,
-        preparedMedia.mediaUrl ? job.text || undefined : undefined,
+        mediaUrl ? job.text || undefined : undefined,
         job.userLocal,
         job.userRegional,
         job.userNational,
@@ -151,7 +181,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         job.landmark,
         undefined,
         undefined,
-        preparedMedia.videoPosterUrl,
+        videoPosterUrl,
     );
 
     completePendingFeedUpload(job.tempId, createdPost);

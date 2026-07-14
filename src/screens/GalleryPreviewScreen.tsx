@@ -5,32 +5,31 @@ import {
     Image,
     LayoutChangeEvent,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
 import Video, { type VideoRef } from 'react-native-video';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
-import { saveDraft } from '../api/drafts';
+import { saveDraft } from '../api/drafts.native';
 import { getKnownUserHandles } from '../api/users';
-import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import GalleryPreviewComposerPanel, {
+    type GalleryPickerTab,
+} from '../components/gallery/GalleryPreviewComposerPanel.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
 import TextStickerModalNative from '../components/TextStickerModal.native';
-import VideoCoverControls from '../components/VideoCoverControls.native';
+import UserTaggingModalNative from '../components/UserTaggingModal.native';
 import type { Sticker, StickerOverlay } from '../types';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
-import { glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import {
     buildFilterInfo,
     getFilterOverlayStyle,
-    INSTANT_FILTER_NAMES,
     type InstantFilterName,
 } from '../utils/instantFiltersNative';
 import { clampStickerY } from '../utils/stickerLayoutNative';
@@ -39,9 +38,16 @@ import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
+import {
+    failedToSaveSheet,
+    nothingToSaveSheet,
+    savedToDraftsSheet,
+    type DraftSaveSheetState,
+} from '../utils/draftSaveSheetNative';
 
 const CAROUSEL_MAX = 10;
-type ComposerTab = 'caption' | 'filters' | 'stickers' | 'location' | 'carousel';
 
 function assetIsVideo(asset: { type?: string; uri?: string }) {
     return Boolean(
@@ -51,8 +57,36 @@ function assetIsVideo(asset: { type?: string; uri?: string }) {
     );
 }
 
+function assetToCarouselItem(a: ImagePicker.Asset): LocalCarouselItem | null {
+    if (!a.uri) return null;
+    const isVideo = assetIsVideo(a);
+    const slide: LocalCarouselItem = {
+        uri: a.uri,
+        type: isVideo ? 'video' : 'image',
+    };
+    if (isVideo) {
+        slide.videoCoverTime = 0;
+        const d = Number(a.duration || 0);
+        if (Number.isFinite(d) && d > 0) {
+            slide.durationSec = Math.max(0.1, Math.floor(d * 10) / 10);
+        }
+    }
+    return slide;
+}
+
+function assetsToCarouselItems(assets: ImagePicker.Asset[], maxCount: number): LocalCarouselItem[] {
+    const next: LocalCarouselItem[] = [];
+    for (const a of assets) {
+        if (next.length >= maxCount) break;
+        const slide = assetToCarouselItem(a);
+        if (slide) next.push(slide);
+    }
+    return next;
+}
+
 export default function GalleryPreviewScreen({ navigation, route }: any) {
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
     const story24 = !!route.params?.story24;
     const passedCaption = route.params?.draftCaption || '';
     const autoStart = route.params?.autoStart as
@@ -87,22 +121,24 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
     const [carouselItems, setCarouselItems] = useState<LocalCarouselItem[]>(initialItems);
     const [carouselActiveIndex, setCarouselActiveIndex] = useState(0);
-    const [cardTab, setCardTab] = useState<ComposerTab>('caption');
+    const [cardTab, setCardTab] = useState<GalleryPickerTab>('caption');
     const [caption, setCaption] = useState(passedCaption);
     const [location, setLocation] = useState('');
     const [venue, setVenue] = useState('');
     const [landmark, setLandmark] = useState('');
-    const [taggedUsersInput, setTaggedUsersInput] = useState('');
+    const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
+    const [showTagUserModal, setShowTagUserModal] = useState(false);
     const [imageFilterName, setImageFilterName] = useState<InstantFilterName>('None');
     const [stickers, setStickers] = useState<StickerOverlay[]>([]);
     const [showStickerPicker, setShowStickerPicker] = useState(false);
     const [showTextStickerModal, setShowTextStickerModal] = useState(false);
     const [selectedStickerOverlay, setSelectedStickerOverlay] = useState<string | null>(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
-    const [isVideoPaused, setIsVideoPaused] = useState(false);
+    const [isMuted, setIsMuted] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
-    const [toolsExpanded, setToolsExpanded] = useState(true);
+    const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
+    const [cardBodyExpanded, setCardBodyExpanded] = useState(true);
     const videoRef = useRef<VideoRef>(null);
     const previewCaptureRef = useRef<View>(null);
 
@@ -112,8 +148,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const previewType = activeSlide?.type;
     const previewCoverTime =
         activeSlide?.type === 'video' ? activeSlide.videoCoverTime ?? 0 : 0;
-    const previewDurationSec =
-        activeSlide?.type === 'video' ? activeSlide.durationSec ?? 15 : 15;
 
     const filterOverlayStyle = useMemo(
         () => getFilterOverlayStyle(imageFilterName),
@@ -121,15 +155,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     );
     const hasAppliedFilter = imageFilterName !== 'None';
     const filterForExport = hasAppliedFilter ? buildFilterInfo(imageFilterName) : null;
-
-    const taggedUsers = useMemo(
-        () =>
-            taggedUsersInput
-                .split(',')
-                .map((v) => v.trim().replace(/^@+/, ''))
-                .filter((v, idx, arr) => v.length > 0 && arr.indexOf(v) === idx),
-        [taggedUsersInput],
-    );
 
     const mentionHandles = useMemo(() => getKnownUserHandles(), []);
     const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -145,19 +170,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         if (previewType !== 'video' || !previewUri) return;
         videoRef.current?.seek(Math.max(0, previewCoverTime));
     }, [previewCoverTime, previewType, previewUri, carouselActiveIndex]);
-
-    const setPreviewCoverTime = useCallback(
-        (timeSec: number) => {
-            setCarouselItems((prev) =>
-                prev.map((item, i) =>
-                    i === carouselActiveIndex && item.type === 'video'
-                        ? { ...item, videoCoverTime: timeSec }
-                        : item,
-                ),
-            );
-        },
-        [carouselActiveIndex],
-    );
 
     const updatePreviewVideoDuration = useCallback(
         (duration: number) => {
@@ -179,57 +191,48 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     }, []);
 
     const addCarouselFromPicker = useCallback(() => {
-        ImagePicker.launchImageLibrary(
-            { mediaType: 'mixed', selectionLimit: CAROUSEL_MAX, quality: 0.9, videoQuality: 'high' },
-            (response) => {
-                if (response.didCancel) return;
-                const assets = response.assets || [];
-                if (assets.length < 1) return;
-                const next: LocalCarouselItem[] = [];
-                for (const a of assets) {
-                    if (next.length >= CAROUSEL_MAX) break;
-                    if (!a.uri) continue;
-                    const isVideo = assetIsVideo(a);
-                    const slide: LocalCarouselItem = {
-                        uri: a.uri,
-                        type: isVideo ? 'video' : 'image',
-                    };
-                    if (isVideo) {
-                        slide.videoCoverTime = 0;
-                        const d = Number(a.duration || 0);
-                        if (Number.isFinite(d) && d > 0) {
-                            slide.durationSec = Math.max(0.1, Math.floor(d * 10) / 10);
-                        }
+        void (async () => {
+            const allowed = await ensureGalleryMediaPermission();
+            if (!allowed) return;
+            const remaining = CAROUSEL_MAX - carouselItems.length;
+            if (remaining <= 0) {
+                Alert.alert('Carousel full', `You can add up to ${CAROUSEL_MAX} photos or videos.`);
+                return;
+            }
+            ImagePicker.launchImageLibrary(
+                {
+                    mediaType: 'mixed',
+                    selectionLimit: remaining > 1 ? remaining : 1,
+                    quality: 0.9,
+                    videoQuality: 'high',
+                    includeExtra: true,
+                },
+                (response) => {
+                    if (response.didCancel) return;
+                    if (response.errorCode) {
+                        Alert.alert('Media error', response.errorMessage || 'Could not open your gallery.');
+                        return;
                     }
-                    next.push(slide);
-                }
-                if (next.length === 0) return;
-                setCarouselItems(next);
-                setCarouselActiveIndex(0);
-                if (next.length > 1) setCardTab('carousel');
-            },
-        );
-    }, []);
+                    const assets = response.assets || [];
+                    if (assets.length < 1) return;
+                    const toAdd = assetsToCarouselItems(assets, remaining);
+                    if (toAdd.length === 0) return;
+                    setCarouselItems((prev) => {
+                        const existingUris = new Set(prev.map((item) => item.uri));
+                        const merged = [
+                            ...prev,
+                            ...toAdd.filter((item) => !existingUris.has(item.uri)),
+                        ];
+                        return merged.slice(0, CAROUSEL_MAX);
+                    });
+                    setCardTab('carousel');
+                },
+            );
+        })();
+    }, [carouselItems.length]);
 
     const applyAssets = useCallback((assets: ImagePicker.Asset[]) => {
-        const next: LocalCarouselItem[] = [];
-        for (const a of assets) {
-            if (next.length >= CAROUSEL_MAX) break;
-            if (!a.uri) continue;
-            const isVideo = assetIsVideo(a);
-            const slide: LocalCarouselItem = {
-                uri: a.uri,
-                type: isVideo ? 'video' : 'image',
-            };
-            if (isVideo) {
-                slide.videoCoverTime = 0;
-                const d = Number(a.duration || 0);
-                if (Number.isFinite(d) && d > 0) {
-                    slide.durationSec = Math.max(0.1, Math.floor(d * 10) / 10);
-                }
-            }
-            next.push(slide);
-        }
+        const next = assetsToCarouselItems(assets, CAROUSEL_MAX);
         if (next.length === 0) return false;
         setCarouselItems(next);
         setCarouselActiveIndex(0);
@@ -238,107 +241,104 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     }, []);
 
     useEffect(() => {
-        // When opened from CreateComposer with no media, auto-start pickers to match web flow:
-        // choose media → preview/tools → (optional) open full studio composer.
         if (!autoStart) return;
         if (initialItems.length > 0) return;
         if (carouselItems.length > 0) return;
 
         if (autoStart.source === 'library') {
-            ImagePicker.launchImageLibrary(
-                {
-                    mediaType: autoStart.mediaType ?? 'mixed',
-                    selectionLimit: autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
-                    quality: 0.9,
-                    videoQuality: 'high',
-                },
-                (response) => {
-                    if (response.didCancel) {
-                        navigation.goBack();
-                        return;
-                    }
-                    if (response.errorCode) {
-                        Alert.alert('Media error', response.errorMessage || 'Could not open your library.');
-                        navigation.goBack();
-                        return;
-                    }
-                    const ok = applyAssets(response.assets || []);
-                    if (!ok) navigation.goBack();
-                },
-            );
+            void (async () => {
+                const allowed = await ensureGalleryMediaPermission();
+                if (!allowed) {
+                    navigation.goBack();
+                    return;
+                }
+                ImagePicker.launchImageLibrary(
+                    {
+                        mediaType: autoStart.mediaType ?? 'mixed',
+                        selectionLimit: autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
+                        quality: 0.9,
+                        videoQuality: 'high',
+                    },
+                    (response) => {
+                        if (response.didCancel) {
+                            navigation.goBack();
+                            return;
+                        }
+                        if (response.errorCode) {
+                            Alert.alert('Media error', response.errorMessage || 'Could not open your library.');
+                            navigation.goBack();
+                            return;
+                        }
+                        const ok = applyAssets(response.assets || []);
+                        if (!ok) navigation.goBack();
+                    },
+                );
+            })();
             return;
         }
 
         if (autoStart.source === 'camera') {
-            const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
-            ImagePicker.launchCamera(
-                { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high' },
-                (response) => {
-                    if (response.didCancel) {
-                        navigation.goBack();
-                        return;
-                    }
-                    if (response.errorCode) {
-                        Alert.alert('Camera error', response.errorMessage || 'Could not open camera.');
-                        navigation.goBack();
-                        return;
-                    }
-                    const ok = applyAssets(response.assets || []);
-                    if (!ok) navigation.goBack();
-                },
-            );
+            void (async () => {
+                const allowed = await ensureGalleryMediaPermission();
+                if (!allowed) {
+                    navigation.goBack();
+                    return;
+                }
+                const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
+                ImagePicker.launchCamera(
+                    { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high' },
+                    (response) => {
+                        if (response.didCancel) {
+                            navigation.goBack();
+                            return;
+                        }
+                        if (response.errorCode) {
+                            Alert.alert('Camera error', response.errorMessage || 'Could not open camera.');
+                            navigation.goBack();
+                            return;
+                        }
+                        const ok = applyAssets(response.assets || []);
+                        if (!ok) navigation.goBack();
+                    },
+                );
+            })();
         }
     }, [applyAssets, autoStart, carouselItems.length, initialItems.length, navigation]);
 
-    const openStudioComposer = () => {
-        if (carouselItems.length === 0) return;
-        if (carouselItems.length === 1) {
-            const only = carouselItems[0];
-            if (only.type === 'video') {
-                navigation.navigate('InstantFilters', {
-                    videoUrl: only.uri,
-                    mediaUrl: only.uri,
-                    mediaType: 'video',
-                    videoDuration: only.durationSec ?? 15,
-                    videoCoverTime: only.videoCoverTime ?? 0,
-                    draftCaption: caption,
-                    draftLocation: location,
-                    draftVenue: venue,
-                    draftLandmark: landmark,
-                    draftTaggedUsers: taggedUsers,
-                    draftStickers: stickers,
-                    story24,
-                });
-                return;
-            }
-            navigation.navigate('CreateComposer', {
-                mediaUrl: only.uri,
-                mediaType: only.type,
-                draftCaption: caption,
-                draftLocation: location,
-                draftVenue: venue,
-                draftLandmark: landmark,
-                draftTaggedUsers: taggedUsers,
-                draftStickers: stickers,
-                story24,
-            });
-            return;
-        }
-        navigation.navigate('CreateComposer', {
-            carouselItems,
-            draftCaption: caption,
-            draftLocation: location,
-            draftVenue: venue,
-            draftLandmark: landmark,
-            draftTaggedUsers: taggedUsers,
-            draftStickers: stickers,
-            story24,
+    const removeCarouselItem = useCallback((index: number) => {
+        setCarouselItems((prev) => {
+            const next = prev.filter((_, i) => i !== index);
+            return next;
         });
-    };
+        setCarouselActiveIndex((prev) => {
+            if (index < prev) return prev - 1;
+            if (index === prev) return Math.max(0, prev - 1);
+            return prev;
+        });
+    }, []);
+
+    const reorderCarouselItems = useCallback((fromIndex: number, toIndex: number) => {
+        if (fromIndex === toIndex) return;
+        setCarouselItems((prev) => {
+            if (fromIndex < 0 || toIndex < 0 || fromIndex >= prev.length || toIndex >= prev.length) {
+                return prev;
+            }
+            const next = [...prev];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            return next;
+        });
+        setCarouselActiveIndex((prev) => {
+            if (prev === fromIndex) return toIndex;
+            if (fromIndex < prev && toIndex >= prev) return prev - 1;
+            if (fromIndex > prev && toIndex <= prev) return prev + 1;
+            return prev;
+        });
+    }, []);
 
     const handleSaveDraft = async () => {
         if (carouselItems.length === 0) {
-            Alert.alert('Nothing to save', 'Add media before saving a draft.');
+            setDraftAlert(nothingToSaveSheet('Add media before saving a draft.'));
             return;
         }
         if (isSavingDraft) return;
@@ -364,16 +364,20 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 })),
             });
             hapticLight();
-            Alert.alert('Saved', 'Draft saved. Open it from your profile drafts.');
-            navigation.navigate('Home');
+            await new Promise<void>((resolve) => setTimeout(resolve, 50));
+            setDraftAlert(
+                savedToDraftsSheet(() =>
+                    resetToHomeFeed(navigation, { forceRefreshAt: Date.now() }),
+                ),
+            );
         } catch (err: any) {
-            Alert.alert('Draft failed', err?.message || 'Could not save draft.');
+            setDraftAlert(failedToSaveSheet(err?.message));
         } finally {
             setIsSavingDraft(false);
         }
     };
 
-    const handlePost = async () => {
+    const handlePost = () => {
         if (!user) {
             Alert.alert('Sign in required', 'Please log in to post.');
             return;
@@ -398,7 +402,6 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
         const captionText = caption.trim();
         const locationLabel = location.trim() || user.regional || 'Unknown';
-
         const first = carouselItems[0];
         if (!first) return;
 
@@ -431,10 +434,13 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             jobId: tempId,
             thumbUri: first.uri,
             thumbType: first.type === 'video' ? 'video' : 'image',
+            initialMessage: 'Posting to Gazetteer…',
+            uploadingTitle: 'Posting…',
+            successTitle: 'Posted!',
         });
         hapticLight();
-        navigation.navigate('Home', { forceRefreshAt: Date.now() });
         setIsUploading(false);
+        resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
         startBackgroundFeedUpload(tempId);
     };
 
@@ -460,39 +466,8 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         setMentionQuery(null);
     };
 
-    const tabs: Array<{ id: ComposerTab; label: string; icon: string }> = [
-        { id: 'caption', label: 'Caption', icon: 'text' },
-        { id: 'filters', label: 'Filters', icon: 'color-filter' },
-        { id: 'stickers', label: 'Stickers', icon: 'happy' },
-        { id: 'location', label: 'Place', icon: 'location' },
-        ...(isCarousel ? [{ id: 'carousel' as const, label: 'Slides', icon: 'albums' }] : []),
-    ];
-
     return (
-        <GazetteerScreenShell edges={['top', 'bottom']}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-                <Text style={styles.title}>Gallery</Text>
-                <View style={styles.headerActions}>
-                    <TouchableOpacity onPress={handleSaveDraft} disabled={isSavingDraft || carouselItems.length === 0}>
-                        {isSavingDraft ? (
-                            <ActivityIndicator size="small" color="#9CA3AF" />
-                        ) : (
-                            <Icon name="bookmark-outline" size={22} color="#E5E7EB" />
-                        )}
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={handlePost} disabled={isUploading || carouselItems.length === 0}>
-                        {isUploading ? (
-                            <ActivityIndicator size="small" color="#f472b6" />
-                        ) : (
-                            <Text style={styles.postText}>Post</Text>
-                        )}
-                    </TouchableOpacity>
-                </View>
-            </View>
-
+        <View style={styles.root}>
             <View style={styles.previewSection}>
                 <View style={styles.previewWrap} onLayout={handlePreviewLayout}>
                     <View ref={previewCaptureRef} style={styles.previewCapture} collapsable={false}>
@@ -503,10 +478,9 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                                 source={{ uri: previewUri }}
                                 style={styles.previewMedia}
                                 resizeMode="contain"
-                                paused={isVideoPaused}
+                                paused={false}
                                 repeat
-                                controls
-                                muted
+                                muted={isMuted}
                                 onLoad={(event) => {
                                     const duration = Number(event?.duration || 0);
                                     if (!Number.isFinite(duration) || duration <= 0) return;
@@ -546,192 +520,115 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             />
                         ))}
                 </View>
-                {previewType === 'video' ? (
-                    <View style={styles.coverControlsWrap}>
-                        <VideoCoverControls
-                            durationSec={previewDurationSec}
-                            coverTime={previewCoverTime}
-                            onCoverTimeChange={setPreviewCoverTime}
-                            onScrubPreview={(timeSec) => {
-                                videoRef.current?.seek(Math.max(0, timeSec));
-                                setIsVideoPaused(true);
-                            }}
-                        />
+
+                <View style={[styles.overlayHeader, { paddingTop: insets.top + 8 }]}>
+                    <TouchableOpacity style={styles.overlayBtn} onPress={() => navigation.goBack()}>
+                        <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    </TouchableOpacity>
+
+                    {isCarousel ? (
+                        <View style={styles.carouselNav}>
+                            <TouchableOpacity
+                                style={styles.overlayBtn}
+                                disabled={carouselActiveIndex === 0}
+                                onPress={() => setCarouselActiveIndex((i) => Math.max(0, i - 1))}
+                            >
+                                <Icon
+                                    name="chevron-back"
+                                    size={18}
+                                    color={carouselActiveIndex === 0 ? 'rgba(255,255,255,0.35)' : '#FFFFFF'}
+                                />
+                            </TouchableOpacity>
+                            <Text style={styles.carouselCounter}>
+                                {carouselActiveIndex + 1} / {carouselItems.length}
+                            </Text>
+                            <TouchableOpacity
+                                style={styles.overlayBtn}
+                                disabled={carouselActiveIndex >= carouselItems.length - 1}
+                                onPress={() =>
+                                    setCarouselActiveIndex((i) =>
+                                        Math.min(carouselItems.length - 1, i + 1),
+                                    )
+                                }
+                            >
+                                <Icon
+                                    name="chevron-forward"
+                                    size={18}
+                                    color={
+                                        carouselActiveIndex >= carouselItems.length - 1
+                                            ? 'rgba(255,255,255,0.35)'
+                                            : '#FFFFFF'
+                                    }
+                                />
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <View style={styles.headerSpacer} />
+                    )}
+
+                    <View style={styles.headerRight}>
+                        {previewType === 'video' ? (
+                            <TouchableOpacity
+                                style={styles.overlayBtn}
+                                onPress={() => setIsMuted((m) => !m)}
+                            >
+                                <Icon
+                                    name={isMuted ? 'volume-mute' : 'volume-high'}
+                                    size={20}
+                                    color="#FFFFFF"
+                                />
+                            </TouchableOpacity>
+                        ) : null}
+                        <View style={styles.postRing}>
+                            <TouchableOpacity
+                                style={styles.postBtn}
+                                onPress={() => void handlePost()}
+                                disabled={isUploading || carouselItems.length === 0}
+                            >
+                                {isUploading ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <Icon name="send" size={22} color="#FFFFFF" />
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                ) : null}
+                </View>
             </View>
 
-            <View style={styles.toolsPanel}>
-                <TouchableOpacity
-                    style={styles.toolsToggle}
-                    onPress={() => setToolsExpanded((v) => !v)}
-                >
-                    <View style={styles.toolsGrabber} />
-                    <Text style={styles.toolsToggleText}>
-                        {toolsExpanded ? 'Tap to collapse' : 'Tap to expand'}
-                    </Text>
-                </TouchableOpacity>
-                {toolsExpanded ? (
-                    <>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabRow}>
-                            {tabs.map((tab) => (
-                                <TouchableOpacity
-                                    key={tab.id}
-                                    onPress={() => setCardTab(tab.id)}
-                                    style={[styles.tabChip, cardTab === tab.id && styles.tabChipActive]}
-                                >
-                                    <Icon
-                                        name={tab.icon}
-                                        size={14}
-                                        color={cardTab === tab.id ? '#FBCFE8' : '#9CA3AF'}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.tabChipText,
-                                            cardTab === tab.id && styles.tabChipTextActive,
-                                        ]}
-                                    >
-                                        {tab.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                        <ScrollView style={styles.tabBody} keyboardShouldPersistTaps="handled">
-                            {cardTab === 'caption' && (
-                                <View>
-                                    <TextInput
-                                        value={caption}
-                                        onChangeText={onCaptionChange}
-                                        placeholder="Write a caption..."
-                                        placeholderTextColor="#6B7280"
-                                        style={styles.captionInput}
-                                        multiline
-                                    />
-                                    {mentionSuggestions.length > 0 ? (
-                                        <View style={styles.mentionList}>
-                                            {mentionSuggestions.map((h) => (
-                                                <TouchableOpacity
-                                                    key={h}
-                                                    onPress={() => insertMention(h.startsWith('@') ? h : `@${h}`)}
-                                                    style={styles.mentionRow}
-                                                >
-                                                    <Text style={styles.mentionText}>{h}</Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-                                    ) : null}
-                                    <TextInput
-                                        value={taggedUsersInput}
-                                        onChangeText={setTaggedUsersInput}
-                                        placeholder="Tag users (comma-separated handles)"
-                                        placeholderTextColor="#6B7280"
-                                        style={styles.tagInput}
-                                    />
-                                </View>
-                            )}
-                            {cardTab === 'filters' && previewUri ? (
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                    {INSTANT_FILTER_NAMES.map((name) => (
-                                        <TouchableOpacity
-                                            key={name}
-                                            onPress={() => setImageFilterName(name)}
-                                            style={[
-                                                styles.filterChip,
-                                                imageFilterName === name && styles.filterChipActive,
-                                            ]}
-                                        >
-                                            <Text
-                                                style={[
-                                                    styles.filterChipText,
-                                                    imageFilterName === name && styles.filterChipTextActive,
-                                                ]}
-                                            >
-                                                {name}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                            ) : null}
-                            {cardTab === 'stickers' && (
-                                <View style={styles.stickerActions}>
-                                    <TouchableOpacity
-                                        style={styles.toolActionBtn}
-                                        onPress={() => setShowStickerPicker(true)}
-                                    >
-                                        <Icon name="happy-outline" size={18} color="#FBCFE8" />
-                                        <Text style={styles.toolActionText}>Add sticker</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.toolActionBtn}
-                                        onPress={() => setShowTextStickerModal(true)}
-                                    >
-                                        <Icon name="text" size={18} color="#FBCFE8" />
-                                        <Text style={styles.toolActionText}>Add text</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                            {cardTab === 'location' && (
-                                <View style={styles.locationFields}>
-                                    <PlaceAutocompleteField
-                                        value={location}
-                                        onChange={setLocation}
-                                        placeholder="City or neighborhood"
-                                    />
-                                    <PlaceAutocompleteField
-                                        value={venue}
-                                        onChange={setVenue}
-                                        placeholder="Venue (optional)"
-                                    />
-                                    <PlaceAutocompleteField
-                                        value={landmark}
-                                        onChange={setLandmark}
-                                        placeholder="Landmark (optional)"
-                                    />
-                                </View>
-                            )}
-                            {cardTab === 'carousel' && isCarousel && (
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={styles.carouselRailContent}
-                                >
-                                    {carouselItems.map((item, index) => (
-                                        <TouchableOpacity
-                                            key={`${item.uri}-${index}`}
-                                            onPress={() => setCarouselActiveIndex(index)}
-                                            style={[
-                                                styles.carouselThumbWrap,
-                                                index === carouselActiveIndex &&
-                                                    styles.carouselThumbWrapActive,
-                                            ]}
-                                        >
-                                            {item.type === 'video' ? (
-                                                <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={18} color="#E5E7EB" />
-                                                </View>
-                                            ) : (
-                                                <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
-                                            )}
-                                        </TouchableOpacity>
-                                    ))}
-                                    {carouselItems.length < CAROUSEL_MAX ? (
-                                        <TouchableOpacity
-                                            style={styles.addSlideBtn}
-                                            onPress={addCarouselFromPicker}
-                                        >
-                                            <Icon name="add" size={22} color="#FBCFE8" />
-                                        </TouchableOpacity>
-                                    ) : null}
-                                </ScrollView>
-                            )}
-                        </ScrollView>
-                        <TouchableOpacity style={styles.studioLink} onPress={openStudioComposer}>
-                            <Icon name="color-wand-outline" size={16} color="#93C5FD" />
-                            <Text style={styles.studioLinkText}>Open full studio composer</Text>
-                        </TouchableOpacity>
-                    </>
-                ) : null}
-            </View>
+            <GalleryPreviewComposerPanel
+                cardTab={cardTab}
+                onCardTabChange={setCardTab}
+                cardBodyExpanded={cardBodyExpanded}
+                onToggleExpanded={() => setCardBodyExpanded((v) => !v)}
+                caption={caption}
+                onCaptionChange={onCaptionChange}
+                mentionSuggestions={mentionSuggestions}
+                onInsertMention={insertMention}
+                location={location}
+                venue={venue}
+                landmark={landmark}
+                onLocationChange={setLocation}
+                onVenueChange={setVenue}
+                onLandmarkChange={setLandmark}
+                taggedUsers={taggedUsers}
+                onOpenTagModal={() => setShowTagUserModal(true)}
+                imageFilterName={imageFilterName}
+                onFilterChange={setImageFilterName}
+                previewUri={previewUri}
+                previewType={previewType}
+                carouselItems={carouselItems}
+                carouselActiveIndex={carouselActiveIndex}
+                onCarouselIndexChange={setCarouselActiveIndex}
+                onAddCarousel={addCarouselFromPicker}
+                onRemoveCarouselItem={removeCarouselItem}
+                onReorderCarouselItems={reorderCarouselItems}
+                isSavingDraft={isSavingDraft}
+                onSaveDraft={() => void handleSaveDraft()}
+                onOpenStickerPicker={() => setShowStickerPicker(true)}
+                onOpenTextSticker={() => setShowTextStickerModal(true)}
+                canSave={carouselItems.length > 0}
+            />
 
             <StickerPickerNative
                 visible={showStickerPicker}
@@ -778,166 +675,121 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                     setShowTextStickerModal(false);
                 }}
             />
-        </GazetteerScreenShell>
+            <UserTaggingModalNative
+                visible={showTagUserModal}
+                onClose={() => setShowTagUserModal(false)}
+                taggedUsers={taggedUsers}
+                onSelectUser={(handle) => {
+                    const normalized = handle.replace(/^@+/, '').trim();
+                    if (!normalized) return;
+                    setTaggedUsers((prev) =>
+                        prev.includes(normalized) ? prev : [...prev, normalized],
+                    );
+                    setShowTagUserModal(false);
+                }}
+            />
+            <GazetteerAlertSheet
+                visible={draftAlert != null}
+                title={draftAlert?.title ?? ''}
+                message={draftAlert?.message}
+                icon={draftAlert?.icon ?? 'alert'}
+                confirmButtonText={draftAlert?.confirmButtonText ?? 'OK'}
+                onConfirm={() => {
+                    const action = draftAlert?.onConfirm;
+                    setDraftAlert(null);
+                    action?.();
+                }}
+                onDismiss={() => setDraftAlert(null)}
+            />
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        ...gazetteerHeader,
+    root: {
+        flex: 1,
+        backgroundColor: '#000000',
     },
-    title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', flex: 1, marginLeft: 8 },
-    headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-    postText: { color: '#f472b6', fontSize: 15, fontWeight: '700' },
-    previewSection: { flex: 1, minHeight: 200 },
+    previewSection: {
+        flex: 1,
+        minHeight: 0,
+        position: 'relative',
+    },
     previewWrap: {
         flex: 1,
-        marginHorizontal: 12,
-        marginTop: 8,
-        borderRadius: 14,
+        backgroundColor: '#000000',
         overflow: 'hidden',
-        backgroundColor: '#000',
     },
-    previewCapture: { flex: 1, minHeight: 220 },
-    previewMedia: { width: '100%', height: '100%', minHeight: 220 },
-    filterOverlay: { ...StyleSheet.absoluteFillObject },
-    stickerDeselect: { ...StyleSheet.absoluteFillObject },
-    coverControlsWrap: { paddingHorizontal: 16, paddingBottom: 8 },
+    previewCapture: {
+        flex: 1,
+        minHeight: 180,
+    },
+    previewMedia: {
+        width: '100%',
+        height: '100%',
+    },
+    filterOverlay: {
+        ...StyleSheet.absoluteFill,
+    },
+    stickerDeselect: {
+        ...StyleSheet.absoluteFill,
+    },
     emptyPick: {
         flex: 1,
-        minHeight: 220,
+        minHeight: 180,
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
     },
-    emptyPickText: { color: '#9CA3AF', fontSize: 14 },
-    toolsPanel: {
-        maxHeight: '42%',
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255,255,255,0.1)',
-        ...glassPanel,
+    emptyPickText: {
+        color: '#9CA3AF',
+        fontSize: 14,
+    },
+    overlayHeader: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
         paddingBottom: 8,
+        zIndex: 10,
     },
-    toolsToggle: {
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4,
-        paddingVertical: 8,
-    },
-    toolsToggleText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-    toolsGrabber: {
-        width: 56,
-        height: 5,
+    overlayBtn: {
+        padding: 8,
         borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.45)',
+        backgroundColor: 'rgba(0,0,0,0.5)',
     },
-    tabRow: { maxHeight: 40, marginBottom: 8, paddingHorizontal: 12 },
-    tabChip: {
+    carouselNav: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        marginRight: 8,
-        borderRadius: 999,
-        ...glassSurface,
+        gap: 8,
     },
-    tabChipActive: {
-        borderColor: 'rgba(244,114,182,0.55)',
-        backgroundColor: 'rgba(244,114,182,0.15)',
+    carouselCounter: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
+        minWidth: 48,
+        textAlign: 'center',
     },
-    tabChipText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-    tabChipTextActive: { color: '#FBCFE8' },
-    tabBody: { maxHeight: 200, paddingHorizontal: 12 },
-    tabHint: { color: '#9CA3AF', fontSize: 13, paddingVertical: 8 },
-    captionInput: {
-        minHeight: 72,
-        borderRadius: 12,
-        padding: 12,
-        color: '#F9FAFB',
-        backgroundColor: 'rgba(15,23,42,0.9)',
-        textAlignVertical: 'top',
-    },
-    tagInput: {
-        marginTop: 8,
-        borderRadius: 12,
-        padding: 12,
-        color: '#F9FAFB',
-        backgroundColor: 'rgba(15,23,42,0.9)',
-    },
-    mentionList: {
-        marginTop: 6,
-        borderRadius: 10,
-        backgroundColor: 'rgba(15,23,42,0.95)',
-        overflow: 'hidden',
-    },
-    mentionRow: { paddingHorizontal: 12, paddingVertical: 10 },
-    mentionText: { color: '#E5E7EB', fontSize: 14 },
-    filterChip: {
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 999,
-        marginRight: 8,
-        ...glassSurface,
-    },
-    filterChipActive: {
-        backgroundColor: 'rgba(244,114,182,0.2)',
-        borderColor: 'rgba(244,114,182,0.5)',
-    },
-    filterChipText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
-    filterChipTextActive: { color: '#FBCFE8' },
-    stickerActions: { flexDirection: 'row', gap: 10, paddingVertical: 8 },
-    toolActionBtn: {
+    headerSpacer: {
         flex: 1,
+    },
+    headerRight: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        paddingVertical: 12,
-        borderRadius: 12,
-        ...glassSurface,
+        gap: 8,
     },
-    toolActionText: { color: '#E5E7EB', fontSize: 13, fontWeight: '600' },
-    locationFields: { gap: 10, paddingVertical: 4 },
-    carouselRailContent: { gap: 8, paddingVertical: 8 },
-    carouselThumbWrap: {
-        width: 64,
-        height: 64,
-        borderRadius: 10,
-        overflow: 'hidden',
-        borderWidth: 2,
-        borderColor: 'transparent',
-        backgroundColor: '#111827',
+    postRing: {
+        borderRadius: 999,
+        padding: 1.5,
+        backgroundColor: '#FFFFFF',
     },
-    carouselThumbWrapActive: { borderColor: '#F472B6' },
-    carouselThumb: { width: '100%', height: '100%' },
-    carouselThumbVideo: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#1F2937',
+    postBtn: {
+        padding: 10,
+        borderRadius: 999,
+        backgroundColor: '#000000',
     },
-    addSlideBtn: {
-        width: 64,
-        height: 64,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: 'rgba(244,114,182,0.45)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    studioLink: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        paddingVertical: 10,
-    },
-    studioLinkText: { color: '#93C5FD', fontSize: 12, fontWeight: '600' },
 });

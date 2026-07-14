@@ -22,7 +22,14 @@ import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
 import { publishMediaStory24 } from '../utils/publishStoryNative';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
-import { saveDraft } from '../api/drafts';
+import { saveDraft } from '../api/drafts.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import {
+    failedToSaveSheet,
+    nothingToSaveSheet,
+    savedToDraftsSheet,
+    type DraftSaveSheetState,
+} from '../utils/draftSaveSheetNative';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
@@ -44,6 +51,7 @@ import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNa
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 
 export default function CreateScreen({ navigation, route }: any) {
@@ -95,6 +103,7 @@ export default function CreateScreen({ navigation, route }: any) {
     );
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
+    const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
     const [videoCoverTime, setVideoCoverTime] = useState<number>(Number(route.params?.videoCoverTime || 0));
     const [isVideoPaused, setIsVideoPaused] = useState(false);
     const [videoDurationSec, setVideoDurationSec] = useState<number>(Math.max(1, Number(route.params?.videoDuration || 0) || 15));
@@ -592,7 +601,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 thumbType: mediaType === 'video' ? 'video' : 'image',
             });
             hapticLight();
-            navigation.navigate('Home', { forceRefreshAt: Date.now() });
+            resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
             setIsUploading(false);
             startBackgroundFeedUpload(tempId);
             return;
@@ -654,7 +663,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
     const handleSaveDraft = async () => {
         if (!selectedMedia && !text.trim()) {
-            Alert.alert('Nothing to save', 'Add media or text before saving a draft.');
+            setDraftAlert(nothingToSaveSheet('Add media or text before saving a draft.'));
             return;
         }
         if (isSavingDraft) return;
@@ -697,9 +706,14 @@ export default function CreateScreen({ navigation, route }: any) {
                 stickers: stickers.length > 0 ? stickers : undefined,
             });
             hapticLight();
-            Alert.alert('Saved', 'Draft saved to your profile drafts.');
+            await new Promise<void>((resolve) => setTimeout(resolve, 50));
+            setDraftAlert(
+                savedToDraftsSheet(() =>
+                    resetToHomeFeed(navigation, { forceRefreshAt: Date.now() }),
+                ),
+            );
         } catch (err: any) {
-            Alert.alert('Draft failed', err?.message || 'Could not save draft.');
+            setDraftAlert(failedToSaveSheet(err?.message));
         } finally {
             setIsSavingDraft(false);
         }
@@ -1135,6 +1149,19 @@ export default function CreateScreen({ navigation, route }: any) {
                 visible={showTextStickerModal}
                 onClose={() => setShowTextStickerModal(false)}
                 onConfirm={handleAddTextSticker}
+            />
+            <GazetteerAlertSheet
+                visible={draftAlert != null}
+                title={draftAlert?.title ?? ''}
+                message={draftAlert?.message}
+                icon={draftAlert?.icon ?? 'alert'}
+                confirmButtonText={draftAlert?.confirmButtonText ?? 'OK'}
+                onConfirm={() => {
+                    const action = draftAlert?.onConfirm;
+                    setDraftAlert(null);
+                    action?.();
+                }}
+                onDismiss={() => setDraftAlert(null)}
             />
         </GazetteerScreenShell>
     );

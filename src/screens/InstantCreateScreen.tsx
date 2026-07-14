@@ -20,6 +20,7 @@ import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
+import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
 
 type PickerMode = 'feed' | 'story24';
 type CreateModeId = 'community' | 'text' | 'gallery' | 'story';
@@ -237,45 +238,48 @@ export default function InstantCreateScreen({ navigation }: any) {
         });
     };
 
-    const pickLibrary = (mode: PickerMode, carousel: boolean) => {
-        ImagePicker.launchImageLibrary(
-            {
-                mediaType: 'mixed',
-                quality: 0.9,
-                selectionLimit: carousel ? 10 : 1,
-            },
-            (response) => {
-                if (response.didCancel) return;
-                navigateFromAssets(response.assets || [], mode, carousel);
-            },
-        );
-    };
-
-    const openLibrary = (mode: PickerMode) => {
-        const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Single photo/video', onPress: () => pickLibrary(mode, false) },
-        ];
-        if (mode !== 'story24') {
-            buttons.splice(1, 0, {
-                text: 'Carousel (2–10)',
-                onPress: () => pickLibrary(mode, true),
-            });
-        }
-        Alert.alert(
-            'Upload from your gallery',
-            'TikTok, Instagram, CapCut, and camera-roll clips all appear here.',
-            buttons,
-        );
-    };
+    const pickGalleryMedia = useCallback(
+        async (mode: PickerMode = 'feed') => {
+            const allowed = await ensureGalleryMediaPermission();
+            if (!allowed) return;
+            ImagePicker.launchImageLibrary(
+                {
+                    mediaType: 'mixed',
+                    quality: 0.9,
+                    selectionLimit: 10,
+                    videoQuality: 'high',
+                },
+                (response) => {
+                    if (response.didCancel) return;
+                    if (response.errorCode) {
+                        Alert.alert(
+                            'Media error',
+                            response.errorMessage || 'Could not open your gallery.',
+                        );
+                        return;
+                    }
+                    const assets = response.assets || [];
+                    if (assets.length === 0) {
+                        Alert.alert(
+                            'No supported files',
+                            'Please select photos or videos from your gallery.',
+                        );
+                        return;
+                    }
+                    navigateFromAssets(assets, mode, assets.length >= 2);
+                },
+            );
+        },
+        [navigateFromAssets],
+    );
 
     const openGallerySourceExplainer = () => {
         Alert.alert(
             'Upload from your gallery',
-            'Save or export from TikTok, Instagram, CapCut, or your camera roll — then pick it here.',
+            'Save or export from TikTok, Instagram, CapCut, or your camera roll — then pick up to 10 items here.',
             [
                 { text: 'Not now', style: 'cancel' },
-                { text: 'Choose media', onPress: () => openLibrary('feed') },
+                { text: 'Proceed', onPress: () => void pickGalleryMedia('feed') },
             ],
         );
     };
@@ -290,7 +294,7 @@ export default function InstantCreateScreen({ navigation }: any) {
             return;
         }
         if (item.id === 'gallery') {
-            openLibrary('feed');
+            void pickGalleryMedia('feed');
             return;
         }
         if (item.id === 'text') {

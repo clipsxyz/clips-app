@@ -204,8 +204,6 @@ import {
 } from '../utils/feedContentPrefsMobile';
 import {
     dismissPendingFeedUpload,
-    getPendingFeedUploads,
-    pendingUploadToPost,
     subscribePendingFeedUploadComplete,
     subscribePendingFeedUploads,
 } from '../utils/pendingFeedUploadNative';
@@ -2288,11 +2286,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     };
 
-    const pendingPosts = React.useMemo(
-        () =>
-            getPendingFeedUploads().map((job) => decorateForUser(userId, pendingUploadToPost(job))),
-        [pendingUploadTick, userId],
-    );
+    // Uploading/failed placeholders live in UploadProgressToast only — not in the feed list.
+    const pendingPosts = React.useMemo(() => [], [pendingUploadTick]);
 
     const flatPosts = React.useMemo(() => {
         const pendingIds = new Set(pendingPosts.map((p) => p.id));

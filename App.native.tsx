@@ -7,7 +7,8 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
+import { rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -94,7 +95,6 @@ class AppErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
-const navigationRef = createNavigationContainerRef();
 
 const TAB_BAR_STYLE = {
   backgroundColor: '#030712',

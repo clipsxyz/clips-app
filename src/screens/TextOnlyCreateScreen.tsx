@@ -25,7 +25,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar.native';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
-import { saveDraft } from '../api/drafts';
+import { saveDraft } from '../api/drafts.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import {
+  failedToSaveSheet,
+  nothingToSaveSheet,
+  savedToDraftsSheet,
+  type DraftSaveSheetState,
+} from '../utils/draftSaveSheetNative';
 import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
 import { navigateMainTab } from '../navigation/mainTabs';
@@ -96,6 +103,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const [tagSearchUsers, setTagSearchUsers] = useState<TagUser[]>([]);
   const [tagSearchLoading, setTagSearchLoading] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeTemplate = useMemo(
@@ -207,7 +215,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
 
   const handleSaveToDrafts = async () => {
     if (!text.trim()) {
-      Alert.alert('Text required', 'Add some text to save a draft.');
+      setDraftAlert(nothingToSaveSheet('Add some text to save a draft.'));
       return;
     }
     if (isSavingDraft) return;
@@ -225,13 +233,10 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         textTemplateId: selectedTemplateId || undefined,
       });
       hapticLight();
-      Alert.alert(
-        'Saved to drafts',
-        'You can find it in your profile. Tap a draft to continue and post.',
-        [{ text: 'Done', onPress: finishToFeed }],
-      );
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      setDraftAlert(savedToDraftsSheet(finishToFeed));
     } catch (err: any) {
-      Alert.alert('Draft failed', err?.message || 'Could not save draft. Please try again.');
+      setDraftAlert(failedToSaveSheet(err?.message));
     } finally {
       setIsSavingDraft(false);
     }
@@ -618,6 +623,19 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
           </View>
         </View>
       </Modal>
+      <GazetteerAlertSheet
+        visible={draftAlert != null}
+        title={draftAlert?.title ?? ''}
+        message={draftAlert?.message}
+        icon={draftAlert?.icon ?? 'alert'}
+        confirmButtonText={draftAlert?.confirmButtonText ?? 'OK'}
+        onConfirm={() => {
+          const action = draftAlert?.onConfirm;
+          setDraftAlert(null);
+          action?.();
+        }}
+        onDismiss={() => setDraftAlert(null)}
+      />
     </View>
   );
 }
