@@ -28,7 +28,18 @@ export default function UploadProgressToast() {
         >
             <View style={styles.card}>
                 <View style={styles.thumb}>
-                    {state.thumbUri ? (
+                    {state.textThumbBackground ? (
+                        <View
+                            style={[
+                                styles.textThumb,
+                                { backgroundColor: state.textThumbBackground },
+                            ]}
+                        >
+                            <Text style={styles.textThumbLabel}>
+                                {state.textThumbLabel || 'Aa'}
+                            </Text>
+                        </View>
+                    ) : state.thumbUri ? (
                         <Image source={{ uri: state.thumbUri }} style={styles.thumbImage} />
                     ) : (
                         <View style={styles.thumbPlaceholder}>
@@ -102,6 +113,16 @@ const styles = StyleSheet.create({
     thumbImage: {
         width: '100%',
         height: '100%',
+    },
+    textThumb: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    textThumbLabel: {
+        color: '#111827',
+        fontSize: 14,
+        fontWeight: '800',
     },
     thumbPlaceholder: {
         flex: 1,

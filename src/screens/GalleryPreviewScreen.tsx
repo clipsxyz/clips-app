@@ -385,7 +385,14 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         if (isUploading) return;
 
         if (story24) {
-            openStudioComposer();
+            const first = carouselItems[0];
+            if (!first) return;
+            navigation.replace('Story24Composer', {
+                mediaUrl: first.uri,
+                mediaType: first.type,
+                videoCoverTime: first.type === 'video' ? first.videoCoverTime ?? 0 : 0,
+                videoDurationSec: first.type === 'video' ? first.durationSec : undefined,
+            });
             return;
         }
 

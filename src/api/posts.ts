@@ -246,6 +246,7 @@ function isMockPostId(id: string): boolean {
 // Get posts from localStorage
 function getPostsFromStorage(): Post[] {
   try {
+    if (typeof localStorage === 'undefined') return [];
     const stored = localStorage.getItem(POSTS_STORAGE_KEY);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
@@ -256,21 +257,31 @@ function getPostsFromStorage(): Post[] {
 
 // Save posts to localStorage — only user-created posts (exclude all mock/seed posts to avoid unbounded growth and duplicates on reload)
 function savePostsToStorage(postsToSave: Post[]): void {
+  const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
   try {
-    const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
-    localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
-    console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
+      console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+    }
   } catch (error) {
     console.error('Error saving posts to localStorage:', error);
   }
+  void import('./postsStorage.native')
+    .then((m) => m.savePostsToStorageNative(userCreatedPosts))
+    .catch(() => {});
 }
 
 function markPendingCreatedPost(post: Post): void {
   try {
-    localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+    }
   } catch {
     // Ignore storage failures; post creation should still succeed.
   }
+  void import('./postsStorage.native')
+    .then((m) => m.markPendingCreatedPostNative(post))
+    .catch(() => {});
 }
 
 export function consumePendingCreatedPost(): Post | null {
@@ -1421,6 +1432,25 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
   // Mock implementation (fallback)
   try {
+    // React Native: hydrate user-created posts from AsyncStorage (no localStorage).
+    if (typeof localStorage === 'undefined') {
+      try {
+        const { getPostsFromStorageNative } = await import('./postsStorage.native');
+        const storedNative = (await getPostsFromStorageNative()).filter((p) => !isMockPostId(p.id));
+        if (storedNative.length > 0) {
+          const seenNative = new Set(posts.map((p) => String(p.id)));
+          for (const p of storedNative) {
+            if (!seenNative.has(String(p.id))) {
+              posts.push(p);
+              seenNative.add(String(p.id));
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // Reload only user-created posts from localStorage (exclude mock ids to avoid duplicates)
   const userCreatedPosts = getPostsFromStorage()
     .filter(p => !isMockPostId(p.id))

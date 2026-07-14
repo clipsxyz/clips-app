@@ -49,6 +49,7 @@ import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import ClipScreen from './src/screens/ClipScreen';
 import ClipPollScreen from './src/screens/ClipPollScreen';
+import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
@@ -341,7 +342,7 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="TextOnlyCreate"
             component={TextOnlyCreateScreen}
-            options={{ presentation: 'modal' }}
+            options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen
             name="TextOnlyPostDetails"
@@ -374,7 +375,16 @@ function App(): React.JSX.Element {
           <Stack.Screen name="Landing" component={LandingScreen} />
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
-          <Stack.Screen name="Clip" component={ClipScreen} />
+          <Stack.Screen
+            name="Clip"
+            component={ClipScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="Story24Composer"
+            component={Story24ComposerScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
           <Stack.Screen
             name="ClipPoll"
             component={ClipPollScreen}

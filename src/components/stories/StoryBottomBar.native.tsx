@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 type Props = {
@@ -35,64 +35,91 @@ export default function StoryBottomBar({
     if (hidden) return null;
 
     return (
-        <View style={styles.bar}>
-            {showReplyComposer ? (
-                <View style={styles.composerRow}>
-                    <TextInput
-                        value={replyText}
-                        onChangeText={onReplyTextChange}
-                        placeholder={replyPlaceholder}
-                        placeholderTextColor="rgba(255,255,255,0.7)"
-                        style={styles.input}
-                        autoFocus
-                        editable={!isSending}
-                        returnKeyType="send"
-                        onSubmitEditing={() => {
-                            if (!isSending && replyText.trim()) onSendReply();
-                        }}
-                    />
-                    <TouchableOpacity
-                        onPress={onSendReply}
-                        disabled={!replyText.trim() || isSending}
-                        style={[styles.sendBtn, (!replyText.trim() || isSending) && styles.sendBtnDisabled]}
+        <View style={styles.host} pointerEvents="box-none">
+            <View style={styles.bar}>
+                {showReplyComposer ? (
+                    <View style={styles.composerRow}>
+                        <TextInput
+                            value={replyText}
+                            onChangeText={onReplyTextChange}
+                            placeholder={replyPlaceholder}
+                            placeholderTextColor="rgba(255,255,255,0.7)"
+                            style={styles.input}
+                            autoFocus
+                            editable={!isSending}
+                            returnKeyType="send"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => {
+                                if (!isSending && replyText.trim()) onSendReply();
+                            }}
+                        />
+                        <Pressable
+                            onPress={onSendReply}
+                            disabled={!replyText.trim() || isSending}
+                            style={({ pressed }) => [
+                                styles.sendBtn,
+                                (!replyText.trim() || isSending) && styles.sendBtnDisabled,
+                                pressed && styles.pressed,
+                            ]}
+                        >
+                            <Text style={styles.sendBtnText}>{isSending ? '…' : 'Send'}</Text>
+                        </Pressable>
+                        <Pressable
+                            onPress={onCancelReply}
+                            style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}
+                        >
+                            <Text style={styles.cancelBtnText}>Cancel</Text>
+                        </Pressable>
+                    </View>
+                ) : (
+                    <Pressable
+                        style={({ pressed }) => [styles.messagePill, pressed && styles.pressed]}
+                        onPress={onOpenReply}
                     >
-                        <Text style={styles.sendBtnText}>{isSending ? '…' : 'Send'}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={onCancelReply} style={styles.cancelBtn}>
-                        <Text style={styles.cancelBtnText}>Cancel</Text>
-                    </TouchableOpacity>
-                </View>
-            ) : (
-                <TouchableOpacity style={styles.messagePill} onPress={onOpenReply} activeOpacity={0.9}>
-                    <Text style={styles.messagePillText}>Send message</Text>
-                </TouchableOpacity>
-            )}
+                        <Text style={styles.messagePillText}>Send message</Text>
+                    </Pressable>
+                )}
 
-            <TouchableOpacity onPress={onLike} style={styles.iconBtn}>
-                <Icon
-                    name="thumbs-up"
-                    size={22}
-                    color={hasReaction ? '#22D3EE' : '#FFFFFF'}
-                />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onShare} style={styles.iconBtn}>
-                <Icon name="paper-plane-outline" size={22} color="#FFFFFF" />
-            </TouchableOpacity>
+                <Pressable
+                    onPress={onLike}
+                    style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+                    hitSlop={8}
+                >
+                    <Icon
+                        name="thumbs-up"
+                        size={22}
+                        color={hasReaction ? '#22D3EE' : '#FFFFFF'}
+                    />
+                </Pressable>
+                <Pressable
+                    onPress={onShare}
+                    style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+                    hitSlop={8}
+                >
+                    <Icon name="paper-plane-outline" size={22} color="#FFFFFF" />
+                </Pressable>
+            </View>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    bar: {
+    host: {
         position: 'absolute',
-        left: 8,
-        right: 8,
-        bottom: 16,
-        zIndex: 60,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 90,
+        elevation: 12,
+        paddingHorizontal: 8,
+        paddingBottom: 16,
+    },
+    bar: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        maxWidth: 420,
+        width: '100%',
+        maxWidth: 448,
         alignSelf: 'center',
     },
     composerRow: {
@@ -112,7 +139,7 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 12,
         paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingVertical: Platform.OS === 'android' ? 6 : 8,
     },
     sendBtn: {
         borderRadius: 999,
@@ -144,5 +171,9 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700',
     },
-    iconBtn: { padding: 6, flexShrink: 0 },
+    iconBtn: {
+        padding: 6,
+        flexShrink: 0,
+    },
+    pressed: { opacity: 0.85 },
 });

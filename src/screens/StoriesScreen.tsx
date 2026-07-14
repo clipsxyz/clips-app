@@ -47,6 +47,10 @@ import {
 } from '../utils/stories24Rail';
 import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
 import { isStoryVideo } from '../utils/storyMediaNative';
+import {
+    buildStoryReplyContext,
+    resolveStoryReplyThumbnail,
+} from '../utils/storyReplyNative';
 import { getStoryTextContent } from '../utils/storyTextStyleNative';
 import {
     buildStoryMetadataItems,
@@ -121,6 +125,10 @@ export default function StoriesScreen({ route, navigation }: any) {
     const lastLikeTapAtRef = useRef(0);
     const lastMuteToggleAtRef = useRef(0);
     const deliveryFxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const deliveryFxFlyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const showInlineReplyComposerRef = useRef(false);
+    const isSendingReplyRef = useRef(false);
+    const pausedRef = useRef(false);
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const formatRelativeTime = (timestamp?: number) => {
@@ -166,7 +174,10 @@ export default function StoriesScreen({ route, navigation }: any) {
     const currentGroup = storyGroups[currentGroupIndex];
     const currentStory = currentGroup?.stories[currentStoryIndex];
     const isViewingOwnStory = Boolean(
-        user?.id && currentStory && currentGroup && currentStory.userId === user.id,
+        user?.id &&
+            currentStory &&
+            currentGroup &&
+            (currentStory.userId === user.id || currentGroup.userHandle === user.handle),
     );
 
     useEffect(() => {
@@ -222,20 +233,53 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [viewingStories, currentGroup?.userHandle, user?.id, user?.handle]);
 
     useEffect(() => {
-        if (
-            showInsightsSheet ||
+        pausedRef.current = paused;
+    }, [paused]);
+
+    const storyPauseLocked = Boolean(
+        showInsightsSheet ||
             showStoryShareModal ||
             showSharedPostModal ||
             showStoryProfileCard ||
-            deliveryFx
-        ) {
-            setPaused(true);
+            deliveryFx ||
+            showInlineReplyComposer ||
+            isSendingReply ||
+            isHoldingToPause,
+    );
+
+    useEffect(() => {
+        if (!viewingStories) return;
+        setPaused(storyPauseLocked);
+    }, [viewingStories, storyPauseLocked]);
+
+    useEffect(() => {
+        showInlineReplyComposerRef.current = showInlineReplyComposer;
+    }, [showInlineReplyComposer]);
+
+    useEffect(() => {
+        isSendingReplyRef.current = isSendingReply;
+    }, [isSendingReply]);
+
+    const clearDeliveryFx = useCallback(() => {
+        if (deliveryFxTimerRef.current) {
+            clearTimeout(deliveryFxTimerRef.current);
+            deliveryFxTimerRef.current = null;
         }
-    }, [showInsightsSheet, showStoryShareModal, showSharedPostModal, showStoryProfileCard, deliveryFx]);
+        if (deliveryFxFlyTimerRef.current) {
+            clearTimeout(deliveryFxFlyTimerRef.current);
+            deliveryFxFlyTimerRef.current = null;
+        }
+        setDeliveryFx(null);
+    }, []);
+
+    const handleDeliveryFxComplete = useCallback(() => {
+        clearDeliveryFx();
+    }, [clearDeliveryFx]);
 
     useEffect(() => {
         return () => {
             if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
+            if (deliveryFxFlyTimerRef.current) clearTimeout(deliveryFxFlyTimerRef.current);
         };
     }, []);
 
@@ -397,7 +441,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
 
         timerRef.current = setInterval(() => {
-            if (paused) return;
+            if (pausedRef.current) return;
 
             progressRef.current += 50;
             const newProgress = Math.min((progressRef.current / STORY_DURATION) * 100, 100);
@@ -513,14 +557,10 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const pauseForHold = () => {
         setIsHoldingToPause(true);
-        setPaused(true);
     };
 
     const releaseHold = () => {
         setIsHoldingToPause(false);
-        if (!showInlineReplyComposer && !isSendingReply) {
-            setPaused(false);
-        }
     };
 
     const toggleGlobalMute = useCallback(() => {
@@ -578,10 +618,14 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const startDeliveryFx = useCallback((kind: 'message' | 'like', toHandle: string) => {
         if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
-        setPaused(true);
+        if (deliveryFxFlyTimerRef.current) clearTimeout(deliveryFxFlyTimerRef.current);
+
         const startX = width / 2;
         const startY = height - 112;
-        const applyTarget = (targetX: number, targetY: number) => {
+        let targetX = 40;
+        let targetY = 42;
+
+        const beginFx = () => {
             setDeliveryFx({
                 kind,
                 toHandle,
@@ -591,29 +635,37 @@ export default function StoriesScreen({ route, navigation }: any) {
                 targetY,
                 phase: 'start',
             });
-            deliveryFxTimerRef.current = setTimeout(() => {
+            deliveryFxFlyTimerRef.current = setTimeout(() => {
                 setDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
             }, 14);
+            deliveryFxTimerRef.current = setTimeout(() => {
+                clearDeliveryFx();
+            }, 4300);
         };
+
+        // Always start FX + resume timer immediately (measureInWindow can hang on Android).
+        beginFx();
+
         const node = avatarRef.current;
         if (node && typeof node.measureInWindow === 'function') {
             node.measureInWindow((x, y, w, h) => {
-                applyTarget(x + w / 2, y + h / 2);
+                if (w <= 0 || h <= 0) return;
+                const measuredX = x + w / 2;
+                const measuredY = y + h / 2;
+                setDeliveryFx((prev) =>
+                    prev ? { ...prev, targetX: measuredX, targetY: measuredY } : null,
+                );
             });
-        } else {
-            applyTarget(40, 42);
         }
-    }, []);
+    }, [clearDeliveryFx]);
 
     const handleReaction = async (emoji: string) => {
         if (!currentStory || !user?.id || !user?.handle) return;
-        setPaused(true);
         try {
             await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
             setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
         } catch (error) {
             console.error('Error adding reaction:', error);
-            if (!deliveryFx) setPaused(false);
         }
     };
 
@@ -631,54 +683,66 @@ export default function StoriesScreen({ route, navigation }: any) {
         const currentGroup = storyGroups[currentGroupIndex];
         const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !user?.handle || !replyText.trim() || isSendingReply) return;
-        
+
+        const toHandle = currentGroup?.userHandle;
+        const normalizedReply = replyText.trim();
+        const isSelfStory =
+            !!toHandle &&
+            !!user.handle &&
+            toHandle.trim().toLowerCase() === user.handle.trim().toLowerCase();
+
         try {
             setIsSendingReply(true);
-            setPaused(true);
-            await addStoryReply(currentStory.id, user.id, user.handle, replyText);
-            if (currentGroup?.userHandle) {
-                const sharedPost =
-                    currentStory.sharedFromPost && !currentStory.mediaUrl
+            await addStoryReply(currentStory.id, user.id, user.handle, normalizedReply);
+
+            if (toHandle && !isSelfStory) {
+                const sharedPostForContext =
+                    currentStory.sharedFromPost && !originalPost
                         ? await getPostById(currentStory.sharedFromPost, user.id)
                         : null;
-                const mediaUrl = (
-                    (currentStory.mediaUrl || '').trim() ||
-                    (sharedPost?.mediaUrl || '').trim() ||
-                    (sharedPost?.mediaItems?.find((m) => m.type === 'image' || m.type === 'video')?.url || '').trim() ||
-                    ''
+                const storyThumb = await resolveStoryReplyThumbnail(
+                    currentStory,
+                    originalPost,
+                    sharedPostForContext,
                 );
-                const contextOwner =
-                    (currentStory.sharedFromUser || sharedPost?.userHandle || currentGroup.userHandle) as string;
-                const contextSnippet = (
-                    (sharedPost?.text || sharedPost?.caption || currentStory.text || '') as string
-                )
-                    .trim()
-                    .slice(0, 120);
-                const normalizedReply = replyText.trim();
-                const isVisualStory = !!mediaUrl;
-                if (isVisualStory && mediaUrl) {
-                    await appendMessage(user.handle, currentGroup.userHandle, {
-                        imageUrl: mediaUrl,
+                const { contextOwner, storyContextText, isVisualStory } = buildStoryReplyContext(
+                    currentStory,
+                    toHandle,
+                    originalPost,
+                    sharedPostForContext,
+                );
+
+                if (storyThumb) {
+                    await appendMessage(user.handle, toHandle, {
+                        imageUrl: storyThumb,
                         storyId: currentStory.id,
-                        storyContextOwner: contextOwner,
-                        storyContextText: contextSnippet || undefined,
+                        storyContextOwner: contextOwner || undefined,
                     });
                 } else {
-                    const contextBubbleText = contextSnippet
-                        ? `Replying to @${contextOwner}'s story:\n"${contextSnippet}"`
+                    const contextBubbleText = storyContextText
+                        ? `Replying to @${contextOwner}'s story:\n"${storyContextText}"`
                         : `Replying to @${contextOwner}'s story`;
-                    await appendMessage(user.handle, currentGroup.userHandle, {
+                    await appendMessage(user.handle, toHandle, {
                         text: contextBubbleText,
                         isSystemMessage: true,
                     });
                 }
-                await appendMessage(user.handle, currentGroup.userHandle, {
+                await appendMessage(user.handle, toHandle, {
                     text: normalizedReply,
+                    imageUrl: isVisualStory ? undefined : storyThumb,
                     storyId: currentStory.id,
-                    storyContextOwner: contextOwner,
-                    storyContextText: isVisualStory ? undefined : (contextSnippet || undefined),
+                    storyContextText: isVisualStory ? undefined : storyContextText || undefined,
+                    storyContextOwner: contextOwner || undefined,
                 });
+                await appendMessage(toHandle, user.handle, {
+                    text: 'You replied to their story',
+                    isSystemMessage: true,
+                });
+                startDeliveryFx('message', toHandle);
+            } else if (toHandle) {
+                startDeliveryFx('message', toHandle);
             }
+
             setStoryGroups((prev) =>
                 prev.map((group, groupIdx) => {
                     if (groupIdx !== currentGroupIndex) return group;
@@ -694,23 +758,20 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         id: `reply-${Date.now()}`,
                                         userId: user.id,
                                         userHandle: user.handle,
-                                        text: replyText.trim(),
+                                        text: normalizedReply,
                                         createdAt: Date.now(),
                                     },
                                 ],
                             };
                         }),
                     };
-                })
+                }),
             );
             setReplyText('');
             setShowInlineReplyComposer(false);
-            if (currentGroup?.userHandle) {
-                startDeliveryFx('message', currentGroup.userHandle);
-            }
         } catch (error) {
             console.error('Error adding reply:', error);
-            setPaused(false);
+            Alert.alert('Could not send reply', 'Please try again in a moment.');
         } finally {
             setIsSendingReply(false);
         }
@@ -775,13 +836,6 @@ export default function StoriesScreen({ route, navigation }: any) {
         },
         [currentGroupIndex, currentStoryIndex, storyGroups, user?.id],
     );
-
-    useEffect(() => {
-        if (!viewingStories) return;
-        if (showInlineReplyComposer || isSendingReply) {
-            setPaused(true);
-        }
-    }, [viewingStories, showInlineReplyComposer, isSendingReply]);
 
     useEffect(() => {
         if (viewingStories && !paused) {
@@ -1095,20 +1149,11 @@ export default function StoriesScreen({ route, navigation }: any) {
                         }}
                         onSendReply={() => void handleReply()}
                         onLike={triggerLikeAction}
-                        onShare={() => {
-                            setShowStoryShareModal(true);
-                            setPaused(true);
-                        }}
+                        onShare={() => setShowStoryShareModal(true)}
                     />
 
                     {deliveryFx ? (
-                        <StoryDeliveryFx
-                            fx={deliveryFx}
-                            onComplete={() => {
-                                setDeliveryFx(null);
-                                if (!showInlineReplyComposer && !isSendingReply) setPaused(false);
-                            }}
-                        />
+                        <StoryDeliveryFx fx={deliveryFx} onComplete={handleDeliveryFxComplete} />
                     ) : null}
                 </>
             )}
@@ -1165,10 +1210,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             {currentStory && currentGroup ? (
                 <StoryShareSheet
                     visible={showStoryShareModal}
-                    onClose={() => {
-                        setShowStoryShareModal(false);
-                        if (!showInlineReplyComposer) setPaused(false);
-                    }}
+                    onClose={() => setShowStoryShareModal(false)}
                     userHandle={currentGroup.userHandle}
                     storyId={currentStory.id}
                 />

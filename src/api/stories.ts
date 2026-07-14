@@ -1031,18 +1031,38 @@ export async function addStoryReaction(storyId: string, userId: string, userHand
 
 // Add reply to story
 export async function addStoryReply(storyId: string, userId: string, userHandle: string, text: string): Promise<void> {
-    await delay();
+    const pushMockReply = () => {
+        const story = stories.find((s) => s.id === storyId);
+        if (story) {
+            if (!Array.isArray(story.replies)) story.replies = [];
+            story.replies.push({
+                id: `reply-${Date.now()}`,
+                userId,
+                userHandle,
+                text,
+                createdAt: Date.now(),
+            });
+        }
+    };
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        story.replies.push({
-            id: `reply-${Date.now()}`,
-            userId,
-            userHandle,
-            text,
-            createdAt: Date.now()
-        });
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            await apiRequest(`/stories/${storyId}/reply`, {
+                method: 'POST',
+                body: JSON.stringify({ text }),
+            });
+            pushMockReply();
+            return;
+        } catch (error: any) {
+            const isConnectionFallback =
+                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+            if (!isConnectionFallback) throw error;
+        }
     }
+
+    await delay();
+    pushMockReply();
 }
 
 // Add answer to question in story - stores question in questions API (not messages)

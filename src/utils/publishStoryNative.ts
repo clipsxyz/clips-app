@@ -74,6 +74,7 @@ export async function publishMediaStory24(options: {
     venue?: string;
     stickers?: StickerOverlay[];
     taggedUsers?: string[];
+    taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>;
     audience?: 'public' | 'close_friends' | 'only_me';
 }): Promise<Story> {
     const composerStickers = buildStoryComposerStickers({
@@ -93,10 +94,11 @@ export async function publishMediaStory24(options: {
         undefined,
         undefined,
         undefined,
+        undefined,
         composerStickers.length > 0 ? composerStickers : undefined,
         options.taggedUsers?.length ? options.taggedUsers : undefined,
         undefined,
-        undefined,
+        options.taggedUsersPositions?.length ? options.taggedUsersPositions : undefined,
         undefined,
         options.venue,
         options.audience ?? 'public',

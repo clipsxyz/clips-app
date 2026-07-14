@@ -10,6 +10,39 @@ import {
 import { getUploadOverlayForJob } from './uploadOverlayNative';
 
 async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void> {
+    if (job.isTextOnly) {
+        const createdPost = await createPost(
+            job.userId,
+            job.userHandle,
+            job.text,
+            job.location,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            job.userLocal,
+            job.userRegional,
+            job.userNational,
+            undefined,
+            job.templateId,
+            undefined,
+            undefined,
+            job.textStyle,
+            job.taggedUsers && job.taggedUsers.length > 0 ? job.taggedUsers : undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            job.venue,
+            job.landmark,
+        );
+        completePendingFeedUpload(job.tempId, createdPost);
+        getUploadOverlayForJob(job.tempId)?.success();
+        return;
+    }
+
     const isCarousel =
         Array.isArray(job.localMediaItems) && job.localMediaItems.length > 1;
 

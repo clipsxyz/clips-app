@@ -1152,7 +1152,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             onPress={() => {
                                                 setDraftsOpen(false);
                                                 if (draft.isTextOnly) {
-                                                    navigation.navigate('TextOnlyPostDetails', {
+                                                    navigation.navigate('TextOnlyCreate', {
                                                         text: draft.textBody || draft.caption || '',
                                                         fromDraft: true,
                                                         location: draft.location || '',

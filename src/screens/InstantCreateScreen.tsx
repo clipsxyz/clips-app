@@ -71,12 +71,13 @@ function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress }: OrbitMod
     });
     const scale = angleDeg.interpolate({
         inputRange: [-180, -90, 0, 90, 180],
-        outputRange: [0.66, 0.83, 1.34, 0.83, 0.66],
+        // Bottom (±180°) matches left/right — web floors opposite at 0.8, not 0.66.
+        outputRange: [0.83, 0.83, 1.34, 0.83, 0.83],
         extrapolate: 'clamp',
     });
     const tileOpacity = angleDeg.interpolate({
         inputRange: [-180, -90, 0, 90, 180],
-        outputRange: [0.56, 0.72, 1, 0.72, 0.56],
+        outputRange: [0.72, 0.72, 1, 0.72, 0.72],
         extrapolate: 'clamp',
     });
     const contentLift = angleDeg.interpolate({

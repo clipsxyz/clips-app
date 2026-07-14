@@ -32,6 +32,15 @@ export type PendingFeedUploadJob = {
     taggedUsers?: string[];
     venue?: string;
     landmark?: string;
+    /** Text-only feed postcard (no media upload). */
+    isTextOnly?: boolean;
+    textStyle?: {
+        color?: string;
+        size?: 'small' | 'medium' | 'large';
+        background?: string;
+        fontFamily?: string;
+    };
+    templateId?: string;
 };
 
 const pendingById = new Map<string, PendingFeedUploadJob>();
@@ -109,6 +118,33 @@ export function completePendingFeedUpload(tempId: string, post: Post): void {
 }
 
 export function pendingUploadToPost(job: PendingFeedUploadJob): Post {
+    if (job.isTextOnly) {
+        return {
+            id: job.tempId,
+            user_id: job.userId,
+            userHandle: job.userHandle,
+            locationLabel: job.location,
+            venue: job.venue,
+            landmark: job.landmark,
+            tags: [],
+            text: job.text || undefined,
+            caption: job.text || undefined,
+            textStyle: job.textStyle,
+            templateId: job.templateId,
+            taggedUsers: job.taggedUsers,
+            userLocal: job.userLocal,
+            userRegional: job.userRegional,
+            userNational: job.userNational,
+            createdAt: job.createdAt,
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: false,
+            userLiked: false,
+            clientUploadStatus: job.status,
+            clientUploadError: job.errorMessage,
+        };
+    }
+
     const previewUri = job.localThumbUri || job.localMediaUri || undefined;
     const carouselLocal =
         job.localMediaItems && job.localMediaItems.length > 1

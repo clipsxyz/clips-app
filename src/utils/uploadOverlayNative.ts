@@ -4,6 +4,9 @@ export type UploadOverlayState = {
     id: string;
     thumbUri?: string;
     thumbType?: 'image' | 'video';
+    /** Text-only post preview tile (web upload overlay parity). */
+    textThumbBackground?: string;
+    textThumbLabel?: string;
     title: string;
     message: string;
     status: UploadOverlayStatus;
@@ -33,6 +36,8 @@ export function subscribeUploadOverlay(listener: Listener): () => void {
 export function showUploadOverlayNative(opts: {
     thumbUri?: string;
     thumbType?: 'image' | 'video';
+    textThumbBackground?: string;
+    textThumbLabel?: string;
     initialMessage?: string;
     uploadingTitle?: string;
     successTitle?: string;
@@ -49,6 +54,8 @@ export function showUploadOverlayNative(opts: {
             id,
             thumbUri: opts.thumbUri,
             thumbType: opts.thumbType ?? 'image',
+            textThumbBackground: opts.textThumbBackground,
+            textThumbLabel: opts.textThumbLabel,
             title,
             message,
             status,
