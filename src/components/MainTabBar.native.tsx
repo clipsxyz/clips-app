@@ -13,6 +13,7 @@ import LinearGradient from 'react-native-linear-gradient';
 
 type Props = BottomTabBarProps & {
   inboxBadgeCount: number;
+  onCreatePress?: () => void;
 };
 
 function TabSquareIcon({ name, focused }: { name: string; focused: boolean }) {
@@ -28,6 +29,7 @@ export default function MainTabBar({
   descriptors,
   navigation,
   inboxBadgeCount,
+  onCreatePress,
 }: Props) {
   const insets = useSafeAreaInsets();
   const activeRouteName = state.routes[state.index]?.name;
@@ -67,6 +69,15 @@ export default function MainTabBar({
         else if (route.name === 'Inbox') iconName = focused ? 'chatbox-ellipses' : 'chatbox-ellipses-outline';
 
         const onPress = () => {
+          if (route.name === 'Create') {
+            navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+            onCreatePress?.();
+            return;
+          }
           const event = navigation.emit({
             type: 'tabPress',
             target: route.key,

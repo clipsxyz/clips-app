@@ -31,6 +31,7 @@ import StoriesScreen from './src/screens/StoriesScreen';
 import ViewProfileScreen from './src/screens/ViewProfileScreen';
 import CreateScreen from './src/screens/CreateScreen';
 import InstantCreateScreen from './src/screens/InstantCreateScreen';
+import { GAZETTEER_ABYSS } from './src/theme/gazetteerAmbientNative';
 import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
 import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
 import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
@@ -164,6 +165,10 @@ function HomeTabScreen(props: React.ComponentProps<typeof FeedScreen>) {
   );
 }
 
+function CreateTabPlaceholder() {
+  return <View style={styles.createTabPlaceholder} />;
+}
+
 function MainTabs() {
   const { user } = useAuth();
   const [inboxBadgeCount, setInboxBadgeCount] = useState(0);
@@ -198,14 +203,28 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: TAB_BAR_STYLE,
-        sceneContainerStyle: { backgroundColor: '#030712' },
+        sceneContainerStyle: { backgroundColor: GAZETTEER_ABYSS },
         lazy: true,
       }}
-      tabBar={(props) => <MainTabBar {...props} inboxBadgeCount={inboxBadgeCount} />}
+      tabBar={(props) => (
+        <MainTabBar
+          {...props}
+          inboxBadgeCount={inboxBadgeCount}
+          onCreatePress={() => {
+            if (navigationRef.isReady()) {
+              navigationRef.navigate('InstantCreate' as never);
+            }
+          }}
+        />
+      )}
     >
       <Tab.Screen name="Home" component={HomeTabScreen} options={{ title: 'Home' }} />
       <Tab.Screen name="Boost" component={BoostScreen} options={{ title: 'Boost' }} />
-      <Tab.Screen name="Create" component={InstantCreateScreen} options={{ title: 'Create' }} />
+      <Tab.Screen
+        name="Create"
+        component={CreateTabPlaceholder}
+        options={{ title: 'Create' }}
+      />
       <Tab.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
       <Tab.Screen name="Inbox" component={InboxScreen} options={{ title: 'Inbox' }} />
     </Tab.Navigator>
@@ -269,7 +288,7 @@ function App(): React.JSX.Element {
           <Stack.Navigator
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: '#030712' },
+              contentStyle: { backgroundColor: GAZETTEER_ABYSS },
             }}
           >
           <Stack.Screen name="MainTabs" component={MainTabs} />
@@ -307,7 +326,7 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="InstantCreate"
             component={InstantCreateScreen}
-            options={{ presentation: 'modal' }}
+            options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen
             name="GalleryPreview"
@@ -380,6 +399,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#030712',
     overflow: 'hidden',
+  },
+  createTabPlaceholder: {
+    flex: 1,
+    backgroundColor: GAZETTEER_ABYSS,
   },
 });
 

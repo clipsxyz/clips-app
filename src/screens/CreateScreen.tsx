@@ -803,14 +803,24 @@ export default function CreateScreen({ navigation, route }: any) {
                 {!selectedMedia && (
                     <View style={styles.mediaSelection}>
                         <TouchableOpacity
-                            onPress={handleSelectMedia}
+                            onPress={() => {
+                                navigation.replace('GalleryPreview', {
+                                    autoStart: { source: 'library', kind: isStory24Flow ? 'single' : 'carousel', mediaType: 'mixed' },
+                                    story24: isStory24Flow || undefined,
+                                });
+                            }}
                             style={styles.mediaButton}
                         >
                             <Icon name="images" size={32} color="#8B5CF6" />
                             <Text style={styles.mediaButtonText}>Choose from Library</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            onPress={handleTakePhoto}
+                            onPress={() => {
+                                navigation.replace('GalleryPreview', {
+                                    autoStart: { source: 'camera', kind: 'single', mediaType: 'photo' },
+                                    story24: isStory24Flow || undefined,
+                                });
+                            }}
                             style={styles.mediaButton}
                         >
                             <Icon name="camera" size={32} color="#8B5CF6" />

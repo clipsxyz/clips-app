@@ -45,7 +45,7 @@ export default function GazetteerScreenShell({
 const styles = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: 'transparent',
+        backgroundColor: GAZETTEER_ABYSS,
     },
     rootSolid: {
         backgroundColor: GAZETTEER_ABYSS,

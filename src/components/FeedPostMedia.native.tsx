@@ -15,8 +15,6 @@ import {
     type ViewStyle,
 } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
-
-const FEED_DOUBLE_TAP_MS = 300;
 import type { StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -40,6 +38,8 @@ import {
 import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
+
+const FEED_DOUBLE_TAP_MS = 300;
 
 export type FeedPostMediaHandle = {
     toggleVideoMute: () => void;

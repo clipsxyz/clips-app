@@ -55,6 +55,13 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const story24 = !!route.params?.story24;
     const passedCaption = route.params?.draftCaption || '';
+    const autoStart = route.params?.autoStart as
+        | undefined
+        | {
+              source: 'library' | 'camera';
+              kind: 'single' | 'carousel';
+              mediaType?: 'photo' | 'video' | 'mixed';
+          };
 
     const initialItems: LocalCarouselItem[] = useMemo(() => {
         const fromRoute = route.params?.carouselItems;
@@ -203,6 +210,85 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             },
         );
     }, []);
+
+    const applyAssets = useCallback((assets: ImagePicker.Asset[]) => {
+        const next: LocalCarouselItem[] = [];
+        for (const a of assets) {
+            if (next.length >= CAROUSEL_MAX) break;
+            if (!a.uri) continue;
+            const isVideo = assetIsVideo(a);
+            const slide: LocalCarouselItem = {
+                uri: a.uri,
+                type: isVideo ? 'video' : 'image',
+            };
+            if (isVideo) {
+                slide.videoCoverTime = 0;
+                const d = Number(a.duration || 0);
+                if (Number.isFinite(d) && d > 0) {
+                    slide.durationSec = Math.max(0.1, Math.floor(d * 10) / 10);
+                }
+            }
+            next.push(slide);
+        }
+        if (next.length === 0) return false;
+        setCarouselItems(next);
+        setCarouselActiveIndex(0);
+        if (next.length > 1) setCardTab('carousel');
+        return true;
+    }, []);
+
+    useEffect(() => {
+        // When opened from CreateComposer with no media, auto-start pickers to match web flow:
+        // choose media → preview/tools → (optional) open full studio composer.
+        if (!autoStart) return;
+        if (initialItems.length > 0) return;
+        if (carouselItems.length > 0) return;
+
+        if (autoStart.source === 'library') {
+            ImagePicker.launchImageLibrary(
+                {
+                    mediaType: autoStart.mediaType ?? 'mixed',
+                    selectionLimit: autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
+                    quality: 0.9,
+                    videoQuality: 'high',
+                },
+                (response) => {
+                    if (response.didCancel) {
+                        navigation.goBack();
+                        return;
+                    }
+                    if (response.errorCode) {
+                        Alert.alert('Media error', response.errorMessage || 'Could not open your library.');
+                        navigation.goBack();
+                        return;
+                    }
+                    const ok = applyAssets(response.assets || []);
+                    if (!ok) navigation.goBack();
+                },
+            );
+            return;
+        }
+
+        if (autoStart.source === 'camera') {
+            const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
+            ImagePicker.launchCamera(
+                { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high' },
+                (response) => {
+                    if (response.didCancel) {
+                        navigation.goBack();
+                        return;
+                    }
+                    if (response.errorCode) {
+                        Alert.alert('Camera error', response.errorMessage || 'Could not open camera.');
+                        navigation.goBack();
+                        return;
+                    }
+                    const ok = applyAssets(response.assets || []);
+                    if (!ok) navigation.goBack();
+                },
+            );
+        }
+    }, [applyAssets, autoStart, carouselItems.length, initialItems.length, navigation]);
 
     const openStudioComposer = () => {
         if (carouselItems.length === 0) return;
@@ -473,8 +559,10 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                     style={styles.toolsToggle}
                     onPress={() => setToolsExpanded((v) => !v)}
                 >
-                    <Text style={styles.toolsToggleText}>{toolsExpanded ? 'Hide tools' : 'Show tools'}</Text>
-                    <Icon name={toolsExpanded ? 'chevron-down' : 'chevron-up'} size={18} color="#9CA3AF" />
+                    <View style={styles.toolsGrabber} />
+                    <Text style={styles.toolsToggleText}>
+                        {toolsExpanded ? 'Tap to collapse' : 'Tap to expand'}
+                    </Text>
                 </TouchableOpacity>
                 {toolsExpanded ? (
                     <>
@@ -729,13 +817,19 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
     },
     toolsToggle: {
-        flexDirection: 'row',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
+        gap: 4,
         paddingVertical: 8,
     },
     toolsToggleText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+    toolsGrabber: {
+        width: 56,
+        height: 5,
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.45)',
+    },
     tabRow: { maxHeight: 40, marginBottom: 8, paddingHorizontal: 12 },
     tabChip: {
         flexDirection: 'row',
