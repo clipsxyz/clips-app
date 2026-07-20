@@ -6,12 +6,10 @@ import {
     ScrollView,
     Image,
     TouchableOpacity,
-    FlatList,
     ActivityIndicator,
     Alert,
     Modal,
     Clipboard,
-    TextInput,
     RefreshControl,
     Linking,
 } from 'react-native';
@@ -26,21 +24,45 @@ import {
     gazetteerHeader,
 } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers } from '../api/posts';
+import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers, setFollowState, toggleLike, reclipPost, posts as allPosts } from '../api/posts';
 import { fetchUserProfile, toggleFollow, fetchFollowers, fetchFollowing } from '../api/client';
+import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { userHasStoriesByHandle } from '../api/stories';
-import { isProfilePrivate, canViewProfile, hasPendingFollowRequest, canSendMessage } from '../api/privacy';
+import {
+    isProfilePrivate,
+    canViewProfile,
+    hasPendingFollowRequest,
+    canSendMessage,
+    createFollowRequest,
+    removeFollowRequest,
+    normalizeHandleForPrivacy,
+} from '../api/privacy';
+import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
-import Avatar from '../components/Avatar';
+import Flag from '../components/Flag.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import ProfilePostNotifyBell from '../components/ProfilePostNotifyBell.native';
 import ProfilePostNotifySheet, {
     type ProfilePostNotifySheetMode,
 } from '../components/ProfilePostNotifySheet.native';
 import ShareProfileSheet from '../components/ShareProfileSheet.native';
+import ProfileQRCodeModal from '../components/ProfileQRCodeModal.native';
+import ViewProfilePostsSheet from '../components/ViewProfilePostsSheet.native';
+import ProfileGridPeekSheet from '../components/ProfileGridPeekSheet.native';
+import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
+import ViewProfileConnectionsModal, {
+    type ConnectionRow,
+    type ConnectionsScope,
+} from '../components/ViewProfileConnectionsModal.native';
+import PostCommentsSheet from '../components/PostCommentsSheet';
+import FeedShareModal from '../components/FeedShareModal';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import ProfileCoverActionsModal from '../components/ProfileCoverActionsModal.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import { getEffectivePlacesTraveled, formatProfileStatCount } from '../utils/effectivePlacesTraveled';
 import { getStableUserId } from '../utils/userId';
 import type { ProfilePostNotifyLevel } from '../utils/profilePostNotifyPrefs';
 import {
@@ -50,7 +72,7 @@ import {
 } from '../utils/profilePostNotifyPrefsMobile';
 
 export default function ViewProfileScreen({ route, navigation }: any) {
-    const { handle } = route.params;
+    const { handle, sourcePostId } = route.params ?? {};
     const { user } = useAuth();
 
     const [profileUser, setProfileUser] = useState<any>(null);
@@ -61,13 +83,26 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [canView, setCanView] = useState(true);
     const [hasPendingRequest, setHasPendingRequest] = useState(false);
     const [profileIsPrivate, setProfileIsPrivate] = useState(false);
-    const [stats, setStats] = useState({ following: 0, followers: 0, posts: 0 });
+    const [stats, setStats] = useState({ following: 0, followers: 0, likes: 0, views: 0 });
     const [showTraveledModal, setShowTraveledModal] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
+    const [showProfileQR, setShowProfileQR] = useState(false);
+    const [showPostsSheet, setShowPostsSheet] = useState(false);
+    const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+    const [gridPeekPost, setGridPeekPost] = useState<Post | null>(null);
+    const [peekCommentsPost, setPeekCommentsPost] = useState<Post | null>(null);
+    const [peekSharePost, setPeekSharePost] = useState<Post | null>(null);
+    const [showInviteToGroup, setShowInviteToGroup] = useState(false);
+    const [showNoPlacesAlert, setShowNoPlacesAlert] = useState(false);
+    const [showFollowRequestAlert, setShowFollowRequestAlert] = useState(false);
+    const [profilePostsCursor, setProfilePostsCursor] = useState<string | number | null>(null);
+    const [profilePostsHasMore, setProfilePostsHasMore] = useState(false);
+    const [profilePostsLoadingMore, setProfilePostsLoadingMore] = useState(false);
+    const suppressGridOpenClickRef = React.useRef(false);
     const [showConnectionsModal, setShowConnectionsModal] = useState(false);
-    const [connectionsScope, setConnectionsScope] = useState<'followers' | 'following' | 'mutual' | 'suggested'>('followers');
-    const [followersList, setFollowersList] = useState<Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>>([]);
-    const [followingList, setFollowingList] = useState<Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>>([]);
+    const [connectionsScope, setConnectionsScope] = useState<ConnectionsScope>('followers');
+    const [followersList, setFollowersList] = useState<ConnectionRow[]>([]);
+    const [followingList, setFollowingList] = useState<ConnectionRow[]>([]);
     const [connectionsSearch, setConnectionsSearch] = useState('');
     const [connectionsLoading, setConnectionsLoading] = useState(false);
     const [connectionsLoadingMore, setConnectionsLoadingMore] = useState(false);
@@ -96,15 +131,16 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         void getProfilePostNotifyLevelMobile(viewerId, decodedHandle).then(setPostNotifyLevel);
     }, [user?.id, decodedHandle, isOwnProfile]);
 
-    const profileNotifyDisplayName = React.useMemo(() => {
+    const profileDisplayName = React.useMemo(() => {
         const name = typeof profileUser?.name === 'string' ? profileUser.name.trim() : '';
         if (name) return name;
-        const h = String(profileUser?.handle || decodedHandle || '')
-            .replace(/^@/, '')
-            .trim();
-        const short = h.split('@')[0];
-        return short || h || 'this user';
-    }, [profileUser?.name, profileUser?.handle, decodedHandle]);
+        return decodedHandle.replace(/^@/, '').split('@')[0] || 'User';
+    }, [profileUser?.name, decodedHandle]);
+
+    const effectivePlaces = React.useMemo(
+        () => getEffectivePlacesTraveled(profileUser, isOwnProfile ? user : undefined),
+        [profileUser, user, isOwnProfile]
+    );
 
     const applyPostNotifyLevel = (level: ProfilePostNotifyLevel) => {
         if (!user?.id || !user?.handle) return;
@@ -124,21 +160,35 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         (isOwnProfile ? user?.profileBackgroundUrl : undefined);
 
     useEffect(() => {
-        loadProfile();
+        let cancelled = false;
+        void loadProfile(() => cancelled);
+        return () => {
+            cancelled = true;
+        };
     }, [handle]);
 
-    const loadProfile = async () => {
+    const loadProfile = async (isCancelled?: () => boolean) => {
         if (!handle) return;
+        const cancelled = () => Boolean(isCancelled?.());
         setLoading(true);
         try {
             const decodedHandle = decodeURIComponent(handle);
             const profilePrivate = isProfilePrivate(decodedHandle);
-            setProfileIsPrivate(profilePrivate);
+            if (!cancelled()) setProfileIsPrivate(profilePrivate);
 
+            let followedUsers: string[] = [];
             if (user?.id && user?.handle) {
-                const followedUsers = await getFollowedUsers(user.id);
+                try {
+                    followedUsers = await getFollowedUsers(user.id);
+                } catch {
+                    followedUsers = [];
+                }
+                if (cancelled()) return;
+
                 const canViewProfileState = canViewProfile(user.handle, decodedHandle, followedUsers);
-                const isFollowingUser = followedUsers.includes(decodedHandle);
+                const isFollowingUser = followedUsers.some(
+                    (h) => h.toLowerCase() === decodedHandle.toLowerCase(),
+                );
                 const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
 
                 setCanView(canViewProfileState);
@@ -146,134 +196,232 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 setHasPendingRequest(hasPending);
 
                 if (!canViewProfileState && profilePrivate && decodedHandle !== user.handle) {
-                    Alert.alert(
-                        'Private Profile',
-                        'To view this user\'s profile you must be following them.',
-                        [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Follow', onPress: handleFollow },
-                        ]
-                    );
                     setLoading(false);
                     return;
                 }
             }
 
-            // Fetch profile data
-            let profileData: any = null;
-            try {
-                profileData = await fetchUserProfile(decodedHandle, user?.id, null, 50);
-                const pt =
-                    (profileData as any).placesTraveled ?? (profileData as any).places_traveled;
+            // Fast path: local/mock posts (instant). Paint immediately, then optionally enrich from API.
+            let userPosts = await fetchPostsByUser(decodedHandle, 20);
+            if (cancelled()) return;
+
+            const isOwn = Boolean(user?.handle && decodedHandle === user.handle);
+            const paintLocalProfile = (apiData?: any) => {
+                const pt = apiData?.placesTraveled ?? apiData?.places_traveled;
                 const placesTraveled =
                     Array.isArray(pt) ? pt.filter((s: unknown) => typeof s === 'string') : undefined;
+                const avatarUrl =
+                    apiData?.avatarUrl ||
+                    apiData?.avatar_url ||
+                    (isOwn ? user?.avatarUrl : undefined) ||
+                    getAvatarForHandle(decodedHandle);
+                const bio = apiData?.bio || (isOwn ? user?.bio : undefined);
+                const socialLinks =
+                    apiData?.socialLinks ||
+                    apiData?.social_links ||
+                    (isOwn ? user?.socialLinks : undefined);
+                const aggregateViews = userPosts.reduce((sum, p) => sum + (p.stats?.views ?? 0), 0);
+                const aggregateLikes = userPosts.reduce((sum, p) => sum + (p.stats?.likes ?? 0), 0);
+                let followersCount = apiData?.followers_count || 0;
+                let followingCount = apiData?.following_count || 0;
+                if (!apiData && user?.id && decodedHandle !== user?.handle) {
+                    const followsThis = followedUsers.some(
+                        (h) => h.toLowerCase() === decodedHandle.toLowerCase(),
+                    );
+                    if (followsThis && followersCount < 1) followersCount = 1;
+                }
+                if (!isLaravelApiEnabled()) {
+                    const mockCounts = computeMockGraphFollowCounts(
+                        decodedHandle,
+                        user?.handle,
+                        followedUsers,
+                    );
+                    followersCount = Math.max(followersCount, mockCounts.followers);
+                    followingCount = Math.max(followingCount, mockCounts.following);
+                }
+
                 setProfileUser({
-                    ...profileData,
+                    handle: decodedHandle,
+                    name:
+                        apiData?.name ||
+                        apiData?.display_name ||
+                        (isOwn ? user?.name : undefined) ||
+                        decodedHandle.split('@')[0],
+                    avatarUrl,
+                    bio,
+                    socialLinks,
                     profileBackgroundUrl:
-                        profileData.profileBackgroundUrl ||
-                        profileData.profile_background_url ||
-                        undefined,
+                        apiData?.profileBackgroundUrl ||
+                        apiData?.profile_background_url ||
+                        (isOwn ? user?.profileBackgroundUrl : undefined),
                     placesTraveled:
                         placesTraveled && placesTraveled.length > 0 ? placesTraveled : undefined,
+                    ...(apiData || {}),
                 });
+                setPosts(userPosts);
                 setStats({
-                    following: profileData.following_count || 0,
-                    followers: profileData.followers_count || 0,
-                    posts: profileData.posts_count || (Array.isArray(profileData.posts) ? profileData.posts.length : 0),
+                    following: followingCount,
+                    followers: followersCount,
+                    likes: apiData?.stats?.likes ?? aggregateLikes,
+                    views: apiData?.stats?.views ?? aggregateViews,
                 });
-            } catch (err) {
-                console.error('Error fetching profile:', err);
+                setProfilePostsCursor(apiData?.postsNextCursor ?? null);
+                setProfilePostsHasMore(Boolean(apiData?.postsHasMore) || userPosts.length >= 20);
+            };
+
+            paintLocalProfile();
+            setLoading(false);
+
+            void userHasStoriesByHandle(decodedHandle)
+                .then((has) => {
+                    if (!cancelled()) setHasStory(has);
+                })
+                .catch(() => {
+                    if (!cancelled()) setHasStory(false);
+                });
+
+            if (isLaravelApiEnabled()) {
+                try {
+                    const profileData = await fetchUserProfile(
+                        decodedHandle,
+                        user?.id,
+                        null,
+                        20,
+                        typeof sourcePostId === 'string' ? sourcePostId : undefined,
+                    );
+                    if (cancelled()) return;
+                    if (Array.isArray(profileData?.posts) && profileData.posts.length > 0) {
+                        userPosts = profileData.posts;
+                    }
+                    paintLocalProfile(profileData);
+                } catch (error: any) {
+                    const isConnectionError =
+                        error?.name === 'ConnectionRefused' ||
+                        error?.message === 'CONNECTION_REFUSED' ||
+                        error?.message?.includes('Failed to fetch');
+                    if (!isConnectionError) {
+                        console.warn('View profile API failed; using local posts:', error);
+                    }
+                }
             }
-
-            // Prefer backend profile posts when available; fallback to local mock lookup.
-            const userPosts = Array.isArray(profileData?.posts)
-                ? profileData.posts
-                : await fetchPostsByUser(decodedHandle, 50);
-            setPosts(userPosts);
-
-            // Check for stories
-            const hasStories = await userHasStoriesByHandle(decodedHandle);
-            setHasStory(hasStories);
         } catch (error) {
             console.error('Error loading profile:', error);
-            Alert.alert('Error', 'Failed to load profile');
-        } finally {
-            setLoading(false);
+            if (!cancelled()) {
+                // Still show a usable shell from the handle — never block behind a hard error alert.
+                const decodedHandle = decodeURIComponent(handle);
+                setProfileUser((prev: any) =>
+                    prev || {
+                        handle: decodedHandle,
+                        name: decodedHandle.split('@')[0],
+                        avatarUrl: getAvatarForHandle(decodedHandle),
+                    },
+                );
+                setLoading(false);
+            }
         }
     };
 
     const handleFollow = async () => {
-        if (!user?.id || !handle || !user?.handle) {
+        if (!user?.id || !handle) {
             Alert.alert('Error', 'Unable to follow user. Please try again.');
+            return;
+        }
+        if (!user?.handle && isProfilePrivate(decodeURIComponent(handle))) {
+            Alert.alert('Error', 'Unable to send follow request. Please sign in with a full profile.');
             return;
         }
 
         const decodedHandle = decodeURIComponent(handle);
+        const handleToUse = profileUser?.handle || decodedHandle;
+        const canonicalHandle = normalizeHandleForPrivacy(handleToUse);
+        const wasFollowingBeforeClick = isFollowing;
+        const profilePrivate = isProfilePrivate(canonicalHandle);
+        const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
+
+        // Mock-only: update local follow state immediately (web ViewProfilePage parity).
+        if (!isLaravelApiEnabled()) {
+            const newFollowing = !wasFollowingBeforeClick;
+            if (profilePrivate && newFollowing && user?.handle) {
+                createFollowRequest(user.handle, canonicalHandle);
+                setHasPendingRequest(true);
+                setIsFollowing(false);
+                setFollowState(followUserId, handleToUse, false);
+                setShowFollowRequestAlert(true);
+            } else {
+                setFollowState(followUserId, handleToUse, newFollowing);
+                setIsFollowing(newFollowing);
+                setHasPendingRequest(false);
+                if (!newFollowing) {
+                    if (user?.handle) {
+                        void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
+                        setPostNotifyLevel('off');
+                        setPostNotifySheetMode(null);
+                    }
+                    setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
+                } else {
+                    setStats((prev) => ({ ...prev, followers: prev.followers + 1 }));
+                }
+                if (profilePrivate) setCanView(newFollowing);
+            }
+            return;
+        }
+
         try {
-            const followedUsers = await getFollowedUsers(user.id);
-            const isCurrentlyFollowing = followedUsers.includes(decodedHandle);
-            const profilePrivate = isProfilePrivate(decodedHandle);
+            const followedUsers = await getFollowedUsers(followUserId);
+            const isCurrentlyFollowing = followedUsers.some(
+                (h) => h.toLowerCase() === handleToUse.toLowerCase(),
+            );
 
             let result;
             try {
-                const encodedHandle = encodeURIComponent(decodedHandle);
-                result = await toggleFollow(encodedHandle);
-            } catch (apiError: any) {
-                // Fallback to mock
-                if (posts[0]?.id) {
-                    await toggleFollowForPost(user.id, posts[0].id);
-                }
+                result = await toggleFollow(decodedHandle);
+            } catch {
+                // API down — fall back to local follow state
                 const nextFollowing = !isCurrentlyFollowing;
+                setFollowState(followUserId, handleToUse, nextFollowing);
                 setIsFollowing(nextFollowing);
                 setHasPendingRequest(false);
                 if (!nextFollowing && user?.handle) {
-                    const viewerId = String(user.id);
-                    void clearProfilePostNotifyForCreatorMobile(viewerId, user.handle, decodedHandle);
+                    void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
                     setPostNotifyLevel('off');
                     setPostNotifySheetMode(null);
                 }
-                if (nextFollowing && profilePrivate) {
-                    setCanView(true);
-                } else if (!nextFollowing && profilePrivate) {
-                    setCanView(false);
-                }
+                setStats((prev) => ({
+                    ...prev,
+                    followers: Math.max(0, prev.followers + (nextFollowing ? 1 : -1)),
+                }));
+                if (profilePrivate) setCanView(nextFollowing);
                 return;
             }
 
             if (result.status === 'unfollowed') {
+                setFollowState(followUserId, handleToUse, false);
                 if (posts[0]?.id) {
-                    await toggleFollowForPost(user.id, posts[0].id);
+                    await toggleFollowForPost(followUserId, posts[0].id, handleToUse);
                 }
                 setIsFollowing(false);
                 setHasPendingRequest(false);
                 if (user?.handle) {
-                    void clearProfilePostNotifyForCreatorMobile(String(user.id), user.handle, decodedHandle);
+                    void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
                     setPostNotifyLevel('off');
                     setPostNotifySheetMode(null);
                 }
-                if (profilePrivate) {
-                    setCanView(false);
-                }
+                setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
+                if (profilePrivate) setCanView(false);
             } else if (result.status === 'pending') {
                 setHasPendingRequest(true);
                 setIsFollowing(false);
-                Alert.alert('Follow Request Sent', 'Your follow request has been sent.');
+                setShowFollowRequestAlert(true);
             } else if (result.status === 'accepted' || result.following === true) {
+                setFollowState(followUserId, handleToUse, true);
                 if (posts[0]?.id) {
-                    await toggleFollowForPost(user.id, posts[0].id);
+                    await toggleFollowForPost(followUserId, posts[0].id, handleToUse);
                 }
                 setIsFollowing(true);
                 setHasPendingRequest(false);
                 setCanView(true);
+                setStats((prev) => ({ ...prev, followers: prev.followers + 1 }));
             }
-
-            // Refresh profile
-            const profileData = await fetchUserProfile(decodedHandle, user.id);
-            setStats({
-                following: profileData.following_count || 0,
-                followers: profileData.followers_count || 0,
-                posts: profileData.posts_count || 0,
-            });
         } catch (error: any) {
             console.error('Error toggling follow:', error);
             Alert.alert('Error', error?.message || 'Failed to follow user.');
@@ -295,32 +443,127 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         }
     };
 
-    const normalizeConnectionItems = (items: any[]): Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }> => {
+    const normalizeConnectionItems = (items: any[]): ConnectionRow[] => {
         return (Array.isArray(items) ? items : [])
             .map((item: any) => {
                 const handleRaw = String(item?.handle || item?.userHandle || item?.username || item?.name || '').replace(/^@/, '').trim();
                 if (!handleRaw) return null;
                 return {
                     handleNoAt: handleRaw,
-                    displayName: String(item?.display_name || item?.displayName || handleRaw),
+                    displayName: String(item?.display_name || item?.displayName || item?.name || handleRaw),
                     avatarUrl: typeof item?.avatar_url === 'string' ? item.avatar_url : item?.avatarUrl,
-                    isRequested: !!(item?.is_requested || item?.has_pending_request),
+                    isRequested: !!(item?.is_requested || item?.has_pending_request || item?.isRequested),
+                    isPrivate: !!(item?.isPrivate || item?.is_private) || isProfilePrivate(handleRaw),
                 };
             })
-            .filter(Boolean) as Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>;
+            .filter(Boolean) as ConnectionRow[];
     };
 
     const normalizeHandleKey = (value: string) => value.replace(/^@/, '').trim().toLowerCase();
 
+    const buildMockConnectionsForTab = async (
+        tab: 'followers' | 'following',
+        targetHandle: string,
+        followedSet: Set<string>,
+    ): Promise<ConnectionRow[]> => {
+        const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+        const viewerFollows = await getFollowedUsers(viewerId);
+        const viewerFollowsSet = new Set(
+            (Array.isArray(viewerFollows) ? viewerFollows : []).map((entry) => normalizeHandleKey(String(entry))),
+        );
+        const normalizedTarget = normalizeHandleKey(targetHandle);
+        const out: ConnectionRow[] = [];
+        const pushRow = (rawHandle: string, rawName?: string, avatarUrl?: string) => {
+            const handleNoAt = String(rawHandle || '').replace(/^@/, '');
+            if (!handleNoAt) return;
+            const normalized = normalizeHandleKey(handleNoAt);
+            if (out.some((row) => normalizeHandleKey(row.handleNoAt) === normalized)) return;
+            out.push({
+                handleNoAt,
+                displayName: rawName || handleNoAt,
+                avatarUrl: avatarUrl || getAvatarForHandle(handleNoAt) || undefined,
+                isPrivate: isProfilePrivate(handleNoAt),
+                isRequested: !!(user?.handle && hasPendingFollowRequest(user.handle, handleNoAt)),
+            });
+        };
+
+        if (tab === 'followers') {
+            Object.entries(MOCK_FOLLOWING_GRAPH).forEach(([followerHandle, followingList]) => {
+                const followsTarget = (followingList || []).some(
+                    (entry) => normalizeHandleKey(entry) === normalizedTarget,
+                );
+                if (!followsTarget) return;
+                const profilePost = allPosts.find(
+                    (p) => normalizeHandleKey(p.userHandle || '') === normalizeHandleKey(followerHandle),
+                );
+                pushRow(
+                    followerHandle,
+                    profilePost?.userHandle || followerHandle,
+                    getAvatarForHandle(followerHandle) || '',
+                );
+            });
+            if (user?.handle && viewerFollowsSet.has(normalizedTarget)) {
+                pushRow(user.handle, user.name || user.handle, user.avatarUrl || '');
+            }
+        } else {
+            const graphEntry = Object.entries(MOCK_FOLLOWING_GRAPH).find(
+                ([k]) => normalizeHandleKey(k) === normalizedTarget,
+            );
+            const mockFollowing = graphEntry ? graphEntry[1] : [];
+            mockFollowing.forEach((h) => {
+                const handleNoAt = String(h || '').replace(/^@/, '');
+                const profilePost = allPosts.find(
+                    (p) => normalizeHandleKey(p.userHandle || '') === normalizeHandleKey(handleNoAt),
+                );
+                pushRow(handleNoAt, profilePost?.userHandle || handleNoAt, getAvatarForHandle(handleNoAt) || '');
+            });
+            if (user?.handle && normalizeHandleKey(user.handle) === normalizedTarget) {
+                viewerFollows.forEach((h) => {
+                    const handleNoAt = String(h || '').replace(/^@/, '');
+                    pushRow(handleNoAt, handleNoAt, getAvatarForHandle(handleNoAt) || '');
+                });
+            }
+        }
+        return out;
+    };
+
     const loadConnections = async (tab: 'followers' | 'following', reset = true) => {
-        if (!handle || !user?.id) return;
+        if (!handle) return;
         const decodedHandle = decodeURIComponent(handle);
         if (reset) setConnectionsLoading(true);
         else setConnectionsLoadingMore(true);
         try {
-            const followedUsers = await getFollowedUsers(user.id);
-            const followedSet = new Set((Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))));
+            const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+            const followedUsers = await getFollowedUsers(viewerId);
+            const followedSet = new Set(
+                (Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))),
+            );
             setViewerFollowedSet(followedSet);
+
+            if (!isLaravelApiEnabled()) {
+                const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
+                const followPatch: Record<string, boolean> = {};
+                const requestPatch: Record<string, boolean> = {};
+                normalized.forEach((entry) => {
+                    followPatch[entry.handleNoAt] = followedSet.has(normalizeHandleKey(entry.handleNoAt));
+                    requestPatch[entry.handleNoAt] = !!entry.isRequested;
+                });
+                setConnectionFollowMap((prev) => ({ ...prev, ...followPatch }));
+                setConnectionRequestMap((prev) => ({ ...prev, ...requestPatch }));
+                if (tab === 'followers') {
+                    setFollowersList(normalized);
+                    setFollowersHasMore(false);
+                    setFollowersCursor(0);
+                    setStats((prev) => ({ ...prev, followers: normalized.length }));
+                } else {
+                    setFollowingList(normalized);
+                    setFollowingHasMore(false);
+                    setFollowingCursor(0);
+                    setStats((prev) => ({ ...prev, following: normalized.length }));
+                }
+                return;
+            }
+
             const cursor = tab === 'followers' ? (reset ? 0 : followersCursor) : (reset ? 0 : followingCursor);
             const response = tab === 'followers'
                 ? await fetchFollowers(decodedHandle, cursor, 40)
@@ -342,7 +585,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 setFollowersList((prev) => {
                     if (reset) return normalized;
                     const merged = [...prev, ...normalized];
-                    const dedup = new Map<string, { handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>();
+                    const dedup = new Map<string, ConnectionRow>();
                     merged.forEach((row) => dedup.set(normalizeHandleKey(row.handleNoAt), row));
                     return Array.from(dedup.values());
                 });
@@ -352,18 +595,43 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 setFollowingList((prev) => {
                     if (reset) return normalized;
                     const merged = [...prev, ...normalized];
-                    const dedup = new Map<string, { handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>();
+                    const dedup = new Map<string, ConnectionRow>();
                     merged.forEach((row) => dedup.set(normalizeHandleKey(row.handleNoAt), row));
                     return Array.from(dedup.values());
                 });
                 setFollowingHasMore(hasMore);
                 setFollowingCursor(nextCursor);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to load connections:', error);
-            if (reset) {
-                if (tab === 'followers') setFollowersList([]);
-                if (tab === 'following') setFollowingList([]);
+            const message = String(error?.message || '');
+            const isConnectionError =
+                message === 'CONNECTION_REFUSED' ||
+                error?.name === 'ConnectionRefused' ||
+                message.includes('Failed to fetch');
+            if (isConnectionError || reset) {
+                try {
+                    const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+                    const followedUsers = await getFollowedUsers(viewerId);
+                    const followedSet = new Set(
+                        (Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))),
+                    );
+                    const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
+                    if (tab === 'followers') {
+                        setFollowersList(normalized);
+                        setFollowersHasMore(false);
+                        setStats((prev) => ({ ...prev, followers: normalized.length }));
+                    } else {
+                        setFollowingList(normalized);
+                        setFollowingHasMore(false);
+                        setStats((prev) => ({ ...prev, following: normalized.length }));
+                    }
+                } catch {
+                    if (reset) {
+                        if (tab === 'followers') setFollowersList([]);
+                        if (tab === 'following') setFollowingList([]);
+                    }
+                }
             }
         } finally {
             if (reset) setConnectionsLoading(false);
@@ -371,7 +639,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         }
     };
 
-    const openConnections = (scope: 'followers' | 'following' | 'mutual' | 'suggested') => {
+    const openConnections = (scope: ConnectionsScope) => {
         setConnectionsScope(scope);
         setShowConnectionsModal(true);
         setConnectionsSearch('');
@@ -389,22 +657,65 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         return true;
     });
 
-    const mutualList = followingList.filter((entry) =>
-        followersList.some((f) => f.handleNoAt.toLowerCase() === entry.handleNoAt.toLowerCase())
+    // Instagram-style mutuals: people the profile follows that the viewer also follows.
+    const mutualList = React.useMemo(
+        () => followingList.filter((entry) => viewerFollowedSet.has(normalizeHandleKey(entry.handleNoAt))),
+        [followingList, viewerFollowedSet],
     );
+
     const suggestedList = React.useMemo(() => {
-        const mutualKey = new Set(mutualList.map((row) => normalizeHandleKey(row.handleNoAt)));
-        const source = [...followersList, ...followingList];
-        const dedup = new Map<string, { handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>();
-        source.forEach((row) => {
-            const key = normalizeHandleKey(row.handleNoAt);
-            if (mutualKey.has(key)) return;
-            if (viewerFollowedSet.has(key)) return;
-            if (normalizeHandleKey(row.handleNoAt) === normalizeHandleKey(String(user?.handle || ''))) return;
-            if (!dedup.has(key)) dedup.set(key, row);
+        const excluded = new Set<string>([
+            normalizeHandleKey(String(user?.handle || '')),
+            normalizeHandleKey(decodedHandle),
+            ...Array.from(viewerFollowedSet),
+        ]);
+        const profileLabel = decodedHandle ? `@${decodedHandle.replace(/^@/, '')}` : 'this profile';
+        const followerMap = new Map(followersList.map((row) => [normalizeHandleKey(row.handleNoAt), row]));
+        const followingMap = new Map(followingList.map((row) => [normalizeHandleKey(row.handleNoAt), row]));
+        const suggestedMap = new Map<string, ConnectionRow>();
+
+        const addSuggested = (rawHandle: string, rawName?: string, reason?: string) => {
+            const key = String(rawHandle || '').replace(/^@/, '').trim();
+            if (!key) return;
+            const normalized = normalizeHandleKey(key);
+            if (excluded.has(normalized) || suggestedMap.has(normalized)) return;
+            const inFollowers = followerMap.has(normalized);
+            const inFollowing = followingMap.has(normalized);
+            const suggestionReason =
+                reason ||
+                (inFollowing
+                    ? `Followed by ${profileLabel}`
+                    : inFollowers
+                      ? `Follows ${profileLabel}`
+                      : 'Suggested for you');
+            suggestedMap.set(normalized, {
+                handleNoAt: key,
+                displayName: rawName || key,
+                avatarUrl:
+                    followerMap.get(normalized)?.avatarUrl ||
+                    followingMap.get(normalized)?.avatarUrl ||
+                    getAvatarForHandle(key),
+                suggestionReason,
+                mutualCount: (inFollowers ? 1 : 0) + (inFollowing ? 1 : 0),
+                isPrivate: isProfilePrivate(key),
+                isRequested: !!(user?.handle && hasPendingFollowRequest(user.handle, key)),
+            });
+        };
+
+        [...followersList, ...followingList].forEach((row) => {
+            if (viewerFollowedSet.has(normalizeHandleKey(row.handleNoAt))) return;
+            addSuggested(row.handleNoAt, row.displayName);
         });
-        return Array.from(dedup.values());
-    }, [followersList, followingList, mutualList, viewerFollowedSet, user?.handle]);
+        allPosts.forEach((post) => {
+            addSuggested(post.userHandle, post.userHandle);
+        });
+        Object.keys(MOCK_FOLLOWING_GRAPH).forEach((h) => addSuggested(h, h));
+
+        return Array.from(suggestedMap.values()).sort(
+            (a, b) => (b.mutualCount || 0) - (a.mutualCount || 0),
+        );
+    }, [followersList, followingList, viewerFollowedSet, user?.handle, decodedHandle]);
+
     const activeConnectionsList =
         connectionsScope === 'followers'
             ? followersList
@@ -413,6 +724,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 : connectionsScope === 'mutual'
                     ? mutualList
                     : suggestedList;
+
     const searchedConnections = activeConnectionsList.filter((entry) => {
         const q = connectionsSearch.trim().toLowerCase();
         if (!q) return true;
@@ -420,43 +732,199 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     });
 
     const toggleConnectionFollow = async (entryHandle: string) => {
-        if (!user?.id) return;
-        setConnectionActionLoadingMap((prev) => ({ ...prev, [entryHandle]: true }));
+        if (!user) return;
+        if (connectionActionLoadingMap[entryHandle]) return;
+        const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
+        const key = entryHandle;
+        const current = connectionFollowMap[key] === true;
+        const requested = connectionRequestMap[key] === true;
+        const row =
+            followersList.find((r) => r.handleNoAt === key) ||
+            followingList.find((r) => r.handleNoAt === key) ||
+            suggestedList.find((r) => r.handleNoAt === key);
+        const rowPrivate = !!row?.isPrivate || isProfilePrivate(key);
+
+        setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: true }));
         try {
-            const result = await toggleFollow(entryHandle);
-            const nextFollowing = result?.status === 'accepted' || result?.following === true;
-            const isRequested = result?.status === 'pending';
-            setConnectionFollowMap((prev) => ({ ...prev, [entryHandle]: nextFollowing }));
-            setConnectionRequestMap((prev) => ({ ...prev, [entryHandle]: isRequested }));
+            if (!current && rowPrivate && requested) {
+                if (user?.handle) removeFollowRequest(user.handle, key);
+                setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
+                return;
+            }
+            if (!current && rowPrivate) {
+                if (user?.handle) createFollowRequest(user.handle, key);
+                setConnectionRequestMap((prev) => ({ ...prev, [key]: true }));
+                return;
+            }
+
+            const nextFollowing = !current;
+            setConnectionFollowMap((prev) => ({ ...prev, [key]: nextFollowing }));
+            setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
             const nextSet = new Set(viewerFollowedSet);
-            const key = normalizeHandleKey(entryHandle);
-            if (nextFollowing) nextSet.add(key);
-            else nextSet.delete(key);
+            const norm = normalizeHandleKey(key);
+            if (nextFollowing) nextSet.add(norm);
+            else nextSet.delete(norm);
             setViewerFollowedSet(nextSet);
+
+            if (!isLaravelApiEnabled()) {
+                setFollowState(followUserId, key, nextFollowing);
+            } else {
+                try {
+                    await toggleFollow(key);
+                } catch {
+                    /* fall through to local state */
+                }
+                setFollowState(followUserId, key, nextFollowing);
+            }
         } catch (error) {
             console.error('Failed to toggle connection follow:', error);
-            Alert.alert('Error', 'Could not update follow status.');
+            setConnectionFollowMap((prev) => ({ ...prev, [key]: current }));
+            setConnectionRequestMap((prev) => ({ ...prev, [key]: requested }));
         } finally {
-            setConnectionActionLoadingMap((prev) => ({ ...prev, [entryHandle]: false }));
+            setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: false }));
         }
     };
 
-    const refreshConnections = async () => {
-        setFollowersCursor(0);
-        setFollowingCursor(0);
-        setFollowersHasMore(true);
-        setFollowingHasMore(true);
-        await Promise.all([loadConnections('followers', true), loadConnections('following', true)]);
+    const handlePostPress = (postId: string) => {
+        if (suppressGridOpenClickRef.current) {
+            suppressGridOpenClickRef.current = false;
+            return;
+        }
+        setSelectedPostId(postId);
+        setShowPostsSheet(true);
     };
 
-    const handlePostPress = (postId: string) => {
-        navigation.navigate('PostDetail', { postId });
+    const openGridPeek = (post: Post) => {
+        suppressGridOpenClickRef.current = true;
+        setGridPeekPost(post);
+    };
+
+    const closeGridPeek = () => {
+        setGridPeekPost(null);
+        setTimeout(() => {
+            suppressGridOpenClickRef.current = false;
+        }, 50);
+    };
+
+    const syncPeekPost = (updated: Post) => {
+        setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        setGridPeekPost((prev) => (prev?.id === updated.id ? updated : prev));
+    };
+
+    const handlePeekLike = async () => {
+        if (!gridPeekPost || !user?.id) return;
+        const updated = await toggleLike(user.id, gridPeekPost.id, gridPeekPost);
+        syncPeekPost(updated);
+    };
+
+    const handlePeekComment = () => {
+        if (!gridPeekPost) return;
+        const post = gridPeekPost;
+        closeGridPeek();
+        setPeekCommentsPost(post);
+    };
+
+    const handlePeekReclip = async () => {
+        if (!gridPeekPost || !user?.id || !user?.handle || isOwnProfile) return;
+        try {
+            await reclipPost(user.id, gridPeekPost.id, user.handle);
+            closeGridPeek();
+            Alert.alert('Reposted', 'Post added to your profile.');
+        } catch (error) {
+            console.error('Reclip failed:', error);
+            Alert.alert('Could not repost', 'Please try again.');
+        }
+    };
+
+    const handlePeekShare = () => {
+        if (!gridPeekPost) return;
+        const post = gridPeekPost;
+        closeGridPeek();
+        setPeekSharePost(post);
+    };
+
+    const handlePeekReport = () => {
+        if (!gridPeekPost) return;
+        Alert.alert('Report this post?', 'Our team will review it.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Report',
+                style: 'destructive',
+                onPress: () => {
+                    Alert.alert("Thanks — we'll review it.");
+                    closeGridPeek();
+                },
+            },
+        ]);
+    };
+
+    const loadMoreProfilePosts = async () => {
+        if (!handle || profilePostsLoadingMore) return;
+        const decoded = decodeURIComponent(handle);
+        if (profilePostsHasMore && profilePostsCursor != null) {
+            setProfilePostsLoadingMore(true);
+            try {
+                const nextProfile = await fetchUserProfile(decoded, user?.id, profilePostsCursor, 20);
+                const rawItems = Array.isArray(nextProfile?.posts) ? nextProfile.posts : [];
+                if (rawItems.length > 0) {
+                    setPosts((prev) => {
+                        const seen = new Set(prev.map((p) => String(p.id)));
+                        const appended = rawItems.filter((p: Post) => !seen.has(String(p.id)));
+                        return [...prev, ...appended];
+                    });
+                }
+                setProfilePostsCursor((nextProfile as any)?.postsNextCursor ?? null);
+                setProfilePostsHasMore(Boolean((nextProfile as any)?.postsHasMore));
+            } catch (error) {
+                console.error('Error loading more profile posts:', error);
+            } finally {
+                setProfilePostsLoadingMore(false);
+            }
+            return;
+        }
+
+        setProfilePostsLoadingMore(true);
+        try {
+            const nextLimit = posts.length + 20;
+            const nextPosts = await fetchPostsByUser(decoded, nextLimit);
+            setPosts(nextPosts);
+            setProfilePostsHasMore(nextPosts.length > posts.length);
+        } catch (error) {
+            console.error('Error loading more mock profile posts:', error);
+        } finally {
+            setProfilePostsLoadingMore(false);
+        }
+    };
+
+    const handlePlacesPress = () => {
+        if (effectivePlaces.length === 0) {
+            setShowNoPlacesAlert(true);
+            return;
+        }
+        setShowTraveledModal(true);
     };
 
     if (loading) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell>
+                <View style={styles.header}>
+                    <TouchableOpacity
+                        onPress={() => navigation.goBack()}
+                        style={styles.headerIconBtn}
+                        accessibilityLabel="Go back"
+                    >
+                        <Icon name="chevron-back" size={22} color="#FFFFFF" />
+                    </TouchableOpacity>
+                    <View style={styles.headerCenter}>
+                        <Text style={styles.headerName} numberOfLines={1}>
+                            Profile
+                        </Text>
+                    </View>
+                    <View style={styles.headerIconBtnPlaceholder} />
+                </View>
+                <View style={styles.loadingShell}>
+                    <ActivityIndicator size="large" color="#f472b6" />
+                </View>
             </GazetteerScreenShell>
         );
     }
@@ -465,21 +933,39 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         return (
             <GazetteerScreenShell>
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => navigation.goBack()}>
-                        <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <TouchableOpacity
+                        onPress={() => navigation.goBack()}
+                        style={styles.headerIconBtn}
+                        accessibilityLabel="Go back"
+                    >
+                        <Icon name="chevron-back" size={22} color="#FFFFFF" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Profile</Text>
-                    <View style={{ width: 24 }} />
+                    <View style={styles.headerCenter}>
+                        <Text style={styles.headerName} numberOfLines={1}>
+                            {profileDisplayName}
+                        </Text>
+                        <Text style={styles.headerHandle} numberOfLines={1}>
+                            {profileUser?.handle || decodedHandle}
+                        </Text>
+                    </View>
+                    <View style={styles.headerIconBtnPlaceholder} />
                 </View>
                 <View style={styles.privateContainer}>
-                    <Icon name="lock-closed" size={48} color="#6B7280" />
-                    <Text style={styles.privateText}>This profile is private</Text>
-                    <Text style={styles.privateSubtext}>Follow to see their posts</Text>
-                    <TouchableOpacity onPress={handleFollow} style={styles.followButton}>
-                        <Text style={styles.followButtonText}>
-                            {hasPendingRequest ? 'Request Sent' : 'Follow'}
-                        </Text>
-                    </TouchableOpacity>
+                    <Icon name="lock-closed" size={64} color="#9CA3AF" />
+                    <Text style={styles.privateText}>This Account is Private</Text>
+                    <Text style={styles.privateSubtext}>
+                        To view this user's profile you must be following them.
+                    </Text>
+                    {!hasPendingRequest ? (
+                        <TouchableOpacity
+                            onPress={handleFollow}
+                            style={[styles.followButton, styles.privateFollowButton]}
+                        >
+                            <Text style={styles.privateFollowButtonText}>Follow</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <Text style={styles.privatePendingText}>Follow request sent</Text>
+                    )}
                 </View>
             </GazetteerScreenShell>
         );
@@ -488,52 +974,152 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     return (
         <GazetteerScreenShell>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                <TouchableOpacity
+                    onPress={() => navigation.goBack()}
+                    style={styles.headerIconBtn}
+                    accessibilityLabel="Go back"
+                >
+                    <Icon name="chevron-back" size={22} color="#FFFFFF" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Profile</Text>
-                <TouchableOpacity onPress={() => setShowProfileMenu(true)}>
-                    <Icon name="ellipsis-horizontal" size={24} color="#FFFFFF" />
+                <View style={styles.headerCenter}>
+                    <Text style={styles.headerName} numberOfLines={1}>
+                        {profileDisplayName}
+                    </Text>
+                    <Text style={styles.headerHandle} numberOfLines={1}>
+                        {profileUser?.handle || decodedHandle}
+                    </Text>
+                </View>
+                <TouchableOpacity
+                    onPress={() => setShowShareProfileSheet(true)}
+                    style={styles.headerIconBtn}
+                    accessibilityLabel="Share profile"
+                >
+                    <Icon name="share-outline" size={18} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.content}>
+            <ScrollView style={styles.content} stickyHeaderIndices={[6]}>
+                <View style={styles.passportTitleBlock}>
+                    <Text style={styles.passportTitle}>Passport</Text>
+                    <Text style={styles.passportEyebrow}>Profile</Text>
+                </View>
+
                 <ProfileCoverHero
                     coverUrl={profileCoverUrl}
-                    avatarUrl={profileUser?.avatarUrl}
-                    name={profileUser?.name || handle?.split('@')[0] || 'User'}
+                    avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
+                    name={profileDisplayName}
                     hasStory={hasStory}
-                    onAvatarPress={() => setShowProfileMenu(true)}
+                    onAvatarPress={() => {
+                        if (hasStory) handleStoryPress();
+                        else setShowProfileMenu(true);
+                    }}
                     showChangeCover={isOwnProfile}
                     onPressChangeCover={() => navigation.navigate('ProfileCover')}
-                />
+                >
+                    <View style={styles.coverIdentity}>
+                        <Text style={styles.coverDisplayName} numberOfLines={1}>
+                            {profileDisplayName}
+                        </Text>
+                        <View style={styles.coverHandleRow}>
+                            <Text style={styles.coverHandle} numberOfLines={1}>
+                                {profileUser?.handle || decodedHandle}
+                            </Text>
+                            <Flag
+                                value={
+                                    isOwnProfile
+                                        ? user?.countryFlag || ''
+                                        : getFlagForHandle(profileUser?.handle || decodedHandle) || ''
+                                }
+                                size={16}
+                            />
+                        </View>
+                    </View>
+                </ProfileCoverHero>
 
-                {/* Profile Header */}
                 <View style={styles.profileHeader}>
                     <View style={styles.statsContainer}>
-                        <TouchableOpacity
-                            style={styles.statItem}
-                            onPress={() => setContentTab('all')}
-                        >
-                            <Text style={styles.statNumber}>{stats.posts}</Text>
-                            <Text style={styles.statLabel}>Posts</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.statItem} onPress={() => openConnections('followers')}>
-                            <Text style={styles.statNumber}>{stats.followers}</Text>
-                            <Text style={styles.statLabel}>Followers</Text>
-                        </TouchableOpacity>
                         <TouchableOpacity style={styles.statItem} onPress={() => openConnections('following')}>
-                            <Text style={styles.statNumber}>{stats.following}</Text>
+                            <Text style={styles.statNumber}>{formatProfileStatCount(stats.following)}</Text>
                             <Text style={styles.statLabel}>Following</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity style={styles.statItem} onPress={() => openConnections('followers')}>
+                            <Text style={styles.statNumber}>{formatProfileStatCount(stats.followers)}</Text>
+                            <Text style={styles.statLabel}>Followers</Text>
+                        </TouchableOpacity>
+                        <View style={styles.statItem}>
+                            <Text style={styles.statNumber}>{formatProfileStatCount(stats.views)}</Text>
+                            <Text style={styles.statLabel}>Views</Text>
+                        </View>
+                        <View style={styles.statItem}>
+                            <Text style={styles.statNumber}>{formatProfileStatCount(stats.likes)}</Text>
+                            <Text style={styles.statLabel}>Likes</Text>
+                        </View>
                     </View>
                 </View>
 
-                {/* User Info */}
+                {/* Following | Message | Notify */}
+                {!isOwnProfile ? (
+                    <View style={styles.actionButtons}>
+                        <TouchableOpacity onPress={handleFollow} style={styles.followButton}>
+                            <Text style={styles.followButtonText}>
+                                {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.messageButton}
+                            onPress={async () => {
+                                if (!user?.handle || !handle) return;
+                                const decoded = decodeURIComponent(handle);
+                                const followedUsers = await getFollowedUsers(user.id);
+                                if (!canSendMessage(user.handle, decoded, followedUsers)) {
+                                    Alert.alert('Cannot Message', 'You must follow this user to send a message.');
+                                    return;
+                                }
+                                navigation.navigate('Messages', { handle: decoded });
+                            }}
+                        >
+                            <Text style={styles.messageButtonText}>Message</Text>
+                        </TouchableOpacity>
+                        {isFollowing && !hasPendingRequest ? (
+                            <TouchableOpacity
+                                style={[
+                                    styles.postNotifyButton,
+                                    postNotifyLevel === 'all' && styles.postNotifyButtonActive,
+                                ]}
+                                onPress={() => setPostNotifySheetMode('menu')}
+                                accessibilityLabel="Post notifications"
+                            >
+                                <ProfilePostNotifyBell active={postNotifyLevel === 'all'} />
+                            </TouchableOpacity>
+                        ) : null}
+                    </View>
+                ) : (
+                    <View />
+                )}
+
+                <View style={styles.secondaryActions}>
+                    <TouchableOpacity onPress={handlePlacesPress} style={styles.secondaryActionBtn}>
+                        <Icon name="location" size={18} color="#FFFFFF" />
+                        <Text style={styles.secondaryActionText}>Places</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.secondaryActionBtn}
+                        onPress={() => setShowShareProfileSheet(true)}
+                    >
+                        <Icon name="share-social" size={18} color="#FFFFFF" />
+                        <Text style={styles.secondaryActionText}>Share</Text>
+                    </TouchableOpacity>
+                </View>
+
                 <View style={styles.userInfo}>
-                    <Text style={styles.userHandle}>{handle}</Text>
-                    {profileUser?.bio && (
-                        <Text style={styles.bio}>{profileUser.bio}</Text>
+                    {profileUser?.bio ? (
+                        <View style={styles.bioBox}>
+                            <Text style={styles.bio}>{profileUser.bio}</Text>
+                        </View>
+                    ) : (
+                        <View style={[styles.bioBox, styles.bioBoxEmpty]}>
+                            <Text style={styles.bioPlaceholder}>No bio yet</Text>
+                        </View>
                     )}
                     {(socialLinks.website ||
                         socialLinks.x ||
@@ -560,7 +1146,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     }
                                     accessibilityLabel="X"
                                 >
-                                    <Icon name="logo-twitter" size={20} color="#FFFFFF" />
+                                    <Text style={styles.socialXGlyph}>𝕏</Text>
                                 </TouchableOpacity>
                             ) : null}
                             {socialLinks.instagram ? (
@@ -602,116 +1188,71 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     )}
                 </View>
 
-                {/* Action Buttons */}
-                {handle !== user?.handle && (
-                    <View style={styles.actionButtons}>
-                        <TouchableOpacity
-                            onPress={handleFollow}
-                            style={[
-                                styles.followButton,
-                                isFollowing && styles.followingButton,
-                            ]}
-                        >
-                            <Text style={[
-                                styles.followButtonText,
-                                isFollowing && styles.followingButtonText,
-                            ]}>
-                                {hasPendingRequest ? 'Request Sent' : isFollowing ? 'Following' : 'Follow'}
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.messageButton}
-                            onPress={async () => {
-                                if (!user?.handle || !handle) return;
-                                const decodedHandle = decodeURIComponent(handle);
-                                const followedUsers = await getFollowedUsers(user.id);
-                                if (!canSendMessage(user.handle, decodedHandle, followedUsers)) {
-                                    Alert.alert('Cannot Message', 'You must follow this user to send a message.');
-                                    return;
-                                }
-                                navigation.navigate('Messages', { handle: decodedHandle });
-                            }}
-                        >
-                            <Text style={styles.messageButtonText}>Message</Text>
-                        </TouchableOpacity>
-                        {isFollowing && !hasPendingRequest ? (
-                            <TouchableOpacity
-                                style={[
-                                    styles.postNotifyButton,
-                                    postNotifyLevel === 'all' && styles.postNotifyButtonActive,
-                                ]}
-                                onPress={() => setPostNotifySheetMode('menu')}
-                                accessibilityLabel="Post notifications"
-                            >
-                                <ProfilePostNotifyBell active={postNotifyLevel === 'all'} />
-                            </TouchableOpacity>
-                        ) : null}
+                <View style={styles.contentTabsWrap}>
+                    <View style={styles.contentTabsRow}>
+                        {[
+                            { id: 'all', label: 'All' },
+                            { id: 'videos', label: 'Videos' },
+                            { id: 'photos', label: 'Photos' },
+                            { id: 'text', label: 'Text' },
+                        ].map((tab) => {
+                            const active = contentTab === tab.id;
+                            return (
+                                <TouchableOpacity
+                                    key={tab.id}
+                                    style={[styles.contentTabButton, active && styles.contentTabButtonActive]}
+                                    onPress={() => setContentTab(tab.id as 'all' | 'videos' | 'photos' | 'text')}
+                                    activeOpacity={0.9}
+                                >
+                                    <Text style={[styles.contentTabText, active && styles.contentTabTextActive]}>
+                                        {tab.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
-                )}
-
-                <View style={styles.secondaryActions}>
-                    <TouchableOpacity
-                        onPress={() => setShowTraveledModal(true)}
-                        style={[
-                            styles.secondaryActionBtn,
-                            (!profileUser?.placesTraveled ||
-                                !Array.isArray(profileUser.placesTraveled) ||
-                                profileUser.placesTraveled.length === 0) &&
-                                styles.secondaryActionBtnDisabled,
-                        ]}
-                        disabled={
-                            !profileUser?.placesTraveled ||
-                            !Array.isArray(profileUser.placesTraveled) ||
-                            profileUser.placesTraveled.length === 0
-                        }
-                    >
-                        <Icon name="location" size={18} color="#FFFFFF" />
-                        <Text style={styles.secondaryActionText}>Places</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.secondaryActionBtn}
-                        onPress={() => setShowShareProfileSheet(true)}
-                    >
-                        <Icon name="share-social" size={18} color="#FFFFFF" />
-                        <Text style={styles.secondaryActionText}>Share</Text>
-                    </TouchableOpacity>
                 </View>
 
-                {/* Posts Grid */}
-                <View style={styles.contentTabsRow}>
-                    {[
-                        { id: 'all', label: 'All' },
-                        { id: 'videos', label: 'Videos' },
-                        { id: 'photos', label: 'Photos' },
-                        { id: 'text', label: 'Text' },
-                    ].map((tab) => {
-                        const active = contentTab === tab.id;
-                        return (
-                            <TouchableOpacity
-                                key={tab.id}
-                                style={[styles.contentTabButton, active && styles.contentTabButtonActive]}
-                                onPress={() => setContentTab(tab.id as 'all' | 'videos' | 'photos' | 'text')}
-                            >
-                                <Text style={[styles.contentTabText, active && styles.contentTabTextActive]}>{tab.label}</Text>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
                 <View style={styles.postsContainer}>
-                    <FlatList
-                        data={filteredPosts}
-                        numColumns={3}
-                        keyExtractor={(item) => item.id}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                onPress={() => handlePostPress(item.id)}
-                                style={styles.postThumbnail}
-                            >
-                                <ProfileGridThumb post={item} />
-                            </TouchableOpacity>
-                        )}
-                        scrollEnabled={false}
-                    />
+                    {filteredPosts.length === 0 ? (
+                        <View style={styles.emptyGrid}>
+                            <Text style={styles.emptyGridTitle}>
+                                {contentTab === 'all' ? 'No posts yet' : `No ${contentTab} yet`}
+                            </Text>
+                            <Text style={styles.emptyGridSubtext}>
+                                {contentTab === 'all'
+                                    ? "When this user posts, you'll see them here."
+                                    : 'Switch tabs to view other content.'}
+                            </Text>
+                        </View>
+                    ) : (
+                        <View style={styles.postsGrid}>
+                            {filteredPosts.map((item) => (
+                                <TouchableOpacity
+                                    key={item.id}
+                                    onPress={() => handlePostPress(item.id)}
+                                    onLongPress={() => openGridPeek(item)}
+                                    delayLongPress={450}
+                                    style={styles.postThumbnail}
+                                >
+                                    <ProfileGridThumb post={item} />
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
+                    {contentTab === 'all' && (profilePostsHasMore || posts.length >= 20) ? (
+                        <TouchableOpacity
+                            style={styles.loadMoreGridBtn}
+                            onPress={() => void loadMoreProfilePosts()}
+                            disabled={profilePostsLoadingMore}
+                        >
+                            {profilePostsLoadingMore ? (
+                                <ActivityIndicator size="small" color="#f472b6" />
+                            ) : (
+                                <Text style={styles.loadMoreGridBtnText}>Load more posts</Text>
+                            )}
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
             </ScrollView>
 
@@ -734,16 +1275,16 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                             style={styles.modalBody}
                             refreshControl={
                                 <RefreshControl
-                                    refreshing={connectionsLoading}
+                                    refreshing={loading}
                                     onRefresh={() => {
-                                        void refreshConnections();
+                                        void loadProfile();
                                     }}
                                     tintColor="#f472b6"
                                 />
                             }
                         >
-                            {profileUser?.placesTraveled && Array.isArray(profileUser.placesTraveled) && profileUser.placesTraveled.length > 0 ? (
-                                profileUser.placesTraveled.map((place: string, index: number) => (
+                            {effectivePlaces.length > 0 ? (
+                                effectivePlaces.map((place: string, index: number) => (
                                     <TouchableOpacity
                                         key={index}
                                         style={styles.placeItem}
@@ -767,234 +1308,192 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     </TouchableOpacity>
                                 ))
                             ) : (
-                                <Text style={styles.emptyText}>No places traveled yet.</Text>
+                                <Text style={styles.emptyText}>
+                                    {isOwnProfile
+                                        ? 'Add places in your profile settings under Travel Info or your bio.'
+                                        : 'No places traveled yet.'}
+                                </Text>
                             )}
                         </ScrollView>
                     </View>
                 </View>
             </Modal>
 
-            {/* Profile Menu Modal */}
-            <Modal
+            <ProfileCoverActionsModal
                 visible={showProfileMenu}
-                transparent={true}
-                animationType="fade"
-                onRequestClose={() => setShowProfileMenu(false)}
-            >
-                <TouchableOpacity
-                    style={styles.menuOverlay}
-                    activeOpacity={1}
-                    onPress={() => setShowProfileMenu(false)}
-                >
-                    <View style={styles.menuContainer}>
-                        <View style={styles.menuContent}>
-                            {/* View Stories - only show if user has stories */}
-                            {hasStory && (
-                                <TouchableOpacity
-                                    style={styles.menuButton}
-                                    onPress={() => {
-                                        setShowProfileMenu(false);
-                                        handleStoryPress();
-                                    }}
-                                >
-                                    <View style={styles.menuIconContainer}>
-                                        <Icon name="play" size={32} color="#FFFFFF" />
-                                    </View>
-                                    <Text style={styles.menuButtonText}>View Stories</Text>
-                                </TouchableOpacity>
-                            )}
+                onClose={() => setShowProfileMenu(false)}
+                name={profileDisplayName}
+                handle={profileUser?.handle || decodedHandle}
+                avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
+                actions={[
+                    ...(hasStory
+                        ? [
+                              {
+                                  id: 'stories',
+                                  label: 'View Stories',
+                                  icon: 'play',
+                                  onPress: () => handleStoryPress(),
+                              },
+                          ]
+                        : []),
+                    ...(!isOwnProfile
+                        ? [
+                              {
+                                  id: 'follow',
+                                  label: isFollowing ? 'Unfollow' : 'Follow',
+                                  icon: isFollowing ? 'person-remove' : 'person-add',
+                                  onPress: () => {
+                                      void handleFollow();
+                                  },
+                              },
+                              {
+                                  id: 'invite',
+                                  label: 'Invite to group',
+                                  icon: 'people',
+                                  onPress: () => setShowInviteToGroup(true),
+                              },
+                          ]
+                        : []),
+                    {
+                        id: 'share',
+                        label: 'Share profile',
+                        icon: 'share-social',
+                        onPress: () => setShowShareProfileSheet(true),
+                    },
+                    {
+                        id: 'qr',
+                        label: 'QR code',
+                        icon: 'qr-code-outline',
+                        onPress: () => setShowProfileQR(true),
+                    },
+                ]}
+            />
 
-                            {/* Follow */}
-                            <TouchableOpacity
-                                style={styles.menuButton}
-                                onPress={async () => {
-                                    setShowProfileMenu(false);
-                                    await handleFollow();
-                                }}
-                            >
-                                <View style={styles.menuIconContainer}>
-                                    <Icon name={isFollowing ? "person-remove" : "person-add"} size={32} color="#FFFFFF" />
-                                </View>
-                                <Text style={styles.menuButtonText}>{isFollowing ? 'Unfollow' : 'Follow'}</Text>
-                            </TouchableOpacity>
-
-                            {/* Share Profile */}
-                            <TouchableOpacity
-                                style={styles.menuButton}
-                                onPress={() => {
-                                    setShowProfileMenu(false);
-                                    setShowShareProfileSheet(true);
-                                }}
-                            >
-                                <View style={styles.menuIconContainer}>
-                                    <Icon name="share-social" size={32} color="#FFFFFF" />
-                                </View>
-                                <Text style={styles.menuButtonText}>Share profile</Text>
-                            </TouchableOpacity>
-
-                            {/* QR Code */}
-                            <TouchableOpacity
-                                style={styles.menuButton}
-                                onPress={() => {
-                                    setShowProfileMenu(false);
-                                    Alert.alert('QR Code', 'QR code feature coming soon!');
-                                }}
-                            >
-                                <View style={styles.menuIconContainer}>
-                                    <Icon name="qr-code" size={32} color="#FFFFFF" />
-                                </View>
-                                <Text style={styles.menuButtonText}>QR code</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </TouchableOpacity>
-            </Modal>
-
-            {/* Connections Modal */}
-            <Modal
+            <ViewProfileConnectionsModal
                 visible={showConnectionsModal}
-                transparent={true}
-                animationType="slide"
-                onRequestClose={() => setShowConnectionsModal(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.connectionsModalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Connections</Text>
-                            <TouchableOpacity onPress={() => setShowConnectionsModal(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.connectionsTabs}>
-                            {[
-                                { id: 'mutual', label: `Mutual (${mutualList.length})` },
-                                { id: 'followers', label: `Followers (${followersList.length})` },
-                                { id: 'following', label: `Following (${followingList.length})` },
-                                { id: 'suggested', label: `Suggested (${suggestedList.length})` },
-                            ].map((tab) => {
-                                const active = connectionsScope === tab.id;
-                                return (
-                                    <TouchableOpacity
-                                        key={tab.id}
-                                        style={[styles.connectionsTabBtn, active && styles.connectionsTabBtnActive]}
-                                        onPress={() => setConnectionsScope(tab.id as 'followers' | 'following' | 'mutual' | 'suggested')}
-                                    >
-                                        <Text style={[styles.connectionsTabText, active && styles.connectionsTabTextActive]}>
-                                            {tab.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                        <View style={styles.connectionsSearchWrap}>
-                            <Icon name="search" size={16} color="#9CA3AF" />
-                            <TextInput
-                                value={connectionsSearch}
-                                onChangeText={setConnectionsSearch}
-                                placeholder="Search people"
-                                placeholderTextColor="#6B7280"
-                                style={styles.connectionsSearchInput}
-                            />
-                        </View>
-                        <ScrollView style={styles.modalBody}>
-                            {connectionsLoading ? (
-                                <ActivityIndicator size="small" color="#f472b6" />
-                            ) : searchedConnections.length > 0 ? (
-                                searchedConnections.map((entry) => (
-                                    <View
-                                        key={entry.handleNoAt}
-                                        style={styles.connectionRow}
-                                    >
-                                        <TouchableOpacity
-                                            style={styles.connectionLeftTap}
-                                            onPress={() => {
-                                                setShowConnectionsModal(false);
-                                                navigation.navigate('ViewProfile', { handle: entry.handleNoAt });
-                                            }}
-                                        >
-                                            <Avatar
-                                                src={entry.avatarUrl}
-                                                name={entry.displayName || entry.handleNoAt}
-                                                size="sm"
-                                            />
-                                            <View style={styles.connectionTextWrap}>
-                                                <Text style={styles.connectionNameText}>{entry.displayName}</Text>
-                                                <Text style={styles.connectionHandleText}>@{entry.handleNoAt}</Text>
-                                                {connectionRequestMap[entry.handleNoAt] && (
-                                                    <View style={styles.connectionMetaBadge}>
-                                                        <Icon name="lock-closed" size={11} color="#CBD5E1" />
-                                                        <Text style={styles.connectionMetaBadgeText}>Private account</Text>
-                                                    </View>
-                                                )}
-                                            </View>
-                                        </TouchableOpacity>
-                                        {normalizeHandleKey(entry.handleNoAt) !== normalizeHandleKey(String(user?.handle || '')) && (
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.connectionFollowBtn,
-                                                    connectionRequestMap[entry.handleNoAt] && styles.connectionRequestedBtn,
-                                                    connectionFollowMap[entry.handleNoAt] && styles.connectionFollowingBtn,
-                                                ]}
-                                                disabled={!!connectionActionLoadingMap[entry.handleNoAt] || !!connectionRequestMap[entry.handleNoAt]}
-                                                onPress={() => void toggleConnectionFollow(entry.handleNoAt)}
-                                            >
-                                                {connectionActionLoadingMap[entry.handleNoAt] ? (
-                                                    <ActivityIndicator size="small" color="#FFFFFF" />
-                                                ) : (
-                                                    <Text style={styles.connectionFollowBtnText}>
-                                                        {connectionRequestMap[entry.handleNoAt]
-                                                            ? 'Requested'
-                                                            : connectionFollowMap[entry.handleNoAt]
-                                                                ? 'Following'
-                                                                : 'Follow'}
-                                                    </Text>
-                                                )}
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                ))
-                            ) : (
-                                <Text style={styles.emptyText}>No connections found.</Text>
-                            )}
-                            {connectionsScope === 'followers' && followersHasMore && !connectionsSearch.trim() && (
-                                <TouchableOpacity
-                                    style={styles.loadMoreBtn}
-                                    disabled={connectionsLoadingMore}
-                                    onPress={() => void loadConnections('followers', false)}
-                                >
-                                    {connectionsLoadingMore ? (
-                                        <ActivityIndicator size="small" color="#FFFFFF" />
-                                    ) : (
-                                        <Text style={styles.loadMoreBtnText}>Load more followers</Text>
-                                    )}
-                                </TouchableOpacity>
-                            )}
-                            {connectionsScope === 'following' && followingHasMore && !connectionsSearch.trim() && (
-                                <TouchableOpacity
-                                    style={styles.loadMoreBtn}
-                                    disabled={connectionsLoadingMore}
-                                    onPress={() => void loadConnections('following', false)}
-                                >
-                                    {connectionsLoadingMore ? (
-                                        <ActivityIndicator size="small" color="#FFFFFF" />
-                                    ) : (
-                                        <Text style={styles.loadMoreBtnText}>Load more following</Text>
-                                    )}
-                                </TouchableOpacity>
-                            )}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
+                onClose={() => setShowConnectionsModal(false)}
+                scope={connectionsScope}
+                onScopeChange={setConnectionsScope}
+                search={connectionsSearch}
+                onSearchChange={setConnectionsSearch}
+                rows={searchedConnections}
+                loading={connectionsLoading}
+                loadingMore={connectionsLoadingMore}
+                viewerHandle={user?.handle}
+                followMap={connectionFollowMap}
+                requestMap={connectionRequestMap}
+                actionLoadingMap={connectionActionLoadingMap}
+                onToggleFollow={(h) => void toggleConnectionFollow(h)}
+                onOpenProfile={(h) => {
+                    setShowConnectionsModal(false);
+                    navigation.navigate('ViewProfile', { handle: h });
+                }}
+                hasMore={
+                    (connectionsScope === 'followers' && followersHasMore) ||
+                    (connectionsScope === 'following' && followingHasMore)
+                }
+                onLoadMore={
+                    connectionsScope === 'followers'
+                        ? () => void loadConnections('followers', false)
+                        : connectionsScope === 'following'
+                          ? () => void loadConnections('following', false)
+                          : undefined
+                }
+            />
 
             <ProfilePostNotifySheet
                 visible={postNotifySheetMode !== null}
                 mode={postNotifySheetMode === 'confirm' ? 'confirm' : 'menu'}
                 activeLevel={postNotifyLevel}
-                displayName={profileNotifyDisplayName}
+                displayName={profileDisplayName}
                 onClose={() => setPostNotifySheetMode(null)}
                 onChooseAll={() => applyPostNotifyLevel('all')}
                 onChooseNone={() => applyPostNotifyLevel('off')}
+            />
+
+            <ShareProfileSheet
+                visible={showShareProfileSheet}
+                onClose={() => setShowShareProfileSheet(false)}
+                handle={decodedHandle}
+                name={profileDisplayName}
+                avatarUrl={profileUser?.avatarUrl}
+                navigation={navigation}
+            />
+
+            <ProfileQRCodeModal
+                visible={showProfileQR}
+                onClose={() => setShowProfileQR(false)}
+                handle={decodedHandle}
+                name={profileDisplayName}
+            />
+
+            <ViewProfilePostsSheet
+                visible={showPostsSheet}
+                onClose={() => {
+                    setShowPostsSheet(false);
+                    setSelectedPostId(null);
+                }}
+                posts={posts}
+                initialPostId={selectedPostId}
+                profileName={profileDisplayName}
+                profileHandle={decodedHandle}
+                navigation={navigation}
+            />
+
+            <ProfileGridPeekSheet
+                visible={gridPeekPost !== null}
+                post={gridPeekPost}
+                profileHandle={decodedHandle}
+                profileName={profileDisplayName}
+                profileAvatarUrl={profileUser?.avatarUrl}
+                isOwnProfile={isOwnProfile}
+                onClose={closeGridPeek}
+                onLike={() => void handlePeekLike()}
+                onComment={handlePeekComment}
+                onReclip={() => void handlePeekReclip()}
+                onShare={handlePeekShare}
+                onReport={handlePeekReport}
+            />
+
+            <PostCommentsSheet
+                postId={peekCommentsPost?.id ?? ''}
+                post={peekCommentsPost}
+                isOpen={peekCommentsPost !== null}
+                onClose={() => setPeekCommentsPost(null)}
+                commentAuthorHandle={user?.handle || ''}
+                currentUserHandle={user?.handle}
+            />
+
+            <FeedShareModal
+                post={peekSharePost}
+                isOpen={peekSharePost !== null}
+                onClose={() => setPeekSharePost(null)}
+            />
+
+            <PickGroupToInviteFeedUserModal
+                visible={showInviteToGroup}
+                onClose={() => setShowInviteToGroup(false)}
+                inviteeHandle={decodedHandle}
+            />
+
+            <GazetteerAlertSheet
+                visible={showNoPlacesAlert}
+                title="No Places Traveled"
+                message={`${decodedHandle || 'This user'} hasn't added any places they've traveled to their profile yet.`}
+                icon="alert"
+                confirmButtonText="Done"
+                onConfirm={() => setShowNoPlacesAlert(false)}
+                onDismiss={() => setShowNoPlacesAlert(false)}
+            />
+
+            <GazetteerAlertSheet
+                visible={showFollowRequestAlert}
+                title="Follow Request Sent"
+                message="Your follow request has been sent."
+                icon="success"
+                confirmButtonText="Done"
+                onConfirm={() => setShowFollowRequestAlert(false)}
+                onDismiss={() => setShowFollowRequestAlert(false)}
             />
         </GazetteerScreenShell>
     );
@@ -1002,6 +1501,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
     loadingShell: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -1009,13 +1509,62 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.1)',
         ...gazetteerHeader,
     },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
+    headerIconBtn: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerIconBtnPlaceholder: {
+        width: 44,
+        height: 44,
+    },
+    headerCenter: {
+        flex: 1,
+        minWidth: 0,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+    },
+    headerName: {
+        fontSize: 14,
+        fontWeight: '600',
         color: '#FFFFFF',
+        textAlign: 'center',
+    },
+    headerHandle: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        textAlign: 'center',
+        marginTop: 1,
+    },
+    passportTitleBlock: {
+        width: '100%',
+        alignItems: 'center',
+        paddingTop: 16,
+        paddingBottom: 12,
+    },
+    passportTitle: {
+        fontSize: 28,
+        fontWeight: '600',
+        color: '#FFFFFF',
+        letterSpacing: -0.3,
+    },
+    passportEyebrow: {
+        marginTop: 4,
+        fontSize: 12,
+        color: '#9CA3AF',
+        textTransform: 'uppercase',
+        letterSpacing: 3.2,
     },
     content: {
         flex: 1,
@@ -1024,30 +1573,79 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.inset,
+        paddingTop: 20,
+        paddingBottom: 8,
         gap: 24,
     },
     statsContainer: {
         flex: 1,
         flexDirection: 'row',
-        justifyContent: 'space-around',
+        gap: 8,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        padding: 8,
     },
     statItem: {
+        flex: 1,
         alignItems: 'center',
+        borderRadius: 12,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        paddingVertical: 8,
     },
     statNumber: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontSize: 16,
+        fontWeight: '600',
         color: '#FFFFFF',
     },
     statLabel: {
-        fontSize: 14,
+        fontSize: 11,
         color: '#9CA3AF',
-        marginTop: 4,
+        marginTop: 2,
+    },
+    nameRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 2,
+    },
+    coverIdentity: {
+        marginTop: 10,
+        alignItems: 'center',
+        alignSelf: 'stretch',
+        paddingHorizontal: 20,
+    },
+    coverDisplayName: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        marginBottom: 4,
+        width: '100%',
+    },
+    coverHandleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        width: '100%',
+    },
+    coverHandle: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: 'rgba(229,231,235,0.92)',
+        textAlign: 'center',
+        flexShrink: 1,
+    },
+    displayName: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     userInfo: {
         paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.normalV,
+        paddingBottom: FEED_UI.spacing.normalV,
         paddingTop: 0,
     },
     userHandle: {
@@ -1056,10 +1654,26 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         marginBottom: 4,
     },
+    bioBox: {
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 4,
+    },
+    bioBoxEmpty: {
+        backgroundColor: 'rgba(255,255,255,0.02)',
+    },
     bio: {
         fontSize: 14,
-        color: '#D1D5DB',
-        marginTop: 4,
+        color: '#E5E7EB',
+        lineHeight: 20,
+    },
+    bioPlaceholder: {
+        fontSize: 14,
+        color: '#6B7280',
     },
     socialLinksRow: {
         flexDirection: 'row',
@@ -1077,15 +1691,22 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.2)',
         borderRadius: 12,
     },
+    socialXGlyph: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '700',
+        lineHeight: 22,
+    },
     postNotifyButton: {
         width: 44,
-        paddingVertical: FEED_UI.spacing.compactV,
-        borderRadius: 8,
+        height: 42,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.3)',
         backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',
+        flexShrink: 0,
     },
     postNotifyButtonActive: {
         borderColor: 'rgba(217,27,92,0.5)',
@@ -1094,14 +1715,15 @@ const styles = StyleSheet.create({
     actionButtons: {
         flexDirection: 'row',
         paddingHorizontal: FEED_UI.spacing.inset,
-        gap: FEED_UI.spacing.groupGapTight,
-        marginBottom: FEED_UI.spacing.groupGapTight,
+        gap: 8,
+        marginBottom: 16,
+        alignItems: 'center',
     },
     secondaryActions: {
         flexDirection: 'row',
         paddingHorizontal: FEED_UI.spacing.inset,
-        gap: FEED_UI.spacing.groupGapTight,
-        marginBottom: FEED_UI.spacing.normalV,
+        gap: 8,
+        marginBottom: 16,
     },
     secondaryActionBtn: {
         flex: 1,
@@ -1125,62 +1747,124 @@ const styles = StyleSheet.create({
     },
     followButton: {
         flex: 1,
-        paddingVertical: FEED_UI.spacing.compactV,
-        borderRadius: 8,
-        backgroundColor: '#d91b5c',
+        paddingVertical: 10,
+        minHeight: 42,
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
         alignItems: 'center',
+        justifyContent: 'center',
     },
-    followingButton: {
-        ...glassSurface,
+    privateFollowButton: {
+        flex: 0,
+        paddingHorizontal: 24,
+        minWidth: 140,
+        backgroundColor: '#d91b5c',
     },
-    followButtonText: {
+    privateFollowButtonText: {
         color: '#FFFFFF',
         fontSize: 14,
         fontWeight: '600',
     },
-    followingButtonText: {
-        color: '#FFFFFF',
+    followButtonText: {
+        color: '#000000',
+        fontSize: 14,
+        fontWeight: '600',
     },
     messageButton: {
         flex: 1,
-        paddingVertical: FEED_UI.spacing.compactV,
-        borderRadius: 8,
+        paddingVertical: 10,
+        minHeight: 42,
+        borderRadius: 12,
         alignItems: 'center',
-        ...glassSurface,
+        justifyContent: 'center',
+        backgroundColor: '#000000',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
     },
     messageButtonText: {
         color: '#FFFFFF',
         fontSize: 14,
         fontWeight: '600',
     },
+    contentTabsWrap: {
+        marginBottom: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(0,0,0,0.92)',
+    },
     contentTabsRow: {
         flexDirection: 'row',
-        gap: 8,
-        paddingHorizontal: FEED_UI.spacing.inset,
-        marginBottom: 8,
+        gap: 6,
+        paddingHorizontal: 4,
     },
     contentTabButton: {
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        ...glassSurface,
+        flex: 1,
+        minHeight: 44,
+        borderRadius: 8,
+        paddingVertical: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#000000',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
     },
     contentTabButtonActive: {
-        borderColor: 'rgba(244, 114, 182, 0.55)',
-        backgroundColor: 'rgba(217, 27, 92, 0.25)',
+        backgroundColor: '#FFFFFF',
+        borderColor: '#FFFFFF',
     },
     contentTabText: {
-        color: '#D1D5DB',
+        color: '#FFFFFF',
         fontSize: 12,
         fontWeight: '700',
     },
     contentTabTextActive: {
-        color: '#FBCFE8',
+        color: '#000000',
     },
     postsContainer: {
-        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingHorizontal: 8,
         paddingTop: 4,
         paddingBottom: FEED_UI.spacing.inset,
+    },
+    postsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    emptyGrid: {
+        alignItems: 'center',
+        paddingVertical: 48,
+        paddingHorizontal: 24,
+    },
+    emptyGridTitle: {
+        color: '#9CA3AF',
+        fontSize: 18,
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    emptyGridSubtext: {
+        color: '#6B7280',
+        fontSize: 14,
+        textAlign: 'center',
+    },
+    loadMoreGridBtn: {
+        marginTop: 12,
+        marginBottom: 8,
+        alignSelf: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        minWidth: 140,
+        alignItems: 'center',
+    },
+    loadMoreGridBtnText: {
+        color: '#E5E7EB',
+        fontSize: 13,
+        fontWeight: '600',
     },
     postThumbnail: {
         width: '33.33%',
@@ -1206,16 +1890,24 @@ const styles = StyleSheet.create({
         padding: 40,
     },
     privateText: {
-        fontSize: 18,
-        fontWeight: '600',
+        fontSize: 24,
+        fontWeight: '700',
         color: '#FFFFFF',
         marginTop: 16,
         marginBottom: 8,
+        textAlign: 'center',
     },
     privateSubtext: {
         fontSize: 14,
         color: '#9CA3AF',
         marginBottom: 24,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    privatePendingText: {
+        fontSize: 14,
+        color: '#6B7280',
+        textAlign: 'center',
     },
     traveledButton: {
         paddingHorizontal: 16,
@@ -1415,43 +2107,6 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         textAlign: 'center',
         paddingVertical: 24,
-    },
-    menuOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(11, 7, 17, 0.78)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    menuContainer: {
-        borderRadius: 24,
-        padding: 24,
-        ...glassPanel,
-    },
-    menuContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 24,
-    },
-    menuButton: {
-        alignItems: 'center',
-        gap: 8,
-    },
-    menuIconContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'rgba(217, 27, 92, 0.22)',
-        borderWidth: 1,
-        borderColor: 'rgba(244, 114, 182, 0.35)',
-    },
-    menuButtonText: {
-        fontSize: 12,
-        fontWeight: '500',
-        color: '#FFFFFF',
-        textAlign: 'center',
     },
 });
 

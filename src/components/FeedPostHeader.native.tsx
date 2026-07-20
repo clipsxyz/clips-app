@@ -15,6 +15,7 @@ import {
     getPostSocialSourceLabel,
     getReclipDisplay,
 } from '../utils/feedPostMeta';
+import { FEED_UI } from '../constants/feedUiTokens';
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -29,6 +30,7 @@ export type FeedPostHeaderProps = {
     onOverflowPress?: () => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onHasStoryChange?: (hasStory: boolean) => void;
+    menuAnchorRef?: React.Ref<View>;
 };
 
 export default function FeedPostHeader({
@@ -43,6 +45,7 @@ export default function FeedPostHeader({
     onOverflowPress,
     onRegisterDmAnchor,
     onHasStoryChange,
+    menuAnchorRef,
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
@@ -117,13 +120,13 @@ export default function FeedPostHeader({
                 <Avatar
                     src={avatarSrc}
                     name={displayHandle.split('@')[0]}
-                    size={32}
+                    size={FEED_UI.icon.avatar}
                     hasStory={hasStory}
                 />
             </TouchableOpacity>
             {!isCurrentUser && onFollow && !isFollowing ? (
                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
-                    <Icon name="add" size={12} color="#FFFFFF" />
+                    <Icon name="add" size={10} color="#FFFFFF" />
                 </TouchableOpacity>
             ) : null}
             {!isCurrentUser && isMutualFollow && onOpenDM ? (
@@ -131,12 +134,12 @@ export default function FeedPostHeader({
                     style={styles.dmButton}
                     onPress={() => onOpenDM(post.userHandle, post.id)}
                 >
-                    <Icon name="paper-plane" size={11} color="#EF4444" />
+                    <Icon name="paper-plane" size={10} color="#EF4444" />
                 </TouchableOpacity>
             ) : null}
             {!isCurrentUser && isFollowing && !isMutualFollow && showFollowCheck ? (
                 <View style={styles.followCheck}>
-                    <Icon name="checkmark" size={12} color="#FFFFFF" />
+                    <Icon name="checkmark" size={10} color="#FFFFFF" />
                 </View>
             ) : null}
         </View>
@@ -147,7 +150,11 @@ export default function FeedPostHeader({
             <Text style={[styles.handleText, { color: textPrimary }]} numberOfLines={1}>
                 {displayHandle}
             </Text>
-            <Flag value={flagValue} national={isCurrentUser ? user?.national : undefined} size={14} />
+            <Flag
+                value={flagValue}
+                national={isCurrentUser ? user?.national : undefined}
+                size={FEED_UI.icon.flag}
+            />
         </TouchableOpacity>
     );
 
@@ -158,7 +165,7 @@ export default function FeedPostHeader({
                 <View style={styles.infoCol}>
                     {isReclip ? (
                         <View style={styles.reclipRow}>
-                            <Icon name="repeat" size={12} color={reclipColor} />
+                            <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
                             <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
                                 {post.userHandle} reclipped
                             </Text>
@@ -196,7 +203,7 @@ export default function FeedPostHeader({
                     >
                         <Icon
                             name="ellipsis-horizontal"
-                            size={20}
+                            size={16}
                             color={isOverlaid ? '#FFFFFF' : '#9CA3AF'}
                         />
                     </TouchableOpacity>
@@ -206,11 +213,20 @@ export default function FeedPostHeader({
     );
 
     if (variant === 'textOnlyChrome') {
-        return <View style={styles.textOnlyChromeWrap}>{chrome}</View>;
+        return (
+            <View ref={menuAnchorRef} collapsable={false} style={styles.textOnlyChromeWrap}>
+                {chrome}
+            </View>
+        );
     }
 
     return (
-        <View style={[styles.wrap, isOverlaid && styles.wrapOverlaid]} pointerEvents="box-none">
+        <View
+            ref={menuAnchorRef}
+            collapsable={false}
+            style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}
+            pointerEvents="box-none"
+        >
             {isOverlaid ? (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}
@@ -224,10 +240,11 @@ export default function FeedPostHeader({
 }
 
 const styles = StyleSheet.create({
+    // Web PostHeader: `px-3 pt-3 pb-2`
     wrap: {
         paddingHorizontal: 12,
-        paddingTop: 10,
-        paddingBottom: 6,
+        paddingTop: 12,
+        paddingBottom: 8,
     },
     wrapOverlaid: {
         position: 'absolute',
@@ -235,7 +252,7 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 20,
-        paddingTop: 8,
+        // No elevation — elevated full-width headers steal taps on Android even with box-none.
     },
     content: {
         zIndex: 1,
@@ -257,21 +274,22 @@ const styles = StyleSheet.create({
     left: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         minWidth: 0,
         paddingRight: 8,
     },
+    // Web: `gap-3` between avatar and text
     leftWithAvatar: {
-        gap: 10,
+        gap: 12,
     },
     infoCol: {
         flex: 1,
         minWidth: 0,
-        gap: 2,
+        gap: 0,
     },
     right: {
         alignItems: 'flex-end',
-        gap: 4,
+        gap: 2,
         flexShrink: 0,
     },
     avatarWrap: {
@@ -320,9 +338,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
+        marginBottom: 4,
     },
+    // Web: `text-xs` — optically bumped for phone Instagram weight
     reclipText: {
-        fontSize: 11,
+        fontSize: FEED_UI.type.reclip,
     },
     handleBtn: {
         flexDirection: 'row',
@@ -330,9 +350,10 @@ const styles = StyleSheet.create({
         gap: 6,
         maxWidth: '100%',
     },
+    // Web: `text-sm font-semibold` — optically bumped
     handleText: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: FEED_UI.type.handle,
+        fontWeight: '700',
         flexShrink: 1,
     },
     socialPill: {
@@ -355,7 +376,12 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '600',
     },
+    // Web: `p-2 min-w/h-[40px]`, icon `w-4 h-4`
     overflowBtn: {
-        padding: 4,
+        minWidth: 40,
+        minHeight: 40,
+        padding: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

@@ -11,8 +11,9 @@ import Avatar from './Avatar';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
 import TaggedAvatars from './TaggedAvatars.native';
+import { FEED_UI } from '../constants/feedUiTokens';
 
-const AVATAR_COLUMN_WIDTH = 36;
+const AVATAR_COLUMN_WIDTH = FEED_UI.icon.avatar + 8;
 const BUBBLE_MAX_WIDTH = 480;
 
 type Props = {
@@ -27,6 +28,7 @@ type Props = {
     onDoubleLike: () => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onShowTaggedUsers?: () => void;
+    menuAnchorRef?: React.Ref<View>;
 };
 
 export default function FeedTextOnlyFeedLayout({
@@ -41,6 +43,7 @@ export default function FeedTextOnlyFeedLayout({
     onDoubleLike,
     onRegisterDmAnchor,
     onShowTaggedUsers,
+    menuAnchorRef,
 }: Props) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
@@ -88,6 +91,7 @@ export default function FeedTextOnlyFeedLayout({
                 onProfileMenuPress={onProfileMenuPress}
                 onOverflowPress={onOverflowPress}
                 onRegisterDmAnchor={onRegisterDmAnchor}
+                menuAnchorRef={menuAnchorRef}
             />
 
             {/* Web PostHeader textOnlyFeed: bubble then avatar, row aligned end. */}
@@ -106,7 +110,7 @@ export default function FeedTextOnlyFeedLayout({
                             <Avatar
                                 src={avatarSrc}
                                 name={(profileHandle || post.userHandle || 'User').split('@')[0]}
-                                size={28}
+                                size={FEED_UI.icon.avatar}
                                 hasStory={hasStory}
                             />
                         </TouchableOpacity>

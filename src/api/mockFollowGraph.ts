@@ -11,6 +11,35 @@ export function normalizeHandleForMockGraph(value: string): string {
     return value.replace(/^@/, '').trim().toLowerCase();
 }
 
+/** Header follower/following counts that match mock connection lists. */
+export function computeMockGraphFollowCounts(
+    decodedHandle: string,
+    viewerHandle: string | undefined,
+    viewerFollows: string[],
+): { followers: number; following: number } {
+    const normalizedTarget = normalizeHandleForMockGraph(decodedHandle);
+    const viewerFollowedSet = new Set(viewerFollows.map((h) => normalizeHandleForMockGraph(h)));
+    const followersSet = new Set<string>();
+    Object.entries(MOCK_FOLLOWING_GRAPH).forEach(([followerHandle, followingList]) => {
+        const followsTarget = (followingList || []).some(
+            (entry) => normalizeHandleForMockGraph(entry) === normalizedTarget,
+        );
+        if (followsTarget) followersSet.add(normalizeHandleForMockGraph(followerHandle));
+    });
+    if (viewerHandle && viewerFollowedSet.has(normalizedTarget)) {
+        followersSet.add(normalizeHandleForMockGraph(viewerHandle));
+    }
+    const followingSet = new Set<string>(
+        (MOCK_FOLLOWING_GRAPH[normalizedTarget] || []).map((entry) =>
+            normalizeHandleForMockGraph(entry),
+        ),
+    );
+    if (viewerHandle && normalizeHandleForMockGraph(viewerHandle) === normalizedTarget) {
+        viewerFollows.forEach((entry) => followingSet.add(normalizeHandleForMockGraph(String(entry))));
+    }
+    return { followers: followersSet.size, following: followingSet.size };
+}
+
 /** True if mock data says `authorHandle` follows `viewerHandle` (for mutual-follow / DM). */
 export function mockAuthorFollowsViewer(authorHandle: string, viewerHandle: string): boolean {
     if (!authorHandle || !viewerHandle) return false;

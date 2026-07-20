@@ -718,7 +718,7 @@ function saveFollowsToStorage(userId: string, follows: Record<string, boolean>):
   } catch (_) {}
 }
 
-/** Fresh follows from localStorage (no in-memory cache). Merge from all possible keys so phone/tablet never miss follows due to userId mismatch. */
+/** Follows for Following feed: storage + in-memory (RN has no localStorage, so taps live in userState). */
 function getFollowsForDiscover(userId: string): Record<string, boolean> {
   const uid = typeof userId === 'string' ? userId : String(userId);
   const fromUid = loadFollowsFromStorage(uid);
@@ -735,7 +735,8 @@ function getFollowsForDiscover(userId: string): Record<string, boolean> {
       }
     }
   } catch (_) {}
-  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid };
+  const fromMemory = userState[uid]?.follows || {};
+  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid, ...fromMemory };
 }
 
 export function getState(userId: string): UserState {
@@ -1116,11 +1117,10 @@ function collectDevMockVideoPostCandidates(): Post[] {
 
 function devMockVideosForDiscoverTab(userId: string): Post[] {
   const all = collectDevMockVideoPostCandidates();
-  // Pure mock mode: always surface Sarah/Bob MP4 demos on Following (no Laravel).
-  if (!isLaravelApiEnabled()) return all;
   const follows = getFollowsForDiscover(userId);
   const followsSarah = getFollowState(follows, 'Sarah@Artane');
-  const followsBob = getFollowState(follows, 'Bob@Ireland');
+  const followsBob =
+    getFollowState(follows, 'Bob@Ireland') || getFollowState(follows, 'Bob@Finglas');
   if (!followsSarah && !followsBob) return [];
   return all.filter((p) => {
     const h = (p.userHandle || '').toLowerCase();
@@ -1130,16 +1130,12 @@ function devMockVideosForDiscoverTab(userId: string): Post[] {
   });
 }
 
-/** Which demo MP4 posts belong on this tab (mock mode is permissive on core location tabs). */
+/** Demo MP4 cards must obey the same tab rules as organic posts (location / Following). */
 function collectDevMockVideoPostsForTab(tab: string, userId: string): Post[] {
   const t = tab.toLowerCase();
   if (t === 'clips') return [];
   if (t === 'discover') return devMockVideosForDiscoverTab(userId);
-  const all = collectDevMockVideoPostCandidates();
-  if (!isLaravelApiEnabled() && (t === 'finglas' || t === 'dublin' || t === 'ireland')) {
-    return all;
-  }
-  return all.filter((p) => postMatchesLocationTab(p, tab));
+  return collectDevMockVideoPostCandidates().filter((p) => postMatchesLocationTab(p, tab));
 }
 
 /** Prepend demo MP4 cards on feed page 0 (location tabs + Following when you follow Sarah/Bob). */
@@ -1346,9 +1342,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         })
         .filter((x: Post | null): x is Post => x !== null);
 
-      // Guard custom location feeds from server over-broad matches.
-      // Keep only posts whose author/location metadata actually matches the queried location.
-      if (isCustomLocationFeed) {
+      // Guard location feeds from server over-broad matches (author local/regional/national must match tab).
+      if (t === 'finglas' || t === 'dublin' || t === 'ireland' || isCustomLocationFeed) {
         transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
       }
 

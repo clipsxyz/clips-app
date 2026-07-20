@@ -3,7 +3,11 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from './Avatar';
-import { hasCustomProfileCover, resolveProfileCoverUri } from '../utils/profileCoverNative';
+import {
+    DEFAULT_PROFILE_COVER_SOURCE,
+    hasCustomProfileCover,
+    resolveProfileCoverSource,
+} from '../utils/profileCoverNative';
 
 type Props = {
     coverUrl?: string | null;
@@ -28,9 +32,9 @@ export default function ProfileCoverHero({
 }: Props) {
     const customCover = hasCustomProfileCover(coverUrl);
     const [coverFailed, setCoverFailed] = useState(false);
-    const coverSrc = coverFailed
-        ? resolveProfileCoverUri(null)
-        : resolveProfileCoverUri(coverUrl);
+    const coverSource = coverFailed
+        ? DEFAULT_PROFILE_COVER_SOURCE
+        : resolveProfileCoverSource(coverUrl);
 
     useEffect(() => {
         setCoverFailed(false);
@@ -41,14 +45,17 @@ export default function ProfileCoverHero({
     return (
         <View style={styles.wrap}>
             <Image
-                source={{ uri: coverSrc }}
+                source={coverSource}
                 style={[styles.coverImage, showMuted && styles.coverImageMuted]}
                 resizeMode="cover"
-                onError={() => setCoverFailed(true)}
+                onError={() => {
+                    if (customCover) setCoverFailed(true);
+                }}
             />
             <LinearGradient
-                colors={['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.45)', 'rgba(11,7,17,0.92)']}
-                style={StyleSheet.absoluteFill}
+                colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.28)', 'rgba(11,7,17,0.75)']}
+                style={styles.gradient}
+                pointerEvents="none"
             />
             {showChangeCover && onPressChangeCover ? (
                 <TouchableOpacity style={styles.changeCoverBtn} onPress={onPressChangeCover}>
@@ -57,14 +64,16 @@ export default function ProfileCoverHero({
                 </TouchableOpacity>
             ) : null}
             <View style={styles.centerBlock}>
-                {onAvatarPress ? (
-                    <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
+                <View style={styles.identityStack}>
+                    {onAvatarPress ? (
+                        <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
+                            <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
+                        </TouchableOpacity>
+                    ) : (
                         <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
-                    </TouchableOpacity>
-                ) : (
-                    <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
-                )}
-                {children}
+                    )}
+                    {children}
+                </View>
             </View>
         </View>
     );
@@ -72,7 +81,7 @@ export default function ProfileCoverHero({
 
 const styles = StyleSheet.create({
     wrap: {
-        height: 220,
+        height: 260,
         borderRadius: 20,
         marginHorizontal: 16,
         marginTop: 8,
@@ -81,20 +90,35 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: '#111827',
+        position: 'relative',
     },
     coverImage: {
-        ...StyleSheet.absoluteFill,
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         width: '100%',
         height: '100%',
+        zIndex: 0,
     },
     coverImageMuted: {
-        opacity: 0.32,
+        opacity: 0.55,
+    },
+    gradient: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1,
     },
     changeCoverBtn: {
         position: 'absolute',
         top: 12,
         right: 12,
-        zIndex: 3,
+        zIndex: 4,
+        elevation: 4,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
@@ -112,9 +136,15 @@ const styles = StyleSheet.create({
     },
     centerBlock: {
         flex: 1,
+        zIndex: 3,
+        elevation: 3,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: 28,
-        zIndex: 2,
+        paddingHorizontal: 16,
+    },
+    identityStack: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        maxWidth: '100%',
     },
 });

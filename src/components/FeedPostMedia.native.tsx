@@ -210,8 +210,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && activeIsVideo && !!mediaUrl;
-    const showScenesCta = mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
+    const showScenesCta =
+        mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
     const feedShouldPlay = mode === 'feed' && video && isActive && !playFailed;
+    const showMuteButton = video && mode === 'feed' && (feedShouldPlay || muteFlash);
 
     const onFeedVideoProgress = (currentTime: number) => {
         if (mode !== 'feed' || !isActive) return;
@@ -303,6 +305,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         !feedTouchesHandledExternally &&
         Boolean(onDoubleLike || onSingleTap || onPress);
 
+    /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
+    const mediaPointerEvents =
+        mode === 'feed' && (feedTapCapture || feedTouchesHandledExternally)
+            ? ('none' as const)
+            : undefined;
+
     const clearPendingSingleTap = useCallback(() => {
         if (singleTapTimerRef.current) {
             clearTimeout(singleTapTimerRef.current);
@@ -373,11 +381,18 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const feedVideoSurfaceProps =
         Platform.OS === 'android' && mode === 'feed'
-            ? { viewType: ViewType.TEXTURE as const }
+            ? { viewType: ViewType.TEXTURE as const, useTextureView: true }
             : {};
 
-    const renderFeedTapOverlay = () =>
-        feedTapCapture && (video || hasCarousel) ? (
+    /**
+     * Scenes-style tap capture: gesture-handler Pressable above media.
+     * pointerEvents="none" on Image/Video so the native surface cannot steal hits.
+     */
+    const renderFeedTapOverlay = (opts?: { forCarouselSlide?: boolean }) => {
+        if (!feedTapCapture) return null;
+        if (hasCarousel && !opts?.forCarouselSlide) return null;
+        if (!hasCarousel && opts?.forCarouselSlide) return null;
+        return (
             <GesturePressable
                 style={styles.tapCapture}
                 onPress={handleMediaTap}
@@ -385,14 +400,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 accessibilityRole="button"
                 accessibilityLabel="Double tap to like"
             />
-        ) : null;
-
-    const mediaPointerEvents =
-        mode === 'feed' &&
-        (feedTapCapture || feedTouchesHandledExternally) &&
-        (video || hasCarousel)
-            ? ('none' as const)
-            : undefined;
+        );
+    };
 
     if (textOnly) {
         return (
@@ -518,46 +527,29 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     <Icon name="videocam-outline" size={36} color="#6B7280" />
                 </View>
             )
-        ) : hasCarousel || !feedTapCapture ? (
+        ) : (
             <Image
                 source={{ uri: slideUrl }}
                 style={frameStyle}
                 resizeMode="cover"
                 resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                 progressiveRenderingEnabled
-                pointerEvents={feedTapCapture ? 'none' : undefined}
+                pointerEvents={mediaPointerEvents}
                 onLoadStart={() => beginUrlLoad(slideRawUrl)}
                 onLoad={() => markUrlLoaded(slideRawUrl)}
                 onError={() => markUrlLoaded(slideRawUrl)}
             />
-        ) : (
-            <GesturePressable
-                style={frameStyle}
-                onPress={handleMediaTap}
-                android_disableSound
-            >
-                <Image
-                    source={{ uri: slideUrl }}
-                    style={frameStyle}
-                    resizeMode="cover"
-                    resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                    progressiveRenderingEnabled
-                    pointerEvents="none"
-                    onLoadStart={() => beginUrlLoad(slideRawUrl)}
-                    onLoad={() => markUrlLoaded(slideRawUrl)}
-                    onError={() => markUrlLoaded(slideRawUrl)}
-                />
-            </GesturePressable>
         );
 
         return (
-            <View style={frameStyle}>
+            <View style={frameStyle} collapsable={false}>
                 {slideInner}
                 {showLoader ? (
                     <View style={styles.loadingOverlay} pointerEvents="none">
                         <ActivityIndicator color="#f472b6" />
                     </View>
                 ) : null}
+                {renderFeedTapOverlay({ forCarouselSlide: true })}
             </View>
         );
     };
@@ -627,8 +619,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             {showScenesCta ? (
                 <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={post.userHandle} />
             ) : null}
-            {video && mode === 'feed' && (feedShouldPlay || muteFlash) ? (
-                <GesturePressable
+            {showMuteButton ? (
+                <Pressable
                     style={styles.muteButton}
                     onPress={(e) => {
                         e.stopPropagation?.();
@@ -639,7 +631,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     hitSlop={8}
                 >
                     <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={20} color="#FFFFFF" />
-                </GesturePressable>
+                </Pressable>
             ) : null}
             {video && mode === 'detail' && paused ? (
                 <Pressable style={styles.playBadge} onPress={() => setPaused(false)}>
@@ -754,7 +746,8 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         zIndex: 22,
         elevation: Platform.OS === 'android' ? 22 : 0,
-        backgroundColor: 'rgba(0,0,0,0.001)',
+        // Non-zero alpha so Android includes this view in hit-testing.
+        backgroundColor: 'rgba(0,0,0,0.002)',
     },
     burstLayer: {
         ...StyleSheet.absoluteFillObject,

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -7,18 +7,19 @@ import {
     ScrollView,
     ActivityIndicator,
     Linking,
-    Alert,
+    Modal,
+    Pressable,
+    Share,
     useWindowDimensions,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
+import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
-import { glassPanel } from '../theme/gazetteerAmbientNative';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_PROFILE } from './GazetteerBottomSheetModal.native';
 import {
     buildProfileShareUrl,
     formatProfileDisplayHandle,
@@ -66,6 +67,7 @@ function IconCircle({
     return <View style={[styles.iconCircle, { backgroundColor }]}>{children}</View>;
 }
 
+/** Web `ShareProfileModal` parity — RN Modal (not gorhom) so it works over profile navigation. */
 export default function ShareProfileSheet({
     visible,
     onClose,
@@ -74,36 +76,64 @@ export default function ShareProfileSheet({
     avatarUrl,
     navigation,
 }: Props) {
+    const insets = useSafeAreaInsets();
     const { width } = useWindowDimensions();
     const { user } = useAuth();
     const [copied, setCopied] = useState(false);
+    const [statusHint, setStatusHint] = useState<string | null>(null);
     const [isSharingStory, setIsSharingStory] = useState(false);
 
     const displayHandle = formatProfileDisplayHandle(handle);
     const profileUrl = buildProfileShareUrl(handle);
     const shareText = getProfileShareMessage(name);
+    const resolvedAvatar = avatarUrl || getAvatarForHandle(handle);
+    const sheetWidth = Math.min(width, 448);
 
-    const copyLink = async () => {
+    useEffect(() => {
+        if (!visible) {
+            setCopied(false);
+            setStatusHint(null);
+            setIsSharingStory(false);
+        }
+    }, [visible]);
+
+    const showHint = (message: string) => {
+        setStatusHint(message);
+        setTimeout(() => setStatusHint(null), 2200);
+    };
+
+    const copyLink = async (hint?: string) => {
         try {
             Clipboard.setString(profileUrl);
             setCopied(true);
+            showHint(hint || 'Profile link copied');
             setTimeout(() => setCopied(false), 2000);
         } catch {
-            Alert.alert('Could not copy', 'Please try again.');
+            showHint('Could not copy link');
+        }
+    };
+
+    const shareSystem = async () => {
+        try {
+            await Share.share({
+                message: `${shareText}\n${profileUrl}`,
+                url: profileUrl,
+                title: shareText,
+            });
+        } catch {
+            /* user cancelled */
+        } finally {
+            onClose();
         }
     };
 
     const openUrl = async (url: string) => {
         try {
-            const can = await Linking.canOpenURL(url);
-            if (!can) {
-                Alert.alert('Unavailable', 'Could not open this app on your device.');
-                return;
-            }
+            // Skip canOpenURL — Android often returns false for https/mailto without package queries.
             await Linking.openURL(url);
             onClose();
         } catch {
-            Alert.alert('Unavailable', 'Could not open link.');
+            await shareSystem();
         }
     };
 
@@ -135,23 +165,31 @@ export default function ShareProfileSheet({
 
     const shareToStory = async () => {
         if (!user?.id) {
-            Alert.alert('Sign in required', 'Sign in to share to Stories.');
+            showHint('Sign in to share to Stories');
             return;
         }
         setIsSharingStory(true);
         try {
             const bareHandle = String(handle || '').replace(/^@/, '').trim();
+            const mediaUrl = resolvedAvatar;
             await createStory(
                 user.id,
                 user.handle || '',
-                avatarUrl || undefined,
-                avatarUrl ? 'image' : undefined,
+                mediaUrl || undefined,
+                mediaUrl ? 'image' : undefined,
                 `Check out @${bareHandle}'s profile!`,
                 undefined,
                 undefined,
                 undefined,
                 bareHandle,
                 undefined,
+                mediaUrl
+                    ? undefined
+                    : {
+                          color: '#FFFFFF',
+                          size: 'large',
+                          background: 'linear-gradient(135deg,#0b0711,#201138,#d91b5c)',
+                      },
                 undefined,
                 [bareHandle],
             );
@@ -159,7 +197,7 @@ export default function ShareProfileSheet({
             navigation.navigate('Stories', { openUserHandle: user.handle });
         } catch (e) {
             console.error('Share profile to story failed:', e);
-            Alert.alert('Stories', 'Could not share to Stories. Try again.');
+            showHint('Failed to share to Stories');
         } finally {
             setIsSharingStory(false);
         }
@@ -221,8 +259,7 @@ export default function ShareProfileSheet({
                 </IconCircle>
             ),
             onPress: async () => {
-                await copyLink();
-                Alert.alert('Instagram', 'Link copied — paste in Instagram.');
+                await copyLink('Link copied — paste in Instagram');
             },
         },
         {
@@ -246,6 +283,16 @@ export default function ShareProfileSheet({
             onPress: () => shareExternal('linkedin'),
         },
         {
+            id: 'more',
+            label: 'More',
+            icon: (
+                <IconCircle backgroundColor="rgba(255,255,255,0.12)">
+                    <Icon name="share-outline" size={22} color="#fff" />
+                </IconCircle>
+            ),
+            onPress: shareSystem,
+        },
+        {
             id: 'copy',
             label: copied ? 'Copied!' : 'Copy link',
             keepOpen: true,
@@ -254,33 +301,33 @@ export default function ShareProfileSheet({
                     <Icon name="link-outline" size={22} color="#fff" />
                 </IconCircle>
             ),
-            onPress: copyLink,
+            onPress: () => copyLink(),
         },
     ];
 
     const urlPreview = profileUrl.replace(/^https?:\/\//, '');
-    const horizontalInset = useMemo(() => {
-        const maxSheet = Math.min(width, 480);
-        return Math.max(12, Math.floor((width - maxSheet) / 2));
-    }, [width]);
-    const profileBackground = useMemo(
-        () => [GAZETTEER_SHEET_PROFILE.background, glassPanel],
-        [],
-    );
+
+    if (!visible) return null;
 
     return (
-        <GazetteerBottomSheetModal
-            visible={visible}
-            onDismiss={onClose}
-            enableDynamicSizing
-            horizontalInset={horizontalInset}
-            backgroundStyle={profileBackground}
-            handleIndicatorStyle={GAZETTEER_SHEET_PROFILE.handle}
-            backdropOpacity={0.72}
-        >
-            <BottomSheetView style={styles.sheetBody}>
+        <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+            <View style={styles.overlay}>
+                <Pressable style={styles.backdrop} onPress={onClose} />
+                <View
+                    style={[
+                        styles.sheet,
+                        {
+                            width: sheetWidth,
+                            paddingBottom: Math.max(insets.bottom, 16),
+                        },
+                    ]}
+                >
+                    <View style={styles.handleWrap}>
+                        <View style={styles.handle} />
+                    </View>
+
                     <View style={styles.headerRow}>
-                        <View>
+                        <View style={styles.headerText}>
                             <Text style={styles.gazetteerLabel}>Gazetteer</Text>
                             <Text style={styles.title}>Share profile</Text>
                         </View>
@@ -289,24 +336,30 @@ export default function ShareProfileSheet({
                         </TouchableOpacity>
                     </View>
 
-                    <View style={styles.profileCard}>
-                        <Avatar src={avatarUrl} name={name} size="lg" />
-                        <View style={styles.profileText}>
-                            <Text style={styles.profileName} numberOfLines={1}>
-                                {name}
-                            </Text>
-                            <Text style={styles.profileHandle} numberOfLines={1}>
-                                {displayHandle}
-                            </Text>
+                    <View style={styles.profileSection}>
+                        <View style={styles.profileCard}>
+                            <View style={styles.avatarRing}>
+                                <Avatar src={resolvedAvatar} name={name} size="lg" />
+                            </View>
+                            <View style={styles.profileText}>
+                                <Text style={styles.profileName} numberOfLines={1}>
+                                    {name}
+                                </Text>
+                                <Text style={styles.profileHandle} numberOfLines={1}>
+                                    {displayHandle}
+                                </Text>
+                            </View>
                         </View>
-                    </View>
 
-                    <TouchableOpacity style={styles.copyRow} onPress={() => void copyLink()}>
-                        <Icon name="link-outline" size={18} color="#D1D5DB" />
-                        <Text style={styles.copyUrl} numberOfLines={1}>
-                            {copied ? 'Link copied' : urlPreview}
-                        </Text>
-                    </TouchableOpacity>
+                        <TouchableOpacity style={styles.copyRow} onPress={() => void copyLink()}>
+                            <Icon name="link-outline" size={18} color="#D1D5DB" />
+                            <Text style={styles.copyUrl} numberOfLines={1}>
+                                {copied ? 'Link copied' : urlPreview}
+                            </Text>
+                        </TouchableOpacity>
+
+                        {statusHint ? <Text style={styles.statusHint}>{statusHint}</Text> : null}
+                    </View>
 
                     <Text style={styles.shareToLabel}>Share to</Text>
                     <ScrollView
@@ -331,14 +384,42 @@ export default function ShareProfileSheet({
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
-            </BottomSheetView>
-        </GazetteerBottomSheetModal>
+                </View>
+            </View>
+        </Modal>
     );
 }
 
 const styles = StyleSheet.create({
-    sheetBody: {
-        paddingBottom: 28,
+    overlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.65)',
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    sheet: {
+        maxHeight: '88%',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: '#1a1524',
+        overflow: 'hidden',
+    },
+    handleWrap: {
+        alignItems: 'center',
+        paddingTop: 12,
+        paddingBottom: 4,
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.2)',
     },
     headerRow: {
         flexDirection: 'row',
@@ -348,6 +429,10 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.1)',
+    },
+    headerText: {
+        flex: 1,
+        paddingRight: 8,
     },
     gazetteerLabel: {
         fontSize: 10,
@@ -365,17 +450,28 @@ const styles = StyleSheet.create({
     closeBtn: {
         padding: 6,
     },
+    profileSection: {
+        paddingHorizontal: 16,
+        paddingTop: 14,
+        paddingBottom: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.1)',
+    },
     profileCard: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        marginHorizontal: 16,
-        marginTop: 14,
         padding: 12,
         borderRadius: 16,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: 'rgba(0,0,0,0.3)',
+    },
+    avatarRing: {
+        borderRadius: 999,
+        borderWidth: 2,
+        borderColor: 'rgba(217, 27, 92, 0.35)',
+        padding: 2,
     },
     profileText: {
         flex: 1,
@@ -395,7 +491,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
-        marginHorizontal: 16,
         marginTop: 10,
         paddingVertical: 12,
         paddingHorizontal: 12,
@@ -410,8 +505,15 @@ const styles = StyleSheet.create({
         color: '#E5E7EB',
         fontWeight: '500',
     },
+    statusHint: {
+        marginTop: 8,
+        fontSize: 12,
+        color: '#F9A8D4',
+        fontWeight: '600',
+        textAlign: 'center',
+    },
     shareToLabel: {
-        marginTop: 16,
+        marginTop: 12,
         marginBottom: 10,
         paddingHorizontal: 16,
         fontSize: 10,
@@ -423,11 +525,12 @@ const styles = StyleSheet.create({
     shareScroll: {
         paddingHorizontal: 12,
         gap: 16,
-        paddingBottom: 4,
+        paddingBottom: 8,
     },
     shareOption: {
         alignItems: 'center',
         width: 64,
+        opacity: 1,
     },
     shareLabel: {
         marginTop: 8,

@@ -1,9 +1,12 @@
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { FEED_UI } from '../constants/feedUiTokens';
 import FeedBarChartIcon from './FeedBarChartIcon.native';
 import FeedLiveShareIcon from './FeedLiveShareIcon.native';
 
 const BRAND_ACTIVE = '#7A8AF0';
+const ACTION_ICON = FEED_UI.icon.action;
+const ACTION_HIT = Math.max(44, ACTION_ICON + 16);
 
 type Props = {
     onShare?: () => void;
@@ -27,7 +30,7 @@ export default function FeedEngagementRightActions({
                     style={styles.button}
                     accessibilityLabel="Share post"
                 >
-                    <FeedLiveShareIcon size={24} color="#FFFFFF" />
+                    <FeedLiveShareIcon size={ACTION_ICON} color="#FFFFFF" />
                 </TouchableOpacity>
             ) : null}
             {showMetrics && onToggleMetrics ? (
@@ -36,7 +39,7 @@ export default function FeedEngagementRightActions({
                     style={styles.button}
                     accessibilityLabel="Toggle boost metrics"
                 >
-                    <FeedBarChartIcon size={24} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
+                    <FeedBarChartIcon size={ACTION_ICON} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
                 </TouchableOpacity>
             ) : null}
         </View>
@@ -50,9 +53,9 @@ const styles = StyleSheet.create({
         columnGap: 16,
     },
     button: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: ACTION_HIT,
+        height: ACTION_HIT,
+        borderRadius: ACTION_HIT / 2,
         alignItems: 'center',
         justifyContent: 'center',
     },

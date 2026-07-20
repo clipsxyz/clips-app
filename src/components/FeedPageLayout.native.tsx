@@ -100,8 +100,9 @@ export const FEED_CARD_MEDIA_TAP_LAYER = {
     right: 0,
     bottom: 0,
     zIndex: 15,
-    elevation: Platform.OS === 'android' ? 15 : 0,
-    backgroundColor: 'rgba(0,0,0,0.001)',
+    elevation: Platform.OS === 'android' ? 16 : 0,
+    // Android skips fully transparent views for hit-testing.
+    backgroundColor: 'rgba(0,0,0,0.01)',
 } as const;
 
 /** Client upload / failure overlay on media. */

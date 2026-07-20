@@ -16,13 +16,16 @@ import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
 import { getUnreadNotificationCount } from './src/api/notifications';
 import { navigateMainTab } from './src/navigation/mainTabs';
+import {
+  HomeTabStack,
+  BoostTabStack,
+  SearchTabStack,
+  InboxTabStack,
+} from './src/navigation/mainTabStacks.native';
 import MainTabBar from './src/components/MainTabBar.native';
 
 // Import screens
-import FeedScreen from './src/screens/FeedScreen';
 import BoostScreen from './src/screens/BoostScreen';
-import SearchScreen from './src/screens/SearchScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
 import ProfileCoverScreen from './src/screens/ProfileCoverScreen';
 import LiveStreamScreen from './src/screens/LiveStreamScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -38,7 +41,6 @@ import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
 import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
 import TextOnlyPostDetailsScreen from './src/screens/TextOnlyPostDetailsScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
-import InboxScreen from './src/screens/InboxScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 import VideoPlaybackSettingsScreen from './src/screens/VideoPlaybackSettingsScreen';
@@ -102,70 +104,6 @@ const TAB_BAR_STYLE = {
   borderTopWidth: 1,
 } as const;
 
-type FeedHomeBoundaryState = { error: Error | null; retryKey: number };
-
-/** Catches Home feed crashes so the tab shows an error instead of a blank screen. */
-class FeedHomeErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  FeedHomeBoundaryState
-> {
-  state: FeedHomeBoundaryState = { error: null, retryKey: 0 };
-
-  static getDerivedStateFromError(error: Error): Partial<FeedHomeBoundaryState> {
-    return { error };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error('Home feed render error:', error);
-  }
-
-  private retry = () => {
-    this.setState((prev) => ({ error: null, retryKey: prev.retryKey + 1 }));
-  };
-
-  render() {
-    if (this.state.error) {
-      return (
-        <View style={{ flex: 1, backgroundColor: '#0b0711', padding: 20, paddingTop: 48 }}>
-          <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
-            Home feed failed
-          </Text>
-          <Pressable
-            onPress={this.retry}
-            style={{
-              alignSelf: 'flex-start',
-              backgroundColor: '#7c3aed',
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-              borderRadius: 8,
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ color: '#fff', fontWeight: '700' }}>Reload feed</Text>
-          </Pressable>
-          <ScrollView>
-            <Text style={{ color: '#e5e7eb', fontSize: 13 }}>{this.state.error.message}</Text>
-          </ScrollView>
-        </View>
-      );
-    }
-    return (
-      <React.Fragment key={this.state.retryKey}>{this.props.children}</React.Fragment>
-    );
-  }
-}
-
-/** Home uses FeedScreen.tsx (same as web feed logic); wrapped for render-error visibility. */
-function HomeTabScreen(props: React.ComponentProps<typeof FeedScreen>) {
-  return (
-    <View style={styles.homeTabRoot}>
-      <FeedHomeErrorBoundary>
-        <FeedScreen {...props} />
-      </FeedHomeErrorBoundary>
-    </View>
-  );
-}
-
 function CreateTabPlaceholder() {
   return <View style={styles.createTabPlaceholder} />;
 }
@@ -219,15 +157,15 @@ function MainTabs() {
         />
       )}
     >
-      <Tab.Screen name="Home" component={HomeTabScreen} options={{ title: 'Home' }} />
-      <Tab.Screen name="Boost" component={BoostScreen} options={{ title: 'Boost' }} />
+      <Tab.Screen name="Home" component={HomeTabStack} options={{ title: 'Home' }} />
+      <Tab.Screen name="Boost" component={BoostTabStack} options={{ title: 'Boost' }} />
       <Tab.Screen
         name="Create"
         component={CreateTabPlaceholder}
         options={{ title: 'Create' }}
       />
-      <Tab.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
-      <Tab.Screen name="Inbox" component={InboxScreen} options={{ title: 'Inbox' }} />
+      <Tab.Screen name="Search" component={SearchTabStack} options={{ title: 'Search' }} />
+      <Tab.Screen name="Inbox" component={InboxTabStack} options={{ title: 'Inbox' }} />
     </Tab.Navigator>
   );
 }
@@ -294,7 +232,6 @@ function App(): React.JSX.Element {
           >
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Discover" component={DiscoverScreen} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="ProfileCover" component={ProfileCoverScreen} />
           <Stack.Screen
             name="Boost"
@@ -404,11 +341,6 @@ const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
     backgroundColor: '#030712',
-  },
-  homeTabRoot: {
-    flex: 1,
-    backgroundColor: '#030712',
-    overflow: 'hidden',
   },
   createTabPlaceholder: {
     flex: 1,

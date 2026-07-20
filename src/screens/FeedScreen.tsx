@@ -122,7 +122,9 @@ import FeedPageLayout, {
     FEED_EMPTY_SUBTITLE,
     FEED_EMPTY_TITLE,
 } from '../components/FeedPageLayout.native';
-import FeedPostProfileQuickMenu from '../components/FeedPostProfileQuickMenu.native';
+import FeedPostProfileQuickMenu, {
+    type ProfileQuickMenuAnchor,
+} from '../components/FeedPostProfileQuickMenu.native';
 import { isDevMockFeedVideoPost } from '../api/posts';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -143,6 +145,7 @@ import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native'
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import FeedShareModal from '../components/FeedShareModal';
 import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getActiveBoost } from '../api/boost';
@@ -819,6 +822,18 @@ const FeedCard = React.memo(function FeedCard({
 }) {
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
+    const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
+    const profileMenuAnchorRef = React.useRef<View>(null);
+    const openProfileMenu = React.useCallback(() => {
+        profileMenuAnchorRef.current?.measureInWindow((x, y, width, height) => {
+            setProfileMenuAnchor({ x, y, width, height });
+            setProfileMenuVisible(true);
+        });
+    }, []);
+    const closeProfileMenu = React.useCallback(() => {
+        setProfileMenuVisible(false);
+        setProfileMenuAnchor(null);
+    }, []);
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
     const [carouselIndex, setCarouselIndex] = React.useState(0);
     const likeButtonRef = React.useRef<View>(null);
@@ -830,8 +845,9 @@ const FeedCard = React.memo(function FeedCard({
     const postViewRecordedRef = React.useRef(false);
     const { width: windowWidth } = useWindowDimensions();
     const cardMediaWidth = windowWidth;
-    const MEDIA_MIN_ASPECT = 1 / 1.91;
-    const MEDIA_MAX_ASPECT = 5 / 4;
+    // Web Media: FEED_MIN_ASPECT 3/4, FEED_TARGET_ASPECT 5/4 (height/width)
+    const MEDIA_MIN_ASPECT = FEED_UI.media.minAspect;
+    const MEDIA_MAX_ASPECT = FEED_UI.media.maxAspect;
 
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
@@ -888,13 +904,16 @@ const FeedCard = React.memo(function FeedCard({
 
     const sizingIsVideoPost = hasFeedMedia && postHasVideoMedia(post);
 
+    const isCarouselPost = carouselThumbItems.length > 1;
+
     React.useEffect(() => {
         if (!mediaSizingUrl || imageDimensions) return;
-        // Lock video cards to portrait clamp immediately — avoids height jump after poster decode.
-        if (sizingIsVideoPost) {
+        // Web: still images use a fixed 4:5 frame; videos default to 4:5 while loading.
+        if (sizingIsVideoPost || !isCarouselPost) {
             setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
             return;
         }
+        // Carousel: lock to first slide aspect, clamped like web (3/4 … 5/4).
         if (isLikelyImageUri(mediaSizingUrl)) {
             Image.getSize(
                 mediaSizingUrl,
@@ -924,6 +943,7 @@ const FeedCard = React.memo(function FeedCard({
         cardMediaWidth,
         imageDimensions,
         sizingIsVideoPost,
+        isCarouselPost,
     ]);
 
     // Calculate image style with Instagram clamping
@@ -986,13 +1006,14 @@ const FeedCard = React.memo(function FeedCard({
                     isCurrentUser={isCurrentUser}
                     onFollow={onFollow}
                     onOpenDM={onOpenDM}
-                    onProfileMenuPress={() => setProfileMenuVisible(true)}
+                    onProfileMenuPress={openProfileMenu}
                     onOverflowPress={onOverflowPress}
                     onDoubleLike={() => {
                         void onLike();
                     }}
                     onRegisterDmAnchor={onRegisterDmAnchor}
                     onShowTaggedUsers={() => onOpenTaggedSheet?.()}
+                    menuAnchorRef={profileMenuAnchorRef}
                 />
             ) : (
                 <View style={FEED_CARD_BODY}>
@@ -1029,7 +1050,9 @@ const FeedCard = React.memo(function FeedCard({
                                 isActive={isVideoActive && !isClientUploading}
                                 muted={feedVideoMuted}
                                 onOpenScenes={
-                                    isClientUploading || isClientUploadFailed ? undefined : handleOpenScenesPress
+                                    isClientUploading || isClientUploadFailed
+                                        ? undefined
+                                        : handleOpenScenesPress
                                 }
                             />
                             <FeedPostHeader
@@ -1039,10 +1062,11 @@ const FeedCard = React.memo(function FeedCard({
                                 isOverlaid
                                 onFollow={onFollow}
                                 onOpenDM={onOpenDM}
-                                onProfileMenuPress={() => setProfileMenuVisible(true)}
+                                onProfileMenuPress={openProfileMenu}
                                 onHasStoryChange={setHeaderHasStory}
                                 onOverflowPress={onOverflowPress}
                                 onRegisterDmAnchor={onRegisterDmAnchor}
+                                menuAnchorRef={profileMenuAnchorRef}
                             />
                             {isClientUploading ? (
                                 <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
@@ -1075,10 +1099,11 @@ const FeedCard = React.memo(function FeedCard({
                             isCurrentUser={isCurrentUser}
                             onFollow={onFollow}
                             onOpenDM={onOpenDM}
-                            onProfileMenuPress={() => setProfileMenuVisible(true)}
+                            onProfileMenuPress={openProfileMenu}
                             onHasStoryChange={setHeaderHasStory}
                             onOverflowPress={onOverflowPress}
                             onRegisterDmAnchor={onRegisterDmAnchor}
+                            menuAnchorRef={profileMenuAnchorRef}
                         />
                     )}
 
@@ -1168,12 +1193,13 @@ const FeedCard = React.memo(function FeedCard({
             {/* Profile quick actions menu (Visit profile / Follow-Unfollow / View stories) */}
             <FeedPostProfileQuickMenu
                 visible={profileMenuVisible}
+                anchor={profileMenuAnchor}
                 profileHandle={profileHandle}
                 isCurrentUser={isCurrentUser}
                 isMutualFollow={isMutualFollow}
                 hasStory={headerHasStory}
                 isFollowing={post.isFollowing === true}
-                onClose={() => setProfileMenuVisible(false)}
+                onClose={closeProfileMenu}
                 onVisitProfile={() => {
                     if (onVisitHandle) onVisitHandle(profileHandle);
                     else onVisitProfile?.();
@@ -1267,6 +1293,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [imageFullscreenStartIndex, setImageFullscreenStartIndex] = useState(0);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
+    const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
+    const [feedGazetteerAlert, setFeedGazetteerAlert] = useState<{
+        title: string;
+        message: string;
+        icon?: 'alert' | 'success' | 'info';
+    } | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
     const [hasInbox, setHasInbox] = useState(false);
     const insets = useSafeAreaInsets();
@@ -1832,39 +1864,43 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const tryReclipPost = React.useCallback(
         async (p: Post) => {
             if (!user || p.userHandle === user.handle) {
-                Alert.alert('Cannot reclip', 'You cannot reclip your own post');
+                setFeedGazetteerAlert({
+                    title: 'Cannot reclip',
+                    message: 'You cannot reclip your own post',
+                    icon: 'alert',
+                });
                 return;
             }
             if (p.userReclipped) {
-                Alert.alert('Already reclipped', 'You have already reclipped this post');
+                setFeedGazetteerAlert({
+                    title: 'Already reclipped',
+                    message: 'You have already reclipped this post',
+                    icon: 'info',
+                });
                 return;
             }
-            const confirmed = await new Promise<boolean>((resolve) => {
-                Alert.alert(
-                    'Reshare this to followers?',
-                    'This post will be shared to your followers in their Following feed.',
-                    [
-                        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                        { text: 'OK', onPress: () => resolve(true) },
-                    ],
-                );
-            });
-            if (!confirmed) return;
-            const newReclips = p.stats.reclips + 1;
-            setReclipState(userId, p.id, true);
-            updatePost(p.id, (prev) => ({
-                ...prev,
-                userReclipped: true,
-                stats: { ...prev.stats, reclips: newReclips },
-            }));
-            try {
-                await reclipPost(userId, p.id, user.handle);
-            } catch (err: any) {
-                console.warn('Reclip failed (UI already updated):', err);
-            }
+            setReclipConfirmPost(p);
         },
-        [userId, user, updatePost]
+        [user],
     );
+
+    const confirmReclipPost = React.useCallback(async () => {
+        const p = reclipConfirmPost;
+        setReclipConfirmPost(null);
+        if (!p || !user) return;
+        const newReclips = p.stats.reclips + 1;
+        setReclipState(userId, p.id, true);
+        updatePost(p.id, (prev) => ({
+            ...prev,
+            userReclipped: true,
+            stats: { ...prev.stats, reclips: newReclips },
+        }));
+        try {
+            await reclipPost(userId, p.id, user.handle);
+        } catch (err: any) {
+            console.warn('Reclip failed (UI already updated):', err);
+        }
+    }, [reclipConfirmPost, user, userId, updatePost]);
 
     useEffect(() => {
         if (user?.national) {
@@ -2977,10 +3013,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         navigation.navigate('PostDetail', { postId: mergedPost.id });
                     }}
                     onVisitProfile={() =>
-                        navigation.navigate('ViewProfile', { handle: mergedPost.userHandle })
+                        navigation.navigate('ViewProfile', {
+                            handle: mergedPost.userHandle,
+                            sourcePostId: mergedPost.id,
+                        })
                     }
                     onVisitHandle={(handle) =>
-                        navigation.navigate('ViewProfile', { handle })
+                        navigation.navigate('ViewProfile', {
+                            handle,
+                            sourcePostId: mergedPost.id,
+                        })
                     }
                     onViewStories={() =>
                         navigation.navigate('Stories', { openUserHandle: mergedPost.userHandle })
@@ -3433,6 +3475,30 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                 />
             ) : null}
+
+            <GazetteerAlertSheet
+                visible={reclipConfirmPost != null}
+                title="Reshare this to followers?"
+                message="This post will be shared to your followers in their Following feed."
+                icon="alert"
+                showCancelButton
+                confirmButtonText="OK"
+                cancelButtonText="Cancel"
+                onConfirm={() => {
+                    void confirmReclipPost();
+                }}
+                onDismiss={() => setReclipConfirmPost(null)}
+            />
+
+            <GazetteerAlertSheet
+                visible={feedGazetteerAlert != null}
+                title={feedGazetteerAlert?.title || ''}
+                message={feedGazetteerAlert?.message}
+                icon={feedGazetteerAlert?.icon || 'alert'}
+                confirmButtonText="OK"
+                onConfirm={() => setFeedGazetteerAlert(null)}
+                onDismiss={() => setFeedGazetteerAlert(null)}
+            />
 
             {dmSheetOpen && dmSheetRecipientHandle ? (
                 <FeedDmSheet
