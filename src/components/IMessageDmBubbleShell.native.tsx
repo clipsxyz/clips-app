@@ -74,6 +74,7 @@ export default function IMessageDmBubbleShell({
 const styles = StyleSheet.create({
     outer: {
         position: 'relative',
+        flexShrink: 1,
         maxWidth: '100%',
     },
     outerMe: {
@@ -108,13 +109,17 @@ const styles = StyleSheet.create({
     bubble: {
         borderRadius: 19,
         paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingVertical: 10,
+        paddingBottom: 10,
+        position: 'relative',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.35,
         shadowRadius: 2,
         elevation: 2,
         overflow: 'visible',
+        alignSelf: 'flex-start',
+        maxWidth: '100%',
     },
     bubbleFeed: {
         borderRadius: 16,

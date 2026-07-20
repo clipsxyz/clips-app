@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiTrash2, FiPlay, FiPause, FiSquare } from 'react-icons/fi';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
 import { MdStickyNote2, MdTranslate } from 'react-icons/md';
@@ -662,9 +662,27 @@ export default function MessagesPage() {
     // Voice message state
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
+    const [recordingGestureHint, setRecordingGestureHint] = useState<'none' | 'cancel'>('none');
+    const [voiceDraft, setVoiceDraft] = useState<{ audioUrl: string; durationSeconds: number; canContinue?: boolean } | null>(null);
+    const [isPlayingVoiceDraft, setIsPlayingVoiceDraft] = useState(false);
+    const [voiceDraftPlaySeconds, setVoiceDraftPlaySeconds] = useState(0);
     const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
     const audioChunksRef = React.useRef<Blob[]>([]);
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+    const recordingTimeRef = React.useRef(0);
+    const discardRecordingRef = React.useRef(false);
+    const recordingStreamRef = React.useRef<MediaStream | null>(null);
+    const voiceDraftAudioRef = React.useRef<HTMLAudioElement | null>(null);
+    const recorderSessionActiveRef = React.useRef(false);
+    const voiceDraftPreviewUrlRef = React.useRef<string | null>(null);
+    const micPointerStartRef = React.useRef({ x: 0, y: 0, at: 0, wasRecording: false });
+    const isRecordingRef = React.useRef(false);
+    const recordingGestureHintRef = React.useRef<'none' | 'cancel'>('none');
+    const voiceDraftRef = React.useRef<typeof voiceDraft>(null);
+    const micCaptureRef = React.useRef<HTMLButtonElement | null>(null);
+    const sendAfterFinalizeRef = React.useRef(false);
+    const previewFinalizeRef = React.useRef(false);
+    const webVoiceSegmentsRef = React.useRef<Array<{ audioUrl: string; durationSeconds: number }>>([]);
     
     // Vanish mode state
     const [vanishMode, setVanishMode] = useState(false);
@@ -712,23 +730,92 @@ export default function MessagesPage() {
         }).catch(() => showToast?.('Could not load post'));
     };
     
+    const formatVoiceDuration = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const stopVoiceDraftPlayback = React.useCallback(() => {
+        const audio = voiceDraftAudioRef.current;
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.onended = null;
+            audio.ontimeupdate = null;
+        }
+        setIsPlayingVoiceDraft(false);
+        setVoiceDraftPlaySeconds(0);
+    }, []);
+
+    const revokeVoiceDraftPreviewUrl = () => {
+        if (voiceDraftPreviewUrlRef.current) {
+            URL.revokeObjectURL(voiceDraftPreviewUrlRef.current);
+            voiceDraftPreviewUrlRef.current = null;
+        }
+    };
+
+    const buildVoiceDraftPreview = React.useCallback(() => {
+        if (!audioChunksRef.current.length) return null;
+        revokeVoiceDraftPreviewUrl();
+        const previewBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const previewUrl = URL.createObjectURL(previewBlob);
+        voiceDraftPreviewUrlRef.current = previewUrl;
+        return previewUrl;
+    }, []);
+
+    React.useEffect(() => {
+        isRecordingRef.current = isRecording;
+    }, [isRecording]);
+
+    React.useEffect(() => {
+        recordingGestureHintRef.current = recordingGestureHint;
+    }, [recordingGestureHint]);
+
+    React.useEffect(() => {
+        voiceDraftRef.current = voiceDraft;
+    }, [voiceDraft]);
+
+    const clearRecordingTimer = () => {
+        if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = null;
+        }
+    };
+
+    const stopRecordingStream = () => {
+        recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+    };
+
+    const resetVoiceCaptureState = () => {
+        setIsRecording(false);
+        setRecordingTime(0);
+        recordingTimeRef.current = 0;
+        setRecordingGestureHint('none');
+        recorderSessionActiveRef.current = false;
+    };
+
     // Start voice recording
-    const handleStartRecording = async () => {
+    const handleStartRecording = async (appendSegment = false) => {
+        if (voiceDraftRef.current && !appendSegment) return false;
         try {
             if (!window.isSecureContext) {
                 showToast?.('Microphone requires HTTPS (or localhost).');
-                return;
+                return false;
             }
             if (!navigator.mediaDevices?.getUserMedia) {
                 showToast?.('Microphone is not supported in this browser.');
-                return;
+                return false;
             }
             if (typeof MediaRecorder === 'undefined') {
                 showToast?.('Voice recording is not supported on this browser/device.');
-                return;
+                return false;
             }
 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recordingStreamRef.current = stream;
+            discardRecordingRef.current = false;
             const preferredMimeType =
                 MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
                     ? 'audio/webm;codecs=opus'
@@ -740,6 +827,7 @@ export default function MessagesPage() {
                 : new MediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
             audioChunksRef.current = [];
+            recorderSessionActiveRef.current = true;
             
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -748,38 +836,72 @@ export default function MessagesPage() {
             };
             
             mediaRecorder.onstop = async () => {
+                const capturedDuration = recordingTimeRef.current;
+                clearRecordingTimer();
+                resetVoiceCaptureState();
+                stopRecordingStream();
+
+                if (discardRecordingRef.current) {
+                    audioChunksRef.current = [];
+                    revokeVoiceDraftPreviewUrl();
+                    return;
+                }
+
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                // Convert to data URL for storage (in production, upload to server and get URL)
+                audioChunksRef.current = [];
                 const reader = new FileReader();
-                reader.onloadend = async () => {
+                reader.onloadend = () => {
                     const base64Audio = reader.result as string;
-                    if (user?.handle && (handle || groupId)) {
-                        try {
-                            await appendToThread({
-                                text: `🎤 Voice Message`,
-                                audioUrl: base64Audio, // Use audioUrl field for voice messages
-                            });
-                        } catch {
-                            showToast?.('Could not send voice message in this chat');
-                        }
-                        scrollToBottom();
+                    if (!base64Audio) return;
+                    revokeVoiceDraftPreviewUrl();
+                    stopVoiceDraftPlayback();
+                    if (sendAfterFinalizeRef.current && user?.handle && (handle || groupId)) {
+                        sendAfterFinalizeRef.current = false;
+                        void appendToThread({ audioUrl: base64Audio })
+                            .then(() => scrollToBottom())
+                            .catch(() => showToast?.('Could not send voice message in this chat'));
+                        webVoiceSegmentsRef.current = [];
+                        return;
                     }
+                    if (previewFinalizeRef.current) {
+                        previewFinalizeRef.current = false;
+                        const segment = {
+                            audioUrl: base64Audio,
+                            durationSeconds: Math.max(1, capturedDuration),
+                        };
+                        const segments = [...webVoiceSegmentsRef.current, segment];
+                        webVoiceSegmentsRef.current = segments;
+                        setVoiceDraft({
+                            audioUrl: base64Audio,
+                            durationSeconds: segments.reduce((sum, s) => sum + s.durationSeconds, 0),
+                            segments,
+                            canContinue: true,
+                        });
+                        return;
+                    }
+                    setVoiceDraft({
+                        audioUrl: base64Audio,
+                        durationSeconds: Math.max(1, capturedDuration),
+                    });
                 };
                 reader.readAsDataURL(audioBlob);
-                
-                stream.getTracks().forEach(track => track.stop());
             };
             
-            mediaRecorder.start();
+            mediaRecorder.start(250);
             setIsRecording(true);
             setRecordingTime(0);
+            recordingTimeRef.current = 0;
             
             // Start timer
             recordingTimerRef.current = setInterval(() => {
-                setRecordingTime(prev => prev + 1);
+                recordingTimeRef.current += 1;
+                setRecordingTime(recordingTimeRef.current);
             }, 1000);
+            return true;
         } catch (error) {
             console.error('Error starting recording:', error);
+            resetVoiceCaptureState();
+            stopRecordingStream();
             const err = error as { name?: string; message?: string };
             if (err?.name === 'NotAllowedError') {
                 showToast?.('Microphone permission denied. Please allow mic access in browser settings.');
@@ -788,21 +910,205 @@ export default function MessagesPage() {
             } else {
                 showToast?.('Failed to start recording. Please check microphone permissions.');
             }
+            return false;
         }
     };
     
-    // Stop voice recording
-    const handleStopRecording = () => {
-        if (mediaRecorderRef.current && isRecording) {
+    const handleFinishRecording = () => {
+        if (!mediaRecorderRef.current || !isRecordingRef.current) return;
+        previewFinalizeRef.current = true;
+        discardRecordingRef.current = false;
+        if (mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
-            setIsRecording(false);
-            if (recordingTimerRef.current) {
-                clearInterval(recordingTimerRef.current);
-                recordingTimerRef.current = null;
-            }
-            setRecordingTime(0);
         }
     };
+
+    const handleCancelRecording = () => {
+        if (!mediaRecorderRef.current || !recorderSessionActiveRef.current) {
+            revokeVoiceDraftPreviewUrl();
+            resetVoiceCaptureState();
+            webVoiceSegmentsRef.current = [];
+            setVoiceDraft(null);
+            return;
+        }
+        discardRecordingRef.current = true;
+        if (mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        clearRecordingTimer();
+        audioChunksRef.current = [];
+        revokeVoiceDraftPreviewUrl();
+        resetVoiceCaptureState();
+        webVoiceSegmentsRef.current = [];
+        setVoiceDraft(null);
+        stopRecordingStream();
+    };
+
+    const continueVoiceRecording = () => {
+        if (!voiceDraft?.canContinue || recorderSessionActiveRef.current) return;
+        try {
+            stopVoiceDraftPlayback();
+            revokeVoiceDraftPreviewUrl();
+            setVoiceDraft(null);
+            void handleStartRecording(true).then((started) => {
+                if (!started) return;
+            });
+        } catch {
+            showToast?.('Could not continue voice recording.');
+        }
+    };
+
+    const discardVoiceDraft = () => {
+        stopVoiceDraftPlayback();
+        if (recorderSessionActiveRef.current) {
+            handleCancelRecording();
+            return;
+        }
+        revokeVoiceDraftPreviewUrl();
+        webVoiceSegmentsRef.current = [];
+        setVoiceDraft(null);
+    };
+
+    const mergeWebVoiceSegments = async (segments: Array<{ audioUrl: string }>) => {
+        if (segments.length <= 1) return segments[0]?.audioUrl ?? null;
+        const blobs = await Promise.all(
+            segments.map(async (segment) => {
+                const res = await fetch(segment.audioUrl);
+                return res.blob();
+            }),
+        );
+        const merged = new Blob(blobs, { type: blobs[0]?.type || 'audio/webm' });
+        return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Could not merge voice segments'));
+            reader.readAsDataURL(merged);
+        });
+    };
+
+    const sendVoiceDraft = async () => {
+        if (!voiceDraft || !user?.handle || (!handle && !groupId)) return;
+        try {
+            const segments = voiceDraft.segments?.length
+                ? voiceDraft.segments
+                : [{ audioUrl: voiceDraft.audioUrl, durationSeconds: voiceDraft.durationSeconds }];
+            const audioUrl = await mergeWebVoiceSegments(segments);
+            if (!audioUrl) {
+                showToast?.('Could not prepare voice message');
+                return;
+            }
+            await appendToThread({ audioUrl });
+            revokeVoiceDraftPreviewUrl();
+            webVoiceSegmentsRef.current = [];
+            setVoiceDraft(null);
+            setVoiceDraftPlaySeconds(0);
+            scrollToBottom();
+        } catch {
+            showToast?.('Could not send voice message in this chat');
+        }
+    };
+
+    const seekVoiceDraftPlayback = (seconds: number) => {
+        if (!voiceDraft?.audioUrl) return;
+        const clamped = Math.max(0, Math.min(voiceDraft.durationSeconds, seconds));
+        setVoiceDraftPlaySeconds(clamped);
+        const audio = voiceDraftAudioRef.current;
+        if (audio) {
+            audio.currentTime = clamped;
+        }
+    };
+
+    const toggleVoiceDraftPlayback = async () => {
+        if (!voiceDraft?.audioUrl) return;
+        if (isPlayingVoiceDraft) {
+            stopVoiceDraftPlayback();
+            return;
+        }
+        try {
+            const segments = voiceDraft.segments?.length
+                ? voiceDraft.segments
+                : [{ audioUrl: voiceDraft.audioUrl, durationSeconds: voiceDraft.durationSeconds }];
+            const playbackUrl =
+                segments.length > 1 ? await mergeWebVoiceSegments(segments) : voiceDraft.audioUrl;
+            if (!playbackUrl) {
+                showToast?.('Could not preview voice message');
+                return;
+            }
+            const audio = new Audio(playbackUrl);
+            voiceDraftAudioRef.current = audio;
+            audio.currentTime = voiceDraftPlaySeconds;
+            audio.onended = () => {
+                stopVoiceDraftPlayback();
+            };
+            audio.ontimeupdate = () => {
+                setVoiceDraftPlaySeconds(Math.floor(audio.currentTime));
+            };
+            await audio.play();
+            setIsPlayingVoiceDraft(true);
+        } catch (error) {
+            console.error('Voice preview playback failed:', error);
+            showToast?.('Could not preview voice message');
+        }
+    };
+
+    const handleMicPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (voiceDraftRef.current) return;
+        const wasRecording = isRecordingRef.current;
+        micPointerStartRef.current = {
+            x: event.clientX,
+            y: event.clientY,
+            at: Date.now(),
+            wasRecording,
+        };
+        setRecordingGestureHint('none');
+        event.currentTarget.setPointerCapture(event.pointerId);
+        if (!wasRecording) {
+            void handleStartRecording();
+        }
+    };
+
+    const handleMicPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (!isRecordingRef.current) return;
+        const dx = event.clientX - micPointerStartRef.current.x;
+        if (dx < -72) {
+            setRecordingGestureHint('cancel');
+        } else {
+            setRecordingGestureHint('none');
+        }
+    };
+
+    const handleMicPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        const { at, wasRecording } = micPointerStartRef.current;
+        const heldMs = Date.now() - at;
+        const hint = recordingGestureHintRef.current;
+        if (hint === 'cancel') {
+            handleCancelRecording();
+            setRecordingGestureHint('none');
+            return;
+        }
+        if (!isRecordingRef.current) {
+            setRecordingGestureHint('none');
+            return;
+        }
+        if (heldMs >= 400) {
+            handleFinishRecording();
+        } else if (wasRecording) {
+            handleFinishRecording();
+        }
+        setRecordingGestureHint('none');
+    };
+
+    React.useEffect(() => {
+        return () => {
+            clearRecordingTimer();
+            stopRecordingStream();
+            stopVoiceDraftPlayback();
+            revokeVoiceDraftPreviewUrl();
+        };
+    }, [stopVoiceDraftPlayback]);
 
     const scrollToBottom = React.useCallback(() => {
         const el = listRef.current;
@@ -3431,55 +3737,148 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 )}
-                <div className={`flex items-end ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
-                    <div className="flex-1 flex items-center gap-2 min-w-0 pb-px">
-                        <div className="relative flex-1 min-w-0">
+                {voiceDraft && (
+                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
+                        <p className="text-[11px] font-semibold text-neutral-500 mb-2 ml-1">Review before sending</p>
+                        <div className="flex items-center gap-2 min-h-[44px] px-2.5 py-2 rounded-[24px] border-2 border-white bg-[#09090b]">
                             <button
                                 type="button"
-                                onClick={handleImageClick}
-                                className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center text-white/90 hover:text-white transition-colors"
-                                aria-label="Add photo"
+                                onClick={discardVoiceDraft}
+                                className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
+                                aria-label="Delete voice note"
                             >
-                                <FiPlus className="w-5 h-5" />
+                                <FiTrash2 className="w-5 h-5" />
                             </button>
-                            <input
-                                type="text"
-                                value={messageText}
-                                onChange={(e) => {
-                                    setMessageText(e.target.value);
-                                    // Simulate typing indicator (in real app, this would be sent to server)
-                                    // For now, we'll just show it when user is typing
+                            <button
+                                type="button"
+                                onClick={toggleVoiceDraftPlayback}
+                                className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-gray-300 via-yellow-500 to-gray-500 text-white flex items-center justify-center border border-yellow-300"
+                                aria-label={isPlayingVoiceDraft ? 'Pause preview' : 'Play preview'}
+                            >
+                                {isPlayingVoiceDraft ? <FiPause className="w-4 h-4" /> : <FiPlay className="w-4 h-4 ml-0.5" />}
+                            </button>
+                            <button
+                                type="button"
+                                className="flex-1 min-w-0 flex flex-col gap-1 py-0.5"
+                                onClick={(event) => {
+                                    const rect = event.currentTarget.getBoundingClientRect();
+                                    const ratio = (event.clientX - rect.left) / rect.width;
+                                    seekVoiceDraftPlayback(Math.floor(ratio * voiceDraft.durationSeconds));
                                 }}
-                                onKeyPress={(e) => {
-                                    if (e.key === 'Enter') {
-                                        handleSend();
-                                    }
-                                }}
-                                placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
-                                className={`w-full min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border-2 border-white shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white ${
-                                    compactPhone ? 'pl-11 pr-4 py-2.5 text-[15px]' : 'pl-12 pr-5 py-3 text-[15px] sm:text-base'
-                                }`}
-                            />
+                                aria-label="Seek voice preview"
+                            >
+                                <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                                    <div
+                                        className="h-full rounded-full bg-yellow-500 transition-[width] duration-150"
+                                        style={{
+                                            width: voiceDraft.durationSeconds
+                                                ? `${Math.min(100, (voiceDraftPlaySeconds / voiceDraft.durationSeconds) * 100)}%`
+                                                : '0%',
+                                        }}
+                                    />
+                                </div>
+                                <span className="text-[11px] font-semibold text-neutral-400 tabular-nums text-right">
+                                    {formatVoiceDuration(
+                                        isPlayingVoiceDraft ? voiceDraftPlaySeconds : voiceDraft.durationSeconds,
+                                    )}
+                                </span>
+                            </button>
+                            {voiceDraft.canContinue ? (
+                                <button
+                                    type="button"
+                                    onClick={continueVoiceRecording}
+                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full border border-yellow-500/40 bg-yellow-950/25 text-yellow-200 text-sm font-semibold hover:bg-yellow-950/40 transition-colors"
+                                >
+                                    <FiMic className="w-4 h-4" />
+                                    Record
+                                </button>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={() => { void sendVoiceDraft(); }}
+                                className="flex-shrink-0 rounded-full bg-white p-2.5 text-black hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-sm"
+                                aria-label="Send voice note"
+                            >
+                                <FiSend className="w-5 h-5" />
+                            </button>
                         </div>
-                        <button
-                            type="button"
-                            onClick={isRecording ? handleStopRecording : handleStartRecording}
-                            className={`flex-shrink-0 rounded-full p-2.5 transition-all shadow-sm border ${
-                                isRecording
-                                    ? 'bg-red-600 text-white border-red-400'
-                                    : 'bg-gradient-to-br from-gray-300 via-yellow-500 to-gray-500 text-white border-yellow-300'
-                            }`}
-                            aria-label={isRecording ? 'Stop voice recording' : 'Start voice recording'}
-                            title={isRecording ? 'Stop voice recording' : 'Start voice recording'}
-                        >
-                            <FiMic className="w-5 h-5 sm:w-6 sm:h-6" />
-                        </button>
-                        {isRecording && (
-                            <div className="flex-shrink-0 rounded-full border border-red-400 bg-red-600/20 px-2 py-1 text-[11px] font-semibold text-red-300">
-                                REC {recordingTime}s
+                    </div>
+                )}
+                {!voiceDraft ? (
+                <div className={`flex flex-col ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
+                    <div className="flex items-end gap-2 min-w-0 pb-px">
+                        {isRecording ? (
+                            <div className="flex-1 flex items-center min-h-[44px] px-3 rounded-[24px] border-2 border-white bg-[#09090b] gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelRecording}
+                                    className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center border border-white/20 text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
+                                    aria-label="Discard recording"
+                                >
+                                    <FiTrash2 className="w-4 h-4" />
+                                </button>
+                                <div className="flex flex-col items-center flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                                        <span className="text-base font-extrabold text-white tabular-nums">
+                                            {formatVoiceDuration(recordingTime)}
+                                        </span>
+                                    </div>
+                                    <span className="text-[11px] font-bold text-yellow-500/90">
+                                        {recordingGestureHint === 'cancel' ? 'Release to cancel' : 'Tap ■ to stop'}
+                                    </span>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="relative flex-1 min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={handleImageClick}
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center text-white/90 hover:text-white transition-colors"
+                                    aria-label="Add photo"
+                                >
+                                    <FiPlus className="w-5 h-5" />
+                                </button>
+                                <input
+                                    type="text"
+                                    value={messageText}
+                                    onChange={(e) => {
+                                        setMessageText(e.target.value);
+                                    }}
+                                    onKeyPress={(e) => {
+                                        if (e.key === 'Enter') {
+                                            handleSend();
+                                        }
+                                    }}
+                                    placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
+                                    className={`w-full min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border-2 border-white shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white ${
+                                        compactPhone ? 'pl-11 pr-4 py-2.5 text-[15px]' : 'pl-12 pr-5 py-3 text-[15px] sm:text-base'
+                                    }`}
+                                />
                             </div>
                         )}
-                        {messageText.trim() && (
+                        <button
+                            ref={micCaptureRef}
+                            type="button"
+                            onPointerDown={handleMicPointerDown}
+                            onPointerMove={handleMicPointerMove}
+                            onPointerUp={handleMicPointerUp}
+                            onPointerCancel={handleMicPointerUp}
+                            className={`flex-shrink-0 rounded-full p-2.5 transition-all shadow-sm border touch-none select-none ${
+                                isRecording
+                                    ? 'bg-yellow-500 text-black border-white'
+                                    : 'bg-gradient-to-br from-gray-300 via-yellow-500 to-gray-500 text-white border-yellow-300'
+                            }`}
+                            aria-label={isRecording ? 'Stop recording' : 'Record voice message'}
+                            title={isRecording ? 'Tap to stop' : 'Tap to record'}
+                        >
+                            {isRecording ? (
+                                <FiSquare className="w-5 h-5 sm:w-6 sm:h-6" />
+                            ) : (
+                                <FiMic className="w-5 h-5 sm:w-6 sm:h-6" />
+                            )}
+                        </button>
+                        {messageText.trim() && !isRecording && (
                             <button
                                 type="button"
                                 onClick={handleSend}
@@ -3498,6 +3897,7 @@ export default function MessagesPage() {
                         className="hidden"
                     />
                 </div>
+                ) : null}
             </div>
 
             {/* Context Menu - position above tap when near bottom so full card is visible */}

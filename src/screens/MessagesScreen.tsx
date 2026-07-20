@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View,
     Text,
@@ -10,7 +10,6 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
-    Alert,
     Animated,
     PanResponder,
     Linking,
@@ -18,7 +17,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { glassPanel, glassSearch, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -38,11 +37,15 @@ import {
     isConversationMuted,
     type ChatMessage,
 } from '../api/messages';
-import { createChatGroup, inviteUserToChatGroup } from '../api/chatGroups';
+import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { getAvatarForHandle } from '../api/users';
 import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import IMessageDmBubbleShell from '../components/IMessageDmBubbleShell.native';
 import {
     DM_RECEIVED,
@@ -50,15 +53,50 @@ import {
     getDmSentBubblePreference,
     type DmSentBubbleStyle,
 } from '../constants/dmImessageTheme.native';
+import { toFileUri } from '../utils/ffmpegNative';
+
+type VoiceDraftSegment = { audioUrl: string; durationSeconds: number };
+type VoiceDraftState = {
+    audioUrl: string;
+    durationSeconds: number;
+    segments: VoiceDraftSegment[];
+    canContinue?: boolean;
+};
 
 const DEBUG_MESSAGE_PAGING =
     __DEV__ && (globalThis as { __CLIPS_DEBUG_MESSAGE_PAGING__?: boolean }).__CLIPS_DEBUG_MESSAGE_PAGING__ === true;
 
+type SheetAlertState = {
+    title: string;
+    message?: string;
+    icon?: 'success' | 'alert' | 'info';
+    confirmButtonText?: string;
+    showCancelButton?: boolean;
+    cancelButtonText?: string;
+    onConfirm?: () => void;
+};
+
+type SheetMenuState = {
+    title: string;
+    subtitle?: string;
+    options: GazetteerMenuOption[];
+};
+
 export default function MessagesScreen({ route, navigation }: any) {
-    const { handle, chatGroupId } = route.params || {};
+    const {
+        handle,
+        chatGroupId,
+        groupName: routeGroupName,
+        communityCreated,
+        communityCreatedName,
+    } = route.params || {};
     const isGroupThread = Boolean(chatGroupId);
     const { user } = useAuth();
-    const [groupName, setGroupName] = useState('Group');
+    const initialGroupName =
+        (typeof routeGroupName === 'string' && routeGroupName.trim()) ||
+        (typeof communityCreatedName === 'string' && communityCreatedName.trim()) ||
+        'Group';
+    const [groupName, setGroupName] = useState(initialGroupName);
     const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
@@ -85,18 +123,131 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [translatedMessages, setTranslatedMessages] = useState<Record<string, string>>({});
     const [isRecordingVoice, setIsRecordingVoice] = useState(false);
     const [recordingSeconds, setRecordingSeconds] = useState(0);
+    const [recordingGestureHint, setRecordingGestureHint] = useState<'none' | 'cancel'>('none');
+    const [voiceDraft, setVoiceDraft] = useState<VoiceDraftState | null>(null);
+    const [isPlayingVoiceDraft, setIsPlayingVoiceDraft] = useState(false);
+    const [voiceDraftPlaySeconds, setVoiceDraftPlaySeconds] = useState(0);
+    const [voiceDraftTrackWidth, setVoiceDraftTrackWidth] = useState(0);
+    const voiceDraftPlayingRef = useRef(false);
+    const voiceDraftSegmentIndexRef = useRef(0);
+    const voiceDraftSegmentOffsetsRef = useRef<number[]>([0]);
+    const voiceSegmentsRef = useRef<VoiceDraftSegment[]>([]);
+    const recordingPathRef = useRef<string | null>(null);
+    const recorderSessionActiveRef = useRef(false);
+    const isRecordingVoiceRef = useRef(false);
+    const recordingGestureHintRef = useRef<'none' | 'cancel'>('none');
+    const micGestureStartRef = useRef({ x: 0, y: 0, at: 0, wasRecording: false });
+    const voiceDraftRef = useRef<typeof voiceDraft>(null);
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>('blue');
 
     useEffect(() => {
         void getDmSentBubblePreference().then(setDmSentStyle);
     }, []);
     const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+    const [sheetAlert, setSheetAlert] = useState<SheetAlertState | null>(null);
+    const [sheetMenu, setSheetMenu] = useState<SheetMenuState | null>(null);
+    const [showChatInfo, setShowChatInfo] = useState(false);
+    const [leaveGroupBusy, setLeaveGroupBusy] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
     const [swipingMessageId, setSwipingMessageId] = useState<string | null>(null);
     const [swipeOffset, setSwipeOffset] = useState(0);
     const swipeStartRef = useRef<{ x: number; y: number; message: ChatMessage | null } | null>(null);
     const audioRecorderRef = useRef(AudioRecorderPlayer);
+    const communityCreatedHandledRef = useRef(false);
+
+    useEffect(() => {
+        isRecordingVoiceRef.current = isRecordingVoice;
+    }, [isRecordingVoice]);
+
+    useEffect(() => {
+        recordingGestureHintRef.current = recordingGestureHint;
+    }, [recordingGestureHint]);
+
+    useEffect(() => {
+        voiceDraftRef.current = voiceDraft;
+    }, [voiceDraft]);
+
+    const showAlert = useCallback((opts: SheetAlertState) => {
+        setSheetAlert(opts);
+    }, []);
+
+    const showMenu = useCallback((opts: SheetMenuState) => {
+        setSheetMenu(opts);
+    }, []);
+
+    useEffect(() => {
+        if (!communityCreated || communityCreatedHandledRef.current) return;
+        communityCreatedHandledRef.current = true;
+        const name =
+            (typeof communityCreatedName === 'string' && communityCreatedName.trim()) ||
+            groupName ||
+            'your community';
+        showAlert({
+            title: 'Community created',
+            message: `You are in "${name}". Use + in the header to invite members.`,
+            icon: 'success',
+            confirmButtonText: 'Open chat',
+        });
+        navigation.setParams({
+            communityCreated: undefined,
+            communityCreatedName: undefined,
+        });
+    }, [communityCreated, communityCreatedName, groupName, navigation, showAlert]);
+
+    const scrollMessagesToBottom = useCallback((animated = true) => {
+        requestAnimationFrame(() => {
+            flatListRef.current?.scrollToEnd({ animated });
+        });
+    }, []);
+
+    const composerPlaceholder = editingMessage ? 'Edit message…' : 'Message…';
+
+    const handleLeaveGroup = async () => {
+        if (!chatGroupId || leaveGroupBusy) return;
+        setLeaveGroupBusy(true);
+        try {
+            await leaveChatGroup(chatGroupId);
+            setShowChatInfo(false);
+            showAlert({
+                title: 'Left group',
+                message: `You left "${groupName}".`,
+                icon: 'success',
+                confirmButtonText: 'OK',
+                onConfirm: () => {
+                    if (navigation.canGoBack()) {
+                        navigation.goBack();
+                    } else {
+                        navigateMainTab(navigation, 'Inbox');
+                    }
+                },
+            });
+        } catch (error) {
+            console.error('Error leaving group:', error);
+            showAlert({
+                title: 'Failed to leave group',
+                message: 'Could not leave this group right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        } finally {
+            setLeaveGroupBusy(false);
+        }
+    };
+
+    const confirmLeaveGroup = () => {
+        showAlert({
+            title: `Leave "${groupName}"?`,
+            message: 'You can be invited again later.',
+            icon: 'info',
+            confirmButtonText: 'Leave group',
+            cancelButtonText: 'Cancel',
+            showCancelButton: true,
+            onConfirm: () => {
+                void handleLeaveGroup();
+            },
+        });
+    };
 
     const isLikelyVideoUrl = (url?: string) => {
         if (!url) return false;
@@ -180,6 +331,11 @@ export default function MessagesScreen({ route, navigation }: any) {
         };
     }, [user?.handle, handle, isGroupThread]);
 
+    useEffect(() => {
+        if (loading || messages.length === 0) return;
+        scrollMessagesToBottom(false);
+    }, [loading, messages.length, scrollMessagesToBottom]);
+
     const loadMessages = async (reset: boolean = false) => {
         if (!user?.handle) return;
         if (reset) {
@@ -256,7 +412,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         const draftText = messageText.trim();
         if (editingMessage) {
             if (isGroupThread) {
-                Alert.alert('Edit unavailable', 'Editing is currently available for direct messages only.');
+                showAlert({
+                    title: 'Edit unavailable',
+                    message: 'Editing is currently available for direct messages only.',
+                    icon: 'info',
+                    confirmButtonText: 'OK',
+                });
                 setEditingMessage(null);
                 setMessageText('');
                 return;
@@ -296,6 +457,7 @@ export default function MessagesScreen({ route, navigation }: any) {
         shouldAutoScrollRef.current = true;
         setMessages(prev => [...prev, newMessage]);
         setMessageText('');
+        scrollMessagesToBottom(true);
 
         try {
             if (isGroupThread && chatGroupId) {
@@ -313,96 +475,94 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const openMessageActions = (item: ChatMessage) => {
         const fromMe = item.senderHandle === user?.handle;
-        Alert.alert(
-            'Message actions',
-            'Choose an action',
-            [
-                {
-                    text: 'React ❤️',
-                    onPress: () => handleToggleReaction(item.id, '❤️'),
+        const options: GazetteerMenuOption[] = [
+            { label: 'React ❤️', onPress: () => handleToggleReaction(item.id, '❤️') },
+            { label: 'React 😂', onPress: () => handleToggleReaction(item.id, '😂') },
+            { label: 'React 🔥', onPress: () => handleToggleReaction(item.id, '🔥') },
+            {
+                label: 'Reply',
+                onPress: () => {
+                    setReplyingTo(item);
+                    setEditingMessage(null);
                 },
-                {
-                    text: 'React 😂',
-                    onPress: () => handleToggleReaction(item.id, '😂'),
+            },
+        ];
+        if (item.storyId) {
+            options.push({
+                label: 'View story',
+                onPress: () => {
+                    navigation.navigate('Stories', {
+                        openUserHandle: item.senderHandle || handle,
+                        openStoryId: item.storyId,
+                    });
                 },
-                {
-                    text: 'React 🔥',
-                    onPress: () => handleToggleReaction(item.id, '🔥'),
+            });
+        }
+        if (fromMe && !isGroupThread) {
+            options.push({
+                label: 'Edit',
+                onPress: () => {
+                    setEditingMessage(item);
+                    setReplyingTo(null);
+                    setMessageText(item.text || '');
                 },
-                {
-                    text: 'Reply',
-                    onPress: () => {
-                        setReplyingTo(item);
-                        setEditingMessage(null);
-                    },
+            });
+        }
+        if (!fromMe) {
+            options.push({
+                label: 'View profile',
+                onPress: () => {
+                    navigation.navigate('ViewProfile', { handle: item.senderHandle });
                 },
-                ...(item.storyId
-                    ? [{
-                        text: 'View story',
-                        onPress: () => {
-                            navigation.navigate('Stories', {
-                                openUserHandle: item.senderHandle || handle,
-                                openStoryId: item.storyId,
-                            });
-                        },
-                    }]
-                    : []),
-                ...(fromMe && !isGroupThread
-                    ? [{
-                        text: 'Edit',
-                        onPress: () => {
-                            setEditingMessage(item);
-                            setReplyingTo(null);
-                            setMessageText(item.text || '');
-                        },
-                    }]
-                    : []),
-                ...(!fromMe
-                    ? [{
-                        text: 'View profile',
-                        onPress: () => {
-                            navigation.navigate('ViewProfile', { handle: item.senderHandle });
-                        },
-                    }]
-                    : []),
-                ...(item.text
-                    ? [{
-                        text: 'Copy text',
-                        onPress: () => {
-                            Clipboard.setString(item.text || '');
-                            Alert.alert('Copied', 'Message text copied to clipboard.');
-                        },
-                    }, {
-                        text: translatedMessages[item.id] ? 'Hide translation' : 'Translate',
-                        onPress: () => {
-                            void handleTranslateMessage(item);
-                        },
-                    }]
-                    : []),
-                {
-                    text: 'Add sticker',
-                    onPress: () => {
-                        setStickerTargetMessageId(item.id);
-                        setShowStickerPicker(true);
-                    },
+            });
+        }
+        if (item.text) {
+            options.push({
+                label: 'Copy text',
+                onPress: () => {
+                    Clipboard.setString(item.text || '');
+                    showAlert({
+                        title: 'Copied',
+                        message: 'Message text copied to clipboard.',
+                        icon: 'success',
+                        confirmButtonText: 'OK',
+                    });
                 },
-                {
-                    text: 'Forward',
-                    onPress: () => {
-                        void handleForwardMessage(item);
-                    },
+            });
+            options.push({
+                label: translatedMessages[item.id] ? 'Hide translation' : 'Translate',
+                onPress: () => {
+                    void handleTranslateMessage(item);
                 },
-                {
-                    text: 'Report',
-                    onPress: () => {
-                        handleReportMessage(item);
-                    },
-                    style: 'destructive',
+            });
+        }
+        options.push(
+            {
+                label: 'Add sticker',
+                onPress: () => {
+                    setStickerTargetMessageId(item.id);
+                    setShowStickerPicker(true);
                 },
-                { text: 'Cancel', style: 'cancel' },
-            ],
-            { cancelable: true },
+            },
+            {
+                label: 'Forward',
+                onPress: () => {
+                    void handleForwardMessage(item);
+                },
+            },
+            {
+                label: 'Report',
+                onPress: () => {
+                    handleReportMessage(item);
+                },
+                destructive: true,
+            },
         );
+        showMenu({
+            title: 'Message actions',
+            subtitle: 'Choose an action',
+            options,
+        });
     };
 
     const translateText = async (text: string): Promise<string> => {
@@ -426,7 +586,12 @@ export default function MessagesScreen({ route, navigation }: any) {
             const translated = await translateText(item.text);
             setTranslatedMessages((prev) => ({ ...prev, [item.id]: translated }));
         } catch {
-            Alert.alert('Translate failed', 'Could not translate this message right now.');
+            showAlert({
+                title: 'Translate failed',
+                message: 'Could not translate this message right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
 
@@ -440,61 +605,96 @@ export default function MessagesScreen({ route, navigation }: any) {
                 .filter((target) => !isGroupThread ? target !== handle : true)
                 .slice(0, 8);
             if (dmTargets.length === 0) {
-                Alert.alert('No conversations', 'No other direct conversations available to forward to.');
+                showAlert({
+                    title: 'No conversations',
+                    message: 'No other direct conversations available to forward to.',
+                    icon: 'info',
+                    confirmButtonText: 'OK',
+                });
                 return;
             }
-            const options: Array<{ text: string; onPress: () => void; style?: 'cancel' | 'destructive' }> = dmTargets.map((target) => ({
-                text: target,
-                onPress: () => {
-                    void (async () => {
-                        try {
-                            await appendMessage(user.handle, target, {
-                                text: item.text ? `Forwarded: ${item.text}` : undefined,
-                                imageUrl: item.imageUrl,
-                                audioUrl: item.audioUrl,
-                            });
-                            Alert.alert('Forwarded', `Sent to ${target}`);
-                        } catch {
-                            Alert.alert('Forward failed', 'Could not forward this message right now.');
-                        }
-                    })();
-                },
-            }));
-            options.push({ text: 'Cancel', style: 'cancel', onPress: () => {} });
-            Alert.alert('Forward message', 'Choose conversation', options);
+            showMenu({
+                title: 'Forward message',
+                subtitle: 'Choose conversation',
+                options: dmTargets.map((target) => ({
+                    label: target,
+                    onPress: () => {
+                        void (async () => {
+                            try {
+                                await appendMessage(user.handle, target, {
+                                    text: item.text ? `Forwarded: ${item.text}` : undefined,
+                                    imageUrl: item.imageUrl,
+                                    audioUrl: item.audioUrl,
+                                });
+                                showAlert({
+                                    title: 'Forwarded',
+                                    message: `Sent to ${target}`,
+                                    icon: 'success',
+                                    confirmButtonText: 'OK',
+                                });
+                            } catch {
+                                showAlert({
+                                    title: 'Forward failed',
+                                    message: 'Could not forward this message right now.',
+                                    icon: 'alert',
+                                    confirmButtonText: 'OK',
+                                });
+                            }
+                        })();
+                    },
+                })),
+            });
         } catch {
-            Alert.alert('Forward failed', 'Could not load conversations right now.');
+            showAlert({
+                title: 'Forward failed',
+                message: 'Could not load conversations right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
 
     const handleReportMessage = (item: ChatMessage) => {
-        Alert.alert(
-            'Report message',
-            `Why are you reporting ${item.senderHandle}'s message?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
+        showMenu({
+            title: 'Report message',
+            subtitle: `Why are you reporting ${item.senderHandle}'s message?`,
+            options: [
                 {
-                    text: 'Spam',
+                    label: 'Spam',
                     onPress: () => {
-                        Alert.alert('Reported', 'Thanks. We have flagged this message for spam review.');
+                        showAlert({
+                            title: 'Reported',
+                            message: 'Thanks. We have flagged this message for spam review.',
+                            icon: 'success',
+                            confirmButtonText: 'OK',
+                        });
                     },
                 },
                 {
-                    text: 'Harassment',
+                    label: 'Harassment',
                     onPress: () => {
-                        Alert.alert('Reported', 'Thanks. We have flagged this message for harassment review.');
+                        showAlert({
+                            title: 'Reported',
+                            message: 'Thanks. We have flagged this message for harassment review.',
+                            icon: 'success',
+                            confirmButtonText: 'OK',
+                        });
                     },
                 },
                 {
-                    text: 'Other',
-                    style: 'destructive',
+                    label: 'Other',
                     onPress: () => {
-                        Alert.alert('Reported', 'Thanks. We have flagged this message for review.');
+                        showAlert({
+                            title: 'Reported',
+                            message: 'Thanks. We have flagged this message for review.',
+                            icon: 'success',
+                            confirmButtonText: 'OK',
+                        });
                     },
+                    destructive: true,
                 },
             ],
-            { cancelable: true },
-        );
+        });
     };
 
     const handleToggleReaction = (messageId: string, emoji: string) => {
@@ -533,15 +733,19 @@ export default function MessagesScreen({ route, navigation }: any) {
             (response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
-                    Alert.alert('Photo error', response.errorMessage || 'Could not open your photo library.');
+                    showAlert({
+                        title: 'Photo error',
+                        message: response.errorMessage || 'Could not open your photo library.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
                     return;
                 }
                 const asset = response.assets?.[0];
                 if (!asset) return;
-                const mime = asset.type || 'image/jpeg';
-                const dataUrl = asset.base64 ? `data:${mime};base64,${asset.base64}` : asset.uri;
-                if (!dataUrl) return;
-                setNewGroupAvatarDataUrl(dataUrl);
+                const uri = asset.uri;
+                if (!uri) return;
+                setNewGroupAvatarDataUrl(uri);
             },
         );
     };
@@ -550,23 +754,54 @@ export default function MessagesScreen({ route, navigation }: any) {
         if (!user?.handle || creatingGroup) return;
         const trimmed = newGroupName.trim();
         if (!trimmed) {
-            Alert.alert('Group name required', 'Enter a group name to continue.');
+            showAlert({
+                title: 'Group name required',
+                message: 'Enter a group name to continue.',
+                icon: 'info',
+                confirmButtonText: 'OK',
+            });
             return;
         }
         setCreatingGroup(true);
         try {
-            const created = await createChatGroup(trimmed, user.handle, newGroupAvatarDataUrl || null);
+            let avatarUrl: string | null = null;
+            if (newGroupAvatarDataUrl) {
+                if (isLaravelApiEnabled()) {
+                    const upload = await uploadFileFromUri(newGroupAvatarDataUrl);
+                    avatarUrl = upload.fileUrl || upload.url || null;
+                    if (!avatarUrl) {
+                        throw new Error('Could not upload group photo');
+                    }
+                } else {
+                    avatarUrl = newGroupAvatarDataUrl;
+                }
+            }
+            const created = await createChatGroup(trimmed, user.handle, avatarUrl);
             if (!created?.id) {
-                Alert.alert('Create failed', 'Could not create group right now.');
+                showAlert({
+                    title: 'Create failed',
+                    message: 'Could not create group right now.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
                 return;
             }
             setCreateGroupOpen(false);
             setNewGroupName('');
             setNewGroupAvatarDataUrl(undefined);
-            navigation.navigate('Messages', { chatGroupId: created.id, kind: 'group' });
+            navigation.replace('Messages', {
+                chatGroupId: created.id,
+                kind: 'group',
+                groupName: trimmed,
+            });
         } catch (error) {
             console.error('Error creating group:', error);
-            Alert.alert('Create failed', 'Could not create group right now.');
+            showAlert({
+                title: 'Create failed',
+                message: 'Could not create group right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         } finally {
             setCreatingGroup(false);
         }
@@ -576,7 +811,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         if (!chatGroupId || inviteBusy) return;
         const normalized = inviteHandle.trim().replace(/^@/, '');
         if (!normalized) {
-            Alert.alert('Handle required', 'Type a handle to invite.');
+            showAlert({
+                title: 'Handle required',
+                message: 'Type a handle to invite.',
+                icon: 'info',
+                confirmButtonText: 'OK',
+            });
             return;
         }
         setInviteBusy(true);
@@ -585,10 +825,20 @@ export default function MessagesScreen({ route, navigation }: any) {
             setInviteOpen(false);
             setInviteHandle('');
             setInviteSuggestions([]);
-            Alert.alert('Invite sent', `@${normalized} will see this invite in notifications.`);
+            showAlert({
+                title: 'Invite sent',
+                message: `@${normalized} will see this invite in notifications.`,
+                icon: 'success',
+                confirmButtonText: 'OK',
+            });
         } catch (error) {
             console.error('Invite failed:', error);
-            Alert.alert('Invite failed', 'Could not send invite right now.');
+            showAlert({
+                title: 'Invite failed',
+                message: 'Could not send invite right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         } finally {
             setInviteBusy(false);
         }
@@ -596,42 +846,56 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const openHeaderActions = () => {
         if (isGroupThread) {
-            Alert.alert('Group actions', 'Choose an action', [
-                { text: 'Invite member', onPress: () => setInviteOpen(true) },
-                { text: 'Cancel', style: 'cancel' },
-            ]);
+            setShowChatInfo(true);
             return;
         }
-        const toggleMuteAction = isMuted
+        const toggleMuteAction: GazetteerMenuOption = isMuted
             ? {
-                text: 'Unmute conversation',
-                onPress: async () => {
-                    if (!user?.handle || !handle) return;
-                    try {
-                        await unmuteConversation(user.handle, handle);
-                        setIsMuted(false);
-                    } catch {
-                        Alert.alert('Action failed', 'Could not update mute state right now.');
-                    }
+                label: 'Unmute conversation',
+                onPress: () => {
+                    void (async () => {
+                        if (!user?.handle || !handle) return;
+                        try {
+                            await unmuteConversation(user.handle, handle);
+                            setIsMuted(false);
+                        } catch {
+                            showAlert({
+                                title: 'Action failed',
+                                message: 'Could not update mute state right now.',
+                                icon: 'alert',
+                                confirmButtonText: 'OK',
+                            });
+                        }
+                    })();
                 },
             }
             : {
-                text: 'Mute conversation',
-                onPress: async () => {
-                    if (!user?.handle || !handle) return;
-                    try {
-                        await muteConversation(user.handle, handle);
-                        setIsMuted(true);
-                    } catch {
-                        Alert.alert('Action failed', 'Could not update mute state right now.');
-                    }
+                label: 'Mute conversation',
+                onPress: () => {
+                    void (async () => {
+                        if (!user?.handle || !handle) return;
+                        try {
+                            await muteConversation(user.handle, handle);
+                            setIsMuted(true);
+                        } catch {
+                            showAlert({
+                                title: 'Action failed',
+                                message: 'Could not update mute state right now.',
+                                icon: 'alert',
+                                confirmButtonText: 'OK',
+                            });
+                        }
+                    })();
                 },
             };
-        Alert.alert('Chat actions', 'Choose an action', [
-            { text: 'Create group', onPress: () => setCreateGroupOpen(true) },
-            toggleMuteAction,
-            { text: 'Cancel', style: 'cancel' },
-        ]);
+        showMenu({
+            title: 'Chat actions',
+            subtitle: 'Choose an action',
+            options: [
+                { label: 'Create group', onPress: () => setCreateGroupOpen(true) },
+                toggleMuteAction,
+            ],
+        });
     };
 
     const handleImageClick = () => {
@@ -646,7 +910,12 @@ export default function MessagesScreen({ route, navigation }: any) {
             async (response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
-                    Alert.alert('Image error', response.errorMessage || 'Could not open your photo library.');
+                    showAlert({
+                        title: 'Image error',
+                        message: response.errorMessage || 'Could not open your photo library.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
                     return;
                 }
                 const asset = response.assets?.[0];
@@ -687,7 +956,12 @@ export default function MessagesScreen({ route, navigation }: any) {
             await loadMessages(true);
         } catch (error) {
             console.error('Error sending image message:', error);
-            Alert.alert('Send failed', 'Could not send image message.');
+            showAlert({
+                title: 'Send failed',
+                message: 'Could not send image message.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
 
@@ -717,7 +991,12 @@ export default function MessagesScreen({ route, navigation }: any) {
             await loadMessages(true);
         } catch (error) {
             console.error('Error sending sticker:', error);
-            Alert.alert('Send failed', 'Could not send sticker.');
+            showAlert({
+                title: 'Send failed',
+                message: 'Could not send sticker.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
 
@@ -736,35 +1015,218 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
     };
 
-    const startVoiceRecording = async () => {
-        if (!user?.handle || isRecordingVoice) return;
+    const formatVoiceDuration = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const normalizePlaybackUri = (uri: string) => {
+        const trimmed = uri.trim();
+        if (!trimmed) return trimmed;
+        if (
+            trimmed.startsWith('file://') ||
+            trimmed.startsWith('content://') ||
+            trimmed.startsWith('http://') ||
+            trimmed.startsWith('https://') ||
+            trimmed.startsWith('data:')
+        ) {
+            return trimmed;
+        }
+        return toFileUri(trimmed);
+    };
+
+    const buildVoiceDraftFromSegments = (segments: VoiceDraftSegment[]): VoiceDraftState => {
+        const durationSeconds = Math.max(
+            1,
+            segments.reduce((sum, segment) => sum + segment.durationSeconds, 0),
+        );
+        let elapsed = 0;
+        const offsets = segments.map((segment) => {
+            const start = elapsed;
+            elapsed += segment.durationSeconds;
+            return start;
+        });
+        voiceDraftSegmentOffsetsRef.current = offsets.length ? offsets : [0];
+        const latest = segments[segments.length - 1];
+        return {
+            audioUrl: latest.audioUrl,
+            durationSeconds,
+            segments,
+            canContinue: true,
+        };
+    };
+
+    const clearVoiceSegments = () => {
+        voiceSegmentsRef.current = [];
+        voiceDraftSegmentOffsetsRef.current = [0];
+        voiceDraftSegmentIndexRef.current = 0;
+    };
+
+    const resolveVoiceDraftAudioUrl = async (draft: VoiceDraftState): Promise<string | null> => {
+        const segments = draft.segments?.length
+            ? draft.segments
+            : [{ audioUrl: draft.audioUrl, durationSeconds: draft.durationSeconds }];
+        const urls = segments.map((segment) => segment.audioUrl).filter(Boolean);
+        if (!urls.length) return null;
+        if (urls.length === 1) return urls[0];
+
+        const { makeSiblingOutputPath, toFfmpegPath, executeFfmpeg } = await import('../utils/ffmpegNative');
+        const outputPath = makeSiblingOutputPath(urls[0], 'voice', 'm4a');
+        const inputs = urls.map((url) => `-i "${toFfmpegPath(url)}"`).join(' ');
+        const filterInputs = urls.map((_, index) => `[${index}:a]`).join('');
+        const filter = `${filterInputs}concat=n=${urls.length}:v=0:a=1[outa]`;
+        await executeFfmpeg(`-y ${inputs} -filter_complex "${filter}" -map "[outa]" "${outputPath}"`);
+        return toFileUri(outputPath);
+    };
+
+    const stopVoiceDraftPlayback = async () => {
+        voiceDraftPlayingRef.current = false;
+        voiceDraftSegmentIndexRef.current = 0;
+        try {
+            await audioRecorderRef.current.stopPlayer();
+            audioRecorderRef.current.removePlayBackListener();
+        } catch {
+            // ignore
+        }
+        setIsPlayingVoiceDraft(false);
+    };
+
+    const resetVoiceCaptureState = () => {
+        setIsRecordingVoice(false);
+        setRecordingSeconds(0);
+        setRecordingGestureHint('none');
+        recordingPathRef.current = null;
+        recorderSessionActiveRef.current = false;
+    };
+
+    const startVoiceRecording = async (appendSegment = false) => {
+        if (!user?.handle || isRecordingVoice) return false;
+        if (voiceDraft && !appendSegment) return false;
         const allowed = await requestMicPermission();
         if (!allowed) {
-            Alert.alert('Permission required', 'Microphone permission is required to record voice messages.');
-            return;
+            showAlert({
+                title: 'Permission required',
+                message: 'Microphone permission is required to record voice messages.',
+                icon: 'info',
+                confirmButtonText: 'OK',
+            });
+            return false;
         }
         try {
             setRecordingSeconds(0);
-            await audioRecorderRef.current.startRecorder();
+            const path = await audioRecorderRef.current.startRecorder();
+            recordingPathRef.current = path || null;
+            recorderSessionActiveRef.current = true;
             audioRecorderRef.current.addRecordBackListener((event: any) => {
                 const secs = Math.max(0, Math.floor((event.currentPosition || 0) / 1000));
                 setRecordingSeconds(secs);
             });
             setIsRecordingVoice(true);
+            return true;
         } catch (error) {
             console.error('Voice record start failed:', error);
-            Alert.alert('Record failed', 'Could not start voice recording.');
+            resetVoiceCaptureState();
+            showAlert({
+                title: 'Record failed',
+                message: 'Could not start voice recording.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+            return false;
         }
     };
 
-    const stopVoiceRecording = async () => {
-        if (!isRecordingVoice || !user?.handle) return;
+    const cancelVoiceRecording = async () => {
         try {
-            const audioUrl = await audioRecorderRef.current.stopRecorder();
+            if (recorderSessionActiveRef.current) {
+                await audioRecorderRef.current.stopRecorder();
+                audioRecorderRef.current.removeRecordBackListener();
+            }
+        } catch {
+            // ignore
+        }
+        await stopVoiceDraftPlayback();
+        resetVoiceCaptureState();
+        clearVoiceSegments();
+        setVoiceDraft(null);
+    };
+
+    const pauseVoiceRecordingForPreview = async () => {
+        if (!isRecordingVoiceRef.current || !recorderSessionActiveRef.current) return;
+        const durationSeconds = Math.max(1, recordingSeconds);
+        try {
             audioRecorderRef.current.removeRecordBackListener();
+            const stoppedPath = await audioRecorderRef.current.stopRecorder();
+            recorderSessionActiveRef.current = false;
             setIsRecordingVoice(false);
-            setRecordingSeconds(0);
-            if (!audioUrl) return;
+            setRecordingGestureHint('none');
+            await stopVoiceDraftPlayback();
+
+            const previewUrl = normalizePlaybackUri(stoppedPath || recordingPathRef.current || '');
+            if (!previewUrl) return;
+
+            const segments = [
+                ...voiceSegmentsRef.current,
+                { audioUrl: previewUrl, durationSeconds },
+            ];
+            voiceSegmentsRef.current = segments;
+            recordingPathRef.current = previewUrl;
+            setVoiceDraft(buildVoiceDraftFromSegments(segments));
+        } catch (error) {
+            console.error('Voice preview finalize failed:', error);
+            await cancelVoiceRecording();
+            showAlert({
+                title: 'Record failed',
+                message: 'Could not finish voice recording for preview.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        }
+    };
+
+    const continueVoiceRecording = async () => {
+        if (!voiceDraft?.canContinue || recorderSessionActiveRef.current) return;
+        try {
+            await stopVoiceDraftPlayback();
+            setVoiceDraft(null);
+            const started = await startVoiceRecording(true);
+            if (!started) return;
+        } catch (error) {
+            console.error('Voice resume failed:', error);
+            showAlert({
+                title: 'Record failed',
+                message: 'Could not continue voice recording.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        }
+    };
+
+    const discardVoiceDraft = async () => {
+        await stopVoiceDraftPlayback();
+        if (recorderSessionActiveRef.current) {
+            await cancelVoiceRecording();
+            return;
+        }
+        clearVoiceSegments();
+        setVoiceDraft(null);
+        setVoiceDraftPlaySeconds(0);
+    };
+
+    const sendVoiceDraft = async () => {
+        if (!voiceDraft || !user?.handle) return;
+        try {
+            const audioUrl = await resolveVoiceDraftAudioUrl(voiceDraft);
+            if (!audioUrl) {
+                showAlert({
+                    title: 'Send failed',
+                    message: 'Could not prepare voice message.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
             const optimistic: ChatMessage = {
                 id: `${Date.now()}-audio`,
                 senderHandle: user.handle,
@@ -779,18 +1241,189 @@ export default function MessagesScreen({ route, navigation }: any) {
                 await appendMessage(user.handle, handle, { audioUrl });
             }
             await loadMessages(true);
+            clearVoiceSegments();
+            setVoiceDraft(null);
+            setVoiceDraftPlaySeconds(0);
+            recordingPathRef.current = null;
         } catch (error) {
-            console.error('Voice record stop failed:', error);
-            Alert.alert('Send failed', 'Could not send voice message.');
+            console.error('Voice send failed:', error);
+            showAlert({
+                title: 'Send failed',
+                message: 'Could not send voice message.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
         }
     };
+
+    const seekVoiceDraftPlayback = async (seconds: number) => {
+        if (!voiceDraft?.audioUrl) return;
+        const clamped = Math.max(0, Math.min(voiceDraft.durationSeconds, seconds));
+        setVoiceDraftPlaySeconds(clamped);
+        try {
+            await audioRecorderRef.current.seekToPlayer(clamped * 1000);
+        } catch {
+            // ignore seek failures on partial files
+        }
+    };
+
+    const handleVoiceDraftTrackPress = (locationX: number) => {
+        if (!voiceDraftTrackWidth || !voiceDraft?.durationSeconds) return;
+        const ratio = Math.max(0, Math.min(1, locationX / voiceDraftTrackWidth));
+        void seekVoiceDraftPlayback(Math.floor(ratio * voiceDraft.durationSeconds));
+    };
+
+    const playVoiceDraftSegment = async (segmentIndex: number, offsetSeconds = 0) => {
+        if (!voiceDraft) return;
+        const segments = voiceDraft.segments?.length
+            ? voiceDraft.segments
+            : [{ audioUrl: voiceDraft.audioUrl, durationSeconds: voiceDraft.durationSeconds }];
+        if (segmentIndex >= segments.length) {
+            await stopVoiceDraftPlayback();
+            return;
+        }
+
+        const segment = segments[segmentIndex];
+        const playbackUri = normalizePlaybackUri(segment.audioUrl);
+        voiceDraftSegmentIndexRef.current = segmentIndex;
+
+        await audioRecorderRef.current.stopPlayer();
+        audioRecorderRef.current.removePlayBackListener();
+        await audioRecorderRef.current.startPlayer(playbackUri);
+        if (offsetSeconds > 0) {
+            try {
+                await audioRecorderRef.current.seekToPlayer(offsetSeconds * 1000);
+            } catch {
+                // seek may fail on some devices until playback starts
+            }
+        }
+
+        voiceDraftPlayingRef.current = true;
+        setIsPlayingVoiceDraft(true);
+        const segmentStart = voiceDraftSegmentOffsetsRef.current[segmentIndex] ?? 0;
+
+        audioRecorderRef.current.addPlayBackListener((event: any) => {
+            const localSecs = Math.max(0, Math.floor((event.currentPosition || 0) / 1000));
+            setVoiceDraftPlaySeconds(segmentStart + localSecs);
+            const durationMs = event.duration || 0;
+            const reachedEnd =
+                (durationMs > 0 && event.currentPosition >= durationMs - 80) ||
+                localSecs >= segment.durationSeconds;
+            if (reachedEnd) {
+                audioRecorderRef.current.removePlayBackListener();
+                void playVoiceDraftSegment(segmentIndex + 1, 0);
+            }
+        });
+    };
+
+    const toggleVoiceDraftPlayback = async () => {
+        if (!voiceDraft?.audioUrl) return;
+        if (isPlayingVoiceDraft) {
+            await stopVoiceDraftPlayback();
+            return;
+        }
+        try {
+            const segments = voiceDraft.segments?.length
+                ? voiceDraft.segments
+                : [{ audioUrl: voiceDraft.audioUrl, durationSeconds: voiceDraft.durationSeconds }];
+            const offsets = voiceDraftSegmentOffsetsRef.current;
+            let startSegment = 0;
+            let offsetInSegment = voiceDraftPlaySeconds;
+            for (let i = 0; i < segments.length; i += 1) {
+                const segmentStart = offsets[i] ?? 0;
+                const segmentEnd = segmentStart + segments[i].durationSeconds;
+                if (voiceDraftPlaySeconds < segmentEnd || i === segments.length - 1) {
+                    startSegment = i;
+                    offsetInSegment = Math.max(0, voiceDraftPlaySeconds - segmentStart);
+                    break;
+                }
+            }
+            await playVoiceDraftSegment(startSegment, offsetInSegment);
+        } catch (error) {
+            console.error('Voice preview playback failed:', error);
+            await stopVoiceDraftPlayback();
+            showAlert({
+                title: 'Playback failed',
+                message: 'Could not preview this voice message.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        }
+    };
+
+    const voiceMicActionsRef = useRef({
+        startVoiceRecording,
+        pauseVoiceRecordingForPreview,
+        cancelVoiceRecording,
+    });
+    voiceMicActionsRef.current = {
+        startVoiceRecording,
+        pauseVoiceRecordingForPreview,
+        cancelVoiceRecording,
+    };
+
+    const voiceMicPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => !voiceDraftRef.current,
+            onMoveShouldSetPanResponder: () => isRecordingVoiceRef.current,
+            onPanResponderGrant: (evt) => {
+                if (voiceDraftRef.current) return;
+                const wasRecording = isRecordingVoiceRef.current;
+                micGestureStartRef.current = {
+                    x: evt.nativeEvent.pageX,
+                    y: evt.nativeEvent.pageY,
+                    at: Date.now(),
+                    wasRecording,
+                };
+                setRecordingGestureHint('none');
+                if (!wasRecording) {
+                    void voiceMicActionsRef.current.startVoiceRecording();
+                }
+            },
+            onPanResponderMove: (evt) => {
+                if (!isRecordingVoiceRef.current) return;
+                const dx = evt.nativeEvent.pageX - micGestureStartRef.current.x;
+                if (dx < -72) {
+                    setRecordingGestureHint('cancel');
+                } else {
+                    setRecordingGestureHint('none');
+                }
+            },
+            onPanResponderRelease: () => {
+                const { at, wasRecording } = micGestureStartRef.current;
+                const heldMs = Date.now() - at;
+                const hint = recordingGestureHintRef.current;
+                if (hint === 'cancel') {
+                    void voiceMicActionsRef.current.cancelVoiceRecording();
+                    setRecordingGestureHint('none');
+                    return;
+                }
+                if (!isRecordingVoiceRef.current) {
+                    setRecordingGestureHint('none');
+                    return;
+                }
+                if (heldMs >= 400) {
+                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
+                } else if (wasRecording) {
+                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
+                }
+                setRecordingGestureHint('none');
+            },
+            onPanResponderTerminate: () => {
+                if (isRecordingVoiceRef.current && micGestureStartRef.current.wasRecording) {
+                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
+                }
+                setRecordingGestureHint('none');
+            },
+        }),
+    ).current;
 
     const handlePlayAudioMessage = async (audioUrl?: string) => {
         if (!audioUrl) return;
         try {
             await audioRecorderRef.current.stopPlayer();
             audioRecorderRef.current.removePlayBackListener();
-            await audioRecorderRef.current.startPlayer(audioUrl);
+            await audioRecorderRef.current.startPlayer(normalizePlaybackUri(audioUrl));
             setPlayingAudioId(audioUrl);
             audioRecorderRef.current.addPlayBackListener((event: any) => {
                 if (event.currentPosition >= event.duration) {
@@ -803,22 +1436,34 @@ export default function MessagesScreen({ route, navigation }: any) {
             try {
                 const supported = await Linking.canOpenURL(audioUrl);
                 if (!supported) {
-                    Alert.alert('Playback unavailable', 'This voice message cannot be played on this device.');
+                    showAlert({
+                        title: 'Playback unavailable',
+                        message: 'This voice message cannot be played on this device.',
+                        icon: 'info',
+                        confirmButtonText: 'OK',
+                    });
                     return;
                 }
                 await Linking.openURL(audioUrl);
             } catch {
-                Alert.alert('Playback failed', 'Could not open this voice message.');
+                showAlert({
+                    title: 'Playback failed',
+                    message: 'Could not open this voice message.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
             }
         }
     };
 
     useEffect(() => {
         return () => {
-            audioRecorderRef.current.stopRecorder().catch(() => {});
+            voiceDraftPlayingRef.current = false;
+            void audioRecorderRef.current.stopRecorder().catch(() => {});
             audioRecorderRef.current.removeRecordBackListener();
-            audioRecorderRef.current.stopPlayer().catch(() => {});
+            void audioRecorderRef.current.stopPlayer().catch(() => {});
             audioRecorderRef.current.removePlayBackListener();
+            recorderSessionActiveRef.current = false;
         };
     }, []);
 
@@ -886,7 +1531,9 @@ export default function MessagesScreen({ route, navigation }: any) {
         );
         const bubbleFill = isFromMe ? sentBubbleColor : DM_RECEIVED;
 
-        const bubbleBody = (
+        const myAvatar = user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined);
+
+        const bubbleContent = (
             <>
                 {(item as any).replyTo ? (
                     <View style={styles.replyPreviewWrap}>
@@ -927,12 +1574,12 @@ export default function MessagesScreen({ route, navigation }: any) {
                             isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
                         ]}
                     >
-                        {item.text}
+                        {translatedMessages[item.id] || item.text}
                     </Text>
                 ) : null}
-                {!!translatedMessages[item.id] && (
-                    <Text style={styles.translatedText}>{translatedMessages[item.id]}</Text>
-                )}
+                {!!translatedMessages[item.id] && !!item.text ? (
+                    <Text style={styles.translatedOriginalText}>Original: {item.text}</Text>
+                ) : null}
                 {item.imageUrl ? (
                     isLikelyVideoUrl(item.imageUrl) ? (
                         <View style={styles.messageVideoFallback}>
@@ -976,24 +1623,43 @@ export default function MessagesScreen({ route, navigation }: any) {
                         ))}
                     </View>
                 )}
-                <Text
-                    style={[
-                        styles.messageTime,
-                        isFromMe ? styles.messageTimeFromMe : styles.messageTimeFromOther,
-                    ]}
-                >
-                    {timeAgo(item.timestamp)}
-                </Text>
-                {isFromMe && !isGroupThread && (
-                    <View style={styles.readReceiptWrap}>
-                        <Icon
-                            name="checkmark-done"
-                            size={13}
-                            color={(item as any).read ? '#0A84FF' : '#8E8E93'}
-                        />
-                    </View>
-                )}
             </>
+        );
+
+        const messageMeta = (
+            <View style={[styles.messageMetaRow, isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther]}>
+                <Text style={styles.messageTimeOutside}>{timeAgo(item.timestamp)}</Text>
+                {isFromMe && !isGroupThread ? (
+                    <Icon
+                        name="checkmark-done"
+                        size={13}
+                        color={(item as any).read ? dmSentBubbleColor(dmSentStyle) : '#8E8E93'}
+                    />
+                ) : null}
+            </View>
+        );
+
+        const bubbleShell = (
+            <IMessageDmBubbleShell
+                isFromMe={isFromMe}
+                tailBackgroundColor={bubbleFill}
+                showTail={!isMediaOnlyMessage}
+                bubbleStyle={
+                    isMediaOnlyMessage
+                        ? {
+                              backgroundColor: 'transparent',
+                              paddingHorizontal: 0,
+                              paddingVertical: 0,
+                              shadowOpacity: 0,
+                              elevation: 0,
+                          }
+                        : messageReactions[item.id]?.length
+                          ? { paddingBottom: 22 }
+                          : undefined
+                }
+            >
+                {bubbleContent}
+            </IMessageDmBubbleShell>
         );
 
         return (
@@ -1001,58 +1667,42 @@ export default function MessagesScreen({ route, navigation }: any) {
                 styles.messageContainer,
                 isFromMe ? styles.messageFromMe : styles.messageFromOther,
             ]}>
-                {!isFromMe && (
+                {!isFromMe ? (
                     <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={32} />
-                )}
-                {!isFromMe && swipingMessageId === item.id && swipeOffset > 18 && (
+                ) : null}
+                {!isFromMe && swipingMessageId === item.id && swipeOffset > 18 ? (
                     <View style={styles.swipeReplyCue}>
                         <Icon name="arrow-undo" size={14} color="#E5E7EB" />
                     </View>
-                )}
-                <Animated.View
-                    {...bubblePanResponder.panHandlers}
-                    style={
-                        !isFromMe && swipingMessageId === item.id
-                            ? { transform: [{ translateX: swipeOffset }] }
-                            : undefined
-                    }
-                >
-                <TouchableOpacity
-                    activeOpacity={0.9}
-                    onLongPress={() => openMessageActions(item)}
-                    style={styles.messageBubblePlain}
-                >
-                    <IMessageDmBubbleShell
-                        isFromMe={isFromMe}
-                        tailBackgroundColor={bubbleFill}
-                        showTail={!isMediaOnlyMessage}
-                        bubbleStyle={
-                            isMediaOnlyMessage
-                                ? {
-                                      backgroundColor: 'transparent',
-                                      paddingHorizontal: 0,
-                                      paddingVertical: 0,
-                                      shadowOpacity: 0,
-                                      elevation: 0,
-                                  }
+                ) : null}
+                <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
+                    <Animated.View
+                        {...bubblePanResponder.panHandlers}
+                        style={
+                            !isFromMe && swipingMessageId === item.id
+                                ? { transform: [{ translateX: swipeOffset }] }
                                 : undefined
                         }
                     >
-                        {bubbleBody}
-                    </IMessageDmBubbleShell>
-                </TouchableOpacity>
-                </Animated.View>
+                        <TouchableOpacity
+                            activeOpacity={0.9}
+                            onLongPress={() => openMessageActions(item)}
+                        >
+                            {bubbleShell}
+                        </TouchableOpacity>
+                    </Animated.View>
+                    {messageMeta}
+                </View>
+                {isFromMe ? (
+                    <Avatar
+                        src={myAvatar}
+                        name={user?.name || user?.handle || 'You'}
+                        size={32}
+                    />
+                ) : null}
             </View>
         );
     };
-
-    if (loading) {
-        return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
-            </GazetteerScreenShell>
-        );
-    }
 
     return (
         <GazetteerScreenShell>
@@ -1069,14 +1719,17 @@ export default function MessagesScreen({ route, navigation }: any) {
                     <Text style={styles.headerName}>{isGroupThread ? groupName : handle}</Text>
                 </View>
                 <View style={styles.headerActions}>
-                    <TouchableOpacity
-                        onPress={() => navigateMainTab(navigation, 'Inbox', { initialTab: 'insights' })}
-                        style={styles.headerActionButton}
-                    >
-                        <Icon name="bar-chart-outline" size={20} color="#FFFFFF" />
-                    </TouchableOpacity>
+                    {isGroupThread ? (
+                        <TouchableOpacity
+                            onPress={() => setInviteOpen(true)}
+                            style={styles.headerActionButton}
+                            accessibilityLabel="Invite to group"
+                        >
+                            <Icon name="person-add-outline" size={22} color="#C4B5FD" />
+                        </TouchableOpacity>
+                    ) : null}
                     <TouchableOpacity style={styles.headerActionButton} onPress={openHeaderActions}>
-                        <Icon name="ellipsis-vertical" size={22} color="#FFFFFF" />
+                        <Icon name="ellipsis-horizontal" size={22} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -1092,14 +1745,17 @@ export default function MessagesScreen({ route, navigation }: any) {
                     renderItem={renderMessage}
                     keyExtractor={(item) => item.id}
                     style={styles.messagesList}
-                    contentContainerStyle={styles.messagesContent}
+                    contentContainerStyle={[
+                        styles.messagesContent,
+                        messages.length === 0 ? styles.messagesContentEmpty : null,
+                    ]}
                     maintainVisibleContentPosition={{
                         minIndexForVisible: 0,
                         autoscrollToTopThreshold: 12,
                     }}
                     onContentSizeChange={() => {
                         if (shouldAutoScrollRef.current) {
-                            flatListRef.current?.scrollToEnd({ animated: true });
+                            scrollMessagesToBottom(true);
                             shouldAutoScrollRef.current = false;
                         }
                     }}
@@ -1115,6 +1771,13 @@ export default function MessagesScreen({ route, navigation }: any) {
                             <Text style={styles.loadingOlderText}>Loading older messages...</Text>
                         </View>
                     ) : null}
+                    ListEmptyComponent={
+                        loading ? (
+                            <View style={styles.threadLoadingWrap}>
+                                <ActivityIndicator size="large" color="#f472b6" />
+                            </View>
+                        ) : null
+                    }
                 />
 
                 {(replyingTo || editingMessage) && (
@@ -1163,63 +1826,154 @@ export default function MessagesScreen({ route, navigation }: any) {
                         </View>
                     </View>
                 )}
-                <View style={styles.inputContainer}>
-                    <View style={styles.inputShell}>
-                        <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
-                            <Icon name="add" size={22} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        <TextInput
-                            value={messageText}
-                            onChangeText={setMessageText}
-                            placeholder="Message..."
-                            placeholderTextColor="#6B7280"
-                            style={styles.input}
-                            multiline
-                            maxLength={1000}
-                        />
-                        <TouchableOpacity
-                            style={styles.inputIconRight}
-                            onPress={() => {
-                                setStickerTargetMessageId(null);
-                                setShowStickerPicker(true);
-                            }}
-                        >
-                            <Icon name="happy-outline" size={20} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
-                    <TouchableOpacity
-                        style={[
-                            styles.composerMicButton,
-                            isRecordingVoice && styles.composerMicButtonActive,
-                        ]}
-                        onPress={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
-                    >
-                        <Icon
-                            name={isRecordingVoice ? 'square' : 'mic'}
-                            size={17}
-                            color={isRecordingVoice ? '#FFFFFF' : '#D4AF37'}
-                        />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={messageText.trim() ? handleSend : (isRecordingVoice ? stopVoiceRecording : startVoiceRecording)}
-                        style={[
-                            styles.sendButton,
-                            !messageText.trim() && styles.sendButtonDisabled,
-                            isRecordingVoice && styles.sendButtonRecording,
-                        ]}
-                    >
-                        <Icon
-                            name={messageText.trim() ? 'send' : (isRecordingVoice ? 'square' : 'mic')}
-                            size={20}
-                            color={messageText.trim() || isRecordingVoice ? '#FFFFFF' : '#6B7280'}
-                        />
-                    </TouchableOpacity>
-                </View>
-                {isRecordingVoice && (
-                    <View style={styles.recordingHintWrap}>
-                        <Text style={styles.recordingHintText}>Recording voice... {recordingSeconds}s</Text>
+                {voiceDraft && (
+                    <View style={styles.voiceReviewSection}>
+                        <Text style={styles.voiceReviewLabel}>Review before sending</Text>
+                        <View style={styles.voiceReviewBar}>
+                            <TouchableOpacity
+                                style={styles.voiceReviewIconBtn}
+                                onPress={() => {
+                                    void discardVoiceDraft();
+                                }}
+                                accessibilityLabel="Delete voice note"
+                            >
+                                <Icon name="trash-outline" size={20} color="#9CA3AF" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.voiceReviewPlayBtn}
+                                onPress={() => {
+                                    void toggleVoiceDraftPlayback();
+                                }}
+                                accessibilityLabel={isPlayingVoiceDraft ? 'Pause preview' : 'Play preview'}
+                            >
+                                <Icon
+                                    name={isPlayingVoiceDraft ? 'pause' : 'play'}
+                                    size={18}
+                                    color="#FFFFFF"
+                                />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                activeOpacity={0.9}
+                                style={styles.voiceReviewTrackWrap}
+                                onLayout={(event) => {
+                                    setVoiceDraftTrackWidth(event.nativeEvent.layout.width);
+                                }}
+                                onPress={(event) => {
+                                    handleVoiceDraftTrackPress(event.nativeEvent.locationX);
+                                }}
+                            >
+                                <View style={styles.voiceReviewTrack}>
+                                    <View
+                                        style={[
+                                            styles.voiceReviewTrackFill,
+                                            {
+                                                width: voiceDraft.durationSeconds
+                                                    ? `${Math.min(100, (voiceDraftPlaySeconds / voiceDraft.durationSeconds) * 100)}%`
+                                                    : '0%',
+                                            },
+                                        ]}
+                                    />
+                                </View>
+                                <Text style={styles.voiceReviewDuration}>
+                                    {formatVoiceDuration(
+                                        isPlayingVoiceDraft ? voiceDraftPlaySeconds : voiceDraft.durationSeconds,
+                                    )}
+                                </Text>
+                            </TouchableOpacity>
+                            {voiceDraft.canContinue ? (
+                                <TouchableOpacity
+                                    style={styles.voiceReviewRecordBtn}
+                                    onPress={() => {
+                                        void continueVoiceRecording();
+                                    }}
+                                >
+                                    <Icon name="mic" size={16} color="#FDE68A" />
+                                    <Text style={styles.voiceReviewRecordText}>Record</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                            <TouchableOpacity
+                                style={styles.sendButton}
+                                onPress={() => {
+                                    void sendVoiceDraft();
+                                }}
+                                accessibilityLabel="Send voice note"
+                            >
+                                <Icon name="send" size={20} color="#000000" />
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 )}
+                {!voiceDraft ? (
+                <View style={styles.inputContainer}>
+                    <View style={styles.inputRow}>
+                        {isRecordingVoice ? (
+                            <View style={styles.voiceActiveBar}>
+                                <TouchableOpacity
+                                    style={styles.voiceRecordingCancelBtn}
+                                    onPress={() => {
+                                        void cancelVoiceRecording();
+                                    }}
+                                    accessibilityLabel="Discard recording"
+                                >
+                                    <Icon name="trash-outline" size={18} color="#9CA3AF" />
+                                </TouchableOpacity>
+                                <View style={styles.voiceHoldCenter}>
+                                    <View style={styles.voiceRecDot} />
+                                    <Text style={styles.voiceHoldTimer}>
+                                        {formatVoiceDuration(recordingSeconds)}
+                                    </Text>
+                                    <Text style={styles.voiceHoldHint}>
+                                        {recordingGestureHint === 'cancel' ? 'Release to cancel' : 'Tap ■ to stop'}
+                                    </Text>
+                                </View>
+                            </View>
+                        ) : (
+                            <View style={styles.inputShell}>
+                                <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
+                                    <Icon name="add" size={22} color="#FFFFFF" />
+                                </TouchableOpacity>
+                                <TextInput
+                                    value={messageText}
+                                    onChangeText={setMessageText}
+                                    placeholder={composerPlaceholder}
+                                    placeholderTextColor="#737373"
+                                    style={styles.input}
+                                    multiline
+                                    maxLength={1000}
+                                />
+                                <TouchableOpacity
+                                    style={styles.inputIconRight}
+                                    onPress={() => {
+                                        setStickerTargetMessageId(null);
+                                        setShowStickerPicker(true);
+                                    }}
+                                >
+                                    <Icon name="happy-outline" size={20} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                        <View
+                            {...voiceMicPanResponder.panHandlers}
+                            style={[
+                                styles.composerMicButton,
+                                isRecordingVoice && styles.composerMicButtonActive,
+                            ]}
+                            accessibilityLabel={isRecordingVoice ? 'Stop recording' : 'Record voice message'}
+                        >
+                            <Icon
+                                name={isRecordingVoice ? 'square' : 'mic'}
+                                size={isRecordingVoice ? 15 : 17}
+                                color={isRecordingVoice ? '#000000' : '#D4AF37'}
+                            />
+                        </View>
+                        {messageText.trim() && !isRecordingVoice ? (
+                            <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
+                                <Icon name="send" size={20} color="#000000" />
+                            </TouchableOpacity>
+                        ) : null}
+                    </View>
+                </View>
+                ) : null}
                 {showStickerPicker && (
                     <View style={styles.stickerPicker}>
                         {['❤️', '😂', '🔥', '👏', '😍', '👍', '🎉', '😮'].map((emoji) => (
@@ -1337,14 +2091,88 @@ export default function MessagesScreen({ route, navigation }: any) {
                     </View>
                 </View>
             </View>
+
+            <View style={[styles.sheetOverlay, !showChatInfo && styles.hidden]}>
+                <TouchableOpacity
+                    style={styles.sheetBackdropTap}
+                    activeOpacity={1}
+                    onPress={() => setShowChatInfo(false)}
+                />
+                <View style={styles.chatInfoSheet}>
+                    <View style={styles.chatInfoHeader}>
+                        <Text style={styles.chatInfoTitle}>Chat Info</Text>
+                        <TouchableOpacity onPress={() => setShowChatInfo(false)}>
+                            <Icon name="close" size={24} color="#9CA3AF" />
+                        </TouchableOpacity>
+                    </View>
+                    {isGroupThread ? (
+                        <View style={styles.chatInfoBody}>
+                            <View style={styles.chatInfoProfileRow}>
+                                <Avatar
+                                    src={groupAvatarUrl}
+                                    name={groupName || 'Group'}
+                                    size={56}
+                                />
+                                <View style={styles.chatInfoProfileText}>
+                                    <Text style={styles.chatInfoName}>{groupName}</Text>
+                                    <Text style={styles.chatInfoSubtitle}>Group chat</Text>
+                                </View>
+                            </View>
+                            <Text style={styles.chatInfoHint}>
+                                To add people, use the + button in the chat header, or open someone&apos;s profile
+                                and choose Invite to group.
+                            </Text>
+                            <TouchableOpacity
+                                style={styles.leaveGroupBtn}
+                                onPress={confirmLeaveGroup}
+                                disabled={leaveGroupBusy}
+                            >
+                                {leaveGroupBusy ? (
+                                    <ActivityIndicator color="#EF4444" />
+                                ) : (
+                                    <>
+                                        <Icon name="close-circle-outline" size={20} color="#EF4444" />
+                                        <Text style={styles.leaveGroupBtnText}>Leave Group</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    ) : null}
+                </View>
+            </View>
+
+            <GazetteerAlertSheet
+                visible={sheetAlert != null}
+                title={sheetAlert?.title ?? ''}
+                message={sheetAlert?.message}
+                icon={sheetAlert?.icon ?? 'alert'}
+                confirmButtonText={sheetAlert?.confirmButtonText ?? 'OK'}
+                showCancelButton={sheetAlert?.showCancelButton}
+                cancelButtonText={sheetAlert?.cancelButtonText}
+                onConfirm={() => {
+                    const action = sheetAlert?.onConfirm;
+                    setSheetAlert(null);
+                    action?.();
+                }}
+                onDismiss={() => setSheetAlert(null)}
+            />
+            <GazetteerMenuSheet
+                visible={sheetMenu != null}
+                title={sheetMenu?.title ?? ''}
+                subtitle={sheetMenu?.subtitle}
+                options={sheetMenu?.options ?? []}
+                onDismiss={() => setSheetMenu(null)}
+            />
         </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
-    loadingShell: {
+    threadLoadingWrap: {
+        flexGrow: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        paddingVertical: 48,
     },
     header: {
         flexDirection: 'row',
@@ -1384,8 +2212,14 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     messagesContent: {
+        flexGrow: 1,
+        justifyContent: 'flex-end',
         paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingTop: 10,
+        paddingBottom: 12,
+    },
+    messagesContentEmpty: {
+        justifyContent: 'center',
     },
     loadingOlderWrap: {
         flexDirection: 'row',
@@ -1410,17 +2244,34 @@ const styles = StyleSheet.create({
     messageFromOther: {
         justifyContent: 'flex-start',
     },
-    messageBubble: {
-        maxWidth: '75%',
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        borderRadius: 15,
+    messageColumn: {
+        flexShrink: 1,
+        minWidth: 0,
+        maxWidth: '82%',
     },
-    messageBubblePlain: {
-        maxWidth: '75%',
-        paddingHorizontal: 0,
-        paddingVertical: 0,
-        backgroundColor: 'transparent',
+    messageColumnMe: {
+        alignItems: 'flex-end',
+    },
+    messageColumnOther: {
+        alignItems: 'flex-start',
+        flex: 1,
+    },
+    messageMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingTop: 4,
+        paddingHorizontal: 2,
+    },
+    messageMetaRowMe: {
+        justifyContent: 'flex-end',
+    },
+    messageMetaRowOther: {
+        justifyContent: 'flex-start',
+    },
+    messageTimeOutside: {
+        fontSize: 10,
+        color: '#8E8E93',
     },
     messageTextPlain: {
         fontSize: 15,
@@ -1429,7 +2280,8 @@ const styles = StyleSheet.create({
     },
     messageText: {
         fontSize: 15,
-        lineHeight: 19,
+        lineHeight: 21,
+        flexShrink: 1,
     },
     messageTextFromMe: {
         color: '#FFFFFF',
@@ -1516,13 +2368,15 @@ const styles = StyleSheet.create({
         lineHeight: 18,
     },
     inputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
         paddingHorizontal: 12,
         paddingVertical: 12,
         borderTopWidth: 1,
         borderTopColor: 'rgba(255, 255, 255, 0.08)',
         backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    },
+    inputRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
         gap: 10,
     },
     composerContextWrap: {
@@ -1573,13 +2427,16 @@ const styles = StyleSheet.create({
     },
     input: {
         width: '100%',
-        ...glassSearch,
+        minHeight: 44,
+        backgroundColor: '#09090b',
         borderRadius: 24,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
         paddingLeft: 42,
         paddingRight: 42,
         paddingVertical: 10,
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: 15,
         maxHeight: 100,
     },
     composerMicButton: {
@@ -1598,14 +2455,27 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     composerMicButtonActive: {
-        backgroundColor: '#B45309',
-        borderColor: '#FDE68A',
+        backgroundColor: '#D4AF37',
+        borderColor: '#FFFFFF',
+    },
+    recordingBadge: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#D4AF37',
+        backgroundColor: 'rgba(212,175,55,0.15)',
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+    },
+    recordingBadgeText: {
+        color: '#FDE68A',
+        fontSize: 11,
+        fontWeight: '700',
     },
     sendButton: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#3B82F6',
+        backgroundColor: '#FFFFFF',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -1613,16 +2483,143 @@ const styles = StyleSheet.create({
         backgroundColor: '#1F2937',
     },
     sendButtonRecording: {
-        backgroundColor: '#DC2626',
+        backgroundColor: '#D4AF37',
     },
     recordingHintWrap: {
         marginHorizontal: 16,
         marginBottom: 6,
     },
     recordingHintText: {
-        color: '#FCA5A5',
+        color: '#D4AF37',
         fontSize: 12,
         fontWeight: '700',
+    },
+    recordingHintSubtleText: {
+        color: '#6B7280',
+        fontSize: 11,
+        fontWeight: '600',
+        marginTop: 6,
+        marginHorizontal: 4,
+        textAlign: 'center',
+    },
+    voiceReviewSection: {
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 4,
+    },
+    voiceReviewLabel: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '600',
+        marginBottom: 8,
+        marginLeft: 2,
+    },
+    voiceReviewBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderRadius: 24,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        backgroundColor: '#09090b',
+    },
+    voiceReviewIconBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    voiceReviewPlayBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#D4AF37',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    voiceReviewTrackWrap: {
+        flex: 1,
+        minWidth: 0,
+        gap: 4,
+    },
+    voiceReviewTrack: {
+        height: 4,
+        borderRadius: 999,
+        backgroundColor: '#374151',
+        overflow: 'hidden',
+    },
+    voiceReviewTrackFill: {
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#D4AF37',
+    },
+    voiceReviewDuration: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '600',
+        textAlign: 'right',
+    },
+    voiceReviewRecordBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#92400E',
+        backgroundColor: 'rgba(180,83,9,0.2)',
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+    },
+    voiceReviewRecordText: {
+        color: '#FDE68A',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    voiceActiveBar: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        minHeight: 44,
+        paddingHorizontal: 10,
+        borderRadius: 24,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        backgroundColor: '#09090b',
+        gap: 10,
+    },
+    voiceHoldCenter: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    voiceHoldTimer: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '800',
+    },
+    voiceHoldHint: {
+        color: '#D4AF37',
+        fontSize: 11,
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    voiceRecDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#D4AF37',
+    },
+    voiceRecordingCancelBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#4B5563',
+        backgroundColor: 'rgba(75,85,99,0.25)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     readReceiptWrap: {
         alignSelf: 'flex-end',
@@ -1685,10 +2682,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     reactionsRow: {
+        position: 'absolute',
+        bottom: 4,
+        right: 4,
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 6,
-        marginTop: 8,
+        gap: 4,
     },
     reactionPill: {
         borderRadius: 999,
@@ -1707,11 +2706,11 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
     },
-    translatedText: {
-        marginTop: 6,
-        fontSize: 12,
-        lineHeight: 16,
-        color: '#D1FAE5',
+    translatedOriginalText: {
+        marginTop: 4,
+        fontSize: 11,
+        lineHeight: 15,
+        color: 'rgba(255,255,255,0.6)',
         fontStyle: 'italic',
     },
     stickerPicker: {
@@ -1760,9 +2759,78 @@ const styles = StyleSheet.create({
         right: 0,
         top: 0,
         bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.45)',
+        backgroundColor: 'rgba(0,0,0,0.8)',
         justifyContent: 'flex-end',
         zIndex: 20,
+    },
+    sheetBackdropTap: {
+        flex: 1,
+        width: '100%',
+    },
+    chatInfoSheet: {
+        backgroundColor: '#111827',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderTopWidth: 1,
+        borderColor: '#374151',
+        maxHeight: '80%',
+    },
+    chatInfoHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#374151',
+    },
+    chatInfoTitle: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    chatInfoBody: {
+        padding: 16,
+        paddingBottom: 24,
+    },
+    chatInfoProfileRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        marginBottom: 20,
+    },
+    chatInfoProfileText: {
+        flex: 1,
+        minWidth: 0,
+    },
+    chatInfoName: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '700',
+    },
+    chatInfoSubtitle: {
+        color: '#9CA3AF',
+        fontSize: 14,
+        marginTop: 2,
+    },
+    chatInfoHint: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        lineHeight: 18,
+        marginBottom: 16,
+    },
+    leaveGroupBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: 12,
+    },
+    leaveGroupBtnText: {
+        color: '#EF4444',
+        fontSize: 16,
+        fontWeight: '600',
     },
     sheetCard: {
         backgroundColor: '#030712',

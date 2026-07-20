@@ -5,39 +5,34 @@ import {
     Text,
     TouchableOpacity,
     StyleSheet,
+    ScrollView,
     useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/Ionicons';
 import { GAZETTEER_SHEET_SLATE } from './GazetteerBottomSheetModal.native';
+
+export type GazetteerMenuOption = {
+    label: string;
+    onPress: () => void;
+    destructive?: boolean;
+};
 
 type Props = {
     visible: boolean;
     title: string;
-    message?: string;
-    icon?: 'success' | 'alert' | 'info';
-    showIcon?: boolean;
-    confirmButtonText?: string;
-    cancelButtonText?: string;
-    showCancelButton?: boolean;
-    onConfirm: () => void;
+    subtitle?: string;
+    options: GazetteerMenuOption[];
+    cancelLabel?: string;
     onDismiss: () => void;
 };
 
-/**
- * Web `Swal.fire(bottomSheet(...))` parity — uses RN Modal so alerts work inside
- * navigation modals (gorhom BottomSheetModal often fails there).
- */
-export default function GazetteerAlertSheet({
+/** Web Swal / action-sheet parity for multi-option menus on React Native. */
+export default function GazetteerMenuSheet({
     visible,
     title,
-    message,
-    icon = 'alert',
-    showIcon = true,
-    confirmButtonText = 'Done',
-    cancelButtonText = 'Cancel',
-    showCancelButton = false,
-    onConfirm,
+    subtitle,
+    options,
+    cancelLabel = 'Cancel',
     onDismiss,
 }: Props) {
     const insets = useSafeAreaInsets();
@@ -48,25 +43,12 @@ export default function GazetteerAlertSheet({
         return { sheetWidth, marginHorizontal };
     }, [width]);
 
-    const iconName =
-        icon === 'success' ? 'checkmark-circle' : icon === 'info' ? 'information-circle' : 'alert-circle';
-
     if (!visible) return null;
 
     return (
-        <Modal
-            visible
-            transparent
-            animationType="slide"
-            onRequestClose={onDismiss}
-            statusBarTranslucent
-        >
+        <Modal visible transparent animationType="slide" onRequestClose={onDismiss} statusBarTranslucent>
             <View style={styles.overlay}>
-                <TouchableOpacity
-                    style={styles.backdrop}
-                    activeOpacity={1}
-                    onPress={onDismiss}
-                />
+                <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onDismiss} />
                 <View
                     style={[
                         styles.sheet,
@@ -82,26 +64,33 @@ export default function GazetteerAlertSheet({
                     <View style={styles.handleWrap}>
                         <View style={[styles.handle, GAZETTEER_SHEET_SLATE.handle]} />
                     </View>
-
                     <Text style={styles.gazetteerLabel}>Gazetteer says</Text>
-
-                    {showIcon ? (
-                        <View style={styles.iconWrap}>
-                            <Icon name={iconName} size={44} color="#FFFFFF" />
-                        </View>
-                    ) : null}
-
                     <Text style={styles.title}>{title}</Text>
-                    {message ? <Text style={styles.message}>{message}</Text> : null}
-
-                    <TouchableOpacity style={styles.confirmBtn} onPress={onConfirm}>
-                        <Text style={styles.confirmBtnText}>{confirmButtonText}</Text>
+                    {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+                    <ScrollView style={styles.optionsScroll} bounces={false}>
+                        {options.map((option) => (
+                            <TouchableOpacity
+                                key={option.label}
+                                style={styles.optionBtn}
+                                onPress={() => {
+                                    onDismiss();
+                                    option.onPress();
+                                }}
+                            >
+                                <Text
+                                    style={[
+                                        styles.optionText,
+                                        option.destructive ? styles.optionTextDestructive : null,
+                                    ]}
+                                >
+                                    {option.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={onDismiss}>
+                        <Text style={styles.cancelBtnText}>{cancelLabel}</Text>
                     </TouchableOpacity>
-                    {showCancelButton ? (
-                        <TouchableOpacity style={styles.cancelBtn} onPress={onDismiss}>
-                            <Text style={styles.cancelBtnText}>{cancelButtonText}</Text>
-                        </TouchableOpacity>
-                    ) : null}
                 </View>
             </View>
         </Modal>
@@ -118,6 +107,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.72)',
     },
     sheet: {
+        maxHeight: '78%',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 20,
@@ -128,6 +118,7 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
     },
     handle: {
+        width: 40,
         height: 4,
         borderRadius: 2,
     },
@@ -138,37 +129,43 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
         color: 'rgba(217, 27, 92, 0.95)',
         textAlign: 'center',
-        marginBottom: 12,
-    },
-    iconWrap: {
-        alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 10,
     },
     title: {
         fontSize: 18,
         fontWeight: '700',
         color: '#FFFFFF',
         textAlign: 'center',
-        marginBottom: 8,
+        marginBottom: 6,
     },
-    message: {
-        fontSize: 15,
+    subtitle: {
+        fontSize: 14,
         color: '#D1D5DB',
         textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: 20,
+        lineHeight: 20,
+        marginBottom: 12,
     },
-    confirmBtn: {
-        borderRadius: 999,
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 14,
-        alignItems: 'center',
+    optionsScroll: {
+        maxHeight: 320,
         marginBottom: 8,
     },
-    confirmBtnText: {
+    optionBtn: {
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        marginBottom: 8,
+    },
+    optionText: {
+        color: '#FFFFFF',
         fontSize: 15,
-        fontWeight: '700',
-        color: '#111827',
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    optionTextDestructive: {
+        color: '#F87171',
     },
     cancelBtn: {
         borderRadius: 999,
@@ -176,7 +173,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.2)',
         paddingVertical: 14,
         alignItems: 'center',
-        marginBottom: 8,
+        marginTop: 4,
     },
     cancelBtnText: {
         fontSize: 15,

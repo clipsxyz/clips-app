@@ -130,6 +130,8 @@ export default function CreateSourceAppsCarouselNative({
             activeOpacity={0.9}
             style={styles.pill}
             onPress={onExplainTap}
+            accessibilityRole="button"
+            accessibilityLabel={`${shareLabel}. Swipe the logo to switch app.`}
             onPressIn={() => {
                 pausedRef.current = true;
             }}

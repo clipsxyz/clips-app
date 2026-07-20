@@ -1,6 +1,12 @@
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 
+/** Browser-only inbox/feed refresh events — no-op on React Native. */
+function dispatchBrowserEvent(name: string, detail?: Record<string, unknown>): void {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent(name, detail != null ? { detail } : undefined));
+}
+
 export interface ChatMessage {
     id: string;
     senderHandle: string;
@@ -111,7 +117,7 @@ export function createMockChatGroup(
     const conversation_id = `mock-conv-${id}`;
     mockChatGroups.set(id, { name: trimmed, avatar_url: avatarUrl || null, creatorHandle, conversation_id });
     mockGroupMessageLists.set(id, []);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
     return { id, name: trimmed, avatar_url: avatarUrl || null, conversation_id };
 }
 
@@ -147,7 +153,7 @@ export function mockLeaveChatGroup(groupId: string): void {
     for (const key of Array.from(mockGroupLastReadByUser.keys())) {
         if (key.endsWith(`::${groupId}`)) mockGroupLastReadByUser.delete(key);
     }
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 function buildMockGroupConversationSummaries(forHandle: string): ConversationSummary[] {
@@ -333,11 +339,8 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     emitInboxUnreadChanged(to, unreadByHandle.get(to) || 0);
     
     // Also dispatch Custom Events as fallback for web compatibility.
-    // RN has no `window`, so guard these browser-only events.
-    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-        window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: msg } }));
-        window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: to, unread: unreadByHandle.get(to) || 0 } }));
-    }
+    dispatchBrowserEvent('conversationUpdated', { participants: [from, to], message: msg });
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: to, unread: unreadByHandle.get(to) || 0 });
     return msg;
 }
 
@@ -371,7 +374,7 @@ export async function editMessage(messageId: string, newText: string, from: stri
     conversations.set(id, list);
     
     // Dispatch event for UI update
-    window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: updatedMessage } }));
+    dispatchBrowserEvent('conversationUpdated', { participants: [from, to], message: updatedMessage });
     
     return updatedMessage;
 }
@@ -409,7 +412,7 @@ export async function markConversationRead(selfHandle: string, otherHandle: stri
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
     const { emitInboxUnreadChanged } = await import('../services/socketio');
     emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
 }
 
 export async function markConversationUnread(selfHandle: string, otherHandle: string): Promise<void> {
@@ -427,8 +430,8 @@ export async function markConversationUnread(selfHandle: string, otherHandle: st
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
     const { emitInboxUnreadChanged } = await import('../services/socketio');
     emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
+    dispatchBrowserEvent('conversationUpdated');
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
 }
 
 export interface ConversationSummary {
@@ -595,11 +598,11 @@ export async function appendGroupChatMessage(
     const list = mockGroupMessageLists.get(groupId) ?? [];
     list.push(msg);
     mockGroupMessageLists.set(groupId, list);
-    window.dispatchEvent(
-        new CustomEvent('conversationUpdated', {
-            detail: { chat_group_id: groupId, chatGroupId: groupId, message: msg },
-        }),
-    );
+    dispatchBrowserEvent('conversationUpdated', {
+        chat_group_id: groupId,
+        chatGroupId: groupId,
+        message: msg,
+    });
     return msg;
 }
 
@@ -618,7 +621,7 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
     const t = msgs.length ? Math.max(...msgs.map((m) => m.timestamp)) : Date.now();
     const v = viewerHandle?.trim();
     if (v) mockGroupLastReadByUser.set(`${v}::${groupId}`, t);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
@@ -739,7 +742,7 @@ export async function pinConversation(userHandle: string, otherHandle: string): 
     pinnedConversations.set(userHandle, pinned);
     const { emitConversationUpdate } = await import('../services/socketio');
     emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'pin' });
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function unpinConversation(userHandle: string, otherHandle: string): Promise<void> {
@@ -749,7 +752,7 @@ export async function unpinConversation(userHandle: string, otherHandle: string)
         pinnedConversations.set(userHandle, pinned);
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unpin' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -758,7 +761,7 @@ export async function addMessageRequest(recipientHandle: string, senderHandle: s
     const requests = messageRequests.get(recipientHandle) || new Set<string>();
     requests.add(senderHandle);
     messageRequests.set(recipientHandle, requests);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 // Accept message request (when user accepts/follows)
@@ -769,7 +772,7 @@ export async function acceptMessageRequest(userHandle: string, otherHandle: stri
         messageRequests.set(userHandle, requests);
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'accept' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -779,7 +782,7 @@ export async function muteConversation(userHandle: string, otherHandle: string):
     muted.add(otherHandle);
     mutedConversations.set(userHandle, muted);
     persistMuteMap();
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function unmuteConversation(userHandle: string, otherHandle: string): Promise<void> {
@@ -790,7 +793,7 @@ export async function unmuteConversation(userHandle: string, otherHandle: string
         persistMuteMap();
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unmute' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -827,7 +830,7 @@ export async function blockUser(userHandle: string, blockedHandle: string): Prom
     // Recompute unread
     unreadByHandle.set(userHandle, await computeUnreadTotal(userHandle));
     
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function unblockUser(userHandle: string, blockedHandle: string): Promise<void> {
@@ -838,7 +841,7 @@ export async function unblockUser(userHandle: string, blockedHandle: string): Pr
         persistBlockedMap();
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, blockedHandle], updateType: 'unblock' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -874,8 +877,8 @@ export async function deleteConversation(userHandle: string, otherHandle: string
     const { emitConversationUpdate, emitInboxUnreadChanged } = await import('../services/socketio');
     emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'delete' });
     emitInboxUnreadChanged(userHandle, unreadByHandle.get(userHandle) || 0);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: userHandle, unread: unreadByHandle.get(userHandle) || 0 } }));
+    dispatchBrowserEvent('conversationUpdated');
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: userHandle, unread: unreadByHandle.get(userHandle) || 0 });
 }
 
 async function computeUnreadTotal(handle: string): Promise<number> {

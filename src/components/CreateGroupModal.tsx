@@ -1,6 +1,7 @@
 import React from 'react';
 import { FiX, FiUsers } from 'react-icons/fi';
 import { createChatGroup } from '../api/chatGroups';
+import { uploadFile } from '../api/client';
 import { showToast } from '../utils/toast';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { useAuth } from '../context/Auth';
@@ -18,14 +19,16 @@ export default function CreateGroupModal({
 }) {
   const { user } = useAuth();
   const [name, setName] = React.useState('');
-  const [avatarDataUrl, setAvatarDataUrl] = React.useState<string | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = React.useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = React.useState<File | null>(null);
   const [busy, setBusy] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     if (isOpen) {
       setName('');
-      setAvatarDataUrl(null);
+      setAvatarPreviewUrl(null);
+      setAvatarFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [isOpen]);
@@ -45,7 +48,19 @@ export default function CreateGroupModal({
     }
     setBusy(true);
     try {
-      const g = await createChatGroup(trimmed, creatorHandle ?? null, avatarDataUrl);
+      let avatarUrl: string | null = null;
+      if (avatarFile) {
+        if (isLaravelApiEnabled()) {
+          const upload = await uploadFile(avatarFile);
+          avatarUrl = upload?.fileUrl || upload?.url || null;
+          if (!avatarUrl) {
+            throw new Error('Could not upload group photo');
+          }
+        } else if (avatarPreviewUrl) {
+          avatarUrl = avatarPreviewUrl;
+        }
+      }
+      const g = await createChatGroup(trimmed, creatorHandle ?? null, avatarUrl);
       if (g) {
         onCreated?.(g);
         onClose();
@@ -111,14 +126,15 @@ export default function CreateGroupModal({
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
               >
-                {avatarDataUrl ? 'Change photo' : 'Choose photo'}
+                {avatarPreviewUrl ? 'Change photo' : 'Choose photo'}
               </button>
-              {avatarDataUrl ? (
+              {avatarPreviewUrl ? (
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => {
-                    setAvatarDataUrl(null);
+                    setAvatarPreviewUrl(null);
+                    setAvatarFile(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
                   className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50"
@@ -142,15 +158,16 @@ export default function CreateGroupModal({
                     showToast('Could not read image file');
                     return;
                   }
-                  setAvatarDataUrl(result);
+                  setAvatarFile(file);
+                  setAvatarPreviewUrl(result);
                 };
                 reader.onerror = () => showToast('Could not read image file');
                 reader.readAsDataURL(file);
               }}
             />
-            {avatarDataUrl ? (
+            {avatarPreviewUrl ? (
               <div className="w-16 h-16 rounded-full overflow-hidden border border-white/20">
-                <img src={avatarDataUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
+                <img src={avatarPreviewUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
               </div>
             ) : null}
           </div>

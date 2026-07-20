@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Alert,
     Animated,
     Easing,
     PanResponder,
@@ -16,6 +15,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -35,6 +35,7 @@ const CREATE_MODE_ITEMS = [
 const ORBIT_RADIUS = 128;
 const STEP_DEG = 360 / CREATE_MODE_ITEMS.length;
 const GALLERY_INDEX = CREATE_MODE_ITEMS.findIndex((item) => item.id === 'gallery');
+const MAX_GALLERY_ITEMS = 10;
 /** Mobile optical parity — web CSS px reads larger on phone browsers. */
 const TILE_CENTERED = 96;
 const TILE_IDLE = 68;
@@ -48,6 +49,24 @@ function assetIsVideo(asset: { type?: string; uri?: string }) {
             asset.uri?.toLowerCase().endsWith('.mov'),
     );
 }
+
+function assetIsSupportedGalleryItem(asset: ImagePicker.Asset) {
+    if (!asset.uri) return false;
+    if (asset.type?.startsWith('image/') || asset.type?.startsWith('video/')) return true;
+    if (assetIsVideo(asset)) return true;
+    return /\.(jpe?g|png|gif|webp|heic|bmp)$/i.test(asset.uri);
+}
+
+type HubAlertConfig = {
+    title: string;
+    message?: string;
+    icon?: 'success' | 'alert' | 'info';
+    showIcon?: boolean;
+    confirmButtonText?: string;
+    cancelButtonText?: string;
+    showCancelButton?: boolean;
+    onConfirm?: () => void;
+};
 
 type OrbitModeItemProps = {
     item: (typeof CREATE_MODE_ITEMS)[number];
@@ -149,6 +168,7 @@ export default function InstantCreateScreen({ navigation }: any) {
     const insets = useSafeAreaInsets();
     const [centeredMode, setCenteredMode] = useState<CreateModeId>('gallery');
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [hubAlert, setHubAlert] = useState<HubAlertConfig | null>(null);
     const orbitIndexRef = useRef(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0);
     const orbitAnim = useRef(new Animated.Value(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0)).current;
     const didInit = useRef(false);
@@ -241,48 +261,86 @@ export default function InstantCreateScreen({ navigation }: any) {
     const pickGalleryMedia = useCallback(
         async (mode: PickerMode = 'feed') => {
             const allowed = await ensureGalleryMediaPermission();
-            if (!allowed) return;
+            if (!allowed) {
+                setHubAlert({
+                    title: 'Gallery access needed',
+                    message: 'Allow photo and video access in Settings to upload from your gallery.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
             ImagePicker.launchImageLibrary(
                 {
                     mediaType: 'mixed',
                     quality: 0.9,
-                    selectionLimit: 10,
+                    selectionLimit: MAX_GALLERY_ITEMS,
                     videoQuality: 'high',
                 },
                 (response) => {
                     if (response.didCancel) return;
                     if (response.errorCode) {
-                        Alert.alert(
-                            'Media error',
-                            response.errorMessage || 'Could not open your gallery.',
-                        );
+                        setHubAlert({
+                            title: 'Media error',
+                            message: response.errorMessage || 'Could not open your gallery.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
                         return;
                     }
-                    const assets = response.assets || [];
-                    if (assets.length === 0) {
-                        Alert.alert(
-                            'No supported files',
-                            'Please select photos or videos from your gallery.',
-                        );
+                    const rawAssets = response.assets || [];
+                    const supported = rawAssets.filter(assetIsSupportedGalleryItem);
+                    if (supported.length === 0) {
+                        setHubAlert({
+                            title: 'No Supported Files',
+                            message: 'Please select images or videos from your gallery.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
                         return;
                     }
-                    navigateFromAssets(assets, mode, assets.length >= 2);
+
+                    const proceed = () => {
+                        const items = supported.slice(0, MAX_GALLERY_ITEMS);
+                        navigateFromAssets(items, mode, items.length >= 2);
+                    };
+
+                    if (supported.length > MAX_GALLERY_ITEMS) {
+                        setHubAlert({
+                            title: 'Too Many Items',
+                            message: `You can select up to ${MAX_GALLERY_ITEMS} items for a carousel.`,
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                            onConfirm: () => {
+                                setHubAlert(null);
+                                proceed();
+                            },
+                        });
+                        return;
+                    }
+
+                    proceed();
                 },
             );
         },
         [navigateFromAssets],
     );
 
-    const openGallerySourceExplainer = () => {
-        Alert.alert(
-            'Upload from your gallery',
-            'Save or export from TikTok, Instagram, CapCut, or your camera roll — then pick up to 10 items here.',
-            [
-                { text: 'Not now', style: 'cancel' },
-                { text: 'Proceed', onPress: () => void pickGalleryMedia('feed') },
-            ],
-        );
-    };
+    const openGallerySourceExplainer = useCallback(() => {
+        setHubAlert({
+            title: 'Upload from your gallery',
+            message:
+                'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
+            showIcon: false,
+            confirmButtonText: 'Proceed',
+            cancelButtonText: 'Not now',
+            showCancelButton: true,
+            onConfirm: () => {
+                setHubAlert(null);
+                setTimeout(() => void pickGalleryMedia('feed'), 100);
+            },
+        });
+    }, [pickGalleryMedia]);
 
     const handleModePress = (
         item: (typeof CREATE_MODE_ITEMS)[number],
@@ -305,14 +363,19 @@ export default function InstantCreateScreen({ navigation }: any) {
             navigation.navigate('Clip', { storyMode: true });
             return;
         }
-        Alert.alert(
-            'Create a community',
-            'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
-            [
-                { text: 'Not now', style: 'cancel' },
-                { text: 'Continue', onPress: () => setCreateGroupOpen(true) },
-            ],
-        );
+        setHubAlert({
+            title: 'Create a community',
+            message:
+                'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
+            icon: 'info',
+            confirmButtonText: 'Continue',
+            cancelButtonText: 'Not now',
+            showCancelButton: true,
+            onConfirm: () => {
+                setHubAlert(null);
+                setTimeout(() => setCreateGroupOpen(true), 100);
+            },
+        });
     };
 
     const handleBack = () => {
@@ -382,12 +445,32 @@ export default function InstantCreateScreen({ navigation }: any) {
                 onClose={() => setCreateGroupOpen(false)}
                 onCreated={(group) => {
                     setCreateGroupOpen(false);
-                    navigation.navigate('Messages', { groupId: group.id });
-                    Alert.alert(
-                        'Community created',
-                        `You are in "${group.name}". Use + in the header to invite members.`,
-                    );
+                    navigation.replace('Messages', {
+                        chatGroupId: group.id,
+                        kind: 'group',
+                        groupName: group.name,
+                        communityCreated: true,
+                        communityCreatedName: group.name,
+                    });
                 }}
+            />
+            <GazetteerAlertSheet
+                visible={hubAlert !== null}
+                title={hubAlert?.title ?? ''}
+                message={hubAlert?.message}
+                icon={hubAlert?.icon}
+                showIcon={hubAlert?.showIcon}
+                confirmButtonText={hubAlert?.confirmButtonText ?? 'OK'}
+                cancelButtonText={hubAlert?.cancelButtonText ?? 'Not now'}
+                showCancelButton={hubAlert?.showCancelButton ?? false}
+                onConfirm={() => {
+                    if (hubAlert?.onConfirm) {
+                        hubAlert.onConfirm();
+                        return;
+                    }
+                    setHubAlert(null);
+                }}
+                onDismiss={() => setHubAlert(null)}
             />
         </GazetteerScreenShell>
     );

@@ -1,21 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
+    useWindowDimensions,
 } from 'react-native';
-import { BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { launchImageLibrary } from 'react-native-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
 import { createChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DM } from './GazetteerBottomSheetModal.native';
+import Avatar from './Avatar.native';
+import { GAZETTEER_SHEET_DM } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -28,16 +34,30 @@ type Props = {
     }) => void;
 };
 
+/**
+ * RN Modal (not gorhom) — BottomSheetModal fails to present inside navigation modals
+ * such as InstantCreate fullScreenModal.
+ */
 export default function CreateGroupModal({ visible, onClose, onCreated }: Props) {
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
+    const { width } = useWindowDimensions();
     const [name, setName] = useState('');
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
+
+    const sheetLayout = useMemo(() => {
+        const sheetWidth = Math.min(width - 24, 400);
+        const marginHorizontal = Math.max(12, Math.floor((width - sheetWidth) / 2));
+        return { sheetWidth, marginHorizontal };
+    }, [width]);
 
     useEffect(() => {
         if (!visible) return;
         setName('');
         setAvatarUri(null);
+        setFormError(null);
     }, [visible]);
 
     const pickPhoto = async () => {
@@ -49,13 +69,14 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
     const submit = async () => {
         const trimmed = name.trim();
         if (!trimmed) {
-            Alert.alert('Group', 'Enter a group name');
+            setFormError('Enter a group name');
             return;
         }
         if (!isLaravelApiEnabled() && !user?.handle) {
-            Alert.alert('Group', 'Sign in to create a group');
+            setFormError('Sign in to create a group in offline mode');
             return;
         }
+        setFormError(null);
         setBusy(true);
         try {
             let avatarUrl: string | null = null;
@@ -75,86 +96,172 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
                 onCreated?.(g);
                 onClose();
             } else {
-                Alert.alert('Group', 'Could not create group');
+                setFormError(
+                    isLaravelApiEnabled()
+                        ? 'Could not create group (try signing in again)'
+                        : 'Could not create group',
+                );
             }
         } catch (e: unknown) {
-            Alert.alert('Group', e instanceof Error ? e.message : 'Could not create group');
+            setFormError(e instanceof Error ? e.message : 'Could not create group');
         } finally {
             setBusy(false);
         }
     };
 
+    if (!visible) return null;
+
     return (
-        <GazetteerBottomSheetModal
-            visible={visible}
-            onDismiss={onClose}
-            enableDynamicSizing
-            horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_DM.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_DM.handle}
-            backdropOpacity={0.7}
-            keyboardBehavior="interactive"
-            android_keyboardInputMode="adjustResize"
+        <Modal
+            visible
+            transparent
+            animationType="slide"
+            onRequestClose={() => !busy && onClose()}
+            statusBarTranslucent
         >
-            <BottomSheetView style={styles.sheetBody}>
-                <View style={styles.header}>
-                    <Icon name="people" size={22} color="#FFF" />
-                    <Text style={styles.title}>New group</Text>
-                    <TouchableOpacity onPress={onClose} disabled={busy}>
-                        <Icon name="close" size={24} color="#FFF" />
-                    </TouchableOpacity>
-                </View>
-                <Text style={styles.hint}>
-                    After creating, open the group chat and invite people with + or from profiles.
-                </Text>
-                <Text style={styles.label}>Group name</Text>
-                <BottomSheetTextInput
-                    style={styles.input}
-                    value={name}
-                    onChangeText={setName}
-                    placeholder="e.g. Dublin photographers"
-                    placeholderTextColor="#6B7280"
-                    maxLength={120}
-                    editable={!busy}
-                />
-                <Text style={styles.label}>Group photo (optional)</Text>
-                <View style={styles.photoRow}>
-                    <TouchableOpacity
-                        style={styles.photoBtn}
-                        onPress={() => void pickPhoto()}
-                        disabled={busy}
-                    >
-                        <Text style={styles.photoBtnText}>
-                            {avatarUri ? 'Change photo' : 'Choose photo'}
-                        </Text>
-                    </TouchableOpacity>
-                    {avatarUri ? (
-                        <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
-                    ) : null}
-                </View>
+            <KeyboardAvoidingView
+                style={styles.overlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
                 <TouchableOpacity
-                    style={[styles.submit, busy && styles.submitDisabled]}
-                    onPress={() => void submit()}
-                    disabled={busy}
+                    style={styles.backdrop}
+                    activeOpacity={1}
+                    onPress={() => !busy && onClose()}
+                />
+                <View
+                    style={[
+                        styles.sheet,
+                        GAZETTEER_SHEET_DM.background,
+                        {
+                            marginHorizontal: sheetLayout.marginHorizontal,
+                            width: sheetLayout.sheetWidth,
+                            alignSelf: 'center',
+                            paddingBottom: Math.max(insets.bottom, 16),
+                        },
+                    ]}
                 >
-                    {busy ? (
-                        <ActivityIndicator color="#000" />
-                    ) : (
-                        <Text style={styles.submitText}>Create group</Text>
-                    )}
-                </TouchableOpacity>
-            </BottomSheetView>
-        </GazetteerBottomSheetModal>
+                    <View style={styles.handleWrap}>
+                        <View style={[styles.handle, GAZETTEER_SHEET_DM.handle]} />
+                    </View>
+                    <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
+                        <View style={styles.header}>
+                            <Avatar
+                                src={user?.avatarUrl}
+                                name={user?.name || user?.handle || 'You'}
+                                size={36}
+                            />
+                            <View style={styles.headerTitleRow}>
+                                <Icon name="people" size={20} color="#FFF" />
+                                <Text style={styles.title}>New group</Text>
+                            </View>
+                            <TouchableOpacity onPress={onClose} disabled={busy} accessibilityLabel="Close">
+                                <Icon name="close" size={24} color="#FFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={styles.hint}>
+                            Next you&apos;ll open the group chat. Invite people with the + button there, or open
+                            someone&apos;s profile → Invite to group.
+                        </Text>
+                        <Text style={styles.label}>Group name</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={name}
+                            onChangeText={(text) => {
+                                setName(text);
+                                if (formError) setFormError(null);
+                            }}
+                            placeholder="e.g. Dublin photographers"
+                            placeholderTextColor="#6B7280"
+                            maxLength={120}
+                            editable={!busy}
+                            returnKeyType="done"
+                            onSubmitEditing={() => void submit()}
+                        />
+                        {formError ? <Text style={styles.formError}>{formError}</Text> : null}
+                        <Text style={styles.label}>Group photo (optional)</Text>
+                        <View style={styles.photoRow}>
+                            <TouchableOpacity
+                                style={styles.photoBtn}
+                                onPress={() => void pickPhoto()}
+                                disabled={busy}
+                            >
+                                <Text style={styles.photoBtnText}>
+                                    {avatarUri ? 'Change photo' : 'Choose photo'}
+                                </Text>
+                            </TouchableOpacity>
+                            {avatarUri ? (
+                                <>
+                                    <TouchableOpacity
+                                        style={styles.photoBtn}
+                                        onPress={() => setAvatarUri(null)}
+                                        disabled={busy}
+                                    >
+                                        <Text style={styles.photoBtnTextMuted}>Remove</Text>
+                                    </TouchableOpacity>
+                                    <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
+                                </>
+                            ) : null}
+                        </View>
+                        <TouchableOpacity
+                            style={[styles.submit, busy && styles.submitDisabled]}
+                            onPress={() => void submit()}
+                            disabled={busy}
+                        >
+                            {busy ? (
+                                <ActivityIndicator color="#000" />
+                            ) : (
+                                <Text style={styles.submitText}>Create group</Text>
+                            )}
+                        </TouchableOpacity>
+                    </ScrollView>
+                </View>
+            </KeyboardAvoidingView>
+        </Modal>
     );
 }
 
 const styles = StyleSheet.create({
-    sheetBody: {
-        padding: 16,
-        paddingBottom: 24,
+    overlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
     },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-    title: { flex: 1, color: '#FFF', fontSize: 17, fontWeight: '700' },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.85)',
+    },
+    sheet: {
+        maxHeight: '88%',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingHorizontal: 16,
+        paddingTop: 4,
+    },
+    handleWrap: {
+        alignItems: 'center',
+        paddingBottom: 8,
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 8,
+        paddingBottom: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.1)',
+    },
+    headerTitleRow: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        minWidth: 0,
+    },
+    title: { color: '#FFF', fontSize: 17, fontWeight: '700', flexShrink: 1 },
     hint: { color: 'rgba(255,255,255,0.5)', fontSize: 12, lineHeight: 18, marginBottom: 12 },
     label: {
         color: 'rgba(255,255,255,0.6)',
@@ -172,7 +279,12 @@ const styles = StyleSheet.create({
         padding: 12,
         color: '#FFF',
     },
-    photoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+    formError: {
+        color: '#F87171',
+        fontSize: 13,
+        marginTop: 8,
+    },
+    photoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' },
     photoBtn: {
         borderRadius: 8,
         borderWidth: 1,
@@ -181,13 +293,15 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
     },
     photoBtnText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
-    avatarPreview: { width: 48, height: 48, borderRadius: 24 },
+    photoBtnTextMuted: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '600' },
+    avatarPreview: { width: 64, height: 64, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
     submit: {
         marginTop: 20,
         backgroundColor: '#FFF',
         borderRadius: 12,
         paddingVertical: 14,
         alignItems: 'center',
+        marginBottom: 8,
     },
     submitDisabled: { opacity: 0.6 },
     submitText: { color: '#000', fontWeight: '700', fontSize: 15 },

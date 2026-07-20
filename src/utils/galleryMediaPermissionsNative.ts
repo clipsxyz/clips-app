@@ -1,4 +1,4 @@
-import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 /** Request read access for gallery pickers (Android 13+ split permissions). */
 export async function ensureGalleryMediaPermission(): Promise<boolean> {
@@ -33,10 +33,6 @@ export async function ensureGalleryMediaPermission(): Promise<boolean> {
             if (result === PermissionsAndroid.RESULTS.GRANTED) return true;
         }
 
-        Alert.alert(
-            'Gallery access needed',
-            'Allow photo and video access in Settings to upload from your gallery.',
-        );
         return false;
     } catch (error) {
         console.warn('ensureGalleryMediaPermission failed:', error);
