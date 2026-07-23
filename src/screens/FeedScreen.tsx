@@ -22,6 +22,7 @@ import {
     Pressable,
     Platform,
     useWindowDimensions,
+    Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -347,7 +348,13 @@ function PillTabs({
         });
     };
     const [menuOpen, setMenuOpen] = useState(false);
+    const [showFeedSwitchCue, setShowFeedSwitchCue] = useState(false);
+    const feedSwitchBadgeAnim = useRef(new Animated.Value(0)).current;
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
+    const sheetInsets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
+    const sheetWidth = Math.min(windowWidth - 32, 400);
+    const sheetMarginH = Math.max(16, Math.floor((windowWidth - sheetWidth) / 2));
     const [locationQuery, setLocationQuery] = useState('');
     const [locationSuggestions, setLocationSuggestions] = useState<HeaderSuggestion[]>([]);
     const [usingFallbackSuggestions, setUsingFallbackSuggestions] = useState(false);
@@ -434,6 +441,31 @@ function PillTabs({
         const timeout = setTimeout(() => setShowGazetteerTitle(false), 2000);
         return () => clearTimeout(timeout);
     }, []);
+
+    useEffect(() => {
+        const appears = setTimeout(() => {
+            setShowFeedSwitchCue(true);
+            Animated.spring(feedSwitchBadgeAnim, {
+                toValue: 1,
+                friction: 6,
+                tension: 120,
+                useNativeDriver: true,
+            }).start();
+        }, 700);
+        const bursts = setTimeout(() => {
+            Animated.timing(feedSwitchBadgeAnim, {
+                toValue: 0,
+                duration: 220,
+                useNativeDriver: true,
+            }).start(({ finished }) => {
+                if (finished) setShowFeedSwitchCue(false);
+            });
+        }, 3900);
+        return () => {
+            clearTimeout(appears);
+            clearTimeout(bursts);
+        };
+    }, [feedSwitchBadgeAnim]);
 
     useEffect(() => {
         if (!menuOpen) return;
@@ -599,7 +631,7 @@ function PillTabs({
                     accessibilityLabel="Stories 24"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Stories24HeaderIcon size={32} />
+                        <Stories24HeaderIcon size={36} />
                         <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
                     </View>
                 </TouchableOpacity>
@@ -609,10 +641,42 @@ function PillTabs({
                         onPress={() => setMenuOpen((prev) => !prev)}
                         style={FEED_HEADER_LOCATION_PILL}
                         activeOpacity={0.85}
+                        accessibilityLabel="Change feed"
                     >
+                        {showFeedSwitchCue && !menuOpen ? (
+                            <Animated.View
+                                pointerEvents="none"
+                                style={[
+                                    styles.feedSwitchBadge,
+                                    {
+                                        opacity: feedSwitchBadgeAnim,
+                                        transform: [
+                                            {
+                                                translateY: feedSwitchBadgeAnim.interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [-8, 0],
+                                                }),
+                                            },
+                                            {
+                                                scale: feedSwitchBadgeAnim.interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [0.86, 1],
+                                                }),
+                                            },
+                                        ],
+                                    },
+                                ]}
+                            >
+                                <View style={styles.feedSwitchBadgeCaret} />
+                                <View style={styles.feedSwitchBadgeInner}>
+                                    <Icon name="location" size={14} color="#FFFFFF" />
+                                    <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
+                                </View>
+                            </Animated.View>
+                        ) : null}
                         <Icon
                             name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
-                            size={16}
+                            size={20}
                             color="#FFFFFF"
                         />
                         <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
@@ -623,100 +687,142 @@ function PillTabs({
                         >
                             {headerLabel}
                         </Text>
-                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="rgba(255,255,255,0.9)" />
+                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={18} color="rgba(255,255,255,0.9)" />
                     </TouchableOpacity>
 
-                    {menuOpen && (
-                        <View style={FEED_HEADER_DROPDOWN_MENU}>
-                            <View style={FEED_HEADER_DROPDOWN_SEARCH_WRAP}>
-                                <Icon name="search-outline" size={16} color="rgba(255,255,255,0.75)" />
-                                <TextInput
-                                    value={locationQuery}
-                                    onChangeText={setLocationQuery}
-                                    placeholder={searchHints[searchHintIndex]}
-                                    placeholderTextColor="rgba(255,255,255,0.45)"
-                                    underlineColorAndroid="transparent"
-                                    onFocus={() => setSearchInputFocused(true)}
-                                    onBlur={() => setSearchInputFocused(false)}
-                                    onSubmitEditing={submitLocationSearch}
-                                    returnKeyType="search"
-                                    autoCapitalize="words"
-                                    style={FEED_HEADER_DROPDOWN_SEARCH_INPUT}
-                                />
-                            </View>
-                            <Text style={FEED_HEADER_DROPDOWN_SEARCH_HINT}>
-                                Tip: use venue: or landmark:
-                            </Text>
-                            {locationQuery.trim().length >= 2 ? (
-                                <View style={FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP}>
-                                    {loadingSuggestions ? (
-                                        <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
-                                    ) : locationSuggestions.length > 0 ? (
-                                        locationSuggestions.map((s, idx) => (
-                                            <TouchableOpacity
-                                                key={`${s.name}-${idx}`}
-                                                style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
-                                                onPress={() => {
-                                                    const raw = locationQuery.trim();
-                                                    const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
-                                                        ? 'venue'
-                                                        : /^landmark\s*:/i.test(raw)
-                                                            ? 'landmark'
-                                                            : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
-                                                                ? 'venue'
-                                                                : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
-                                                                    ? 'landmark'
-                                                                    : 'location');
-                                                    setLocationQuery(s.name);
-                                                    commitHeaderPlace(
-                                                        headerSuggestionToLocation(s, s.name),
-                                                        mode
-                                                    );
-                                                    setMenuOpen(false);
-                                                }}
-                                            >
-                                                <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
-                                                    {s.name}
-                                                    {s.type === 'venue'
-                                                        ? ' · venue'
-                                                        : s.type === 'landmark'
-                                                            ? ' · landmark'
-                                                            : (usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : ''))}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))
-                                    ) : (
-                                        <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
-                                    )}
+                    <Modal
+                        visible={menuOpen}
+                        transparent
+                        animationType="slide"
+                        onRequestClose={() => setMenuOpen(false)}
+                        statusBarTranslucent
+                    >
+                        <View style={styles.feedSwitchSheetOverlay}>
+                            <Pressable style={styles.feedSwitchSheetBackdrop} onPress={() => setMenuOpen(false)} />
+                            <View
+                                style={[
+                                    styles.feedSwitchSheet,
+                                    {
+                                        width: sheetWidth,
+                                        marginHorizontal: sheetMarginH,
+                                        paddingBottom: Math.max(sheetInsets.bottom, 16),
+                                    },
+                                ]}
+                            >
+                                <View style={styles.feedSwitchSheetHandle} />
+                                <View style={styles.feedSwitchSheetHeader}>
+                                    <View style={styles.feedSwitchSheetHeaderSpacer} />
+                                    <TouchableOpacity
+                                        onPress={() => setMenuOpen(false)}
+                                        style={styles.feedSwitchSheetClose}
+                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                        accessibilityLabel="Close"
+                                    >
+                                        <Icon name="close" size={24} color="#FFFFFF" />
+                                    </TouchableOpacity>
                                 </View>
-                            ) : null}
-                            {customLocation ? (
-                                <TouchableOpacity
-                                    style={FEED_HEADER_DROPDOWN_MENU_ITEM}
-                                    onPress={() => {
-                                        onClearCustom?.();
-                                        setMenuOpen(false);
-                                    }}
+                                <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
+                                <Text style={styles.feedSwitchSheetTitle}>Switch feed</Text>
+                                <Text style={styles.feedSwitchSheetSub}>
+                                    Nearby, city, country, Discover, or Following
+                                </Text>
+                                <View style={styles.feedSwitchSearchWrap}>
+                                    <Icon name="search-outline" size={18} color="rgba(255,255,255,0.75)" />
+                                    <TextInput
+                                        value={locationQuery}
+                                        onChangeText={setLocationQuery}
+                                        placeholder={searchHints[searchHintIndex]}
+                                        placeholderTextColor="rgba(255,255,255,0.45)"
+                                        underlineColorAndroid="transparent"
+                                        onFocus={() => setSearchInputFocused(true)}
+                                        onBlur={() => setSearchInputFocused(false)}
+                                        onSubmitEditing={submitLocationSearch}
+                                        returnKeyType="search"
+                                        autoCapitalize="words"
+                                        style={styles.feedSwitchSearchInput}
+                                    />
+                                </View>
+                                <Text style={styles.feedSwitchSearchHint}>
+                                    Tip: use venue: or landmark:
+                                </Text>
+                                <ScrollView
+                                    style={styles.feedSwitchSheetScroll}
+                                    contentContainerStyle={styles.feedSwitchSheetScrollContent}
+                                    keyboardShouldPersistTaps="handled"
+                                    showsVerticalScrollIndicator={false}
                                 >
-                                    <Icon name="home-outline" size={18} color="rgba(255,255,255,0.8)" />
-                                    <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
-                                </TouchableOpacity>
-                            ) : null}
-                            {menuItems.map((item) => (
-                                <TouchableOpacity
-                                    key={item.key}
-                                    style={FEED_HEADER_DROPDOWN_MENU_ITEM}
-                                    onPress={() => {
-                                        item.onPress();
-                                        setMenuOpen(false);
-                                    }}
-                                >
-                                    <Icon name={item.icon} size={18} color={item.iconColor} />
-                                    <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
-                                </TouchableOpacity>
-                            ))}
+                                    {locationQuery.trim().length >= 2 ? (
+                                        <View style={styles.feedSwitchSuggestionsWrap}>
+                                            {loadingSuggestions ? (
+                                                <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
+                                            ) : locationSuggestions.length > 0 ? (
+                                                locationSuggestions.map((s, idx) => (
+                                                    <TouchableOpacity
+                                                        key={`${s.name}-${idx}`}
+                                                        style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
+                                                        onPress={() => {
+                                                            const raw = locationQuery.trim();
+                                                            const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
+                                                                ? 'venue'
+                                                                : /^landmark\s*:/i.test(raw)
+                                                                    ? 'landmark'
+                                                                    : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
+                                                                        ? 'venue'
+                                                                        : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
+                                                                            ? 'landmark'
+                                                                            : 'location');
+                                                            setLocationQuery(s.name);
+                                                            commitHeaderPlace(
+                                                                headerSuggestionToLocation(s, s.name),
+                                                                mode
+                                                            );
+                                                            setMenuOpen(false);
+                                                        }}
+                                                    >
+                                                        <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
+                                                            {s.name}
+                                                            {s.type === 'venue'
+                                                                ? ' · venue'
+                                                                : s.type === 'landmark'
+                                                                    ? ' · landmark'
+                                                                    : (usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : ''))}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ))
+                                            ) : (
+                                                <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
+                                            )}
+                                        </View>
+                                    ) : null}
+                                    {customLocation ? (
+                                        <TouchableOpacity
+                                            style={styles.feedSwitchMenuItem}
+                                            onPress={() => {
+                                                onClearCustom?.();
+                                                setMenuOpen(false);
+                                            }}
+                                        >
+                                            <Icon name="home-outline" size={22} color="rgba(255,255,255,0.8)" />
+                                            <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
+                                    {menuItems.map((item) => (
+                                        <TouchableOpacity
+                                            key={item.key}
+                                            style={styles.feedSwitchMenuItem}
+                                            onPress={() => {
+                                                item.onPress();
+                                                setMenuOpen(false);
+                                            }}
+                                        >
+                                            <Icon name={item.icon} size={22} color={item.iconColor} />
+                                            <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
                         </View>
-                    )}
+                    </Modal>
                 </View>
 
                 <View style={FEED_HEADER_RIGHT_ACTIONS}>
@@ -727,7 +833,7 @@ function PillTabs({
                                 style={FEED_HEADER_ICON_BUTTON}
                                 accessibilityLabel={`About ${activeLabel}`}
                             >
-                                <Icon name="information-circle-outline" size={20} color="#FFFFFF" />
+                                <Icon name="information-circle-outline" size={24} color="#FFFFFF" />
                             </TouchableOpacity>
                             <LocationPlaceSummaryModal
                                 open={placeInfoOpen}
@@ -1911,7 +2017,41 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     }, [user?.national, user?.regional, user?.local]);
 
+    /** Footer Home tab — same as web `goHomeFeed` / `resetFeed`. */
     useEffect(() => {
+        const token = route?.params?.resetHomeFeedAt;
+        if (token == null) return;
+        void (async () => {
+            await clearPendingLocationFeed();
+            setShowFollowingFeed(false);
+            setActive(user?.national || defaultNational);
+            setCustomLocation(null);
+            setCustomLocationLabel(null);
+            setCustomLocationPlaceId(null);
+            setCustomFilterType(null);
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
+            setError(null);
+            setReloadTick((t) => t + 1);
+            try {
+                navigation?.setParams?.({
+                    resetHomeFeedAt: null,
+                    location: undefined,
+                    locationLabel: undefined,
+                    locationScope: undefined,
+                    filterType: undefined,
+                    placeId: undefined,
+                });
+            } catch {
+                // ignore
+            }
+        })();
+    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational]);
+
+    useEffect(() => {
+        // A live Home-tab reset token must win; null/undefined means apply location.
+        if (route?.params?.resetHomeFeedAt != null) return;
         const requestedLocation = route?.params?.location;
         const requestedLabel = route?.params?.locationLabel;
         const requestedPlaceId = route?.params?.placeId;
@@ -1947,7 +2087,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     : 'location'
         );
         setReloadTick((t) => t + 1);
-    }, [route?.params?.location, route?.params?.locationLabel, route?.params?.filterType, route?.params?.placeId]);
+    }, [
+        route?.params?.location,
+        route?.params?.locationLabel,
+        route?.params?.filterType,
+        route?.params?.placeId,
+        route?.params?.resetHomeFeedAt,
+    ]);
 
     useEffect(() => {
         pagesRef.current = pages;
@@ -2301,6 +2447,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     );
 
     const clearCustomLocation = () => {
+        void clearPendingLocationFeed();
+        setShowFollowingFeed(false);
+        setActive(user?.national || defaultNational);
         setCustomLocation(null);
         setCustomLocationLabel(null);
         setCustomLocationPlaceId(null);
@@ -2309,6 +2458,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setCursor(0);
         setEnd(false);
         setError(null);
+        setReloadTick((t) => t + 1);
         try {
             navigation?.setParams?.({
                 location: undefined,
@@ -2316,6 +2466,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 locationScope: undefined,
                 filterType: undefined,
                 placeId: undefined,
+                resetHomeFeedAt: undefined,
             });
         } catch {
             // ignore
@@ -3816,6 +3967,165 @@ const styles = StyleSheet.create({
     feedHeaderPassportAvatarImage: {
         width: '100%',
         height: '100%',
+    },
+    feedSwitchBadge: {
+        position: 'absolute',
+        top: '100%',
+        left: 0,
+        right: 0,
+        marginTop: 10,
+        zIndex: 20,
+        alignItems: 'center',
+    },
+    feedSwitchBadgeInner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 16,
+        paddingVertical: 7,
+        borderRadius: 18,
+        borderWidth: 1.5,
+        borderColor: '#FFFFFF',
+        backgroundColor: '#000000',
+    },
+    feedSwitchBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    feedSwitchBadgeCaret: {
+        width: 10,
+        height: 10,
+        marginBottom: -5,
+        backgroundColor: '#000000',
+        borderLeftWidth: 1.5,
+        borderTopWidth: 1.5,
+        borderColor: '#FFFFFF',
+        transform: [{ rotate: '45deg' }],
+        borderRadius: 2,
+        zIndex: 1,
+    },
+    feedSwitchSheetOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    feedSwitchSheetBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+    },
+    feedSwitchSheet: {
+        alignSelf: 'center',
+        backgroundColor: '#1a1a1a',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+        maxHeight: '78%',
+        paddingTop: 4,
+        overflow: 'hidden',
+    },
+    feedSwitchSheetHandle: {
+        alignSelf: 'center',
+        width: 44,
+        height: 5,
+        borderRadius: 3,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+        marginTop: 8,
+        marginBottom: 6,
+    },
+    feedSwitchSheetHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        paddingHorizontal: 12,
+        minHeight: 40,
+    },
+    feedSwitchSheetHeaderSpacer: {
+        flex: 1,
+    },
+    feedSwitchSheetClose: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    feedSwitchSheetGazetteer: {
+        textAlign: 'center',
+        color: 'rgba(217, 27, 92, 0.95)',
+        fontSize: 13,
+        fontWeight: '700',
+        letterSpacing: 1.4,
+        textTransform: 'uppercase',
+        marginBottom: 12,
+        paddingHorizontal: 20,
+    },
+    feedSwitchSheetTitle: {
+        textAlign: 'center',
+        color: '#FFFFFF',
+        fontSize: 24,
+        fontWeight: '700',
+        paddingHorizontal: 20,
+    },
+    feedSwitchSheetSub: {
+        textAlign: 'center',
+        color: '#A3A3A3',
+        fontSize: 15,
+        lineHeight: 22,
+        marginTop: 8,
+        marginBottom: 18,
+        paddingHorizontal: 20,
+    },
+    feedSwitchSearchWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: 16,
+        marginBottom: 8,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 999,
+        borderWidth: 1.5,
+        borderColor: '#FFFFFF',
+        backgroundColor: 'transparent',
+    },
+    feedSwitchSearchInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 16,
+        marginLeft: 10,
+        paddingVertical: 0,
+        borderWidth: 0,
+    },
+    feedSwitchSearchHint: {
+        marginHorizontal: 20,
+        marginBottom: 10,
+        color: 'rgba(255,255,255,0.45)',
+        fontSize: 12,
+    },
+    feedSwitchSheetScroll: {
+        maxHeight: 360,
+    },
+    feedSwitchSheetScrollContent: {
+        paddingBottom: 10,
+    },
+    feedSwitchSuggestionsWrap: {
+        marginHorizontal: 16,
+        marginBottom: 8,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        overflow: 'hidden',
+    },
+    feedSwitchMenuItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        minHeight: 52,
     },
     errorContainer: {
         padding: 16,

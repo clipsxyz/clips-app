@@ -33,6 +33,12 @@ const FEED_UI_BY_MODE = {
       flag: 18,
       // Web Avatar size="sm" is 32 — bumped for phone Instagram weight.
       avatar: 36,
+      // Header / tab chrome (optical bump vs web 16-in-28 squares).
+      tab: 22,
+      tabSquare: 36,
+      headerStories: 36,
+      headerLocation: 20,
+      headerPassport: 36,
     },
   },
   comfortable: {
@@ -60,6 +66,11 @@ const FEED_UI_BY_MODE = {
       action: 28,
       flag: 18,
       avatar: 36,
+      tab: 22,
+      tabSquare: 36,
+      headerStories: 36,
+      headerLocation: 20,
+      headerPassport: 36,
     },
   },
 } as const;

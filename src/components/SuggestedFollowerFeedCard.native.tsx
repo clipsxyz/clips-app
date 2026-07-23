@@ -11,7 +11,6 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
 import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
@@ -60,7 +59,23 @@ export default function SuggestedFollowerFeedCard({
 
   return (
     <View style={styles.card}>
-      <DiscoverAmbientCanvas variant="discover" />
+      {/* Soft wash only — DiscoverAmbientCanvas paints above UI on Nokia when used as a sibling. */}
+      <LinearGradient
+        colors={['#0b0711', '#201138', '#3a1528', '#201138', '#0b0711']}
+        locations={[0, 0.28, 0.52, 0.78, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.ambientWash}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={['rgba(217,27,92,0.22)', 'transparent', 'rgba(122,90,200,0.18)']}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.ambientWash}
+        pointerEvents="none"
+      />
 
       <View style={styles.content}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => setInfoOpen((v) => !v)} accessibilityLabel="Info">
@@ -160,11 +175,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     minHeight: 300,
   },
+  ambientWash: {
+    ...StyleSheet.absoluteFillObject,
+  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 16,
     paddingTop: 8,
-    zIndex: 2,
   },
   iconBtn: {
     position: 'absolute',

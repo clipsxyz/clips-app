@@ -1073,6 +1073,17 @@ video {
   animation: contributeBadgeBurst 220ms ease-out forwards;
 }
 
+@keyframes feedSwitchSheetUp {
+  from {
+    transform: translateY(18px);
+    opacity: 0.72;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @keyframes contributeConfettiBurst {
   0% {
     transform: translate(0, 0) scale(0.6) rotate(0deg);

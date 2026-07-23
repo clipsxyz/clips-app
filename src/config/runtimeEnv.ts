@@ -97,8 +97,14 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
       try {
         const parsed = new URL(scriptUrl);
         const host = parsed.hostname;
+        // LAN / Wi‑Fi Metro (e.g. 192.168.x.x:8081) → same host for Laravel.
         if (host && host !== 'localhost' && host !== '127.0.0.1') {
           return `http://${host}:${port}/api`;
+        }
+        // USB `adb reverse` Metro is localhost — API must also be localhost (reverse :8000),
+        // NOT 10.0.2.2 (emulator-only; black-holes places search on physical devices).
+        if (host === 'localhost' || host === '127.0.0.1') {
+          return `http://127.0.0.1:${port}/api`;
         }
       } catch {
         /* ignore malformed script URL */

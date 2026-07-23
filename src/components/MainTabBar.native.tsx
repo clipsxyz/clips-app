@@ -19,7 +19,7 @@ type Props = BottomTabBarProps & {
 function TabSquareIcon({ name, focused }: { name: string; focused: boolean }) {
   return (
     <View style={[styles.iconSquare, focused ? styles.iconSquareActive : styles.iconSquareInactive]}>
-      <Icon name={name} size={16} color={focused ? '#111827' : '#FFFFFF'} />
+      <Icon name={name} size={22} color={focused ? '#111827' : '#FFFFFF'} />
     </View>
   );
 }
@@ -83,7 +83,21 @@ export default function MainTabBar({
             target: route.key,
             canPreventDefault: true,
           });
-          if (!focused && !event.defaultPrevented) {
+          if (event.defaultPrevented) return;
+
+          // Home footer always returns to the user's national feed (web `goHomeFeed` /
+          // `resetFeed`) — not the last Discover/Search location.
+          if (route.name === 'Home') {
+            navigation.navigate('Home', {
+              screen: 'Feed',
+              params: {
+                resetHomeFeedAt: Date.now(),
+              },
+            });
+            return;
+          }
+
+          if (!focused) {
             navigation.navigate(route.name);
           }
         };
@@ -143,8 +157,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-around',
-    paddingHorizontal: 8,
-    paddingTop: 6,
+    paddingHorizontal: 6,
+    paddingTop: 8,
     backgroundColor: '#030712',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
@@ -153,17 +167,18 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 2,
   },
   iconStack: {
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 28,
+    minHeight: 36,
   },
   iconSquare: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -172,12 +187,12 @@ const styles = StyleSheet.create({
   },
   iconSquareInactive: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#FFFFFF',
   },
   label: {
-    marginTop: 4,
-    fontSize: 10,
+    marginTop: 5,
+    fontSize: 11,
     fontWeight: '600',
   },
   labelActive: {
@@ -205,7 +220,7 @@ const styles = StyleSheet.create({
   },
   addYoursBubble: {
     position: 'absolute',
-    bottom: 36,
+    bottom: 44,
     alignItems: 'center',
     zIndex: 20,
   },

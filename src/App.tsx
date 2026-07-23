@@ -520,6 +520,8 @@ function PillTabs(props: {
   const [questionsCount, setQuestionsCount] = React.useState(0);
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [showFeedSwitchCue, setShowFeedSwitchCue] = React.useState(false);
+  const [showFeedSwitchBurst, setShowFeedSwitchBurst] = React.useState(false);
   const [locationQuery, setLocationQuery] = React.useState('');
   const [locationSuggestions, setLocationSuggestions] = React.useState<HeaderSuggestion[]>([]);
   const [usingFallbackSuggestions, setUsingFallbackSuggestions] = React.useState(false);
@@ -639,19 +641,26 @@ function PillTabs(props: {
     return () => window.clearTimeout(timeout);
   }, []);
 
+  // Peek badge (same motion as footer Create “Add Yours”) so the feed control reads as tappable.
+  React.useEffect(() => {
+    const appears = window.setTimeout(() => setShowFeedSwitchCue(true), 700);
+    const bursts = window.setTimeout(() => setShowFeedSwitchBurst(true), 3400);
+    const hides = window.setTimeout(() => {
+      setShowFeedSwitchCue(false);
+      setShowFeedSwitchBurst(false);
+    }, 4100);
+    return () => {
+      window.clearTimeout(appears);
+      window.clearTimeout(bursts);
+      window.clearTimeout(hides);
+    };
+  }, []);
+
   React.useEffect(() => {
     if (!menuOpen) return;
     setLocationQuery(props.customLocation || '');
     setLocationSuggestions([]);
-    const handleOutsideClick = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [menuOpen]);
+  }, [menuOpen, props.customLocation]);
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -898,12 +907,23 @@ function PillTabs(props: {
           <div ref={menuRef} className="relative flex justify-center">
             <button
               type="button"
-              aria-haspopup="menu"
+              aria-haspopup="dialog"
               aria-expanded={menuOpen}
               aria-label="Change feed"
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="relative inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
+              {showFeedSwitchCue && !menuOpen ? (
+                <span
+                  className={`contribute-badge-pop pointer-events-none absolute top-full mt-2 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white bg-black text-white text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(0,0,0,0.45)] ${showFeedSwitchBurst ? 'contribute-badge-burst' : ''}`}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <FiMapPin className="w-3.5 h-3.5 text-white" />
+                    <span>Switch feed</span>
+                  </span>
+                  <span className="absolute left-1/2 -top-1 -translate-x-1/2 w-2 h-2 bg-black border-l border-t border-white rotate-45 rounded-[2px]" />
+                </span>
+              ) : null}
               <span className="shrink-0" aria-hidden>
                 {props.customFilterType === 'venue' ? (
                   <FiHome className="h-4 w-4 text-white" />
@@ -932,117 +952,151 @@ function PillTabs(props: {
               />
             </button>
 
-            {menuOpen && (
+            {menuOpen && createPortal(
               <div
-                role="menu"
-                className="absolute top-[calc(100%+6px)] left-1/2 z-[160] w-[220px] -translate-x-1/2 overflow-hidden rounded-[22px] border border-white/10 bg-[#272b35]/92 shadow-[0_14px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                className="fixed inset-0 z-[220] flex items-end justify-center px-4"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Change feed"
               >
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    submitLocationSearch();
-                  }}
-                  className="px-3 pt-3"
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/60"
+                  aria-label="Dismiss"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  className="relative w-full max-w-[400px] overflow-hidden rounded-t-[1.5rem] border border-white/10 border-b-0 bg-[#1a1a1a] shadow-[0_-12px_40px_rgba(0,0,0,0.55)] pb-[max(1rem,env(safe-area-inset-bottom))] animate-[feedSwitchSheetUp_280ms_cubic-bezier(0.22,1,0.36,1)_both]"
                 >
-                  <div className="flex items-center gap-2 rounded-full border border-white bg-transparent px-3 py-2">
-                    <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
-                    <input
-                      type="text"
-                      value={locationQuery}
-                      onChange={(e) => setLocationQuery(e.target.value)}
-                      placeholder={searchHints[searchHintIndex]}
-                      onFocus={() => setSearchInputFocused(true)}
-                      onBlur={() => setSearchInputFocused(false)}
-                      className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                      style={{ WebkitAppearance: 'none', appearance: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
-                      aria-label="Search location feed"
-                    />
+                  <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-white/30" aria-hidden />
+                  <div className="relative px-4 pt-1 pb-1">
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={() => setMenuOpen(false)}
+                      className="absolute right-3 top-0 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/15"
+                    >
+                      <FiX className="h-5 w-5" strokeWidth={2.2} />
+                    </button>
+                    <p className="gazetteer-shimmer text-center text-[12px] font-semibold tracking-[0.12em] uppercase">
+                      Gazetteer says
+                    </p>
+                    <h3
+                      className="mt-2 text-center text-white"
+                      style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif' }}
+                    >
+                      Switch feed
+                    </h3>
+                    <p className="mt-1 text-center text-[14px] leading-snug text-[#a3a3a3]">
+                      Nearby, city, country, Discover, or Following
+                    </p>
                   </div>
-                  <div className="px-1 pt-1.5 text-[11px] text-white/45">
-                    Tip: use <span className="text-white/65">venue:</span> or <span className="text-white/65">landmark:</span>
-                  </div>
-                </form>
-                <div className="py-1.5">
-                  {locationQuery.trim().length >= 2 && (
-                    <div className="px-3 pb-1">
-                      {loadingSuggestions ? (
-                        <div className="px-2 py-1.5 text-xs text-white/60">Searching places...</div>
-                      ) : locationSuggestions.length > 0 ? (
-                        <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                          {locationSuggestions.map((s, idx) => (
-                            <button
-                              key={`${s.name}-${idx}`}
-                              type="button"
-                              onClick={() => {
-                                const raw = locationQuery.trim();
-                                const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
-                                  ? 'venue'
-                                  : /^landmark\s*:/i.test(raw)
-                                    ? 'landmark'
-                                    : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
-                                      ? 'venue'
-                                      : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
-                                        ? 'landmark'
-                                        : 'location');
-                                setLocationQuery(s.name);
-                                const filter = s.filter ?? s.name;
-                                props.onSearchLocation?.(filter, mode, {
-                                  label: s.label ?? s.name,
-                                  placeId: s.placeId ?? null,
-                                  scope: s.scope,
-                                });
-                                setMenuOpen(false);
-                              }}
-                              className="w-full px-3 py-2 text-left hover:bg-white/10 transition-colors"
-                            >
-                              <span className="text-sm text-white/90">{s.name}</span>
-                              {s.type === 'venue' ? (
-                                <span className="ml-1 text-xs text-emerald-300/80">Â· venue</span>
-                              ) : s.type === 'landmark' ? (
-                                <span className="ml-1 text-xs text-amber-300/80">Â· landmark</span>
-                              ) : usingFallbackSuggestions ? (
-                                <span className="ml-1 text-xs text-white/45">Â· quick suggestion</span>
-                              ) : s.country ? (
-                                <span className="ml-1 text-xs text-white/55">Â· {s.country}</span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="px-2 py-1.5 text-xs text-white/50">No matches yet</div>
-                      )}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      submitLocationSearch();
+                    }}
+                    className="px-4 pt-2"
+                  >
+                    <div className="flex items-center gap-2 rounded-full border border-white bg-transparent px-3 py-2.5">
+                      <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
+                      <input
+                        type="text"
+                        value={locationQuery}
+                        onChange={(e) => setLocationQuery(e.target.value)}
+                        placeholder={searchHints[searchHintIndex]}
+                        onFocus={() => setSearchInputFocused(true)}
+                        onBlur={() => setSearchInputFocused(false)}
+                        className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                        style={{ WebkitAppearance: 'none', appearance: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
+                        aria-label="Search location feed"
+                      />
                     </div>
-                  )}
-                  {props.customLocation && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        props.onClearCustom?.();
-                        setMenuOpen(false);
-                      }}
-                      className="w-full px-4 py-2.5 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
-                      style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
-                    >
-                      <span className="shrink-0"><FiHome className="h-4 w-4 text-white/80" /></span>
-                      <span className="truncate">Back to home feed</span>
-                    </button>
-                  )}
-                  {menuItems.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      role="menuitem"
-                      onClick={item.onClick}
-                      className="w-full px-4 py-2.5 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
-                      style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
-                    >
-                      <span className="shrink-0">{item.icon}</span>
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  ))}
+                    <div className="px-1 pt-1.5 text-[11px] text-white/45">
+                      Tip: use <span className="text-white/65">venue:</span> or <span className="text-white/65">landmark:</span>
+                    </div>
+                  </form>
+                  <div className="max-h-[min(48vh,360px)] overflow-y-auto py-2">
+                    {locationQuery.trim().length >= 2 && (
+                      <div className="px-4 pb-2">
+                        {loadingSuggestions ? (
+                          <div className="px-2 py-1.5 text-xs text-white/60">Searching places...</div>
+                        ) : locationSuggestions.length > 0 ? (
+                          <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                            {locationSuggestions.map((s, idx) => (
+                              <button
+                                key={`${s.name}-${idx}`}
+                                type="button"
+                                onClick={() => {
+                                  const raw = locationQuery.trim();
+                                  const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
+                                    ? 'venue'
+                                    : /^landmark\s*:/i.test(raw)
+                                      ? 'landmark'
+                                      : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
+                                        ? 'venue'
+                                        : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
+                                          ? 'landmark'
+                                          : 'location');
+                                  setLocationQuery(s.name);
+                                  const filter = s.filter ?? s.name;
+                                  props.onSearchLocation?.(filter, mode, {
+                                    label: s.label ?? s.name,
+                                    placeId: s.placeId ?? null,
+                                    scope: s.scope,
+                                  });
+                                  setMenuOpen(false);
+                                }}
+                                className="w-full px-3 py-2.5 text-left hover:bg-white/10 transition-colors"
+                              >
+                                <span className="text-sm text-white/90">{s.name}</span>
+                                {s.type === 'venue' ? (
+                                  <span className="ml-1 text-xs text-emerald-300/80">· venue</span>
+                                ) : s.type === 'landmark' ? (
+                                  <span className="ml-1 text-xs text-amber-300/80">· landmark</span>
+                                ) : usingFallbackSuggestions ? (
+                                  <span className="ml-1 text-xs text-white/45">· quick suggestion</span>
+                                ) : s.country ? (
+                                  <span className="ml-1 text-xs text-white/55">· {s.country}</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="px-2 py-1.5 text-xs text-white/50">No matches yet</div>
+                        )}
+                      </div>
+                    )}
+                    {props.customLocation && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          props.onClearCustom?.();
+                          setMenuOpen(false);
+                        }}
+                        className="w-full px-4 py-3 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
+                        style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                      >
+                        <span className="shrink-0"><FiHome className="h-4 w-4 text-white/80" /></span>
+                        <span className="truncate">Back to home feed</span>
+                      </button>
+                    )}
+                    {menuItems.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={item.onClick}
+                        className="w-full px-4 py-3 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
+                        style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                      >
+                        <span className="shrink-0">{item.icon}</span>
+                        <span className="truncate">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
+import LinearGradient from 'react-native-linear-gradient';
 import { INTEREST_OPTIONS, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
 
 type Props = {
@@ -17,56 +17,72 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
 
   return (
     <View style={styles.card}>
-      <DiscoverAmbientCanvas variant="discover" />
+      {/* Soft wash only — DiscoverAmbientCanvas paints above UI on Nokia when used as a sibling. */}
+      <LinearGradient
+        colors={['#0b0711', '#201138', '#3a1528', '#201138', '#0b0711']}
+        locations={[0, 0.28, 0.52, 0.78, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.ambientWash}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={['rgba(217,27,92,0.18)', 'transparent', 'rgba(122,90,200,0.14)']}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.ambientWash}
+        pointerEvents="none"
+      />
       <View style={styles.content}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Your interests</Text>
-          <Text style={styles.subtitle}>
-            Optional — pick up to {MAX_INTEREST_SELECTIONS} for your profile. Your feed stays based on location.
-          </Text>
+        <View style={styles.header}>
+          <View style={styles.headerText}>
+            <Text style={styles.title}>Your interests</Text>
+            <Text style={styles.subtitle}>
+              Optional — pick up to {MAX_INTEREST_SELECTIONS} for your profile. Your feed stays based on location.
+            </Text>
+          </View>
+          <TouchableOpacity onPress={onSkip} style={styles.closeBtn} accessibilityLabel="Skip for now">
+            <Icon name="close" size={18} color="#9CA3AF" />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity onPress={onSkip} style={styles.closeBtn} accessibilityLabel="Skip for now">
-          <Icon name="close" size={18} color="#9CA3AF" />
-        </TouchableOpacity>
-      </View>
 
-      <View style={styles.chipsWrap}>
-        {INTEREST_OPTIONS.map((interest) => {
-          const isSelected = selected.includes(interest);
-          const disabled = !isSelected && atMax;
-          return (
-            <TouchableOpacity
-              key={interest}
-              disabled={disabled}
-              onPress={() => onToggle(interest)}
-              style={[styles.chip, isSelected && styles.chipSelected, disabled && styles.chipDisabled]}
-            >
-              <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{interest}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <Text style={styles.count}>
-        {selected.length} of {MAX_INTEREST_SELECTIONS} selected{atMax ? " — you're all set." : ''}
-      </Text>
+        <View style={styles.chipsWrap}>
+          {INTEREST_OPTIONS.map((interest) => {
+            const isSelected = selected.includes(interest);
+            const disabled = !isSelected && atMax;
+            return (
+              <TouchableOpacity
+                key={interest}
+                disabled={disabled}
+                onPress={() => onToggle(interest)}
+                style={[styles.chip, isSelected && styles.chipSelected, disabled && styles.chipDisabled]}
+              >
+                <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{interest}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.count}>
+          {selected.length} of {MAX_INTEREST_SELECTIONS} selected{atMax ? " — you're all set." : ''}
+        </Text>
 
-      <View style={styles.actions}>
-        <TouchableOpacity onPress={onSkip} style={styles.skipBtn}>
-          <Text style={styles.skipText}>Skip for now</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onSave}
-          disabled={saving || selected.length === 0}
-          style={[styles.saveBtn, (saving || selected.length === 0) && styles.saveBtnDisabled]}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="#111827" />
-          ) : (
-            <Text style={styles.saveText}>{atMax ? 'Done' : 'Save'}</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+        <View style={styles.actions}>
+          <TouchableOpacity onPress={onSkip} style={styles.skipBtn}>
+            <Text style={styles.skipText}>Skip for now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onSave}
+            disabled={saving || selected.length === 0}
+            style={[styles.saveBtn, (saving || selected.length === 0) && styles.saveBtnDisabled]}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#111827" />
+            ) : (
+              <Text style={styles.saveText}>{atMax ? 'Done' : 'Save'}</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -82,9 +98,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0711',
     overflow: 'hidden',
   },
-  content: {
-    zIndex: 2,
+  ambientWash: {
+    ...StyleSheet.absoluteFillObject,
   },
+  content: {},
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -328,21 +328,21 @@ export const FEED_PILL_TABS_BG = '#000000';
 /** Web location pill: `bg-[#36454F]`. */
 export const FEED_LOCATION_PILL_BG = '#36454F';
 
-/** Web header title typography (PillTabs location label). */
+/** Web header title typography (PillTabs location label) — optically bumped for phone. */
 export const FEED_HEADER_TITLE = {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700' as const,
-    lineHeight: 20,
+    lineHeight: 22,
     color: '#E5E7EB',
 };
 
-/** Web PillTabs grid row: grid-cols-[auto_1fr_auto] gap-2 px-3. */
+/** Web PillTabs grid row: grid-cols-[auto_1fr_auto] gap-2 px-3 — taller for IG weight. */
 export const FEED_HEADER_PICKER_ROW = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
     paddingHorizontal: 12,
-    minHeight: 40,
+    minHeight: 52,
     gap: 8,
     zIndex: 30,
 };
@@ -354,10 +354,10 @@ export const FEED_HEADER_SIDE_ACTION = {
 };
 
 export const FEED_HEADER_SIDE_LABEL = {
-    marginTop: 1,
-    fontSize: 10,
-    lineHeight: 10,
-    fontWeight: '500' as const,
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 12,
+    fontWeight: '600' as const,
     color: '#FFFFFF',
 };
 
@@ -368,28 +368,30 @@ export const FEED_HEADER_CENTER = {
     position: 'relative' as const,
 };
 
-/** Web location pill: rounded-lg bg-[#36454F] px-3 py-1.5. */
+/** Web location pill: rounded-lg bg-[#36454F] — padded for Instagram chrome weight. */
 export const FEED_HEADER_LOCATION_PILL = {
+    position: 'relative' as const,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: 8,
     maxWidth: '100%' as const,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
     backgroundColor: FEED_LOCATION_PILL_BG,
+    overflow: 'visible' as const,
 };
 
 export const FEED_HEADER_ACTIVE_DOT = {
-    width: 10,
-    height: 10,
+    width: 11,
+    height: 11,
     borderRadius: 999,
 };
 
 export const FEED_HEADER_LOCATION_TITLE = {
     flexShrink: 1,
-    maxWidth: 144,
+    maxWidth: 160,
     ...FEED_HEADER_TITLE,
 };
 
@@ -455,20 +457,20 @@ export const FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP = {
 };
 
 export const FEED_HEADER_DROPDOWN_SUGGESTION_ITEM = {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
 };
 
 export const FEED_HEADER_DROPDOWN_SUGGESTION_TEXT = {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 14,
+    fontSize: 15,
 };
 
 export const FEED_HEADER_DROPDOWN_META = {
     color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    fontSize: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
 };
 
 export const FEED_HEADER_DROPDOWN_MENU_ITEM = {
@@ -480,15 +482,15 @@ export const FEED_HEADER_DROPDOWN_MENU_ITEM = {
 };
 
 export const FEED_HEADER_DROPDOWN_MENU_TEXT = {
-    fontSize: 17,
+    fontSize: 18,
     color: 'rgba(255,255,255,0.95)',
-    fontWeight: '500' as const,
+    fontWeight: '600' as const,
 };
 
 export const FEED_HEADER_PASSPORT_AVATAR = {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     overflow: 'hidden' as const,
     backgroundColor: '#374151',
     borderWidth: 2,
@@ -498,14 +500,14 @@ export const FEED_HEADER_PASSPORT_AVATAR = {
 };
 
 export const FEED_HEADER_PASSPORT_INITIALS = {
-    fontSize: 10,
-    fontWeight: '600' as const,
+    fontSize: 12,
+    fontWeight: '700' as const,
     color: '#FFFFFF',
 };
 
 export const FEED_HEADER_ICON_BUTTON = {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
 };
