@@ -53,6 +53,7 @@ import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNativ
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -723,7 +724,7 @@ export default function CreateScreen({ navigation, route }: any) {
         <GazetteerScreenShell edges={['top', 'bottom']}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="close" size={24} color="#FFFFFF" />
+                    <Icon name="close" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{isStory24Flow ? 'Create Story 24' : 'Create Post'}</Text>
                 <View style={styles.headerActions}>
@@ -759,13 +760,13 @@ export default function CreateScreen({ navigation, route }: any) {
             >
                 {isAddYoursFlow && (
                     <View style={styles.addYoursBanner}>
-                        <Icon name="sparkles" size={16} color="#111827" />
+                        <Icon name="sparkles" size={ox(16)} color="#111827" />
                         <Text style={styles.addYoursBannerText}>Add Yours mode</Text>
                     </View>
                 )}
                 {isStory24Flow && (
                     <View style={styles.addYoursBanner}>
-                        <Icon name="location" size={16} color="#111827" />
+                        <Icon name="location" size={ox(16)} color="#111827" />
                         <Text style={styles.addYoursBannerText}>Stories 24 mode</Text>
                     </View>
                 )}
@@ -825,7 +826,7 @@ export default function CreateScreen({ navigation, route }: any) {
                             }}
                             style={styles.mediaButton}
                         >
-                            <Icon name="images" size={32} color="#8B5CF6" />
+                            <Icon name="images" size={ox(32)} color="#8B5CF6" />
                             <Text style={styles.mediaButtonText}>Choose from Library</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -837,7 +838,7 @@ export default function CreateScreen({ navigation, route }: any) {
                             }}
                             style={styles.mediaButton}
                         >
-                            <Icon name="camera" size={32} color="#8B5CF6" />
+                            <Icon name="camera" size={ox(32)} color="#8B5CF6" />
                             <Text style={styles.mediaButtonText}>Take Photo</Text>
                         </TouchableOpacity>
                     </View>
@@ -848,7 +849,7 @@ export default function CreateScreen({ navigation, route }: any) {
                     <View style={styles.mediaPreview}>
                         {isCarousel ? (
                             <View style={styles.carouselBadge}>
-                                <Icon name="images" size={12} color="#FBCFE8" />
+                                <Icon name="images" size={ox(12)} color="#FBCFE8" />
                                 <Text style={styles.carouselBadgeText}>
                                     {carouselItems.length} slides · swipe in feed
                                 </Text>
@@ -856,13 +857,13 @@ export default function CreateScreen({ navigation, route }: any) {
                         ) : null}
                         {hasAppliedFilter && !isCarousel ? (
                             <View style={styles.filterBadge}>
-                                <Icon name="color-filter" size={12} color="#FBCFE8" />
+                                <Icon name="color-filter" size={ox(12)} color="#FBCFE8" />
                                 <Text style={styles.filterBadgeText}>{activeFilterName}</Text>
                             </View>
                         ) : null}
                         {hasAppliedFilter && isCarousel ? (
                             <View style={styles.filterBadge}>
-                                <Icon name="color-filter" size={12} color="#FBCFE8" />
+                                <Icon name="color-filter" size={ox(12)} color="#FBCFE8" />
                                 <Text style={styles.filterBadgeText}>Filter on cover photo</Text>
                             </View>
                         ) : null}
@@ -887,7 +888,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                         >
                                             {item.type === 'video' ? (
                                                 <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={22} color="#E5E7EB" />
+                                                    <Icon name="videocam" size={ox(22)} color="#E5E7EB" />
                                                 </View>
                                             ) : (
                                                 <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
@@ -907,7 +908,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                                 onPress={() => removeCarouselItem(index)}
                                                 hitSlop={8}
                                             >
-                                                <Icon name="close" size={14} color="#FFFFFF" />
+                                                <Icon name="close" size={ox(14)} color="#FFFFFF" />
                                             </TouchableOpacity>
                                         </TouchableOpacity>
                                     );
@@ -966,7 +967,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                     style={styles.videoPauseBtn}
                                     onPress={() => setIsVideoPaused((v) => !v)}
                                 >
-                                    <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
+                                    <Icon name={isVideoPaused ? 'play' : 'pause'} size={ox(18)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                         </View>
@@ -980,7 +981,7 @@ export default function CreateScreen({ navigation, route }: any) {
                             }}
                             style={styles.removeMediaButton}
                         >
-                            <Icon name="close-circle" size={32} color="#EF4444" />
+                            <Icon name="close-circle" size={ox(32)} color="#EF4444" />
                         </TouchableOpacity>
                     </View>
                 )}
@@ -988,12 +989,12 @@ export default function CreateScreen({ navigation, route }: any) {
                     <View style={styles.composerTools}>
                         {previewType === 'video' && !isCarousel ? (
                             <TouchableOpacity style={styles.composerToolBtn} onPress={openFilters}>
-                                <Icon name="color-filter" size={18} color="#FBCFE8" />
+                                <Icon name="color-filter" size={ox(18)} color="#FBCFE8" />
                                 <Text style={styles.composerToolText}>Filters</Text>
                             </TouchableOpacity>
                         ) : null}
                         <TouchableOpacity style={styles.composerToolBtn} onPress={openStickerPicker}>
-                            <Icon name="happy" size={18} color="#FBCFE8" />
+                            <Icon name="happy" size={ox(18)} color="#FBCFE8" />
                             <Text style={styles.composerToolText}>
                                 Stickers{stickers.length > 0 ? ` (${stickers.length})` : ''}
                             </Text>
@@ -1003,7 +1004,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                 style={styles.composerToolBtn}
                                 onPress={() => setSelectedStickerOverlay(null)}
                             >
-                                <Icon name="checkmark-circle-outline" size={18} color="#FBCFE8" />
+                                <Icon name="checkmark-circle-outline" size={ox(18)} color="#FBCFE8" />
                                 <Text style={styles.composerToolText}>Done</Text>
                             </TouchableOpacity>
                         ) : null}
@@ -1079,7 +1080,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Location Input */}
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="location" size={20} color="#8B5CF6" />
+                        <Icon name="location" size={ox(20)} color="#8B5CF6" />
                         <TextInput
                             value={location}
                             onChangeText={setLocation}
@@ -1092,7 +1093,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="business" size={20} color="#8B5CF6" />
+                        <Icon name="business" size={ox(20)} color="#8B5CF6" />
                         <TextInput
                             value={venue}
                             onChangeText={setVenue}
@@ -1105,7 +1106,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="pin" size={20} color="#8B5CF6" />
+                        <Icon name="pin" size={ox(20)} color="#8B5CF6" />
                         <TextInput
                             value={landmark}
                             onChangeText={setLandmark}
@@ -1117,7 +1118,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 </View>
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="person-add" size={20} color="#8B5CF6" />
+                        <Icon name="person-add" size={ox(20)} color="#8B5CF6" />
                         <TextInput
                             value={taggedUsersInput}
                             onChangeText={setTaggedUsersInput}
@@ -1172,38 +1173,38 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: ox(16),
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
         backgroundColor: 'rgba(0, 0, 0, 0.35)',
         zIndex: 1,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     postButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(8),
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: ox(10),
     },
     draftButton: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
     draftButtonText: {
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     postButtonText: {
         color: '#3B82F6',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     content: {
@@ -1211,66 +1212,66 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     contentContainer: {
-        paddingBottom: 32,
+        paddingBottom: ox(32),
     },
     addYoursBanner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: ox(6),
         alignSelf: 'flex-start',
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: '#FBBF24',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        margin: 16,
-        marginBottom: 8,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
+        margin: ox(16),
+        marginBottom: ox(8),
     },
     addYoursBannerText: {
         color: '#111827',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     mediaSelection: {
-        padding: 16,
-        gap: 16,
+        padding: ox(16),
+        gap: ox(16),
     },
     mediaButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        padding: 20,
-        borderRadius: 14,
+        gap: ox(12),
+        padding: ox(20),
+        borderRadius: ox(14),
         ...glassSurface,
     },
     mediaButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '500',
     },
     storyControlsCard: {
-        marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 4,
-        borderRadius: 14,
+        marginHorizontal: ox(16),
+        marginTop: ox(8),
+        marginBottom: ox(4),
+        borderRadius: ox(14),
         ...glassPanel,
-        padding: 12,
-        gap: 10,
+        padding: ox(12),
+        gap: ox(10),
     },
     storyControlsTitle: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     storyAudienceRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
+        gap: ox(8),
     },
     storyAudienceChip: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         ...glassSurface,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     storyAudienceChipActive: {
         borderColor: '#F8D26A',
@@ -1278,25 +1279,25 @@ const styles = StyleSheet.create({
     },
     storyAudienceChipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     storyAudienceChipTextActive: {
         color: '#F8D26A',
     },
     storyStyleChip: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#4B5563',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     storyStyleChipActive: {
         borderColor: '#F8D26A',
     },
     storyStyleChipText: {
         color: '#F9FAFB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     mediaPreview: {
@@ -1333,33 +1334,33 @@ const styles = StyleSheet.create({
     carouselBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: ox(6),
         alignSelf: 'flex-start',
-        marginBottom: 8,
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        marginBottom: ox(8),
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         backgroundColor: 'rgba(59, 130, 246, 0.25)',
         borderWidth: 1,
         borderColor: 'rgba(147, 197, 253, 0.45)',
     },
     carouselBadgeText: {
         color: '#BFDBFE',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     carouselRail: {
-        marginBottom: 10,
+        marginBottom: ox(10),
         maxHeight: 88,
     },
     carouselRailContent: {
-        gap: 8,
-        paddingRight: 8,
+        gap: ox(8),
+        paddingRight: ox(8),
     },
     carouselThumbWrap: {
-        width: 72,
-        height: 72,
-        borderRadius: 10,
+        width: ox(72),
+        height: ox(72),
+        borderRadius: ox(10),
         overflow: 'hidden',
         backgroundColor: '#111827',
         borderWidth: 2,
@@ -1373,19 +1374,19 @@ const styles = StyleSheet.create({
         right: 4,
         top: 4,
         backgroundColor: 'rgba(244,114,182,0.9)',
-        borderRadius: 4,
-        paddingHorizontal: 4,
+        borderRadius: ox(4),
+        paddingHorizontal: ox(4),
         paddingVertical: 1,
     },
     carouselCoverBadgeText: {
         color: '#FFFFFF',
-        fontSize: 8,
+        fontSize: ox(8),
         fontWeight: '700',
     },
     carouselCoverHint: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginBottom: 8,
+        fontSize: ox(12),
+        marginBottom: ox(8),
     },
     carouselThumb: {
         width: '100%',
@@ -1403,22 +1404,22 @@ const styles = StyleSheet.create({
         left: 4,
         bottom: 4,
         backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 4,
-        paddingHorizontal: 4,
+        borderRadius: ox(4),
+        paddingHorizontal: ox(4),
         paddingVertical: 1,
     },
     carouselVidBadgeText: {
         color: '#FFFFFF',
-        fontSize: 9,
+        fontSize: ox(9),
         fontWeight: '700',
     },
     carouselThumbRemove: {
         position: 'absolute',
         top: 4,
         right: 4,
-        width: 22,
-        height: 22,
-        borderRadius: 11,
+        width: ox(22),
+        height: ox(22),
+        borderRadius: ox(11),
         backgroundColor: 'rgba(0,0,0,0.65)',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1430,17 +1431,17 @@ const styles = StyleSheet.create({
         zIndex: 2,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        gap: ox(4),
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         backgroundColor: 'rgba(217, 27, 92, 0.35)',
         borderWidth: 1,
         borderColor: 'rgba(244, 114, 182, 0.45)',
     },
     filterBadgeText: {
         color: '#FBCFE8',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     videoPauseBtn: {
@@ -1448,9 +1449,9 @@ const styles = StyleSheet.create({
         right: 14,
         top: 14,
         zIndex: 25,
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(17),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.45)',
@@ -1463,37 +1464,37 @@ const styles = StyleSheet.create({
     },
     composerTools: {
         flexDirection: 'row',
-        gap: 10,
-        paddingHorizontal: 16,
-        paddingTop: 10,
-        paddingBottom: 4,
+        gap: ox(10),
+        paddingHorizontal: ox(16),
+        paddingTop: ox(10),
+        paddingBottom: ox(4),
     },
     composerToolBtn: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        borderRadius: 12,
-        paddingVertical: 10,
+        gap: ox(8),
+        borderRadius: ox(12),
+        paddingVertical: ox(10),
         backgroundColor: 'rgba(244, 114, 182, 0.12)',
         borderWidth: 1,
         borderColor: 'rgba(244, 114, 182, 0.28)',
     },
     composerToolText: {
         color: '#FBCFE8',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     imageFilterRow: {
-        paddingHorizontal: 16,
-        paddingBottom: 10,
-        gap: 8,
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(10),
+        gap: ox(8),
     },
     imageFilterChip: {
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
         backgroundColor: 'rgba(255,255,255,0.06)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
@@ -1504,38 +1505,38 @@ const styles = StyleSheet.create({
     },
     imageFilterChipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     imageFilterChipTextActive: {
         color: '#FBCFE8',
     },
     videoCoverWrap: {
-        marginHorizontal: 16,
-        marginTop: 10,
-        marginBottom: 4,
+        marginHorizontal: ox(16),
+        marginTop: ox(10),
+        marginBottom: ox(4),
     },
     inputContainer: {
-        padding: 16,
+        padding: ox(16),
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.06)',
     },
     textInput: {
         ...glassSurface,
-        borderRadius: 14,
-        padding: 16,
+        borderRadius: ox(14),
+        padding: ox(16),
         color: '#FFFFFF',
-        fontSize: 16,
-        minHeight: 120,
+        fontSize: ox(16),
+        minHeight: ox(120),
         textAlignVertical: 'top',
     },
     captionCounterRow: {
-        marginTop: 8,
+        marginTop: ox(8),
         alignItems: 'flex-end',
     },
     captionCounterText: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     captionCounterWarn: {
@@ -1547,20 +1548,20 @@ const styles = StyleSheet.create({
     locationInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: ox(12),
         ...glassSurface,
-        borderRadius: 14,
-        padding: 16,
+        borderRadius: ox(14),
+        padding: ox(16),
     },
     locationInput: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
     },
     taggedUsersPreview: {
-        marginTop: 8,
+        marginTop: ox(8),
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
 });

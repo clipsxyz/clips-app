@@ -1,4 +1,5 @@
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 
 export type NotificationType =
     | 'sticker'
@@ -82,10 +83,8 @@ export async function createNotification(notification: Omit<Notification, 'id' |
     userNotifications.unshift(notif); // Add to beginning (newest first)
     notifications.set(notification.toHandle, userNotifications);
 
-    if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('notificationCreated', { detail: notif }));
-        window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: notification.toHandle } }));
-    }
+    dispatchBrowserEvent('notificationCreated', notif as unknown as Record<string, unknown>);
+    dispatchBrowserEvent('notificationsUpdated', { handle: notification.toHandle });
 
     return notif;
 }
@@ -169,7 +168,7 @@ export async function markNotificationRead(notificationId: string, forHandle: st
         try {
             const apiClient = await import('./client');
             await apiClient.markNotificationReadApi(notificationId);
-            window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: forHandle } }));
+            dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
             return;
         } catch (error) {
             console.warn('Failed to mark notification read via API, falling back to local store:', error);
@@ -180,7 +179,7 @@ export async function markNotificationRead(notificationId: string, forHandle: st
     const notif = userNotifications.find(n => n.id === notificationId);
     if (notif) {
         notif.read = true;
-        window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: forHandle } }));
+        dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
     }
 }
 
@@ -190,7 +189,7 @@ export async function markAllNotificationsRead(forHandle: string): Promise<void>
         try {
             const apiClient = await import('./client');
             await apiClient.markAllNotificationsReadApi();
-            window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: forHandle } }));
+            dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
             return;
         } catch (error) {
             console.warn('Failed to mark all notifications read via API, falling back to local store:', error);
@@ -199,7 +198,7 @@ export async function markAllNotificationsRead(forHandle: string): Promise<void>
 
     const userNotifications = notifications.get(forHandle) || [];
     userNotifications.forEach(n => n.read = true);
-    window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: forHandle } }));
+    dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
 }
 
 export async function getUnreadNotificationCount(forHandle: string): Promise<number> {
@@ -211,7 +210,7 @@ export async function deleteNotification(notificationId: string, forHandle: stri
     const userNotifications = notifications.get(forHandle) || [];
     const filtered = userNotifications.filter(n => n.id !== notificationId);
     notifications.set(forHandle, filtered);
-    window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: forHandle } }));
+    dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
 }
 
 

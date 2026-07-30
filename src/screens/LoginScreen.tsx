@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -6,14 +6,12 @@ import {
     TextInput,
     TouchableOpacity,
     ScrollView,
-    ActivityIndicator,
     Alert,
-    Image,
     Modal,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { glassPanel, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
+import { glassPanel } from '../theme/gazetteerAmbientNative';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +23,13 @@ import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native'
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
+import { ox } from '../constants/nativeOpticalScale';
+
+type AuthMode = 'signup' | 'login';
+
+function resolveAuthMode(raw: unknown): AuthMode {
+    return raw === 'login' ? 'login' : 'signup';
+}
 
 const MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -33,9 +38,9 @@ const MONTHS = [
 
 const MIN_AGE = 13;
 
-export default function LoginScreen({ navigation }: any) {
+export default function LoginScreen({ navigation, route }: any) {
     const { login } = useAuth();
-    const [mode, setMode] = useState<'signup' | 'login'>('signup');
+    const [mode, setMode] = useState<AuthMode>(() => resolveAuthMode(route?.params?.mode));
     const [step, setStep] = useState(1);
     const [busy, setBusy] = useState(false);
     const [errorText, setErrorText] = useState('');
@@ -67,6 +72,26 @@ export default function LoginScreen({ navigation }: any) {
     const [profilePicture, setProfilePicture] = useState<string | null>(null);
 
     const getFieldError = (key: string) => fieldErrors[key] || '';
+
+    useEffect(() => {
+        const nextMode = resolveAuthMode(route?.params?.mode);
+        setMode(nextMode);
+        if (nextMode === 'signup') setStep(1);
+        setErrorText('');
+        setFieldErrors({});
+    }, [route?.params?.mode]);
+
+    const goToFeed = () => {
+        navigation.replace('MainTabs', { screen: 'Home' });
+    };
+
+    const switchMode = (next: AuthMode) => {
+        setMode(next);
+        setStep(1);
+        setErrorText('');
+        setFieldErrors({});
+        navigation.setParams?.({ mode: next });
+    };
 
     const signupStepTitle =
         step === 1 ? 'Create your account' : step === 2 ? 'About you' : 'Add a photo';
@@ -169,7 +194,7 @@ export default function LoginScreen({ navigation }: any) {
             };
             login(mergedUser);
             setBusy(false);
-            navigation.replace('Home');
+            goToFeed();
             return;
         } catch (err: any) {
             // Backend unavailable or login failed - fallback to local registration
@@ -184,7 +209,7 @@ export default function LoginScreen({ navigation }: any) {
                 return;
             }
             login(localRecord.userData);
-            navigation.replace('Home');
+            goToFeed();
         } finally {
             setBusy(false);
         }
@@ -281,7 +306,7 @@ export default function LoginScreen({ navigation }: any) {
         await saveLocalRegistration(email.trim(), password, userData);
         login(userData);
         setBusy(false);
-        navigation.replace('Home');
+        goToFeed();
     };
 
     const handleProfilePictureSelect = () => {
@@ -306,31 +331,15 @@ export default function LoginScreen({ navigation }: any) {
                     contentContainerStyle={styles.scrollContent}
                     keyboardShouldPersistTaps="handled"
                 >
-                <View style={styles.form}>
+                <View style={[styles.form, mode === 'login' && styles.loginFormShell]}>
+                    <View style={mode === 'login' ? styles.loginFormInner : undefined}>
                     {/* Header */}
                     <View style={styles.header}>
+                        <Text style={styles.tagline}>No algorithms just places</Text>
                         <Text style={styles.title}>Gazetteer</Text>
-                        {mode === 'signup' && step === 1 ? (
-                            <Text style={styles.tagline}>No algorithms just places</Text>
-                        ) : null}
                         <Text style={styles.subtitle}>
-                            {mode === 'login' ? 'Sign in to continue' : signupStepTitle}
+                            {mode === 'login' ? 'Log in to your account' : signupStepTitle}
                         </Text>
-
-                        <View style={styles.modeRow}>
-                            <TouchableOpacity
-                                onPress={() => setMode('signup')}
-                                style={[styles.modePill, mode === 'signup' && styles.modePillActive]}
-                            >
-                                <Text style={[styles.modePillText, mode === 'signup' && styles.modePillTextActive]}>Sign up</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => setMode('login')}
-                                style={[styles.modePill, mode === 'login' && styles.modePillActive]}
-                            >
-                                <Text style={[styles.modePillText, mode === 'login' && styles.modePillTextActive]}>Sign in</Text>
-                            </TouchableOpacity>
-                        </View>
 
                         {mode === 'signup' ? (
                             <View style={styles.progressTrack}>
@@ -351,19 +360,21 @@ export default function LoginScreen({ navigation }: any) {
                                 style={styles.input}
                                 keyboardType="email-address"
                                 autoCapitalize="none"
+                                autoComplete="email"
                             />
                             {!!getFieldError('loginEmail') && <Text style={styles.fieldErrorText}>{getFieldError('loginEmail')}</Text>}
-                            <View style={styles.passwordRow}>
+                            <View style={styles.passwordField}>
                                 <TextInput
                                     value={loginPassword}
                                     onChangeText={setLoginPassword}
-                                    placeholder="Password"
+                                    placeholder="Password (8+ characters)"
                                     placeholderTextColor="#9CA3AF"
-                                    style={[styles.input, { flex: 1 }]}
+                                    style={[styles.input, styles.passwordInput]}
                                     secureTextEntry={!showLoginPassword}
+                                    autoComplete="password"
                                 />
-                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowLoginPassword((v) => !v)}>
-                                    <Icon name={showLoginPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
+                                <TouchableOpacity style={styles.eyeOverlay} onPress={() => setShowLoginPassword((v) => !v)}>
+                                    <Icon name={showLoginPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </View>
                             {!!getFieldError('loginPassword') && <Text style={styles.fieldErrorText}>{getFieldError('loginPassword')}</Text>}
@@ -372,11 +383,19 @@ export default function LoginScreen({ navigation }: any) {
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={handleLoginSubmit}
-                                style={styles.submitButton}
+                                style={[styles.submitButton, styles.loginSubmitButton]}
                                 disabled={busy}
                             >
-                                <Text style={styles.submitButtonText}>{busy ? 'Signing in...' : 'Sign in'}</Text>
+                                <Text style={[styles.submitButtonText, styles.loginSubmitButtonText]}>
+                                    {busy ? 'Logging in…' : 'Log in'}
+                                </Text>
                             </TouchableOpacity>
+                            <Text style={styles.switchModeText}>
+                                Don&apos;t have an account?{' '}
+                                <Text style={styles.linkText} onPress={() => switchMode('signup')}>
+                                    Sign up
+                                </Text>
+                            </Text>
                         </View>
                     )}
 
@@ -423,7 +442,7 @@ export default function LoginScreen({ navigation }: any) {
                                     secureTextEntry={!showSignupPassword}
                                 />
                                 <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupPassword((v) => !v)}>
-                                    <Icon name={showSignupPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
+                                    <Icon name={showSignupPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </View>
                             {!!getFieldError('password') && <Text style={styles.fieldErrorText}>{getFieldError('password')}</Text>}
@@ -438,7 +457,7 @@ export default function LoginScreen({ navigation }: any) {
                                     secureTextEntry={!showSignupConfirmPassword}
                                 />
                                 <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupConfirmPassword((v) => !v)}>
-                                    <Icon name={showSignupConfirmPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
+                                    <Icon name={showSignupConfirmPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </View>
                             {!!getFieldError('confirmPassword') && <Text style={styles.fieldErrorText}>{getFieldError('confirmPassword')}</Text>}
@@ -514,7 +533,7 @@ export default function LoginScreen({ navigation }: any) {
                             {!!getFieldError('homeLocation') && <Text style={styles.fieldErrorText}>{getFieldError('homeLocation')}</Text>}
                             {homeLocationComplete ? (
                                 <View style={styles.locationOk}>
-                                    <Icon name="checkmark-circle" size={18} color="#7A8AF0" />
+                                    <Icon name="checkmark-circle" size={ox(18)} color="#7A8AF0" />
                                     <View style={{ flex: 1 }}>
                                         <Text style={styles.locationOkTitle}>Home area set</Text>
                                         <Text style={styles.locationOkSub}>
@@ -540,7 +559,7 @@ export default function LoginScreen({ navigation }: any) {
                             </View>
                             <View style={styles.photoActions}>
                                 <TouchableOpacity onPress={handleProfilePictureSelect} style={styles.photoButton}>
-                                    <Icon name="camera" size={20} color="#FFFFFF" />
+                                    <Icon name="camera" size={ox(20)} color="#FFFFFF" />
                                     <Text style={styles.photoButtonText}>Choose photo</Text>
                                 </TouchableOpacity>
                                 {profilePicture ? (
@@ -552,6 +571,7 @@ export default function LoginScreen({ navigation }: any) {
                             <Text style={styles.photoHint}>Optional — initials are used if you skip.</Text>
                         </View>
                     )}
+                    </View>
                 </View>
             </ScrollView>
 
@@ -561,7 +581,7 @@ export default function LoginScreen({ navigation }: any) {
                         <View style={styles.consentBox}>
                             <Text style={styles.consentTitle}>Required to continue</Text>
                             <TouchableOpacity style={styles.checkRow} onPress={() => setAcceptedTerms((v) => !v)}>
-                                <Icon name={acceptedTerms ? 'checkbox' : 'square-outline'} size={20} color={acceptedTerms ? '#7A8AF0' : '#9CA3AF'} />
+                                <Icon name={acceptedTerms ? 'checkbox' : 'square-outline'} size={ox(20)} color={acceptedTerms ? '#7A8AF0' : '#9CA3AF'} />
                                 <Text style={styles.checkLabel}>
                                     I accept{' '}
                                     <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>
@@ -571,7 +591,7 @@ export default function LoginScreen({ navigation }: any) {
                             </TouchableOpacity>
                             {!!getFieldError('terms') && <Text style={styles.fieldErrorText}>{getFieldError('terms')}</Text>}
                             <TouchableOpacity style={styles.checkRow} onPress={() => setAcceptedGuidelines((v) => !v)}>
-                                <Icon name={acceptedGuidelines ? 'checkbox' : 'square-outline'} size={20} color={acceptedGuidelines ? '#7A8AF0' : '#9CA3AF'} />
+                                <Icon name={acceptedGuidelines ? 'checkbox' : 'square-outline'} size={ox(20)} color={acceptedGuidelines ? '#7A8AF0' : '#9CA3AF'} />
                                 <Text style={styles.checkLabel}>
                                     I accept{' '}
                                     <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>
@@ -600,7 +620,15 @@ export default function LoginScreen({ navigation }: any) {
                         </Text>
                     </TouchableOpacity>
                     {step === 1 ? (
-                        <Text style={styles.termsText}>You must be at least 13 years old.</Text>
+                        <>
+                            <Text style={styles.termsText}>You must be at least 13 years old.</Text>
+                            <Text style={styles.switchModeText}>
+                                Already have an account?{' '}
+                                <Text style={styles.linkText} onPress={() => switchMode('login')}>
+                                    Log in
+                                </Text>
+                            </Text>
+                        </>
                     ) : (
                         <Text style={styles.termsText}>By signing up, you agree to our terms and community guidelines.</Text>
                     )}
@@ -655,28 +683,39 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
-        padding: 16,
-        paddingBottom: 8,
+        padding: ox(16),
+        paddingBottom: ox(8),
     },
     form: {
         ...glassPanel,
-        borderRadius: 20,
+        borderRadius: ox(20),
         maxWidth: 400,
         width: '100%',
         alignSelf: 'center',
     },
+    loginFormShell: {
+        borderRadius: ox(16),
+        padding: ox(2),
+        backgroundColor: '#d4af37',
+        borderWidth: 0,
+    },
+    loginFormInner: {
+        borderRadius: ox(14),
+        backgroundColor: '#000000',
+        overflow: 'hidden',
+    },
     tagline: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#6B7280',
-        marginBottom: 8,
+        marginBottom: ox(8),
         textAlign: 'center',
     },
     progressTrack: {
-        marginTop: 16,
+        marginTop: ox(16),
         height: 2,
         width: 200,
         maxWidth: '80%',
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: 'rgba(255,255,255,0.1)',
         overflow: 'hidden',
         alignSelf: 'center',
@@ -684,36 +723,36 @@ const styles = StyleSheet.create({
     progressFill: {
         height: '100%',
         backgroundColor: '#7A8AF0',
-        borderRadius: 999,
+        borderRadius: ox(999),
     },
     header: {
-        padding: 40,
-        paddingBottom: 24,
+        padding: ox(40),
+        paddingBottom: ox(24),
         alignItems: 'center',
     },
     title: {
-        fontSize: 28,
+        fontSize: ox(28),
         fontWeight: '300',
         color: '#FFFFFF',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     subtitle: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
-        marginBottom: 24,
+        marginBottom: ox(24),
         textAlign: 'center',
     },
     modeRow: {
         flexDirection: 'row',
-        gap: 8,
-        marginBottom: 16,
+        gap: ox(8),
+        marginBottom: ox(16),
     },
     modePill: {
         borderWidth: 1,
         borderColor: '#374151',
-        borderRadius: 999,
-        paddingHorizontal: 14,
-        paddingVertical: 6,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(6),
         backgroundColor: '#111827',
     },
     modePillActive: {
@@ -722,7 +761,7 @@ const styles = StyleSheet.create({
     },
     modePillText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     modePillTextActive: {
@@ -731,25 +770,41 @@ const styles = StyleSheet.create({
     errorText: {
         color: '#FCA5A5',
         textAlign: 'center',
-        fontSize: 12,
-        marginBottom: 8,
-        paddingHorizontal: 20,
+        fontSize: ox(12),
+        marginBottom: ox(8),
+        paddingHorizontal: ox(20),
     },
     fieldErrorText: {
         color: '#FCA5A5',
-        fontSize: 11,
-        marginTop: -6,
-        marginBottom: 2,
+        fontSize: ox(11),
+        marginTop: ox(-6),
+        marginBottom: ox(2),
     },
     passwordRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
+    },
+    passwordField: {
+        position: 'relative',
+        width: '100%',
+    },
+    passwordInput: {
+        paddingRight: ox(44),
+    },
+    eyeOverlay: {
+        position: 'absolute',
+        right: 8,
+        top: 0,
+        bottom: 0,
+        width: ox(36),
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     eyeButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(10),
         backgroundColor: '#111827',
         borderWidth: 1,
         borderColor: '#374151',
@@ -757,75 +812,81 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     forgotText: {
-        color: '#93C5FD',
-        fontSize: 12,
+        color: '#7A8AF0',
+        fontSize: ox(12),
         textAlign: 'right',
-        marginBottom: 8,
+        marginBottom: ox(8),
+    },
+    switchModeText: {
+        color: '#9CA3AF',
+        fontSize: ox(12),
+        textAlign: 'center',
+        marginTop: ox(4),
     },
     stepContent: {
-        paddingHorizontal: 20,
-        paddingBottom: 16,
-        gap: 12,
+        paddingHorizontal: ox(20),
+        paddingBottom: ox(16),
+        gap: ox(12),
     },
     step3Content: {
         alignItems: 'center',
     },
     step3Handle: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '600',
     },
     step3Location: {
         color: '#6B7280',
-        fontSize: 12,
+        fontSize: ox(12),
         textAlign: 'center',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     fieldLabel: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#9CA3AF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     hintText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#6B7280',
     },
     warnText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#FCD34D',
     },
     linkText: {
         color: '#7A8AF0',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     locationOk: {
         flexDirection: 'row',
-        gap: 8,
-        marginTop: 4,
+        gap: ox(8),
+        marginTop: ox(4),
     },
     locationOkTitle: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     locationOkSub: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginTop: 2,
+        fontSize: ox(12),
+        marginTop: ox(2),
     },
     input: {
         width: '100%',
-        borderRadius: 12,
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: 'rgba(255,255,255,0.05)',
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        fontSize: 14,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        fontSize: ox(14),
         color: '#F9FAFB',
     },
     pickerContainer: {
         width: '100%',
-        borderRadius: 12,
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: 'rgba(255,255,255,0.05)',
@@ -836,11 +897,11 @@ const styles = StyleSheet.create({
         color: '#F9FAFB',
     },
     interestsContainer: {
-        marginTop: 8,
+        marginTop: ox(8),
     },
     birthdateRow: {
         flexDirection: 'row',
-        gap: 8,
+        gap: ox(8),
     },
     birthInput: {
         flex: 1,
@@ -850,16 +911,16 @@ const styles = StyleSheet.create({
     },
     accountTypeRow: {
         flexDirection: 'row',
-        gap: 8,
-        marginTop: 2,
+        gap: ox(8),
+        marginTop: ox(2),
     },
     accountTypePill: {
         flex: 1,
-        borderRadius: 12,
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         alignItems: 'center',
     },
     accountTypePillActive: {
@@ -867,7 +928,7 @@ const styles = StyleSheet.create({
     },
     accountTypeText: {
         color: '#D1D5DB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '600',
     },
     accountTypeTextActive: {
@@ -876,100 +937,100 @@ const styles = StyleSheet.create({
     checkRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        marginTop: 8,
+        gap: ox(8),
+        marginTop: ox(8),
     },
     checkLabel: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     interestsLabel: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#9CA3AF',
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     interestsChips: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
-        marginTop: 12,
+        gap: ox(8),
+        marginTop: ox(12),
     },
     interestChip: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        gap: ox(6),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
         backgroundColor: '#3B82F6',
-        borderRadius: 4,
+        borderRadius: ox(4),
     },
     interestChipText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     avatarContainer: {
         alignItems: 'center',
-        marginBottom: 24,
+        marginBottom: ox(24),
     },
     photoButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
         width: '100%',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         backgroundColor: '#3B82F6',
-        borderRadius: 4,
+        borderRadius: ox(4),
     },
     photoButtonText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     removeButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
         width: '100%',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         backgroundColor: '#E5E7EB',
-        borderRadius: 4,
-        marginTop: 12,
+        borderRadius: ox(4),
+        marginTop: ox(12),
     },
     removeButtonText: {
         color: '#111827',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     photoHint: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#6B7280',
         textAlign: 'center',
-        marginTop: 8,
+        marginTop: ox(8),
     },
     footer: {
-        paddingHorizontal: 20,
-        paddingTop: 12,
-        paddingBottom: 16,
+        paddingHorizontal: ox(20),
+        paddingTop: ox(12),
+        paddingBottom: ox(16),
         borderTopWidth: 1,
         borderTopColor: 'rgba(255,255,255,0.1)',
-        gap: 10,
+        gap: ox(10),
         maxWidth: 400,
         width: '100%',
         alignSelf: 'center',
         backgroundColor: '#000',
     },
     consentBox: {
-        borderRadius: 12,
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: 'rgba(255,255,255,0.05)',
-        padding: 12,
-        gap: 10,
+        padding: ox(12),
+        gap: ox(10),
     },
     consentTitle: {
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
         color: '#D1D5DB',
     },
@@ -977,21 +1038,21 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     removePhotoBtn: {
-        paddingVertical: 10,
-        paddingHorizontal: 16,
+        paddingVertical: ox(10),
+        paddingHorizontal: ox(16),
     },
     removePhotoText: {
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     submitButton: {
         width: '100%',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
         backgroundColor: '#FFFFFF',
-        borderRadius: 12,
+        borderRadius: ox(12),
         alignItems: 'center',
     },
     submitButtonDisabled: {
@@ -999,53 +1060,59 @@ const styles = StyleSheet.create({
     },
     submitButtonText: {
         color: '#111827',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
+    },
+    loginSubmitButton: {
+        marginTop: ox(8),
+    },
+    loginSubmitButtonText: {
+        fontWeight: '700',
     },
     backButton: {
         flex: 1,
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         backgroundColor: '#FFFFFF',
-        borderRadius: 12,
+        borderRadius: ox(12),
         alignItems: 'center',
     },
     backButtonText: {
         color: '#111827',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     backLink: {
         alignItems: 'center',
-        paddingVertical: 4,
+        paddingVertical: ox(4),
     },
     backLinkText: {
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     termsText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#9CA3AF',
         textAlign: 'center',
-        marginTop: 16,
+        marginTop: ox(16),
     },
     forgotModalCard: {
-        margin: 24,
+        margin: ox(24),
         marginTop: '40%',
         backgroundColor: '#030712',
-        borderRadius: 16,
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: '#374151',
-        padding: 16,
-        gap: 12,
+        padding: ox(16),
+        gap: ox(12),
     },
     forgotTitle: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '700',
     },
     forgotActions: {
         flexDirection: 'row',
-        gap: 8,
+        gap: ox(8),
     },
 });
 

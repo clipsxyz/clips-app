@@ -14,6 +14,7 @@ import { useAuth } from '../context/Auth';
 import { getCollection, getCollectionPosts } from '../api/collections';
 import type { Collection, Post } from '../types';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function CollectionFeedScreen({ route, navigation }: any) {
     const { collectionId, collectionName } = route.params;
@@ -55,11 +56,11 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{collectionName || 'Collection'}</Text>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="close" size={24} color="#FFFFFF" />
+                    <Icon name="close" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
 
@@ -83,7 +84,7 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
                 )}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
-                        <Icon name="bookmark-outline" size={48} color="#6B7280" />
+                        <Icon name="bookmark-outline" size={ox(48)} color="#6B7280" />
                         <Text style={styles.emptyText}>No posts in this collection yet</Text>
                     </View>
                 }
@@ -101,19 +102,19 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     infoContainer: {
-        padding: 16,
+        padding: ox(16),
     },
     postCount: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     postItem: {
@@ -137,12 +138,12 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 40,
+        padding: ox(40),
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#6B7280',
-        marginTop: 16,
+        marginTop: ox(16),
     },
 });
 

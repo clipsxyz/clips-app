@@ -4,7 +4,10 @@ import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolu
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
-import { appendMessage } from '../api/messages';
+import {
+    deliverStoryReactionToInbox,
+    deliverStoryReplyToInbox,
+} from '../utils/sendStoryInteractionToInbox';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { isProfilePrivate, canSendMessage, createFollowRequest } from '../api/privacy';
@@ -1143,6 +1146,23 @@ export default function StoriesPage() {
             await addStoryReaction(storyId, user.id, user.handle, emoji);
             setShowEmojiPicker(false);
             setIsMuted(keepMuted);
+            const toHandle = currentGroup?.userHandle;
+            if (
+                toHandle &&
+                toHandle.trim().toLowerCase() !== user.handle.trim().toLowerCase()
+            ) {
+                try {
+                    await deliverStoryReactionToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        emoji,
+                    });
+                } catch (inboxError) {
+                    console.warn('Story reaction inbox delivery failed:', inboxError);
+                }
+            }
         } catch (error) {
             console.error('Error adding reaction:', error);
             // Revert optimistic reaction on failure.
@@ -1243,71 +1263,24 @@ export default function StoriesPage() {
         if (!currentStory || !user?.id || !user?.handle || !replyText.trim()) return;
         try {
             await addStoryReply(currentStory.id, user.id, user.handle, replyText);
-            // Also append to chat between replier and story owner
+            // Instagram-style: also land in the story owner's Messages inbox.
             const toHandle = currentGroup?.userHandle;
-            if (toHandle) {
-                // Attach a stable thumbnail so DM shows which story was replied to.
-                const storyPreview = await generateStoryReplyThumbnail();
-                let storyThumb = storyPreview?.previewUrl;
-                const sharedPostForContext =
-                    currentStory.sharedFromPost && !originalPost
-                        ? await getPostById(currentStory.sharedFromPost, user.id)
-                        : null;
-                const postForContext = originalPost || sharedPostForContext;
-                // If the story only had `sharedFromPost` and `originalPost` was not loaded yet, resolve media for the preview.
-                if (!storyThumb && postForContext) {
-                    const u = (postForContext.mediaUrl || '').trim() || (postForContext.mediaItems?.find((m) => m.type === 'image' || m.type === 'video')?.url || '').trim();
-                    if (u) {
-                        const isVid =
-                            /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(u) ||
-                            postForContext.mediaType === 'video' ||
-                            postForContext.mediaItems?.[0]?.type === 'video';
-                        if (isVid) {
-                            const cap = await captureVideoFrameDataUrl(u);
-                            storyThumb = cap || u;
-                        } else {
-                            storyThumb = u;
-                        }
-                    }
-                }
-                const contextOwner = (currentStory.sharedFromUser || '').trim()
-                    || (currentStory.sharedFromPost ? (postForContext?.userHandle || toHandle) : toHandle);
-                const rawContextText = currentStory.sharedFromPost
-                    ? (postForContext?.text || currentStory.text || '')
-                    : (currentStory.text || '');
-                const storyContextText = rawContextText.trim().slice(0, 120);
-                const normalizedReply = replyText.trim();
-                const isVisualStory =
-                    !!currentStory.mediaUrl ||
-                    currentStory.mediaType === 'image' ||
-                    currentStory.mediaType === 'video' ||
-                    (currentStory.sharedFromPost &&
-                        !!((postForContext?.mediaUrl && postForContext.mediaUrl.trim() !== '') ||
-                            (postForContext?.mediaItems && postForContext.mediaItems.length > 0)));
-                if (storyThumb) {
-                    await appendMessage(user.handle, toHandle, {
-                        imageUrl: storyThumb,
-                        storyId: currentStory.id,
-                        storyContextOwner: contextOwner || undefined,
+            const isSelfStory =
+                !!toHandle &&
+                !!user.handle &&
+                toHandle.trim().toLowerCase() === user.handle.trim().toLowerCase();
+            if (toHandle && !isSelfStory) {
+                try {
+                    await deliverStoryReplyToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        replyText: replyText.trim(),
                     });
-                } else {
-                    const contextBubbleText = storyContextText
-                        ? `Replying to @${contextOwner}'s story:\n"${storyContextText}"`
-                        : `Replying to @${contextOwner}'s story`;
-                    await appendMessage(user.handle, toHandle, {
-                        text: contextBubbleText,
-                        isSystemMessage: true,
-                    });
+                } catch (inboxError) {
+                    console.warn('Story reply inbox delivery failed:', inboxError);
                 }
-                await appendMessage(user.handle, toHandle, {
-                    text: normalizedReply,
-                    imageUrl: isVisualStory ? undefined : storyThumb,
-                    storyId: currentStory.id,
-                    storyContextText: isVisualStory ? undefined : (storyContextText || undefined),
-                    storyContextOwner: contextOwner || undefined,
-                });
-                // Optional: system echo for owner (kept same conversation id)
-                await appendMessage(toHandle, user.handle, { text: `You replied to their story`, isSystemMessage: true });
                 startDeliveryFx('message', toHandle);
             }
             setReplyText('');

@@ -12,6 +12,8 @@ import { useAuth } from '../context/Auth';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import { ox } from '../constants/nativeOpticalScale';
+
 
 type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
 type SearchRefinement = 'all' | 'local' | 'regional';
@@ -438,13 +440,13 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         accessibilityLabel="Go back"
                         style={styles.backBtn}
                     >
-                        <Icon name="arrow-back" size={22} color="#fff" />
+                        <Icon name="arrow-back" size={ox(22)} color="#fff" />
                     </TouchableOpacity>
                     <Text style={styles.title}>Search</Text>
                 </View>
 
                 <View style={styles.searchBar}>
-                    <Icon name="search" size={18} color="#9CA3AF" />
+                    <Icon name="search" size={ox(18)} color="#9CA3AF" />
                     <TextInput
                         style={styles.searchInput}
                         placeholder={modePlaceholder[searchMode]}
@@ -458,7 +460,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                     />
                     {!!searchQuery && (
                         <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={8}>
-                            <Icon name="close-circle" size={18} color="#6B7280" />
+                            <Icon name="close-circle" size={ox(18)} color="#6B7280" />
                         </TouchableOpacity>
                     )}
                 </View>
@@ -480,7 +482,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                     style={styles.placeSuggestionRow}
                                     onPress={() => onPlaceSuggestionPress(s)}
                                 >
-                                    <Icon name={iconName} size={18} color="#A78BFA" />
+                                    <Icon name={iconName} size={ox(18)} color="#A78BFA" />
                                     <View style={styles.placeSuggestionTextWrap}>
                                         <Text style={styles.placeSuggestionName} numberOfLines={2}>{s.display_name || s.name}</Text>
                                         <Text style={styles.placeSuggestionMeta}>
@@ -507,7 +509,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                 onPress={() => onModeChipPress(chip.id)}
                                 style={[styles.chip, active && styles.chipActive]}
                             >
-                                <Icon name={chip.icon as any} size={14} color={active ? '#111' : '#E5E7EB'} />
+                                <Icon name={chip.icon as any} size={ox(14)} color={active ? '#111' : '#E5E7EB'} />
                                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip.label}</Text>
                             </TouchableOpacity>
                         );
@@ -536,7 +538,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                             onPress={() => toggleSaveSearch(searchQuery, searchMode)}
                             style={styles.saveSearchBtn}
                         >
-                            <Icon name={isCurrentQuerySaved ? 'bookmark' : 'bookmark-outline'} size={16} color="#F8D26A" />
+                            <Icon name={isCurrentQuerySaved ? 'bookmark' : 'bookmark-outline'} size={ox(16)} color="#F8D26A" />
                         </TouchableOpacity>
                     </View>
                 )}
@@ -552,7 +554,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         <View>
                             {filteredUsers.map((u: any) => (
                                 <TouchableOpacity key={u.handle} onPress={() => goToUser(u.handle)} style={styles.resultItem}>
-                                    <Avatar src={u.avatar_url || u.avatarUrl} name={(u.handle || 'User').split('@')[0]} size={40} />
+                                    <Avatar src={u.avatar_url || u.avatarUrl} name={(u.handle || 'User').split('@')[0]} size={ox(40)} />
                                     <View style={styles.resultInfo}>
                                         <Text style={styles.resultName}>{u.handle}</Text>
                                         <Text style={styles.resultMeta}>{u.display_name || 'User'}</Text>
@@ -575,7 +577,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                 const kindLabel = kind === 'venue' ? 'Venue' : kind === 'landmark' ? 'Landmark' : 'Location';
                                 return (
                                     <TouchableOpacity key={`${loc.name}-${loc.country || ''}`} onPress={() => goToLocation(loc.name, kind)} style={styles.resultItem}>
-                                        <Icon name={iconName} size={20} color="#A78BFA" />
+                                        <Icon name={iconName} size={ox(20)} color="#A78BFA" />
                                         <View style={styles.resultInfo}>
                                             <Text style={styles.resultName}>{loc.name}</Text>
                                             <Text style={styles.resultMeta}>
@@ -703,7 +705,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                             <View style={styles.quickPinWrap}>
                                                 <Icon
                                                     name="location"
-                                                    size={12}
+                                                    size={ox(12)}
                                                     color={QUICK_PICK_PIN_COLORS[idx % QUICK_PICK_PIN_COLORS.length]}
                                                 />
                                             </View>
@@ -730,7 +732,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                         style={styles.popularCard}
                                     >
                                         <View style={styles.quickCardTitleRow}>
-                                            <Icon name="business-outline" size={14} color="#fff" />
+                                            <Icon name="business-outline" size={ox(14)} color="#fff" />
                                             <Text style={styles.quickCardTitle} numberOfLines={1}>{name}</Text>
                                         </View>
                                         <Text style={styles.quickCardSub}>Popular venue</Text>
@@ -754,7 +756,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                         style={styles.popularCard}
                                     >
                                         <View style={styles.quickCardTitleRow}>
-                                            <Icon name="flag-outline" size={14} color="#fff" />
+                                            <Icon name="flag-outline" size={ox(14)} color="#fff" />
                                             <Text style={styles.quickCardTitle} numberOfLines={1}>{name}</Text>
                                         </View>
                                         <Text style={styles.quickCardSub}>Popular landmark</Text>
@@ -773,7 +775,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                 suggestedUsers.map((u) => (
                                     <View key={u.handle} style={styles.suggestedRow}>
                                         <TouchableOpacity style={styles.suggestedRowLeft} onPress={() => goToUser(u.handle)}>
-                                            <Avatar src={u.avatar_url} name={(u.handle || 'User').split('@')[0]} size={36} />
+                                            <Avatar src={u.avatar_url} name={(u.handle || 'User').split('@')[0]} size={ox(36)} />
                                             <View style={styles.resultInfo}>
                                                 <Text style={styles.resultName}>{u.handle}</Text>
                                                 <Text style={styles.resultMeta}>{u.display_name || 'User'}</Text>
@@ -817,25 +819,25 @@ const styles = StyleSheet.create({
         backgroundColor: '#000',
     },
     header: {
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 10,
-        gap: 10,
+        paddingHorizontal: ox(16),
+        paddingTop: ox(8),
+        paddingBottom: ox(10),
+        gap: ox(10),
     },
     headerTop: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     backBtn: {
-        padding: 4,
+        padding: ox(4),
         marginLeft: -4,
     },
     title: {
         color: '#FFFFFF',
-        fontSize: 17,
+        fontSize: ox(17),
         fontWeight: '700',
-        letterSpacing: -0.2,
+        letterSpacing: ox(-0.2),
     },
     searchBar: {
         flexDirection: 'row',
@@ -843,33 +845,33 @@ const styles = StyleSheet.create({
         backgroundColor: '#101010',
         borderWidth: 1,
         borderColor: '#272727',
-        borderRadius: 20,
-        paddingHorizontal: 14,
-        paddingVertical: 11,
-        gap: 8,
+        borderRadius: ox(20),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(11),
+        gap: ox(8),
     },
     searchInput: {
         flex: 1,
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#F3F4F6',
         padding: 0,
     },
     chipRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingVertical: 2,
+        gap: ox(8),
+        paddingVertical: ox(2),
     },
     chip: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        borderRadius: 999,
+        gap: ox(6),
+        borderRadius: ox(999),
         backgroundColor: '#0d0d0f',
         borderWidth: 1,
         borderColor: '#2a2a2a',
-        paddingHorizontal: 14,
-        paddingVertical: 9,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(9),
     },
     chipActive: {
         backgroundColor: '#FFFFFF',
@@ -877,7 +879,7 @@ const styles = StyleSheet.create({
     },
     chipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     chipTextActive: {
@@ -886,15 +888,15 @@ const styles = StyleSheet.create({
     refinementRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     refinementChip: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#2a2a2a',
         backgroundColor: '#0d0d0f',
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
     },
     refinementChipActive: {
         borderColor: '#F8D26A',
@@ -902,7 +904,7 @@ const styles = StyleSheet.create({
     },
     refinementChipText: {
         color: '#D1D5DB',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     refinementChipTextActive: {
@@ -910,22 +912,22 @@ const styles = StyleSheet.create({
     },
     saveSearchBtn: {
         marginLeft: 'auto',
-        padding: 4,
+        padding: ox(4),
     },
     placeSuggestionsContainer: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: '#272727',
         backgroundColor: '#101010',
-        maxHeight: 260,
+        maxHeight: ox(260),
         overflow: 'hidden',
     },
     placeSuggestionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        gap: ox(10),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.08)',
     },
@@ -934,19 +936,19 @@ const styles = StyleSheet.create({
     },
     placeSuggestionName: {
         color: '#F9FAFB',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     placeSuggestionMeta: {
         color: '#9CA3AF',
-        fontSize: 11,
-        marginTop: 2,
+        fontSize: ox(11),
+        marginTop: ox(2),
     },
     placeSuggestionLoading: {
         color: '#9CA3AF',
-        fontSize: 13,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        fontSize: ox(13),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
     },
     loadingContainer: {
         flex: 1,
@@ -959,24 +961,24 @@ const styles = StyleSheet.create({
     resultItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
-        gap: 12,
+        gap: ox(12),
     },
     resultInfo: {
         flex: 1,
     },
     resultName: {
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     resultMeta: {
-        fontSize: 13,
+        fontSize: ox(13),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     postResultItem: {
         width: '33.33%',
@@ -989,70 +991,70 @@ const styles = StyleSheet.create({
         padding: 1,
     },
     emptyState: {
-        padding: 16,
+        padding: ox(16),
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#6B7280',
         textAlign: 'center',
-        marginTop: 40,
+        marginTop: ox(40),
     },
     idleScroll: {
         flex: 1,
     },
     idleContent: {
-        paddingHorizontal: 16,
-        paddingBottom: 28,
-        gap: 14,
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(28),
+        gap: ox(14),
     },
     historyCard: {
-        borderRadius: 24,
+        borderRadius: ox(24),
         backgroundColor: '#050505',
         borderWidth: 1,
         borderColor: '#181818',
-        paddingHorizontal: 12,
-        paddingTop: 12,
-        paddingBottom: 14,
+        paddingHorizontal: ox(12),
+        paddingTop: ox(12),
+        paddingBottom: ox(14),
     },
     sectionHeaderRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     sectionLabel: {
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
-        letterSpacing: 1.6,
+        letterSpacing: ox(1.6),
         textTransform: 'uppercase',
     },
     clearLink: {
         color: '#6B7280',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
     },
     idleHint: {
         color: '#6B7280',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     historyDivider: {
         height: StyleSheet.hairlineWidth,
         backgroundColor: '#181818',
-        marginVertical: 14,
+        marginVertical: ox(14),
     },
     pillWrap: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
+        gap: ox(8),
     },
     historyPill: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: 'rgba(0,0,0,0.6)',
-        paddingHorizontal: 14,
-        paddingVertical: 8,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(8),
         maxWidth: '100%',
     },
     recentPill: {
@@ -1061,58 +1063,58 @@ const styles = StyleSheet.create({
     },
     historyPillText: {
         color: '#F3F4F6',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '500',
     },
     quickPicksHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 2,
+        paddingHorizontal: ox(2),
     },
     quickPicksHint: {
         color: '#6B7280',
-        fontSize: 11,
+        fontSize: ox(11),
     },
     quickGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
+        gap: ox(8),
     },
     quickCard: {
         width: '31.5%',
-        borderRadius: 16,
+        borderRadius: ox(16),
         backgroundColor: 'rgba(0,0,0,0.6)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
-        paddingHorizontal: 10,
-        paddingVertical: 10,
-        gap: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
+        gap: ox(6),
     },
     popularGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
+        gap: ox(8),
     },
     popularCard: {
         width: '48.5%',
-        borderRadius: 16,
+        borderRadius: ox(16),
         backgroundColor: '#000',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        gap: 6,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+        gap: ox(6),
     },
     quickCardTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: ox(6),
     },
     quickPinWrap: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: ox(20),
+        height: ox(20),
+        borderRadius: ox(10),
         backgroundColor: 'rgba(255,255,255,0.05)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
@@ -1122,39 +1124,39 @@ const styles = StyleSheet.create({
     quickCardTitle: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     quickCardSub: {
         color: '#6B7280',
-        fontSize: 10,
+        fontSize: ox(10),
     },
     usersCard: {
-        borderRadius: 24,
+        borderRadius: ox(24),
         backgroundColor: '#050505',
         borderWidth: 1,
         borderColor: '#181818',
-        padding: 12,
-        gap: 10,
+        padding: ox(12),
+        gap: ox(10),
     },
     suggestedRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 8,
+        gap: ox(8),
     },
     suggestedRowLeft: {
         flexDirection: 'row',
         alignItems: 'center',
         flex: 1,
-        gap: 10,
+        gap: ox(10),
     },
     suggestFollowBtn: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: '#2563EB',
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-        minWidth: 86,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(7),
+        minWidth: ox(86),
         alignItems: 'center',
     },
     suggestFollowingBtn: {
@@ -1162,31 +1164,31 @@ const styles = StyleSheet.create({
     },
     suggestFollowText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     loadMoreButton: {
-        margin: 12,
-        borderRadius: 10,
+        margin: ox(12),
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#2a2a2a',
         backgroundColor: '#0d0d0f',
         alignItems: 'center',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
     },
     loadMoreButtonFull: {
         width: '100%',
-        marginTop: 8,
-        borderRadius: 10,
+        marginTop: ox(8),
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#2a2a2a',
         backgroundColor: '#0d0d0f',
         alignItems: 'center',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
     },
     loadMoreText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
 });

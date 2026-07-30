@@ -36,6 +36,7 @@ import {
 import { publishMediaStory24 } from '../utils/publishStoryNative';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 type StoryAudience = 'public' | 'close_friends' | 'only_me';
 type RailAction = 'text' | 'location' | 'link' | 'tag' | 'audience';
@@ -476,7 +477,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
 
                 <View style={[styles.headerOverlay, { paddingTop: Math.max(insets.top, 8) }]}>
                     <TouchableOpacity onPress={handleClose} style={styles.headerBtn} hitSlop={8}>
-                        <Icon name="close" size={24} color="#FFFFFF" />
+                        <Icon name="close" size={ox(24)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Your Story</Text>
                     <TouchableOpacity
@@ -590,11 +591,11 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
             >
                 <View style={modalStyles.header}>
                     <View style={modalStyles.headerLeft}>
-                        <Icon name="location-outline" size={22} color="#FFFFFF" />
+                        <Icon name="location-outline" size={ox(22)} color="#FFFFFF" />
                         <Text style={modalStyles.title}>Add Location</Text>
                     </View>
                     <TouchableOpacity onPress={() => setShowLocationModal(false)} hitSlop={8}>
-                        <Icon name="close" size={20} color="#FFFFFF" />
+                        <Icon name="close" size={ox(20)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
                 <Text style={modalStyles.label}>Location</Text>
@@ -623,11 +624,11 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
             <StoryModalShell visible={showLinkModal} onRequestClose={() => setShowLinkModal(false)}>
                 <View style={modalStyles.header}>
                     <View style={modalStyles.headerLeft}>
-                        <Icon name="link-outline" size={22} color="#FFFFFF" />
+                        <Icon name="link-outline" size={ox(22)} color="#FFFFFF" />
                         <Text style={modalStyles.title}>Add Link</Text>
                     </View>
                     <TouchableOpacity onPress={() => setShowLinkModal(false)} hitSlop={8}>
-                        <Icon name="close" size={20} color="#FFFFFF" />
+                        <Icon name="close" size={ox(20)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
                 <Text style={modalStyles.label}>Link Name / Description</Text>
@@ -677,40 +678,40 @@ const modalStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
-    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    title: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
-    label: { color: '#D1D5DB', fontSize: 14, fontWeight: '500', marginBottom: 8 },
+    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: ox(8) },
+    title: { color: '#FFFFFF', fontSize: ox(20), fontWeight: '700' },
+    label: { color: '#D1D5DB', fontSize: ox(14), fontWeight: '500', marginBottom: ox(8) },
     input: {
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
-        borderRadius: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        borderRadius: ox(12),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         backgroundColor: '#000000',
-        marginBottom: 14,
+        marginBottom: ox(14),
     },
-    actions: { flexDirection: 'row', gap: 12, marginTop: 4 },
+    actions: { flexDirection: 'row', gap: ox(12), marginTop: ox(4) },
     cancelBtn: {
         flex: 1,
-        paddingVertical: 14,
-        borderRadius: 12,
+        paddingVertical: ox(14),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         alignItems: 'center',
     },
-    cancelBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+    cancelBtnText: { color: '#FFFFFF', fontSize: ox(15), fontWeight: '600' },
     confirmBtn: {
         flex: 1,
-        paddingVertical: 14,
-        borderRadius: 12,
+        paddingVertical: ox(14),
+        borderRadius: ox(12),
         backgroundColor: '#FFFFFF',
         alignItems: 'center',
     },
-    confirmBtnText: { color: '#000000', fontSize: 15, fontWeight: '600' },
+    confirmBtnText: { color: '#000000', fontSize: ox(15), fontWeight: '600' },
 });
 
 const styles = StyleSheet.create({
@@ -731,22 +732,22 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        paddingBottom: 10,
+        paddingHorizontal: ox(12),
+        paddingBottom: ox(10),
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
-    headerBtn: { padding: 8, width: 40 },
-    headerTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+    headerBtn: { padding: ox(8), width: ox(40) },
+    headerTitle: { color: '#FFFFFF', fontSize: ox(16), fontWeight: '600' },
     postBtn: {
         backgroundColor: '#FFFFFF',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 999,
-        minWidth: 72,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(8),
+        borderRadius: ox(999),
+        minWidth: ox(72),
         alignItems: 'center',
     },
     postBtnDisabled: { opacity: 0.5 },
-    postBtnText: { color: '#000000', fontSize: 14, fontWeight: '700' },
+    postBtnText: { color: '#000000', fontSize: ox(14), fontWeight: '700' },
     footerOverlay: {
         position: 'absolute',
         left: 0,
@@ -755,10 +756,10 @@ const styles = StyleSheet.create({
         zIndex: 50,
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
-    audienceHint: { textAlign: 'center', fontSize: 11, paddingTop: 8, paddingBottom: 4 },
-    railContent: { alignItems: 'center', paddingTop: 8, paddingBottom: 12 },
-    railSlot: { width: RAIL_SLOT, height: 76, alignItems: 'center', justifyContent: 'center' },
-    railRing: { padding: 2, borderRadius: 999 },
+    audienceHint: { textAlign: 'center', fontSize: ox(11), paddingTop: ox(8), paddingBottom: ox(4) },
+    railContent: { alignItems: 'center', paddingTop: ox(8), paddingBottom: ox(12) },
+    railSlot: { width: RAIL_SLOT, height: ox(76), alignItems: 'center', justifyContent: 'center' },
+    railRing: { padding: ox(2), borderRadius: ox(999) },
     railRingCentered: {
         shadowColor: '#FFFFFF',
         shadowOffset: { width: 0, height: 0 },
@@ -771,21 +772,21 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    railTypeIcon: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-    railTypeIconCentered: { fontSize: 20 },
+    railTypeIcon: { color: '#FFFFFF', fontSize: ox(18), fontWeight: '700' },
+    railTypeIconCentered: { fontSize: ox(20) },
     countBadge: {
         position: 'absolute',
         top: -4,
         right: -6,
-        minWidth: 18,
-        height: 18,
-        borderRadius: 9,
+        minWidth: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
         backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 4,
+        paddingHorizontal: ox(4),
     },
-    countBadgeText: { color: '#000000', fontSize: 10, fontWeight: '700' },
-    railLabel: { marginTop: 4, color: '#FFFFFF', fontSize: 10, opacity: 0.75, textAlign: 'center' },
+    countBadgeText: { color: '#000000', fontSize: ox(10), fontWeight: '700' },
+    railLabel: { marginTop: ox(4), color: '#FFFFFF', fontSize: ox(10), opacity: 0.75, textAlign: 'center' },
     railLabelActive: { opacity: 0.95, fontWeight: '600' },
 });

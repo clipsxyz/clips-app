@@ -25,30 +25,40 @@ export default function StorySwipeLayer({
 }: Props) {
     const startX = useRef<number | null>(null);
     const startY = useRef<number | null>(null);
+    const enabledRef = useRef(enabled);
+    const onSwipeLeftRef = useRef(onSwipeLeft);
+    const onSwipeRightRef = useRef(onSwipeRight);
+    const onHoldStartRef = useRef(onHoldStart);
+    const onHoldEndRef = useRef(onHoldEnd);
+    enabledRef.current = enabled;
+    onSwipeLeftRef.current = onSwipeLeft;
+    onSwipeRightRef.current = onSwipeRight;
+    onHoldStartRef.current = onHoldStart;
+    onHoldEndRef.current = onHoldEnd;
 
     const panResponder = useRef(
         PanResponder.create({
-            onStartShouldSetPanResponder: () => enabled,
+            onStartShouldSetPanResponder: () => enabledRef.current,
             onMoveShouldSetPanResponder: (_, g) =>
-                enabled && (Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8),
+                enabledRef.current && (Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8),
             onPanResponderGrant: (_, gesture) => {
                 startX.current = gesture.x0;
                 startY.current = gesture.y0;
-                onHoldStart?.();
+                onHoldStartRef.current?.();
             },
             onPanResponderRelease: (_, gesture) => {
-                onHoldEnd?.();
+                onHoldEndRef.current?.();
                 if (startX.current == null || startY.current == null) return;
                 const dx = gesture.moveX - startX.current;
                 const dy = gesture.moveY - startY.current;
                 startX.current = null;
                 startY.current = null;
                 if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy)) return;
-                if (dx < 0) onSwipeLeft();
-                else onSwipeRight();
+                if (dx < 0) onSwipeLeftRef.current();
+                else onSwipeRightRef.current();
             },
             onPanResponderTerminate: () => {
-                onHoldEnd?.();
+                onHoldEndRef.current?.();
                 startX.current = null;
                 startY.current = null;
             },

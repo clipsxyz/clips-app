@@ -9,7 +9,9 @@ import {
 } from 'react-native';
 import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
+import Flag from '../Flag.native';
 import type { Post, Story } from '../../types';
 import {
     getPostMediaUrl,
@@ -20,10 +22,13 @@ import {
     resolveStoryVideoPlaybackUrl,
 } from '../../utils/storyMediaNative';
 import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
-import { getAvatarForHandle } from '../../api/users';
+import { getAvatarForHandle, getFlagForHandle } from '../../api/users';
 import { timeAgo } from '../../utils/timeAgo';
+import { ox } from '../../constants/nativeOpticalScale';
 
 const SHARED_BACKDROP = ['#0f172a', '#111827', '#1f2937'];
+/** Soft atlas wash behind text-only shares (not IG purple/magenta). */
+const TEXT_SHARE_FALLBACK_BACKDROP = ['#0f2430', '#060d16', '#12263a'];
 
 function StoryVideoLayer({
     uri,
@@ -210,30 +215,96 @@ export default function StorySharedPostViewer({
 
     if (post.text) {
         const { gradientColors, color, fontSize } = getTextStoryStyle(story, post);
+        const cleanHandle = (handle || post.userHandle || '').replace(/^@/, '');
+        const bodySize = Math.max(fontSize, ox(18));
+        const backdropColors =
+            gradientColors.length >= 2
+                ? [gradientColors[0], '#060d16', gradientColors[gradientColors.length - 1]]
+                : TEXT_SHARE_FALLBACK_BACKDROP;
+
         return (
-            <View style={styles.textSharedRoot}>
-                <Text style={styles.sharedFromPill}>
-                    Shared from <Text style={styles.sharedFromBold}>@{handle.replace(/^@/, '')}</Text>
-                </Text>
-                <TouchableOpacity style={styles.textCard} onPress={onOpenModal} activeOpacity={0.95}>
-                    <View style={styles.textCardHeader}>
-                        <Avatar
-                            src={getAvatarForHandle(post.userHandle)}
-                            name={post.userHandle.split('@')[0]}
-                            size="sm"
-                        />
-                        <View style={styles.textCardMeta}>
-                            <Text style={styles.textCardHandle}>{post.userHandle}</Text>
-                            {post.createdAt ? (
-                                <Text style={styles.textCardTime}>{timeAgo(post.createdAt)}</Text>
-                            ) : null}
-                        </View>
+            <LinearGradient colors={backdropColors} style={styles.textSharedRoot}>
+                <View style={styles.textSharedVeil} pointerEvents="none" />
+                <View style={styles.textSharedColumn}>
+                    <View style={styles.sharedFromPill}>
+                        <Icon name="return-up-forward-outline" size={ox(12)} color="#9fd4cb" />
+                        <Text style={styles.sharedFromPillText}>
+                            Shared from{' '}
+                            <Text style={styles.sharedFromBold}>@{cleanHandle}</Text>
+                        </Text>
                     </View>
-                    <LinearGradient colors={gradientColors} style={styles.textCardBody}>
-                        <Text style={[styles.textCardBodyText, { color, fontSize }]}>{post.text}</Text>
-                    </LinearGradient>
-                </TouchableOpacity>
-            </View>
+
+                    <TouchableOpacity
+                        style={styles.textCard}
+                        onPress={onOpenModal}
+                        activeOpacity={0.94}
+                    >
+                        <View style={styles.textCardHeader}>
+                            <Avatar
+                                src={getAvatarForHandle(post.userHandle)}
+                                name={post.userHandle.split('@')[0]}
+                                size={ox(36)}
+                            />
+                            <View style={styles.textCardMeta}>
+                                <View style={styles.textCardHandleRow}>
+                                    <Text style={styles.textCardHandle} numberOfLines={1}>
+                                        {post.userHandle}
+                                    </Text>
+                                    <Flag
+                                        value={getFlagForHandle(post.userHandle) || ''}
+                                        size={ox(12)}
+                                    />
+                                </View>
+                                <View style={styles.textCardSubRow}>
+                                    {post.locationLabel ? (
+                                        <>
+                                            <Icon
+                                                name="location-outline"
+                                                size={ox(11)}
+                                                color="#6B7280"
+                                            />
+                                            <Text style={styles.textCardTime} numberOfLines={1}>
+                                                {post.locationLabel}
+                                            </Text>
+                                            {post.createdAt ? (
+                                                <Text style={styles.textCardDot}>·</Text>
+                                            ) : null}
+                                        </>
+                                    ) : null}
+                                    {post.createdAt ? (
+                                        <Text style={styles.textCardTime}>
+                                            {timeAgo(post.createdAt)}
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            </View>
+                        </View>
+
+                        <View style={styles.textCardBodyPad}>
+                            <LinearGradient
+                                colors={
+                                    gradientColors.length >= 2
+                                        ? gradientColors
+                                        : ['#0f2430', '#1a3f3c', '#12263a']
+                                }
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.textCardBody}
+                            >
+                                <View style={styles.textCardAccent} />
+                                <Text
+                                    style={[
+                                        styles.textCardBodyText,
+                                        { color, fontSize: bodySize, lineHeight: bodySize * 1.35 },
+                                    ]}
+                                >
+                                    {post.text}
+                                </Text>
+                            </LinearGradient>
+                        </View>
+                    </TouchableOpacity>
+                </View>
+            </LinearGradient>
         );
     }
 
@@ -314,43 +385,105 @@ const styles = StyleSheet.create({
     attributionText: { color: '#fff', fontSize: 13, fontWeight: '700' },
     textSharedRoot: {
         flex: 1,
-        backgroundColor: '#000',
+        width: '100%',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+    },
+    textSharedVeil: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(6, 13, 22, 0.45)',
+    },
+    textSharedColumn: {
+        width: '100%',
+        maxWidth: ox(340),
+        paddingHorizontal: ox(22),
+        alignItems: 'center',
     },
     sharedFromPill: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: 12,
-        marginBottom: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+        marginBottom: ox(14),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(7),
+        borderRadius: ox(999),
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderColor: 'rgba(159, 212, 203, 0.35)',
+        backgroundColor: 'rgba(6, 13, 22, 0.72)',
     },
-    sharedFromBold: { fontWeight: '700' },
+    sharedFromPillText: {
+        color: 'rgba(255,255,255,0.92)',
+        fontSize: ox(12),
+    },
+    sharedFromBold: { fontWeight: '700', color: '#9fd4cb' },
     textCard: {
         width: '100%',
-        maxWidth: 300,
-        borderRadius: 16,
+        borderRadius: ox(20),
         overflow: 'hidden',
-        backgroundColor: '#fff',
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.55)',
+        shadowColor: '#000',
+        shadowOpacity: 0.45,
+        shadowRadius: 24,
+        shadowOffset: { width: 0, height: 12 },
+        elevation: 12,
     },
     textCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        padding: 12,
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingTop: ox(16),
+        paddingBottom: ox(12),
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#e5e7eb',
+        borderBottomColor: '#E5E7EB',
+        backgroundColor: '#FFFFFF',
     },
-    textCardMeta: { flex: 1 },
-    textCardHandle: { fontSize: 13, fontWeight: '700', color: '#111827' },
-    textCardTime: { fontSize: 11, color: '#6b7280', marginTop: 2 },
-    textCardBody: { padding: 16, minHeight: 120, justifyContent: 'center' },
-    textCardBodyText: { fontWeight: '600', textAlign: 'left', lineHeight: 22 },
+    textCardMeta: { flex: 1, minWidth: 0 },
+    textCardHandleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+    },
+    textCardHandle: {
+        flexShrink: 1,
+        fontSize: ox(14),
+        fontWeight: '700',
+        color: '#111827',
+    },
+    textCardSubRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(4),
+        marginTop: ox(3),
+    },
+    textCardTime: { fontSize: ox(11), color: '#6B7280', flexShrink: 1 },
+    textCardDot: { fontSize: ox(11), color: '#9CA3AF' },
+    textCardBodyPad: {
+        padding: ox(14),
+        backgroundColor: '#FFFFFF',
+    },
+    textCardBody: {
+        paddingVertical: ox(22),
+        paddingHorizontal: ox(18),
+        minHeight: ox(148),
+        borderRadius: ox(14),
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    textCardAccent: {
+        position: 'absolute',
+        left: 0,
+        top: ox(14),
+        bottom: ox(14),
+        width: 3,
+        borderRadius: 2,
+        backgroundColor: 'rgba(159, 212, 203, 0.85)',
+    },
+    textCardBodyText: {
+        fontWeight: '600',
+        textAlign: 'left',
+        letterSpacing: -0.2,
+    },
 });

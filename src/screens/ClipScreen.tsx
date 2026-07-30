@@ -11,6 +11,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import * as ImagePicker from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigateMainTab } from '../navigation/mainTabs';
+import { ox } from '../constants/nativeOpticalScale';
 
 function assetIsVideo(asset: { type?: string; uri?: string }) {
     return Boolean(
@@ -72,7 +73,7 @@ export default function ClipScreen({ navigation }: any) {
                         onPress={() => navigateMainTab(navigation, 'Home')}
                         accessibilityLabel="Home feed"
                     >
-                        <Icon name="home-outline" size={20} color="#FFFFFF" />
+                        <Icon name="home-outline" size={ox(20)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.brand}>Gazetteer</Text>
                 </View>
@@ -94,10 +95,10 @@ export default function ClipScreen({ navigation }: any) {
                         style={styles.cameraRing}
                     >
                         <View style={styles.cameraInner}>
-                            <Icon name="camera-outline" size={56} color="#FFFFFF" />
+                            <Icon name="camera-outline" size={ox(56)} color="#FFFFFF" />
                         </View>
                         <View style={styles.cameraPlus}>
-                            <Icon name="add" size={12} color="#FFFFFF" />
+                            <Icon name="add" size={ox(12)} color="#FFFFFF" />
                         </View>
                     </LinearGradient>
                 </TouchableOpacity>
@@ -135,45 +136,45 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingBottom: 12,
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(12),
         backgroundColor: 'rgba(0,0,0,0.9)',
     },
     headerLeft: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: ox(10),
     },
     homeBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
         backgroundColor: 'rgba(0,0,0,0.5)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     brand: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '300',
-        letterSpacing: 0.3,
+        letterSpacing: ox(0.3),
     },
     clipsLabel: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '300',
-        letterSpacing: 0.2,
+        letterSpacing: ox(0.2),
     },
     center: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 24,
+        paddingHorizontal: ox(24),
     },
     cameraWrap: {
         width: 128,
         height: 128,
-        marginBottom: 24,
+        marginBottom: ox(24),
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -181,22 +182,22 @@ const styles = StyleSheet.create({
         position: 'absolute',
         width: 128,
         height: 128,
-        borderRadius: 64,
+        borderRadius: ox(64),
         backgroundColor: 'rgba(255,255,255,0.12)',
         opacity: 0.35,
     },
     cameraRing: {
         width: 128,
         height: 128,
-        borderRadius: 64,
-        padding: 3,
+        borderRadius: ox(64),
+        padding: ox(3),
         alignItems: 'center',
         justifyContent: 'center',
     },
     cameraInner: {
         width: '100%',
         height: '100%',
-        borderRadius: 64,
+        borderRadius: ox(64),
         backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',
@@ -205,9 +206,9 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 8,
         bottom: 8,
-        width: 22,
-        height: 22,
-        borderRadius: 11,
+        width: ox(22),
+        height: ox(22),
+        borderRadius: ox(11),
         backgroundColor: '#525252',
         borderWidth: 2,
         borderColor: '#FFFFFF',
@@ -216,26 +217,26 @@ const styles = StyleSheet.create({
     },
     heading: {
         color: '#FFFFFF',
-        fontSize: 24,
+        fontSize: ox(24),
         fontWeight: '700',
         textAlign: 'center',
-        marginBottom: 10,
+        marginBottom: ox(10),
     },
     subtitle: {
         color: '#9CA3AF',
-        fontSize: 15,
+        fontSize: ox(15),
         textAlign: 'center',
-        marginBottom: 28,
-        lineHeight: 22,
+        marginBottom: ox(28),
+        lineHeight: ox(22),
     },
     uploadOuter: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'visible',
     },
     uploadPill: {
-        paddingHorizontal: 22,
-        paddingVertical: 14,
-        borderRadius: 16,
+        paddingHorizontal: ox(22),
+        paddingVertical: ox(14),
+        borderRadius: ox(16),
         borderWidth: 2.5,
         borderColor: 'rgba(255,255,255,0.9)',
         minWidth: 220,
@@ -243,22 +244,22 @@ const styles = StyleSheet.create({
         position: 'relative',
         overflow: 'visible',
     },
-    decorTL: { position: 'absolute', top: 4, left: 10, fontSize: 16, opacity: 0.8 },
-    decorTR: { position: 'absolute', top: 2, right: 12, fontSize: 14, opacity: 0.6 },
-    decorBL: { position: 'absolute', bottom: 4, left: 12, fontSize: 12, opacity: 0.5 },
+    decorTL: { position: 'absolute', top: 4, left: 10, fontSize: ox(16), opacity: 0.8 },
+    decorTR: { position: 'absolute', top: 2, right: 12, fontSize: ox(14), opacity: 0.6 },
+    decorBL: { position: 'absolute', bottom: 4, left: 12, fontSize: ox(12), opacity: 0.5 },
     uploadLabel: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
-        letterSpacing: -0.2,
+        letterSpacing: ox(-0.2),
     },
     uploadPlus: {
         position: 'absolute',
         top: -6,
         right: -6,
-        width: 18,
-        height: 18,
-        borderRadius: 9,
+        width: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
         backgroundColor: '#525252',
         borderWidth: 2,
         borderColor: '#FFFFFF',
@@ -267,8 +268,8 @@ const styles = StyleSheet.create({
     },
     uploadPlusText: {
         color: '#FFFFFF',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
-        lineHeight: 12,
+        lineHeight: ox(12),
     },
 });

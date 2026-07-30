@@ -3,13 +3,14 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 export type StoryDeliveryFxState = {
-    kind: 'message' | 'like';
+    kind: 'message' | 'like' | 'react';
     toHandle: string;
     startX: number;
     startY: number;
     targetX: number;
     targetY: number;
     phase: 'start' | 'fly';
+    emoji?: string;
 };
 
 type Props = {
@@ -77,16 +78,31 @@ export default function StoryDeliveryFx({ fx, onComplete }: Props) {
                     },
                 ]}
             >
-                <View style={styles.iconWrap}>
-                    <Icon
-                        name={fx.kind === 'message' ? 'send' : 'thumbs-up'}
-                        size={14}
-                        color="#fff"
-                    />
+                <View
+                    style={[
+                        styles.iconWrap,
+                        fx.kind === 'like' || fx.kind === 'react'
+                            ? styles.iconWrapLike
+                            : styles.iconWrapMessage,
+                    ]}
+                >
+                    {fx.kind === 'react' && fx.emoji ? (
+                        <Text style={styles.emojiIcon}>{fx.emoji}</Text>
+                    ) : (
+                        <Icon
+                            name={fx.kind === 'message' ? 'send' : 'heart'}
+                            size={14}
+                            color="#fff"
+                        />
+                    )}
                 </View>
                 <View style={styles.textWrap}>
                     <Text style={styles.title}>
-                        {fx.kind === 'message' ? 'Message sent' : 'Like sent'}
+                        {fx.kind === 'message'
+                            ? 'Message sent'
+                            : fx.kind === 'react'
+                              ? 'Reaction sent'
+                              : 'Like sent'}
                     </Text>
                     <Text style={styles.handle} numberOfLines={1}>
                         @{fx.toHandle.replace(/^@/, '')}
@@ -117,9 +133,18 @@ const styles = StyleSheet.create({
         width: 28,
         height: 28,
         borderRadius: 14,
-        backgroundColor: 'rgba(6,182,212,0.9)',
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    iconWrapMessage: {
+        backgroundColor: 'rgba(6,182,212,0.9)',
+    },
+    iconWrapLike: {
+        backgroundColor: 'rgba(255,45,85,0.95)',
+    },
+    emojiIcon: {
+        fontSize: 14,
+        lineHeight: 18,
     },
     textWrap: { flex: 1, minWidth: 0 },
     title: { color: '#fff', fontSize: 11, fontWeight: '700' },

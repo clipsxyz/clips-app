@@ -22,6 +22,7 @@ import {
     type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ox } from '../constants/nativeOpticalScale';
 
 /** Web `main` / feed shell background (App.tsx style={{ backgroundColor: '#030712' }}). */
 export const FEED_PAGE_BG = '#030712';
@@ -330,9 +331,9 @@ export const FEED_LOCATION_PILL_BG = '#36454F';
 
 /** Web header title typography (PillTabs location label) — optically bumped for phone. */
 export const FEED_HEADER_TITLE = {
-    fontSize: 20,
+    fontSize: ox(20),
     fontWeight: '700' as const,
-    lineHeight: 22,
+    lineHeight: ox(22),
     color: '#E5E7EB',
 };
 
@@ -341,9 +342,9 @@ export const FEED_HEADER_PICKER_ROW = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
-    paddingHorizontal: 12,
-    minHeight: 52,
-    gap: 8,
+    paddingHorizontal: ox(12),
+    minHeight: ox(52),
+    gap: ox(8),
     zIndex: 30,
 };
 
@@ -355,8 +356,8 @@ export const FEED_HEADER_SIDE_ACTION = {
 
 export const FEED_HEADER_SIDE_LABEL = {
     marginTop: 2,
-    fontSize: 11,
-    lineHeight: 12,
+    fontSize: ox(11),
+    lineHeight: ox(13),
     fontWeight: '600' as const,
     color: '#FFFFFF',
 };
@@ -374,31 +375,31 @@ export const FEED_HEADER_LOCATION_PILL = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    gap: 8,
+    gap: ox(8),
     maxWidth: '100%' as const,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: ox(14),
+    paddingVertical: ox(9),
     borderRadius: 10,
     backgroundColor: FEED_LOCATION_PILL_BG,
     overflow: 'visible' as const,
 };
 
 export const FEED_HEADER_ACTIVE_DOT = {
-    width: 11,
-    height: 11,
+    width: ox(11),
+    height: ox(11),
     borderRadius: 999,
 };
 
 export const FEED_HEADER_LOCATION_TITLE = {
     flexShrink: 1,
-    maxWidth: 160,
+    maxWidth: ox(160),
     ...FEED_HEADER_TITLE,
 };
 
 /** Web dropdown: rounded-[22px] border-white/10 bg-[#272b35]/92. */
 export const FEED_HEADER_DROPDOWN_MENU = {
     position: 'absolute' as const,
-    top: '100%' as const,
+    top: 48,
     marginTop: 6,
     alignSelf: 'center' as const,
     width: 220,
@@ -488,8 +489,8 @@ export const FEED_HEADER_DROPDOWN_MENU_TEXT = {
 };
 
 export const FEED_HEADER_PASSPORT_AVATAR = {
-    width: 36,
-    height: 36,
+    width: ox(36),
+    height: ox(36),
     borderRadius: 10,
     overflow: 'hidden' as const,
     backgroundColor: '#374151',
@@ -500,7 +501,7 @@ export const FEED_HEADER_PASSPORT_AVATAR = {
 };
 
 export const FEED_HEADER_PASSPORT_INITIALS = {
-    fontSize: 12,
+    fontSize: ox(12),
     fontWeight: '700' as const,
     color: '#FFFFFF',
 };

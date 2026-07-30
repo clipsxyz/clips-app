@@ -10,6 +10,7 @@ import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import { FEED_UI } from '../constants/feedUiTokens';
 
 type Props = BottomTabBarProps & {
   inboxBadgeCount: number;
@@ -19,7 +20,7 @@ type Props = BottomTabBarProps & {
 function TabSquareIcon({ name, focused }: { name: string; focused: boolean }) {
   return (
     <View style={[styles.iconSquare, focused ? styles.iconSquareActive : styles.iconSquareInactive]}>
-      <Icon name={name} size={22} color={focused ? '#111827' : '#FFFFFF'} />
+      <Icon name={name} size={FEED_UI.icon.tab} color={focused ? '#111827' : '#FFFFFF'} />
     </View>
   );
 }
@@ -173,11 +174,11 @@ const styles = StyleSheet.create({
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 36,
+    minHeight: FEED_UI.icon.tabSquare,
   },
   iconSquare: {
-    width: 36,
-    height: 36,
+    width: FEED_UI.icon.tabSquare,
+    height: FEED_UI.icon.tabSquare,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -192,7 +193,7 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: 5,
-    fontSize: 11,
+    fontSize: Math.round(FEED_UI.type.meta * 0.95),
     fontWeight: '600',
   },
   labelActive: {

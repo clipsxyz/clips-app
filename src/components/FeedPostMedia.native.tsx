@@ -14,7 +14,6 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
-import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import type { StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -385,15 +384,16 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             : {};
 
     /**
-     * Scenes-style tap capture: gesture-handler Pressable above media.
-     * pointerEvents="none" on Image/Video so the native surface cannot steal hits.
+     * Scenes-style tap capture above media.
+     * Use RN Pressable (not RNGH) so FlatList doesn’t cancel single-taps on still images.
+     * Image/Video keep pointerEvents="none" so the native surface cannot steal hits.
      */
     const renderFeedTapOverlay = (opts?: { forCarouselSlide?: boolean }) => {
         if (!feedTapCapture) return null;
         if (hasCarousel && !opts?.forCarouselSlide) return null;
         if (!hasCarousel && opts?.forCarouselSlide) return null;
         return (
-            <GesturePressable
+            <Pressable
                 style={styles.tapCapture}
                 onPress={handleMediaTap}
                 android_disableSound

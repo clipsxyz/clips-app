@@ -1,11 +1,6 @@
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
-
-/** Browser-only inbox/feed refresh events — no-op on React Native. */
-function dispatchBrowserEvent(name: string, detail?: Record<string, unknown>): void {
-    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
-    window.dispatchEvent(new CustomEvent(name, detail != null ? { detail } : undefined));
-}
+import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 
 export interface ChatMessage {
     id: string;
@@ -305,16 +300,23 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     unreadByHandle.set(to, await computeUnreadTotal(to));
 
     // Create notifications for incoming messages unless this thread is muted by receiver.
+    // Story context messages may be image-only — still notify (Instagram story reply/reaction).
     const receiverMutedThread = mutedConversations.get(to)?.has(from) ?? false;
-    if (!message.isSystemMessage && message.text && !receiverMutedThread) {
+    const shouldNotify =
+        !message.isSystemMessage &&
+        !receiverMutedThread &&
+        Boolean(message.text?.trim() || message.storyId || message.imageUrl);
+    if (shouldNotify) {
         // Dynamically import to avoid circular dependency
         const { createNotification, isStickerMessage, isReplyToPost } = await import('./notifications');
         
         // Determine notification type
         let notificationType: 'sticker' | 'reply' | 'dm';
-        if (isStickerMessage(message.text)) {
+        if (message.storyId) {
+            notificationType = 'reply';
+        } else if (message.text && isStickerMessage(message.text)) {
             notificationType = 'sticker';
-        } else if (isReplyToPost(message.text)) {
+        } else if (message.text && isReplyToPost(message.text)) {
             notificationType = 'reply';
         } else {
             notificationType = 'dm';
@@ -325,7 +327,9 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
             type: notificationType,
             fromHandle: from,
             toHandle: to,
-            message: message.text,
+            message:
+                message.text?.trim() ||
+                (message.storyId ? 'Replied to your story' : message.imageUrl ? 'Sent a photo' : ''),
             storyId: message.storyId,
             imageUrl: message.storyId ? message.imageUrl : undefined,
             storyContextText: message.storyContextText,
@@ -694,7 +698,8 @@ export async function listConversations(forHandle: string): Promise<Conversation
         if (a !== forHandle && b !== forHandle) return;
         const other = a === forHandle ? b : a;
         const sorted = msgs.slice().sort((m1, m2) => m2.timestamp - m1.timestamp);
-        const last = sorted[0];
+        // Prefer last real message for inbox preview (skip system echoes).
+        const last = sorted.find((m) => !m.isSystemMessage) || sorted[0];
         const lastRead = lastReadByThread.get(`${forHandle}::${other}`) || 0;
         const unread = sorted.filter(m => m.senderHandle !== forHandle && m.timestamp > lastRead && !m.isSystemMessage).length;
         const existing = summaries.get(other) || { last: undefined, unread: 0 };

@@ -1,9 +1,16 @@
+import { ox, NATIVE_OPTICAL_SCALE } from './nativeOpticalScale';
+
 export type FeedUiMode = 'compact' | 'comfortable';
 
 /**
  * Aspect values are height/width (Instagram feed policy), matching web Media in App.tsx:
  * FEED_MIN_ASPECT = 3/4, FEED_TARGET_ASPECT = 5/4 (4:5 portrait max).
+ *
+ * Optical scale: on same physical phone size, RN density-independent px usually reads
+ * smaller than mobile Safari/Chrome CSS px. Bump feed chrome so Nokia RN matches Oppo web.
  */
+export const FEED_OPTICAL_SCALE = NATIVE_OPTICAL_SCALE;
+
 const FEED_UI_BY_MODE = {
   compact: {
     media: {
@@ -11,34 +18,34 @@ const FEED_UI_BY_MODE = {
       maxAspect: 5 / 4,
     },
     spacing: {
-      inset: 12,
-      compactV: 8,
-      normalV: 12,
-      cardGap: 8,
-      groupGap: 12,
-      groupGapTight: 10,
+      inset: ox(12),
+      compactV: ox(8),
+      normalV: ox(12),
+      cardGap: ox(8),
+      groupGap: ox(12),
+      groupGapTight: ox(10),
       hairlineGap: 0.5,
     },
     type: {
-      actionCount: 12,
-      // Optical bump vs web text-sm / text-[10px] — Instagram weight on phone screens.
-      handle: 16,
-      meta: 12,
-      metaIcon: 14,
-      reclip: 13,
+      actionCount: ox(12),
+      // Web text-sm ≈ 14 CSS px — optically larger on RN phones.
+      handle: ox(16),
+      meta: ox(12),
+      metaIcon: ox(14),
+      reclip: ox(13),
+      caption: ox(14),
+      captionMore: ox(12),
     },
     icon: {
-      // Optical bump vs web 24px CSS — Instagram weight on smaller/denser phone screens.
-      action: 28,
-      flag: 18,
-      // Web Avatar size="sm" is 32 — bumped for phone Instagram weight.
-      avatar: 36,
-      // Header / tab chrome (optical bump vs web 16-in-28 squares).
-      tab: 22,
-      tabSquare: 36,
-      headerStories: 36,
-      headerLocation: 20,
-      headerPassport: 36,
+      // Web engagement icons ≈ 24 CSS px.
+      action: ox(28),
+      flag: ox(18),
+      avatar: ox(36),
+      tab: ox(22),
+      tabSquare: ox(36),
+      headerStories: ox(36),
+      headerLocation: ox(20),
+      headerPassport: ox(36),
     },
   },
   comfortable: {
@@ -47,30 +54,32 @@ const FEED_UI_BY_MODE = {
       maxAspect: 5 / 4,
     },
     spacing: {
-      inset: 14,
-      compactV: 10,
-      normalV: 12,
-      cardGap: 12,
-      groupGap: 14,
-      groupGapTight: 12,
+      inset: ox(14),
+      compactV: ox(10),
+      normalV: ox(12),
+      cardGap: ox(12),
+      groupGap: ox(14),
+      groupGapTight: ox(12),
       hairlineGap: 1,
     },
     type: {
-      actionCount: 13,
-      handle: 16,
-      meta: 12,
-      metaIcon: 14,
-      reclip: 13,
+      actionCount: ox(13),
+      handle: ox(16),
+      meta: ox(12),
+      metaIcon: ox(14),
+      reclip: ox(13),
+      caption: ox(14),
+      captionMore: ox(12),
     },
     icon: {
-      action: 28,
-      flag: 18,
-      avatar: 36,
-      tab: 22,
-      tabSquare: 36,
-      headerStories: 36,
-      headerLocation: 20,
-      headerPassport: 36,
+      action: ox(28),
+      flag: ox(18),
+      avatar: ox(36),
+      tab: ox(22),
+      tabSquare: ox(36),
+      headerStories: ox(36),
+      headerLocation: ox(20),
+      headerPassport: ox(36),
     },
   },
 } as const;
@@ -78,4 +87,3 @@ const FEED_UI_BY_MODE = {
 // Switch this to 'comfortable' if you want a roomier layout.
 export const FEED_UI_MODE: FeedUiMode = 'compact';
 export const FEED_UI = FEED_UI_BY_MODE[FEED_UI_MODE];
-

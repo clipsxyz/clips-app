@@ -259,6 +259,7 @@ import {
 import { fetchSuggestedPostsByPlaces, transformLaravelPost } from '../api/posts';
 import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
+import { ox } from '../constants/nativeOpticalScale';
 
 type Tab = string;
 
@@ -277,6 +278,7 @@ function PillTabs({
     onOpenPassport,
     onOpenDiscover,
     onSearchLocation,
+    onHeaderPlacePick,
     onClearCustom,
 }: {
     active: Tab;
@@ -305,6 +307,10 @@ function PillTabs({
 }) {
     const { user } = useAuth();
     const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
+    const onHeaderPlacePickRef = useRef(onHeaderPlacePick);
+    const onSearchLocationRef = useRef(onSearchLocation);
+    onHeaderPlacePickRef.current = onHeaderPlacePick;
+    onSearchLocationRef.current = onSearchLocation;
 
     type HeaderSuggestion = {
         name: string;
@@ -338,11 +344,12 @@ function PillTabs({
         suggestion: LocationSuggestion,
         filterType: 'location' | 'venue' | 'landmark'
     ) => {
-        if (onHeaderPlacePick) {
-            onHeaderPlacePick(suggestion, filterType);
+        const pickHandler = onHeaderPlacePickRef.current;
+        if (typeof pickHandler === 'function') {
+            pickHandler(suggestion, filterType);
             return;
         }
-        onSearchLocation?.(suggestion.name, filterType, {
+        onSearchLocationRef.current?.(suggestion.name, filterType, {
             label: suggestion.name,
             placeId: suggestion.place_id ?? null,
         });
@@ -521,24 +528,38 @@ function PillTabs({
                 const res = await searchLocations(q, 6, modeForApi);
                 if (!cancelled) {
                     const allApiSuggestions = Array.isArray(res) ? res : [];
-                    const mappedApi: HeaderSuggestion[] = allApiSuggestions.map((s) => {
-                        const sel = resolvePlaceFeedSelection(s as LocationSuggestion);
-                        const t = String((s as any)?.type || '').toLowerCase();
-                        const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
-                            ? 'venue'
-                            : t.includes('landmark')
-                                ? 'landmark'
-                                : 'location';
-                        return {
-                            name: s.name,
-                            country: (s as any).country,
-                            type: kind,
-                            filter: sel.filter,
-                            label: sel.label,
-                            placeId: sel.placeId,
-                            scope: sel.scope,
-                            source: s as LocationSuggestion,
-                        };
+                    const mappedApi: HeaderSuggestion[] = allApiSuggestions.flatMap((raw) => {
+                        if (!raw || typeof raw !== 'object') return [];
+                        const s = raw as LocationSuggestion;
+                        const name = String(s.name || s.display_name || '').trim();
+                        if (!name) return [];
+                        try {
+                            const normalized: LocationSuggestion = {
+                                ...s,
+                                name,
+                                country: s.country != null ? String(s.country) : undefined,
+                                type: s.type || 'location',
+                            };
+                            const sel = resolvePlaceFeedSelection(normalized);
+                            const t = String(normalized.type || '').toLowerCase();
+                            const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
+                                ? 'venue'
+                                : t.includes('landmark')
+                                    ? 'landmark'
+                                    : 'location';
+                            return [{
+                                name,
+                                country: normalized.country,
+                                type: kind,
+                                filter: sel.filter,
+                                label: sel.label,
+                                placeId: sel.placeId,
+                                scope: sel.scope,
+                                source: normalized,
+                            }];
+                        } catch {
+                            return [];
+                        }
                     });
                     const fallbackCombined: HeaderSuggestion[] = [
                         ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
@@ -608,18 +629,20 @@ function PillTabs({
             filterType = 'landmark';
         }
         if (!next) return;
-        commitHeaderPlace(
-            {
-                name: next,
-                type: filterType === 'venue' ? 'venue' : filterType === 'landmark' ? 'landmark' : 'location',
-                country: next,
-                national: next,
-                local: next,
-                regional: next,
-            },
-            filterType
-        );
         setMenuOpen(false);
+        setTimeout(() => {
+            commitHeaderPlace(
+                {
+                    name: next,
+                    type: filterType === 'venue' ? 'venue' : filterType === 'landmark' ? 'landmark' : 'location',
+                    country: next,
+                    national: next,
+                    local: next,
+                    regional: next,
+                },
+                filterType
+            );
+        }, 80);
     };
 
     return (
@@ -631,7 +654,7 @@ function PillTabs({
                     accessibilityLabel="Stories 24"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Stories24HeaderIcon size={36} />
+                        <Stories24HeaderIcon size={FEED_UI.icon.headerStories} />
                         <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
                     </View>
                 </TouchableOpacity>
@@ -669,14 +692,14 @@ function PillTabs({
                             >
                                 <View style={styles.feedSwitchBadgeCaret} />
                                 <View style={styles.feedSwitchBadgeInner}>
-                                    <Icon name="location" size={14} color="#FFFFFF" />
+                                    <Icon name="location" size={ox(14)} color="#FFFFFF" />
                                     <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
                                 </View>
                             </Animated.View>
                         ) : null}
                         <Icon
                             name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
-                            size={20}
+                            size={FEED_UI.icon.headerLocation}
                             color="#FFFFFF"
                         />
                         <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
@@ -687,7 +710,7 @@ function PillTabs({
                         >
                             {headerLabel}
                         </Text>
-                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={18} color="rgba(255,255,255,0.9)" />
+                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
                     </TouchableOpacity>
 
                     <Modal
@@ -718,7 +741,7 @@ function PillTabs({
                                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                         accessibilityLabel="Close"
                                     >
-                                        <Icon name="close" size={24} color="#FFFFFF" />
+                                        <Icon name="close" size={ox(24)} color="#FFFFFF" />
                                     </TouchableOpacity>
                                 </View>
                                 <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
@@ -727,7 +750,7 @@ function PillTabs({
                                     Nearby, city, country, Discover, or Following
                                 </Text>
                                 <View style={styles.feedSwitchSearchWrap}>
-                                    <Icon name="search-outline" size={18} color="rgba(255,255,255,0.75)" />
+                                    <Icon name="search-outline" size={ox(18)} color="rgba(255,255,255,0.75)" />
                                     <TextInput
                                         value={locationQuery}
                                         onChangeText={setLocationQuery}
@@ -756,9 +779,23 @@ function PillTabs({
                                             {loadingSuggestions ? (
                                                 <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
                                             ) : locationSuggestions.length > 0 ? (
-                                                locationSuggestions.map((s, idx) => (
+                                                locationSuggestions.map((s, idx) => {
+                                                    const suggestionName = String(s.name || '').trim();
+                                                    if (!suggestionName) return null;
+                                                    const countryLabel = s.country != null ? String(s.country) : '';
+                                                    const metaLabel =
+                                                        s.type === 'venue'
+                                                            ? ' · venue'
+                                                            : s.type === 'landmark'
+                                                                ? ' · landmark'
+                                                                : usingFallbackSuggestions
+                                                                    ? ' · quick suggestion'
+                                                                    : countryLabel
+                                                                        ? ` · ${countryLabel}`
+                                                                        : '';
+                                                    return (
                                                     <TouchableOpacity
-                                                        key={`${s.name}-${idx}`}
+                                                        key={`${suggestionName}-${idx}`}
                                                         style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
                                                         onPress={() => {
                                                             const raw = locationQuery.trim();
@@ -771,24 +808,24 @@ function PillTabs({
                                                                         : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
                                                                             ? 'landmark'
                                                                             : 'location');
-                                                            setLocationQuery(s.name);
-                                                            commitHeaderPlace(
-                                                                headerSuggestionToLocation(s, s.name),
-                                                                mode
-                                                            );
+                                                            setLocationQuery(suggestionName);
                                                             setMenuOpen(false);
+                                                            // Defer so the feed-switch Modal unmounts before scope picker opens (Android nested Modal crash).
+                                                            setTimeout(() => {
+                                                                commitHeaderPlace(
+                                                                    headerSuggestionToLocation(s, suggestionName),
+                                                                    mode
+                                                                );
+                                                            }, 80);
                                                         }}
                                                     >
                                                         <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
-                                                            {s.name}
-                                                            {s.type === 'venue'
-                                                                ? ' · venue'
-                                                                : s.type === 'landmark'
-                                                                    ? ' · landmark'
-                                                                    : (usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : ''))}
+                                                            {suggestionName}
+                                                            {metaLabel}
                                                         </Text>
                                                     </TouchableOpacity>
-                                                ))
+                                                    );
+                                                })
                                             ) : (
                                                 <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
                                             )}
@@ -802,7 +839,7 @@ function PillTabs({
                                                 setMenuOpen(false);
                                             }}
                                         >
-                                            <Icon name="home-outline" size={22} color="rgba(255,255,255,0.8)" />
+                                            <Icon name="home-outline" size={ox(22)} color="rgba(255,255,255,0.8)" />
                                             <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
                                         </TouchableOpacity>
                                     ) : null}
@@ -815,7 +852,7 @@ function PillTabs({
                                                 setMenuOpen(false);
                                             }}
                                         >
-                                            <Icon name={item.icon} size={22} color={item.iconColor} />
+                                            <Icon name={item.icon} size={ox(22)} color={item.iconColor} />
                                             <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
                                         </TouchableOpacity>
                                     ))}
@@ -833,7 +870,7 @@ function PillTabs({
                                 style={FEED_HEADER_ICON_BUTTON}
                                 accessibilityLabel={`About ${activeLabel}`}
                             >
-                                <Icon name="information-circle-outline" size={24} color="#FFFFFF" />
+                                <Icon name="information-circle-outline" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                             <LocationPlaceSummaryModal
                                 open={placeInfoOpen}
@@ -1183,7 +1220,7 @@ const FeedCard = React.memo(function FeedCard({
                             ) : null}
                             {isClientUploadFailed ? (
                                 <View style={FEED_CARD_UPLOAD_OVERLAY}>
-                                    <Icon name="alert-circle-outline" size={28} color="#FCA5A5" />
+                                    <Icon name="alert-circle-outline" size={ox(28)} color="#FCA5A5" />
                                     <Text style={FEED_CARD_UPLOAD_TITLE}>Post failed</Text>
                                     <Text style={FEED_CARD_UPLOAD_SUBTITLE} numberOfLines={2}>
                                         {post.clientUploadError || 'Could not post. Tap to dismiss.'}
@@ -3970,39 +4007,39 @@ const styles = StyleSheet.create({
     },
     feedSwitchBadge: {
         position: 'absolute',
-        top: '100%',
+        top: 44,
         left: 0,
         right: 0,
-        marginTop: 10,
+        marginTop: ox(10),
         zIndex: 20,
         alignItems: 'center',
     },
     feedSwitchBadgeInner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 16,
-        paddingVertical: 7,
-        borderRadius: 18,
+        gap: ox(6),
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(7),
+        borderRadius: ox(18),
         borderWidth: 1.5,
         borderColor: '#FFFFFF',
         backgroundColor: '#000000',
     },
     feedSwitchBadgeText: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     feedSwitchBadgeCaret: {
         width: 10,
         height: 10,
-        marginBottom: -5,
+        marginBottom: ox(-5),
         backgroundColor: '#000000',
         borderLeftWidth: 1.5,
         borderTopWidth: 1.5,
         borderColor: '#FFFFFF',
         transform: [{ rotate: '45deg' }],
-        borderRadius: 2,
+        borderRadius: ox(2),
         zIndex: 1,
     },
     feedSwitchSheetOverlay: {
@@ -4022,32 +4059,32 @@ const styles = StyleSheet.create({
         borderBottomWidth: 0,
         borderColor: 'rgba(255,255,255,0.1)',
         maxHeight: '78%',
-        paddingTop: 4,
+        paddingTop: ox(4),
         overflow: 'hidden',
     },
     feedSwitchSheetHandle: {
         alignSelf: 'center',
-        width: 44,
+        width: ox(44),
         height: 5,
-        borderRadius: 3,
+        borderRadius: ox(3),
         backgroundColor: 'rgba(255,255,255,0.3)',
-        marginTop: 8,
-        marginBottom: 6,
+        marginTop: ox(8),
+        marginBottom: ox(6),
     },
     feedSwitchSheetHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        paddingHorizontal: 12,
-        minHeight: 40,
+        paddingHorizontal: ox(12),
+        minHeight: ox(40),
     },
     feedSwitchSheetHeaderSpacer: {
         flex: 1,
     },
     feedSwitchSheetClose: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(255,255,255,0.08)',
@@ -4055,37 +4092,37 @@ const styles = StyleSheet.create({
     feedSwitchSheetGazetteer: {
         textAlign: 'center',
         color: 'rgba(217, 27, 92, 0.95)',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
-        letterSpacing: 1.4,
+        letterSpacing: ox(1.4),
         textTransform: 'uppercase',
-        marginBottom: 12,
-        paddingHorizontal: 20,
+        marginBottom: ox(12),
+        paddingHorizontal: ox(20),
     },
     feedSwitchSheetTitle: {
         textAlign: 'center',
         color: '#FFFFFF',
-        fontSize: 24,
+        fontSize: ox(24),
         fontWeight: '700',
-        paddingHorizontal: 20,
+        paddingHorizontal: ox(20),
     },
     feedSwitchSheetSub: {
         textAlign: 'center',
         color: '#A3A3A3',
-        fontSize: 15,
-        lineHeight: 22,
-        marginTop: 8,
-        marginBottom: 18,
-        paddingHorizontal: 20,
+        fontSize: ox(15),
+        lineHeight: ox(22),
+        marginTop: ox(8),
+        marginBottom: ox(18),
+        paddingHorizontal: ox(20),
     },
     feedSwitchSearchWrap: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginHorizontal: 16,
-        marginBottom: 8,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        borderRadius: 999,
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
+        borderRadius: ox(999),
         borderWidth: 1.5,
         borderColor: '#FFFFFF',
         backgroundColor: 'transparent',
@@ -4093,27 +4130,27 @@ const styles = StyleSheet.create({
     feedSwitchSearchInput: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         marginLeft: 10,
         paddingVertical: 0,
         borderWidth: 0,
     },
     feedSwitchSearchHint: {
-        marginHorizontal: 20,
-        marginBottom: 10,
+        marginHorizontal: ox(20),
+        marginBottom: ox(10),
         color: 'rgba(255,255,255,0.45)',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     feedSwitchSheetScroll: {
         maxHeight: 360,
     },
     feedSwitchSheetScrollContent: {
-        paddingBottom: 10,
+        paddingBottom: ox(10),
     },
     feedSwitchSuggestionsWrap: {
-        marginHorizontal: 16,
-        marginBottom: 8,
-        borderRadius: 12,
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: 'rgba(0,0,0,0.2)',
@@ -4122,25 +4159,25 @@ const styles = StyleSheet.create({
     feedSwitchMenuItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        minHeight: 52,
+        gap: ox(12),
+        paddingHorizontal: ox(20),
+        paddingVertical: ox(16),
+        minHeight: ox(52),
     },
     errorContainer: {
-        padding: 16,
+        padding: ox(16),
         backgroundColor: '#FEE2E2',
     },
     errorText: {
         color: '#DC2626',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     loadingContainer: {
-        padding: 20,
+        padding: ox(20),
         alignItems: 'center',
     },
     emptyContainer: {
-        padding: 24,
+        padding: ox(24),
         alignItems: 'stretch',
     },
     emptyDefaultWrap: {
@@ -4150,41 +4187,41 @@ const styles = StyleSheet.create({
     emptyCustomActions: {
         width: '100%',
         alignItems: 'stretch',
-        gap: 12,
+        gap: ox(12),
     },
     emptyNotifyBtnWrap: {
         width: '100%',
     },
     emptyLoadingText: {
-        marginTop: 12,
+        marginTop: ox(12),
         color: '#9CA3AF',
-        fontSize: 15,
+        fontSize: ox(15),
         textAlign: 'center',
     },
     emptyFeedTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: '700',
         color: '#FFFFFF',
         textAlign: 'center',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     emptyFeedSubtitle: {
-        fontSize: 14,
-        lineHeight: 20,
+        fontSize: ox(14),
+        lineHeight: ox(20),
         color: '#9CA3AF',
         textAlign: 'center',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     emptyFeedSecondaryBtn: {
-        borderRadius: 999,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(20),
+        paddingVertical: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.35)',
     },
     emptyFeedSecondaryBtnText: {
         color: '#D1D5DB',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     emptyFeedNotifyBtnActive: {
@@ -4193,20 +4230,20 @@ const styles = StyleSheet.create({
     },
     emptyFeedNotifyBtnText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
         textAlign: 'center',
     },
     emptyFeedNotifyBtnTextActive: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
         textAlign: 'center',
     },
     emptyFeedNotifyHint: {
-        marginTop: 12,
-        fontSize: 11,
-        lineHeight: 16,
+        marginTop: ox(12),
+        fontSize: ox(11),
+        lineHeight: ox(16),
         color: '#6B7280',
         textAlign: 'center',
     },
@@ -4216,49 +4253,49 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     boostPromptCard: {
-        margin: 24,
-        borderRadius: 14,
-        padding: 16,
-        gap: 10,
+        margin: ox(24),
+        borderRadius: ox(14),
+        padding: ox(16),
+        gap: ox(10),
         ...glassPanel,
     },
     boostPromptTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '800',
     },
     boostPromptText: {
         color: '#D1D5DB',
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: ox(13),
+        lineHeight: ox(18),
     },
     boostPromptActions: {
         flexDirection: 'row',
-        gap: 8,
-        marginTop: 4,
+        gap: ox(8),
+        marginTop: ox(4),
     },
     boostPromptSecondaryBtn: {
         flex: 1,
-        borderRadius: 10,
-        paddingVertical: 10,
+        borderRadius: ox(10),
+        paddingVertical: ox(10),
         alignItems: 'center',
         ...glassSurface,
     },
     boostPromptSecondaryText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     boostPromptPrimaryBtn: {
         flex: 1,
-        borderRadius: 10,
+        borderRadius: ox(10),
         backgroundColor: '#d91b5c',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         alignItems: 'center',
     },
     boostPromptPrimaryText: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '800',
     },
 });

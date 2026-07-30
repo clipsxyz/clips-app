@@ -5,6 +5,7 @@ import { useAuth } from '../context/Auth';
 import ScenesViewer from '../components/ScenesViewer.native';
 import { setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 type RouteParams = {
     initialPostId: string;

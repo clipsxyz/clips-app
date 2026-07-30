@@ -16,13 +16,11 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import {
-    chipActiveMagenta,
-    chipActiveMagentaText,
-    glassPanel,
     glassSearch,
     glassSurface,
     gazetteerHeader,
 } from '../theme/gazetteerAmbientNative';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers, setFollowState, toggleLike, reclipPost, posts as allPosts } from '../api/posts';
 import { fetchUserProfile, toggleFollow, fetchFollowers, fetchFollowing } from '../api/client';
@@ -65,6 +63,7 @@ import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNati
 import { getEffectivePlacesTraveled, formatProfileStatCount } from '../utils/effectivePlacesTraveled';
 import { getStableUserId } from '../utils/userId';
 import type { ProfilePostNotifyLevel } from '../utils/profilePostNotifyPrefs';
+import { ox } from '../constants/nativeOpticalScale';
 import {
     clearProfilePostNotifyForCreatorMobile,
     getProfilePostNotifyLevelMobile,
@@ -337,9 +336,10 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         const wasFollowingBeforeClick = isFollowing;
         const profilePrivate = isProfilePrivate(canonicalHandle);
         const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
+        const isKnownMockUser = Boolean(getAvatarForHandle(handleToUse));
 
-        // Mock-only: update local follow state immediately (web ViewProfilePage parity).
-        if (!isLaravelApiEnabled()) {
+        // Mock-only / known demo handles (Ava@galway etc.): local follow — no Laravel account required.
+        if (!isLaravelApiEnabled() || isKnownMockUser) {
             const newFollowing = !wasFollowingBeforeClick;
             if (profilePrivate && newFollowing && user?.handle) {
                 createFollowRequest(user.handle, canonicalHandle);
@@ -906,14 +906,14 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <GazetteerScreenShell>
+            <GazetteerScreenShell ambientVariant="passport">
                 <View style={styles.header}>
                     <TouchableOpacity
                         onPress={() => navigation.goBack()}
                         style={styles.headerIconBtn}
                         accessibilityLabel="Go back"
                     >
-                        <Icon name="chevron-back" size={22} color="#FFFFFF" />
+                        <Icon name="chevron-back" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <View style={styles.headerCenter}>
                         <Text style={styles.headerName} numberOfLines={1}>
@@ -923,7 +923,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     <View style={styles.headerIconBtnPlaceholder} />
                 </View>
                 <View style={styles.loadingShell}>
-                    <ActivityIndicator size="large" color="#f472b6" />
+                    <ActivityIndicator size="large" color="#3d9b8f" />
                 </View>
             </GazetteerScreenShell>
         );
@@ -931,14 +931,14 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
     if (!canView && profileIsPrivate) {
         return (
-            <GazetteerScreenShell>
+            <GazetteerScreenShell ambientVariant="passport">
                 <View style={styles.header}>
                     <TouchableOpacity
                         onPress={() => navigation.goBack()}
                         style={styles.headerIconBtn}
                         accessibilityLabel="Go back"
                     >
-                        <Icon name="chevron-back" size={22} color="#FFFFFF" />
+                        <Icon name="chevron-back" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <View style={styles.headerCenter}>
                         <Text style={styles.headerName} numberOfLines={1}>
@@ -951,7 +951,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     <View style={styles.headerIconBtnPlaceholder} />
                 </View>
                 <View style={styles.privateContainer}>
-                    <Icon name="lock-closed" size={64} color="#9CA3AF" />
+                    <Icon name="lock-closed" size={ox(64)} color="#9CA3AF" />
                     <Text style={styles.privateText}>This Account is Private</Text>
                     <Text style={styles.privateSubtext}>
                         To view this user's profile you must be following them.
@@ -972,14 +972,14 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     }
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambientVariant="passport">
             <View style={styles.header}>
                 <TouchableOpacity
                     onPress={() => navigation.goBack()}
                     style={styles.headerIconBtn}
                     accessibilityLabel="Go back"
                 >
-                    <Icon name="chevron-back" size={22} color="#FFFFFF" />
+                    <Icon name="chevron-back" size={ox(22)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerName} numberOfLines={1}>
@@ -994,7 +994,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     style={styles.headerIconBtn}
                     accessibilityLabel="Share profile"
                 >
-                    <Icon name="share-outline" size={18} color="#FFFFFF" />
+                    <Icon name="share-outline" size={ox(18)} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
 
@@ -1030,7 +1030,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                         ? user?.countryFlag || ''
                                         : getFlagForHandle(profileUser?.handle || decodedHandle) || ''
                                 }
-                                size={16}
+                                size={ox(16)}
                             />
                         </View>
                     </View>
@@ -1099,14 +1099,14 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
                 <View style={styles.secondaryActions}>
                     <TouchableOpacity onPress={handlePlacesPress} style={styles.secondaryActionBtn}>
-                        <Icon name="location" size={18} color="#FFFFFF" />
+                        <Icon name="location" size={ox(18)} color="#FFFFFF" />
                         <Text style={styles.secondaryActionText}>Places</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.secondaryActionBtn}
                         onPress={() => setShowShareProfileSheet(true)}
                     >
-                        <Icon name="share-social" size={18} color="#FFFFFF" />
+                        <Icon name="share-social" size={ox(18)} color="#FFFFFF" />
                         <Text style={styles.secondaryActionText}>Share</Text>
                     </TouchableOpacity>
                 </View>
@@ -1133,7 +1133,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     onPress={() => void openExternalLink(socialLinks.website)}
                                     accessibilityLabel="Website"
                                 >
-                                    <Icon name="link-outline" size={20} color="#FFFFFF" />
+                                    <Icon name="link-outline" size={ox(20)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                             {socialLinks.x ? (
@@ -1159,7 +1159,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     }
                                     accessibilityLabel="Instagram"
                                 >
-                                    <Icon name="logo-instagram" size={20} color="#FFFFFF" />
+                                    <Icon name="logo-instagram" size={ox(20)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                             {socialLinks.tiktok ? (
@@ -1172,7 +1172,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     }
                                     accessibilityLabel="TikTok"
                                 >
-                                    <Icon name="logo-tiktok" size={20} color="#FFFFFF" />
+                                    <Icon name="logo-tiktok" size={ox(20)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                             {socialLinks.podcast ? (
@@ -1181,7 +1181,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     onPress={() => void openExternalLink(socialLinks.podcast)}
                                     accessibilityLabel="Podcast"
                                 >
-                                    <Icon name="mic-outline" size={20} color="#FFFFFF" />
+                                    <Icon name="mic-outline" size={ox(20)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                         </View>
@@ -1247,7 +1247,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                             disabled={profilePostsLoadingMore}
                         >
                             {profilePostsLoadingMore ? (
-                                <ActivityIndicator size="small" color="#f472b6" />
+                                <ActivityIndicator size="small" color="#3d9b8f" />
                             ) : (
                                 <Text style={styles.loadMoreGridBtnText}>Load more posts</Text>
                             )}
@@ -1268,7 +1268,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Places Traveled</Text>
                             <TouchableOpacity onPress={() => setShowTraveledModal(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView
@@ -1279,7 +1279,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     onRefresh={() => {
                                         void loadProfile();
                                     }}
-                                    tintColor="#f472b6"
+                                    tintColor="#3d9b8f"
                                 />
                             }
                         >
@@ -1294,7 +1294,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                         }}
                                     >
                                         <View style={styles.placeIcon}>
-                                            <Icon name="location" size={20} color="#FFFFFF" />
+                                            <Icon name="location" size={ox(20)} color="#FFFFFF" />
                                         </View>
                                         <Text style={styles.placeName}>{place}</Text>
                                         <TouchableOpacity
@@ -1303,7 +1303,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                                 navigation.navigate('Feed', { location: place });
                                             }}
                                         >
-                                            <Icon name="eye" size={20} color="#9CA3AF" />
+                                            <Icon name="eye" size={ox(20)} color="#9CA3AF" />
                                         </TouchableOpacity>
                                     </TouchableOpacity>
                                 ))
@@ -1509,16 +1509,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.1)',
         ...gazetteerHeader,
     },
     headerIconBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: ox(44),
+        height: ox(44),
+        borderRadius: ox(22),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         backgroundColor: 'rgba(0,0,0,0.7)',
@@ -1526,23 +1526,23 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     headerIconBtnPlaceholder: {
-        width: 44,
-        height: 44,
+        width: ox(44),
+        height: ox(44),
     },
     headerCenter: {
         flex: 1,
         minWidth: 0,
-        paddingHorizontal: 8,
+        paddingHorizontal: ox(8),
         alignItems: 'center',
     },
     headerName: {
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
         color: '#FFFFFF',
         textAlign: 'center',
     },
     headerHandle: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#9CA3AF',
         textAlign: 'center',
         marginTop: 1,
@@ -1550,21 +1550,21 @@ const styles = StyleSheet.create({
     passportTitleBlock: {
         width: '100%',
         alignItems: 'center',
-        paddingTop: 16,
-        paddingBottom: 12,
+        paddingTop: ox(16),
+        paddingBottom: ox(12),
     },
     passportTitle: {
-        fontSize: 28,
+        fontSize: ox(28),
         fontWeight: '600',
         color: '#FFFFFF',
-        letterSpacing: -0.3,
+        letterSpacing: ox(-0.3),
     },
     passportEyebrow: {
-        marginTop: 4,
-        fontSize: 12,
+        marginTop: ox(4),
+        fontSize: ox(12),
         color: '#9CA3AF',
         textTransform: 'uppercase',
-        letterSpacing: 3.2,
+        letterSpacing: ox(3.2),
     },
     content: {
         flex: 1,
@@ -1573,73 +1573,73 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: FEED_UI.spacing.inset,
-        paddingTop: 20,
-        paddingBottom: 8,
-        gap: 24,
+        paddingTop: ox(20),
+        paddingBottom: ox(8),
+        gap: ox(24),
     },
     statsContainer: {
         flex: 1,
         flexDirection: 'row',
-        gap: 8,
-        borderRadius: 16,
+        gap: ox(8),
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: 'rgba(255,255,255,0.03)',
-        padding: 8,
+        padding: ox(8),
     },
     statItem: {
         flex: 1,
         alignItems: 'center',
-        borderRadius: 12,
+        borderRadius: ox(12),
         backgroundColor: 'rgba(0,0,0,0.4)',
-        paddingVertical: 8,
+        paddingVertical: ox(8),
     },
     statNumber: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     statLabel: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     nameRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        marginBottom: 2,
+        gap: ox(8),
+        marginBottom: ox(2),
     },
     coverIdentity: {
-        marginTop: 10,
+        marginTop: ox(10),
         alignItems: 'center',
         alignSelf: 'stretch',
-        paddingHorizontal: 20,
+        paddingHorizontal: ox(20),
     },
     coverDisplayName: {
-        fontSize: 22,
+        fontSize: ox(22),
         fontWeight: '700',
         color: '#FFFFFF',
         textAlign: 'center',
-        marginBottom: 4,
+        marginBottom: ox(4),
         width: '100%',
     },
     coverHandleRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
+        gap: ox(6),
         width: '100%',
     },
     coverHandle: {
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '500',
         color: 'rgba(229,231,235,0.92)',
         textAlign: 'center',
         flexShrink: 1,
     },
     displayName: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
         color: '#FFFFFF',
     },
@@ -1649,58 +1649,58 @@ const styles = StyleSheet.create({
         paddingTop: 0,
     },
     userHandle: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     bioBox: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: 'rgba(255,255,255,0.03)',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginBottom: 4,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+        marginBottom: ox(4),
     },
     bioBoxEmpty: {
         backgroundColor: 'rgba(255,255,255,0.02)',
     },
     bio: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#E5E7EB',
-        lineHeight: 20,
+        lineHeight: ox(20),
     },
     bioPlaceholder: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#6B7280',
     },
     socialLinksRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
-        marginTop: 10,
+        gap: ox(8),
+        marginTop: ox(10),
     },
     socialLinkIconButton: {
-        width: 44,
-        height: 44,
+        width: ox(44),
+        height: ox(44),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#000000',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 12,
+        borderRadius: ox(12),
     },
     socialXGlyph: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
-        lineHeight: 22,
+        lineHeight: ox(22),
     },
     postNotifyButton: {
-        width: 44,
-        height: 42,
-        borderRadius: 12,
+        width: ox(44),
+        height: ox(42),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.3)',
         backgroundColor: '#000000',
@@ -1715,24 +1715,24 @@ const styles = StyleSheet.create({
     actionButtons: {
         flexDirection: 'row',
         paddingHorizontal: FEED_UI.spacing.inset,
-        gap: 8,
-        marginBottom: 16,
+        gap: ox(8),
+        marginBottom: ox(16),
         alignItems: 'center',
     },
     secondaryActions: {
         flexDirection: 'row',
         paddingHorizontal: FEED_UI.spacing.inset,
-        gap: 8,
-        marginBottom: 16,
+        gap: ox(8),
+        marginBottom: ox(16),
     },
     secondaryActionBtn: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 11,
-        borderRadius: 12,
+        gap: ox(8),
+        paddingVertical: ox(11),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.3)',
         backgroundColor: '#000000',
@@ -1742,39 +1742,39 @@ const styles = StyleSheet.create({
     },
     secondaryActionText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     followButton: {
         flex: 1,
-        paddingVertical: 10,
-        minHeight: 42,
-        borderRadius: 12,
+        paddingVertical: ox(10),
+        minHeight: ox(42),
+        borderRadius: ox(12),
         backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
     },
     privateFollowButton: {
         flex: 0,
-        paddingHorizontal: 24,
+        paddingHorizontal: ox(24),
         minWidth: 140,
-        backgroundColor: '#d91b5c',
+        backgroundColor: PASSPORT_PALETTE.wavePrimary,
     },
     privateFollowButtonText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     followButtonText: {
         color: '#000000',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     messageButton: {
         flex: 1,
-        paddingVertical: 10,
-        minHeight: 42,
-        borderRadius: 12,
+        paddingVertical: ox(10),
+        minHeight: ox(42),
+        borderRadius: ox(12),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#000000',
@@ -1783,13 +1783,13 @@ const styles = StyleSheet.create({
     },
     messageButtonText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     contentTabsWrap: {
-        marginBottom: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 6,
+        marginBottom: ox(8),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(6),
         borderTopWidth: StyleSheet.hairlineWidth,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderColor: 'rgba(255,255,255,0.1)',
@@ -1797,14 +1797,14 @@ const styles = StyleSheet.create({
     },
     contentTabsRow: {
         flexDirection: 'row',
-        gap: 6,
-        paddingHorizontal: 4,
+        gap: ox(6),
+        paddingHorizontal: ox(4),
     },
     contentTabButton: {
         flex: 1,
-        minHeight: 44,
-        borderRadius: 8,
-        paddingVertical: 10,
+        minHeight: ox(44),
+        borderRadius: ox(8),
+        paddingVertical: ox(10),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#000000',
@@ -1817,15 +1817,15 @@ const styles = StyleSheet.create({
     },
     contentTabText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     contentTabTextActive: {
         color: '#000000',
     },
     postsContainer: {
-        paddingHorizontal: 8,
-        paddingTop: 4,
+        paddingHorizontal: ox(8),
+        paddingTop: ox(4),
         paddingBottom: FEED_UI.spacing.inset,
     },
     postsGrid: {
@@ -1834,27 +1834,27 @@ const styles = StyleSheet.create({
     },
     emptyGrid: {
         alignItems: 'center',
-        paddingVertical: 48,
-        paddingHorizontal: 24,
+        paddingVertical: ox(48),
+        paddingHorizontal: ox(24),
     },
     emptyGridTitle: {
         color: '#9CA3AF',
-        fontSize: 18,
-        marginBottom: 8,
+        fontSize: ox(18),
+        marginBottom: ox(8),
         textAlign: 'center',
     },
     emptyGridSubtext: {
         color: '#6B7280',
-        fontSize: 14,
+        fontSize: ox(14),
         textAlign: 'center',
     },
     loadMoreGridBtn: {
-        marginTop: 12,
-        marginBottom: 8,
+        marginTop: ox(12),
+        marginBottom: ox(8),
         alignSelf: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 999,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(10),
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: 'rgba(255,255,255,0.05)',
@@ -1863,7 +1863,7 @@ const styles = StyleSheet.create({
     },
     loadMoreGridBtnText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '600',
     },
     postThumbnail: {
@@ -1887,32 +1887,32 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 40,
+        padding: ox(40),
     },
     privateText: {
-        fontSize: 24,
+        fontSize: ox(24),
         fontWeight: '700',
         color: '#FFFFFF',
-        marginTop: 16,
-        marginBottom: 8,
+        marginTop: ox(16),
+        marginBottom: ox(8),
         textAlign: 'center',
     },
     privateSubtext: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
-        marginBottom: 24,
+        marginBottom: ox(24),
         textAlign: 'center',
-        lineHeight: 20,
+        lineHeight: ox(20),
     },
     privatePendingText: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#6B7280',
         textAlign: 'center',
     },
     traveledButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 8,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(10),
+        borderRadius: ox(8),
         justifyContent: 'center',
         alignItems: 'center',
         ...glassSurface,
@@ -1922,91 +1922,98 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(11, 7, 17, 0.82)',
+        backgroundColor: 'rgba(6, 13, 22, 0.82)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 16,
+        padding: ox(16),
     },
     modalContent: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         maxWidth: 400,
         width: '100%',
         maxHeight: '80%',
         overflow: 'hidden',
-        ...glassPanel,
+        backgroundColor: 'rgba(15, 36, 48, 0.94)',
+        borderWidth: 1,
+        borderColor: 'rgba(159, 212, 203, 0.18)',
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     modalTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     modalBody: {
-        padding: 16,
+        padding: ox(16),
     },
     connectionsModalContent: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         maxWidth: 500,
         width: '100%',
         maxHeight: '85%',
         overflow: 'hidden',
-        ...glassPanel,
+        backgroundColor: 'rgba(15, 36, 48, 0.94)',
+        borderWidth: 1,
+        borderColor: 'rgba(159, 212, 203, 0.18)',
     },
     connectionsTabs: {
         flexDirection: 'row',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        paddingBottom: 8,
+        gap: ox(8),
+        paddingHorizontal: ox(16),
+        paddingTop: ox(12),
+        paddingBottom: ox(8),
     },
     connectionsTabBtn: {
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
         ...glassSurface,
     },
     connectionsTabBtnActive: {
-        ...chipActiveMagenta,
+        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        borderWidth: 1,
+        borderColor: 'rgba(159, 212, 203, 0.35)',
     },
     connectionsTabText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     connectionsTabTextActive: {
-        ...chipActiveMagentaText,
+        color: '#FFFFFF',
+        fontWeight: '700',
     },
     connectionsSearchWrap: {
-        marginHorizontal: 16,
-        marginBottom: 8,
-        borderRadius: 999,
-        paddingHorizontal: 12,
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
         ...glassSearch,
     },
     connectionsSearchInput: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: 14,
-        paddingVertical: 8,
+        fontSize: ox(14),
+        paddingVertical: ox(8),
     },
     connectionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        marginBottom: 8,
+        borderRadius: ox(10),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
+        marginBottom: ox(8),
         justifyContent: 'space-between',
-        gap: 10,
+        gap: ox(10),
         ...glassSurface,
     },
     connectionLeftTap: {
@@ -2020,36 +2027,36 @@ const styles = StyleSheet.create({
     },
     connectionNameText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     connectionHandleText: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginTop: 2,
+        fontSize: ox(12),
+        marginTop: ox(2),
     },
     connectionMetaBadge: {
-        marginTop: 5,
+        marginTop: ox(5),
         alignSelf: 'flex-start',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 5,
-        borderRadius: 999,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
+        gap: ox(5),
+        borderRadius: ox(999),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(3),
         ...glassSurface,
     },
     connectionMetaBadgeText: {
         color: '#CBD5E1',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
     },
     connectionFollowBtn: {
-        borderRadius: 999,
-        backgroundColor: '#d91b5c',
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-        minWidth: 84,
+        borderRadius: ox(999),
+        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(7),
+        minWidth: ox(84),
         alignItems: 'center',
     },
     connectionFollowingBtn: {
@@ -2064,49 +2071,49 @@ const styles = StyleSheet.create({
     },
     connectionFollowBtnText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     loadMoreBtn: {
-        marginTop: 6,
-        borderRadius: 10,
+        marginTop: ox(6),
+        borderRadius: ox(10),
         alignItems: 'center',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         ...glassSurface,
     },
     loadMoreBtnText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     placeItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
+        padding: ox(16),
+        borderRadius: ox(12),
+        marginBottom: ox(12),
         ...glassSurface,
     },
     placeIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#d91b5c',
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
+        backgroundColor: PASSPORT_PALETTE.wavePrimary,
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
     },
     placeName: {
         flex: 1,
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '500',
         color: '#FFFFFF',
     },
     emptyText: {
-        fontSize: 15,
+        fontSize: ox(15),
         color: '#9CA3AF',
         textAlign: 'center',
-        paddingVertical: 24,
+        paddingVertical: ox(24),
     },
 });
 

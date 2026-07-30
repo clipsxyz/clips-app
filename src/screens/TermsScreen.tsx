@@ -3,13 +3,14 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function TermsScreen({ navigation }: any) {
   return (
     <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Icon name="arrow-back" size={22} color="#FFFFFF" />
+          <Icon name="arrow-back" size={ox(22)} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Terms</Text>
         <View style={styles.backBtn} />
@@ -37,34 +38,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: ox(16),
+    paddingVertical: ox(12),
     ...gazetteerHeader,
   },
   backBtn: {
-    width: 32,
-    height: 32,
+    width: ox(32),
+    height: ox(32),
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: ox(18),
     fontWeight: '700',
   },
   content: {
-    padding: 16,
+    padding: ox(16),
   },
   sectionTitle: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: ox(15),
     fontWeight: '700',
-    marginTop: 10,
-    marginBottom: 6,
+    marginTop: ox(10),
+    marginBottom: ox(6),
   },
   body: {
     color: '#D1D5DB',
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: ox(13),
+    lineHeight: ox(19),
   },
 });

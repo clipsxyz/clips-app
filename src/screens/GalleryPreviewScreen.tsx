@@ -40,6 +40,7 @@ import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNati
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
+import { ox } from '../constants/nativeOpticalScale';
 import {
     failedToSaveSheet,
     nothingToSaveSheet,
@@ -491,7 +492,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             <Image source={{ uri: previewUri }} style={styles.previewMedia} resizeMode="contain" />
                         ) : (
                             <TouchableOpacity style={styles.emptyPick} onPress={addCarouselFromPicker}>
-                                <Icon name="images-outline" size={36} color="#9CA3AF" />
+                                <Icon name="images-outline" size={ox(36)} color="#9CA3AF" />
                                 <Text style={styles.emptyPickText}>Choose photos or videos</Text>
                             </TouchableOpacity>
                         )}
@@ -523,7 +524,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
                 <View style={[styles.overlayHeader, { paddingTop: insets.top + 8 }]}>
                     <TouchableOpacity style={styles.overlayBtn} onPress={() => navigation.goBack()}>
-                        <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                        <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                     </TouchableOpacity>
 
                     {isCarousel ? (
@@ -535,7 +536,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             >
                                 <Icon
                                     name="chevron-back"
-                                    size={18}
+                                    size={ox(18)}
                                     color={carouselActiveIndex === 0 ? 'rgba(255,255,255,0.35)' : '#FFFFFF'}
                                 />
                             </TouchableOpacity>
@@ -553,7 +554,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             >
                                 <Icon
                                     name="chevron-forward"
-                                    size={18}
+                                    size={ox(18)}
                                     color={
                                         carouselActiveIndex >= carouselItems.length - 1
                                             ? 'rgba(255,255,255,0.35)'
@@ -574,7 +575,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             >
                                 <Icon
                                     name={isMuted ? 'volume-mute' : 'volume-high'}
-                                    size={20}
+                                    size={ox(20)}
                                     color="#FFFFFF"
                                 />
                             </TouchableOpacity>
@@ -588,7 +589,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                                 {isUploading ? (
                                     <ActivityIndicator size="small" color="#FFFFFF" />
                                 ) : (
-                                    <Icon name="send" size={22} color="#FFFFFF" />
+                                    <Icon name="send" size={ox(22)} color="#FFFFFF" />
                                 )}
                             </TouchableOpacity>
                         </View>
@@ -722,7 +723,7 @@ const styles = StyleSheet.create({
     },
     previewCapture: {
         flex: 1,
-        minHeight: 180,
+        minHeight: ox(180),
     },
     previewMedia: {
         width: '100%',
@@ -736,14 +737,14 @@ const styles = StyleSheet.create({
     },
     emptyPick: {
         flex: 1,
-        minHeight: 180,
+        minHeight: ox(180),
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     emptyPickText: {
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     overlayHeader: {
         position: 'absolute',
@@ -753,25 +754,25 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingBottom: 8,
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(8),
         zIndex: 10,
     },
     overlayBtn: {
-        padding: 8,
-        borderRadius: 999,
+        padding: ox(8),
+        borderRadius: ox(999),
         backgroundColor: 'rgba(0,0,0,0.5)',
     },
     carouselNav: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     carouselCounter: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
-        minWidth: 48,
+        minWidth: ox(48),
         textAlign: 'center',
     },
     headerSpacer: {
@@ -780,16 +781,16 @@ const styles = StyleSheet.create({
     headerRight: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     postRing: {
-        borderRadius: 999,
-        padding: 1.5,
+        borderRadius: ox(999),
+        padding: ox(1.5),
         backgroundColor: '#FFFFFF',
     },
     postBtn: {
-        padding: 10,
-        borderRadius: 999,
+        padding: ox(10),
+        borderRadius: ox(999),
         backgroundColor: '#000000',
     },
 });

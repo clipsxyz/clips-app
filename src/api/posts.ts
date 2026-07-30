@@ -2467,30 +2467,22 @@ export async function addComment(postId: string, userHandle: string, text: strin
       post.stats.comments += 1;
     }
 
-    // Send DM to post owner with comment notification (only if not commenting on own post).
-    // Skip for frontend-only demo posts — Laravel has no Ava mock user / post to message.
+    // Notify post owner in Inbox → Notifs (not Messages / DM).
+    // Skip for frontend-only demo posts and own posts.
     if (post.userHandle !== userHandle && !isFrontendOnlyPostId(resolvedPostId)) {
-      // Dynamically import to avoid circular dependency
-      const { appendMessage } = await import('./messages');
-      console.log('Sending comment notification DM:', {
-        from: userHandle,
-        to: post.userHandle,
-        postId,
-        commentText: text
-      });
       try {
-        await appendMessage(userHandle, post.userHandle, {
-          postId: postId,
+        const { createNotification } = await import('./notifications');
+        await createNotification({
+          type: 'comment',
+          fromHandle: userHandle,
+          toHandle: post.userHandle,
+          message: text,
+          postId: resolvedPostId,
           commentId: comment.id,
-          commentText: text,
-          isSystemMessage: false
         });
-        console.log('Comment notification DM sent successfully');
       } catch (error) {
-        console.error('Failed to send comment notification DM:', error);
+        console.error('Failed to create comment notification:', error);
       }
-    } else {
-      console.log('Skipping DM - user is commenting on their own post');
     }
   } else {
     console.warn('Post not found for comment:', postId, 'Available post IDs:', posts.map(p => p.id).slice(0, 5));
@@ -2557,6 +2549,24 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     }
     parentComment.replies.push(reply);
     parentComment.replyCount = (parentComment.replyCount || 0) + 1;
+
+    // Instagram-style: reply-to-comment → Activity/Notifs for the parent author (not a DM).
+    const parentAuthor = String(parentComment.userHandle || '').trim();
+    if (parentAuthor && parentAuthor.toLowerCase() !== String(userHandle || '').trim().toLowerCase()) {
+      try {
+        const { createNotification } = await import('./notifications');
+        await createNotification({
+          type: 'reply',
+          fromHandle: userHandle,
+          toHandle: parentAuthor,
+          message: text,
+          postId,
+          commentId: reply.id,
+        });
+      } catch (error) {
+        console.error('Failed to create comment-reply notification:', error);
+      }
+    }
   }
 
   return reply;

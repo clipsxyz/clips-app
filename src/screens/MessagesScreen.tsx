@@ -14,10 +14,11 @@ import {
     PanResponder,
     Linking,
     PermissionsAndroid,
+    ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -35,25 +36,43 @@ import {
     muteConversation,
     unmuteConversation,
     isConversationMuted,
+    blockUser,
+    unblockUser,
+    isUserBlocked,
+    deleteConversation,
     type ChatMessage,
 } from '../api/messages';
 import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { getAvatarForHandle } from '../api/users';
+import { getPostById, getFollowedUsers, getState, setFollowState } from '../api/posts';
+import { fetchUserProfile, toggleFollow } from '../api/client';
+import { parsePlacesFromBio } from '../utils/suggestedPlaces';
+import { extractPostId } from '../utils/extractPostId';
+import { DmSharedPostCard, DmSharedPostPreviewCard } from '../components/DmSharedPostCard.native';
+import { isProfilePrivate, hasPendingFollowRequest } from '../api/privacy';
+import type { Post } from '../types';
 import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
+import DmMessageActionsSheet, { type DmMessageAction } from '../components/DmMessageActionsSheet.native';
+import DmReactionFlyOverlay, {
+    type ReactionFlyTarget,
+} from '../components/DmReactionFlyOverlay.native';
+import DmMessagePressable from '../components/DmMessagePressable.native';
 import IMessageDmBubbleShell from '../components/IMessageDmBubbleShell.native';
 import {
     DM_RECEIVED,
     dmSentBubbleColor,
     getDmSentBubblePreference,
+    setDmSentBubblePreference,
     type DmSentBubbleStyle,
 } from '../constants/dmImessageTheme.native';
 import { toFileUri } from '../utils/ffmpegNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 type VoiceDraftSegment = { audioUrl: string; durationSeconds: number };
 type VoiceDraftState = {
@@ -116,6 +135,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [inviteSuggestions, setInviteSuggestions] = useState<Array<{ handle: string; displayName?: string; avatarUrl?: string }>>([]);
     const [inviteSearching, setInviteSearching] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
+    const [isBlocked, setIsBlocked] = useState(false);
     const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string } | null>(null);
     const [messageReactions, setMessageReactions] = useState<Record<string, Array<{ emoji: string; users: string[] }>>>({});
     const [showStickerPicker, setShowStickerPicker] = useState(false);
@@ -139,6 +159,13 @@ export default function MessagesScreen({ route, navigation }: any) {
     const micGestureStartRef = useRef({ x: 0, y: 0, at: 0, wasRecording: false });
     const voiceDraftRef = useRef<typeof voiceDraft>(null);
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>('blue');
+    const [sharedPosts, setSharedPosts] = useState<Record<string, Post>>({});
+    const [isFollowing, setIsFollowing] = useState(false);
+    const [showFollowCheck, setShowFollowCheck] = useState(false);
+    const [isFollowLoading, setIsFollowLoading] = useState(false);
+    const [otherUserPlacesTraveled, setOtherUserPlacesTraveled] = useState<string[] | undefined>(
+        undefined,
+    );
 
     useEffect(() => {
         void getDmSentBubblePreference().then(setDmSentStyle);
@@ -146,13 +173,21 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
     const [sheetAlert, setSheetAlert] = useState<SheetAlertState | null>(null);
     const [sheetMenu, setSheetMenu] = useState<SheetMenuState | null>(null);
+    const [messageActionsTarget, setMessageActionsTarget] = useState<ChatMessage | null>(null);
+    const [reactionFly, setReactionFly] = useState<{
+        messageId: string;
+        emoji: string;
+        target: ReactionFlyTarget | null;
+    } | null>(null);
+    const reactionPillRefs = useRef<Record<string, View | null>>({});
+    const swipeAnim = useRef(new Animated.Value(0)).current;
+    const replyBarAnim = useRef(new Animated.Value(0)).current;
+    const swipeMessageIdRef = useRef<string | null>(null);
     const [showChatInfo, setShowChatInfo] = useState(false);
     const [leaveGroupBusy, setLeaveGroupBusy] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
     const [swipingMessageId, setSwipingMessageId] = useState<string | null>(null);
-    const [swipeOffset, setSwipeOffset] = useState(0);
-    const swipeStartRef = useRef<{ x: number; y: number; message: ChatMessage | null } | null>(null);
     const audioRecorderRef = useRef(AudioRecorderPlayer);
     const communityCreatedHandledRef = useRef(false);
 
@@ -325,11 +360,306 @@ export default function MessagesScreen({ route, navigation }: any) {
                 if (!cancelled) setIsMuted(false);
             }
         }
+        async function syncBlocked() {
+            if (!user?.handle || !handle || isGroupThread) {
+                if (!cancelled) setIsBlocked(false);
+                return;
+            }
+            try {
+                const blocked = await isUserBlocked(user.handle, handle);
+                if (!cancelled) setIsBlocked(!!blocked);
+            } catch {
+                if (!cancelled) setIsBlocked(false);
+            }
+        }
         syncMuted();
+        syncBlocked();
         return () => {
             cancelled = true;
         };
     }, [user?.handle, handle, isGroupThread]);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function loadOtherUserPlaces() {
+            if (!handle || isGroupThread) {
+                if (!cancelled) setOtherUserPlacesTraveled(undefined);
+                return;
+            }
+            try {
+                let places: string[] = [];
+                if (user?.id) {
+                    try {
+                        const profile = await fetchUserProfile(handle, user.id);
+                        const apiPlaces =
+                            (profile as any).places_traveled || (profile as any).placesTraveled;
+                        if (Array.isArray(apiPlaces) && apiPlaces.length > 0) {
+                            places = apiPlaces;
+                        } else if (typeof (profile as any).bio === 'string') {
+                            places = parsePlacesFromBio((profile as any).bio);
+                        }
+                    } catch {
+                        // fall through to mock fallback
+                    }
+                }
+                if ((!places || places.length === 0) && handle === 'Bob@Ireland') {
+                    places = ['Cork', 'Galway', 'Belfast', 'London', 'Paris'];
+                }
+                if (!cancelled) {
+                    setOtherUserPlacesTraveled(places && places.length > 0 ? places : []);
+                }
+            } catch {
+                if (!cancelled) setOtherUserPlacesTraveled([]);
+            }
+        }
+        void loadOtherUserPlaces();
+        return () => {
+            cancelled = true;
+        };
+    }, [handle, isGroupThread, user?.id]);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function checkFollow() {
+            if (!handle || !user?.id || isGroupThread || handle === user.handle) {
+                if (!cancelled) {
+                    setIsFollowing(false);
+                    setShowFollowCheck(false);
+                }
+                return;
+            }
+            try {
+                const followedUsers = await getFollowedUsers(user.id);
+                const following = followedUsers.includes(handle);
+                if (!cancelled) {
+                    setIsFollowing(following);
+                    setShowFollowCheck(following);
+                }
+            } catch {
+                if (!cancelled) {
+                    setIsFollowing(false);
+                    setShowFollowCheck(false);
+                }
+            }
+        }
+        void checkFollow();
+        return () => {
+            cancelled = true;
+        };
+    }, [handle, isGroupThread, user?.handle, user?.id]);
+
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        if (user?.handle && handle && handle !== user.handle && isFollowing) {
+            setShowFollowCheck(true);
+            timer = setTimeout(() => setShowFollowCheck(false), 2500);
+        } else {
+            setShowFollowCheck(false);
+        }
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
+    }, [isFollowing, handle, user?.handle]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const postIds = new Set<string>();
+        for (const msg of messages) {
+            if (msg.postId) postIds.add(msg.postId);
+            if (msg.text) {
+                const pid = extractPostId(msg.text);
+                if (pid) postIds.add(pid);
+            }
+        }
+        const missing = Array.from(postIds).filter((id) => !sharedPosts[id]);
+        if (missing.length === 0) return;
+        void Promise.all(
+            missing.map(async (postId) => {
+                try {
+                    const post = await getPostById(postId, user?.id);
+                    if (!cancelled && post) {
+                        setSharedPosts((prev) =>
+                            prev[postId] ? prev : { ...prev, [postId]: post },
+                        );
+                    }
+                } catch {
+                    // ignore missing posts
+                }
+            }),
+        );
+        return () => {
+            cancelled = true;
+        };
+        // sharedPosts intentionally omitted — we only fetch missing ids from messages
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [messages, user?.id]);
+
+    const openScenesForPost = (post: Post) => {
+        navigation.navigate('Scenes', {
+            initialPostId: post.id,
+            posts: [post],
+            feedLabel: 'Messages',
+        });
+    };
+
+    const openScenesForPostId = (postId: string) => {
+        getPostById(postId, user?.id)
+            .then((post) => {
+                if (post) {
+                    setSharedPosts((prev) => ({ ...prev, [postId]: post }));
+                    openScenesForPost(post);
+                } else {
+                    showAlert({
+                        title: 'Could not load post',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                }
+            })
+            .catch(() => {
+                showAlert({
+                    title: 'Could not load post',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+            });
+    };
+
+    const openPlacesTraveled = () => {
+        if (!handle) return;
+        if (!otherUserPlacesTraveled || otherUserPlacesTraveled.length === 0) {
+            showAlert({
+                title: 'No Places Traveled',
+                message: `${handle} hasn't added any places they've traveled to their profile yet.`,
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
+        showAlert({
+            title: 'Places Traveled',
+            message: otherUserPlacesTraveled.join('\n'),
+            icon: 'info',
+            confirmButtonText: 'OK',
+        });
+    };
+
+    const handleFollowFromHeader = async () => {
+        if (!user?.id || !user?.handle || !handle || isFollowLoading || handle === user.handle) return;
+        setIsFollowLoading(true);
+        try {
+            const profilePrivate = isProfilePrivate(handle);
+            const hasPending = hasPendingFollowRequest(user.handle, handle);
+            if (profilePrivate && hasPending) {
+                showAlert({
+                    title: 'Follow Request Already Sent',
+                    message: `You have already sent a follow request to ${handle}. You will be notified when they respond.`,
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
+            const s = getState(user.id);
+            const wasFollowing = s.follows[handle] === true;
+            const newFollowingState = !wasFollowing;
+            setFollowState(user.id, handle, newFollowingState);
+            setIsFollowing(newFollowingState);
+            try {
+                const result = await toggleFollow(handle);
+                if (result && typeof result.following === 'boolean') {
+                    setFollowState(user.id, handle, result.following);
+                    setIsFollowing(result.following);
+                }
+            } catch {
+                // keep optimistic local state
+            }
+        } catch {
+            const current = getState(user.id).follows[handle] === true;
+            setIsFollowing(current);
+            showAlert({
+                title: 'Action failed',
+                message: 'Could not update follow status right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        } finally {
+            setIsFollowLoading(false);
+        }
+    };
+
+    const confirmBlockUser = () => {
+        if (!user?.handle || !handle || isGroupThread) return;
+        if (isBlocked) {
+            void (async () => {
+                try {
+                    await unblockUser(user.handle, handle);
+                    setIsBlocked(false);
+                    setShowChatInfo(false);
+                } catch {
+                    showAlert({
+                        title: 'Action failed',
+                        message: 'Could not unblock this user right now.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                }
+            })();
+            return;
+        }
+        showAlert({
+            title: `Block ${handle}?`,
+            message: "You won't receive messages from them.",
+            icon: 'alert',
+            confirmButtonText: 'Block',
+            showCancelButton: true,
+            cancelButtonText: 'Cancel',
+            onConfirm: () => {
+                void (async () => {
+                    try {
+                        await blockUser(user.handle, handle);
+                        setIsBlocked(true);
+                        setShowChatInfo(false);
+                        navigation.goBack();
+                    } catch {
+                        showAlert({
+                            title: 'Action failed',
+                            message: 'Could not block this user right now.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                    }
+                })();
+            },
+        });
+    };
+
+    const confirmDeleteConversation = () => {
+        if (!user?.handle || !handle || isGroupThread) return;
+        showAlert({
+            title: `Delete conversation with ${handle}?`,
+            message: 'This cannot be undone.',
+            icon: 'alert',
+            confirmButtonText: 'Delete',
+            showCancelButton: true,
+            cancelButtonText: 'Cancel',
+            onConfirm: () => {
+                void (async () => {
+                    try {
+                        await deleteConversation(user.handle, handle);
+                        setShowChatInfo(false);
+                        navigation.goBack();
+                    } catch {
+                        showAlert({
+                            title: 'Action failed',
+                            message: 'Could not delete this conversation right now.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                    }
+                })();
+            },
+        });
+    };
 
     useEffect(() => {
         if (loading || messages.length === 0) return;
@@ -474,13 +804,18 @@ export default function MessagesScreen({ route, navigation }: any) {
     };
 
     const openMessageActions = (item: ChatMessage) => {
+        setMessageActionsTarget(item);
+    };
+
+    const closeMessageActions = () => setMessageActionsTarget(null);
+
+    const messageActionList = (item: ChatMessage): DmMessageAction[] => {
         const fromMe = item.senderHandle === user?.handle;
-        const options: GazetteerMenuOption[] = [
-            { label: 'React ❤️', onPress: () => handleToggleReaction(item.id, '❤️') },
-            { label: 'React 😂', onPress: () => handleToggleReaction(item.id, '😂') },
-            { label: 'React 🔥', onPress: () => handleToggleReaction(item.id, '🔥') },
+        const actions: DmMessageAction[] = [
             {
+                key: 'reply',
                 label: 'Reply',
+                icon: 'arrow-undo',
                 onPress: () => {
                     setReplyingTo(item);
                     setEditingMessage(null);
@@ -488,8 +823,10 @@ export default function MessagesScreen({ route, navigation }: any) {
             },
         ];
         if (item.storyId) {
-            options.push({
+            actions.push({
+                key: 'view-story',
                 label: 'View story',
+                icon: 'image-outline',
                 onPress: () => {
                     navigation.navigate('Stories', {
                         openUserHandle: item.senderHandle || handle,
@@ -499,8 +836,10 @@ export default function MessagesScreen({ route, navigation }: any) {
             });
         }
         if (fromMe && !isGroupThread) {
-            options.push({
+            actions.unshift({
+                key: 'edit',
                 label: 'Edit',
+                icon: 'create-outline',
                 onPress: () => {
                     setEditingMessage(item);
                     setReplyingTo(null);
@@ -508,17 +847,28 @@ export default function MessagesScreen({ route, navigation }: any) {
                 },
             });
         }
-        if (!fromMe) {
-            options.push({
-                label: 'View profile',
-                onPress: () => {
-                    navigation.navigate('ViewProfile', { handle: item.senderHandle });
-                },
-            });
-        }
+        actions.push({
+            key: 'sticker',
+            label: 'Add sticker',
+            icon: 'happy-outline',
+            onPress: () => {
+                setStickerTargetMessageId(item.id);
+                setShowStickerPicker(true);
+            },
+        });
+        actions.push({
+            key: 'forward',
+            label: 'Forward',
+            icon: 'share-outline',
+            onPress: () => {
+                void handleForwardMessage(item);
+            },
+        });
         if (item.text) {
-            options.push({
+            actions.push({
+                key: 'copy',
                 label: 'Copy text',
+                icon: 'copy-outline',
                 onPress: () => {
                     Clipboard.setString(item.text || '');
                     showAlert({
@@ -529,40 +879,35 @@ export default function MessagesScreen({ route, navigation }: any) {
                     });
                 },
             });
-            options.push({
+            actions.push({
+                key: 'translate',
                 label: translatedMessages[item.id] ? 'Hide translation' : 'Translate',
+                icon: 'language-outline',
                 onPress: () => {
                     void handleTranslateMessage(item);
                 },
             });
         }
-        options.push(
-            {
-                label: 'Add sticker',
+        if (!fromMe) {
+            actions.push({
+                key: 'profile',
+                label: 'View profile',
+                icon: 'person-outline',
                 onPress: () => {
-                    setStickerTargetMessageId(item.id);
-                    setShowStickerPicker(true);
+                    navigation.navigate('ViewProfile', { handle: item.senderHandle });
                 },
+            });
+        }
+        actions.push({
+            key: 'report',
+            label: 'Report',
+            icon: 'alert-circle-outline',
+            destructive: true,
+            onPress: () => {
+                handleReportMessage(item);
             },
-            {
-                label: 'Forward',
-                onPress: () => {
-                    void handleForwardMessage(item);
-                },
-            },
-            {
-                label: 'Report',
-                onPress: () => {
-                    handleReportMessage(item);
-                },
-                destructive: true,
-            },
-        );
-        showMenu({
-            title: 'Message actions',
-            subtitle: 'Choose an action',
-            options,
         });
+        return actions;
     };
 
     const translateText = async (text: string): Promise<string> => {
@@ -722,6 +1067,62 @@ export default function MessagesScreen({ route, navigation }: any) {
         });
     };
 
+    /** Instagram-style: add reaction, then pop → fly into the pill on the bubble. */
+    const handleReactWithAnimation = (messageId: string, emoji: string) => {
+        if (!user?.handle) return;
+        const existing = messageReactions[messageId] || [];
+        const reaction = existing.find((r) => r.emoji === emoji);
+        const removing = !!reaction?.users.includes(user.handle);
+        handleToggleReaction(messageId, emoji);
+        if (removing) return;
+        setReactionFly({ messageId, emoji, target: null });
+    };
+
+    const measureReactionFlyTarget = useCallback(() => {
+        if (!reactionFly) return;
+        const key = `${reactionFly.messageId}::${reactionFly.emoji}`;
+        const node = reactionPillRefs.current[key];
+        if (!node || typeof (node as any).measureInWindow !== 'function') {
+            // Pill may not have laid out yet — retry once next frame
+            requestAnimationFrame(() => {
+                const retry = reactionPillRefs.current[key];
+                if (retry && typeof (retry as any).measureInWindow === 'function') {
+                    (retry as View).measureInWindow((x, y, w, h) => {
+                        setReactionFly((prev) =>
+                            prev && prev.messageId === reactionFly.messageId && prev.emoji === reactionFly.emoji
+                                ? { ...prev, target: { x: x + w / 2, y: y + h / 2 } }
+                                : prev,
+                        );
+                    });
+                } else {
+                    setReactionFly(null);
+                }
+            });
+            return;
+        }
+        (node as View).measureInWindow((x, y, w, h) => {
+            setReactionFly((prev) =>
+                prev && prev.messageId === reactionFly.messageId && prev.emoji === reactionFly.emoji
+                    ? { ...prev, target: { x: x + w / 2, y: y + h / 2 } }
+                    : prev,
+            );
+        });
+    }, [reactionFly]);
+
+    useEffect(() => {
+        if (!replyingTo && !editingMessage) {
+            replyBarAnim.setValue(0);
+            return;
+        }
+        replyBarAnim.setValue(0);
+        Animated.spring(replyBarAnim, {
+            toValue: 1,
+            friction: 8,
+            tension: 120,
+            useNativeDriver: true,
+        }).start();
+    }, [replyingTo?.id, editingMessage?.id, replyBarAnim]);
+
     const pickGroupAvatar = () => {
         launchImageLibrary(
             {
@@ -845,57 +1246,41 @@ export default function MessagesScreen({ route, navigation }: any) {
     };
 
     const openHeaderActions = () => {
-        if (isGroupThread) {
-            setShowChatInfo(true);
-            return;
+        setShowChatInfo(true);
+    };
+
+    const formatMessageClock = (ts: number) => {
+        try {
+            return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {
+            return timeAgo(ts);
         }
-        const toggleMuteAction: GazetteerMenuOption = isMuted
-            ? {
-                label: 'Unmute conversation',
-                onPress: () => {
-                    void (async () => {
-                        if (!user?.handle || !handle) return;
-                        try {
-                            await unmuteConversation(user.handle, handle);
-                            setIsMuted(false);
-                        } catch {
-                            showAlert({
-                                title: 'Action failed',
-                                message: 'Could not update mute state right now.',
-                                icon: 'alert',
-                                confirmButtonText: 'OK',
-                            });
-                        }
-                    })();
-                },
+    };
+
+    const handleToggleDmBubbleStyle = async (style: DmSentBubbleStyle) => {
+        setDmSentStyle(style);
+        await setDmSentBubblePreference(style);
+    };
+
+    const handleToggleMuteFromSheet = async () => {
+        if (!user?.handle || !handle || isGroupThread) return;
+        try {
+            if (isMuted) {
+                await unmuteConversation(user.handle, handle);
+                setIsMuted(false);
+            } else {
+                await muteConversation(user.handle, handle);
+                setIsMuted(true);
             }
-            : {
-                label: 'Mute conversation',
-                onPress: () => {
-                    void (async () => {
-                        if (!user?.handle || !handle) return;
-                        try {
-                            await muteConversation(user.handle, handle);
-                            setIsMuted(true);
-                        } catch {
-                            showAlert({
-                                title: 'Action failed',
-                                message: 'Could not update mute state right now.',
-                                icon: 'alert',
-                                confirmButtonText: 'OK',
-                            });
-                        }
-                    })();
-                },
-            };
-        showMenu({
-            title: 'Chat actions',
-            subtitle: 'Choose an action',
-            options: [
-                { label: 'Create group', onPress: () => setCreateGroupOpen(true) },
-                toggleMuteAction,
-            ],
-        });
+            setShowChatInfo(false);
+        } catch {
+            showAlert({
+                title: 'Action failed',
+                message: 'Could not update mute state right now.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+        }
     };
 
     const handleImageClick = () => {
@@ -968,7 +1353,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const handleSendSticker = async (emoji: string) => {
         if (!user?.handle || !emoji) return;
         if (stickerTargetMessageId) {
-            handleToggleReaction(stickerTargetMessageId, emoji);
+            handleReactWithAnimation(stickerTargetMessageId, emoji);
             setStickerTargetMessageId(null);
             setShowStickerPicker(false);
             return;
@@ -1470,57 +1855,238 @@ export default function MessagesScreen({ route, navigation }: any) {
     const renderMessage = ({ item }: { item: ChatMessage }) => {
         const isFromMe = item.senderHandle === user?.handle;
         const senderAvatar = getAvatarForHandle(item.senderHandle);
-        const isStoryReplyContext =
+        const isStoryInteraction = Boolean(item.storyId);
+        const isLegacyStoryContextText =
             !!item.isSystemMessage &&
             typeof item.text === 'string' &&
             item.text.trim().toLowerCase().startsWith('replying to @') &&
             item.text.toLowerCase().includes('story');
 
         const bubblePanResponder = PanResponder.create({
-            onStartShouldSetPanResponder: () => !isFromMe,
+            // Don't claim touch on start — that blocks long-press / reply menu.
+            onStartShouldSetPanResponder: () => false,
+            // Higher threshold so a soft hold (with tiny jitter) isn't stolen as a swipe.
             onMoveShouldSetPanResponder: (_evt, gestureState) =>
-                !isFromMe && gestureState.dx > 8 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-            onPanResponderGrant: (evt) => {
-                swipeStartRef.current = {
-                    x: evt.nativeEvent.pageX,
-                    y: evt.nativeEvent.pageY,
-                    message: item,
-                };
+                !isFromMe &&
+                gestureState.dx > 28 &&
+                Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.35,
+            onPanResponderGrant: () => {
+                swipeMessageIdRef.current = item.id;
+                swipeAnim.stopAnimation();
+                swipeAnim.setValue(0);
                 setSwipingMessageId(item.id);
-                setSwipeOffset(0);
             },
             onPanResponderMove: (_evt, gestureState) => {
                 if (isFromMe) return;
-                const dx = Math.max(0, gestureState.dx);
+                const dx = Math.max(0, Math.min(gestureState.dx, 84));
                 const dy = Math.abs(gestureState.dy);
-                if (dx > dy) {
-                    setSwipeOffset(Math.min(dx, 84));
+                if (dx > dy * 0.6) {
+                    swipeAnim.setValue(dx);
                 }
             },
-            onPanResponderRelease: () => {
-                const shouldReply = !isFromMe && swipingMessageId === item.id && swipeOffset > 48;
+            onPanResponderRelease: (_evt, gestureState) => {
+                const shouldReply = !isFromMe && gestureState.dx > 48;
+                Animated.spring(swipeAnim, {
+                    toValue: 0,
+                    friction: 7,
+                    tension: 140,
+                    useNativeDriver: true,
+                }).start(() => {
+                    if (swipeMessageIdRef.current === item.id) {
+                        setSwipingMessageId(null);
+                        swipeMessageIdRef.current = null;
+                    }
+                });
                 if (shouldReply) {
                     setReplyingTo(item);
                     setEditingMessage(null);
                 }
-                setSwipingMessageId(null);
-                setSwipeOffset(0);
-                swipeStartRef.current = null;
             },
             onPanResponderTerminate: () => {
-                setSwipingMessageId(null);
-                setSwipeOffset(0);
-                swipeStartRef.current = null;
+                Animated.spring(swipeAnim, {
+                    toValue: 0,
+                    friction: 7,
+                    tension: 140,
+                    useNativeDriver: true,
+                }).start(() => {
+                    setSwipingMessageId(null);
+                    swipeMessageIdRef.current = null;
+                });
             },
         });
 
-        if (isStoryReplyContext) {
+        const renderReactionPills = () => {
+            const reactions = messageReactions[item.id];
+            if (!reactions?.length) return null;
             return (
-                <View style={styles.storyContextWrap}>
-                    <View style={styles.storyContextCard}>
-                        <Text style={styles.storyContextLabel}>Story context</Text>
-                        <Text style={styles.storyContextText}>{item.text}</Text>
+                <View style={styles.reactionsRow}>
+                    {reactions.map((reaction) => {
+                        const pillKey = `${item.id}::${reaction.emoji}`;
+                        return (
+                            <View
+                                key={pillKey}
+                                ref={(node) => {
+                                    reactionPillRefs.current[pillKey] = node;
+                                }}
+                                collapsable={false}
+                                onLayout={() => {
+                                    if (
+                                        reactionFly &&
+                                        reactionFly.messageId === item.id &&
+                                        reactionFly.emoji === reaction.emoji &&
+                                        !reactionFly.target
+                                    ) {
+                                        // Pill just appeared during pop — ready to measure soon
+                                    }
+                                }}
+                            >
+                                <TouchableOpacity
+                                    style={styles.reactionPill}
+                                    onPress={() => handleToggleReaction(item.id, reaction.emoji)}
+                                >
+                                    <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+                                    {reaction.users.length > 1 && (
+                                        <Text style={styles.reactionCount}>{reaction.users.length}</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        );
+                    })}
+                </View>
+            );
+        };
+
+        if (isStoryInteraction || isLegacyStoryContextText) {
+            const trimmed = (item.text || '').trim();
+            const reactionOnly =
+                !!item.storyId &&
+                (item.storyContextText === 'Reacted to your story' ||
+                    (trimmed.length > 0 && trimmed.length <= 4 && !/\s/.test(trimmed)));
+            const label = reactionOnly
+                ? 'Reacted to your story'
+                : trimmed === 'Replied to your story' || !trimmed
+                  ? 'Replied to your story'
+                  : 'Replied to your story';
+            const bodyText =
+                reactionOnly
+                    ? trimmed
+                    : trimmed && trimmed !== 'Replied to your story'
+                      ? trimmed
+                      : item.storyContextText && item.storyContextText !== 'Reacted to your story'
+                        ? item.storyContextText
+                        : null;
+
+            return (
+                <View
+                    style={[
+                        styles.messageContainer,
+                        isFromMe ? styles.messageFromMe : styles.messageFromOther,
+                    ]}
+                >
+                    <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => {
+                            if (!item.storyId) return;
+                            navigation.navigate('Stories', {
+                                openUserHandle: isFromMe
+                                    ? handle
+                                    : item.storyContextOwner || handle,
+                                openStoryId: item.storyId,
+                            });
+                        }}
+                        onLongPress={() => openMessageActions(item)}
+                    >
+                        <View style={[styles.storyStickerCard, isFromMe && styles.storyStickerCardMine]}>
+                            {item.imageUrl ? (
+                                <Image source={{ uri: item.imageUrl }} style={styles.storyStickerThumb} />
+                            ) : (
+                                <View style={[styles.storyStickerThumb, styles.storyStickerThumbFallback]}>
+                                    <Icon name="images-outline" size={22} color="#9CA3AF" />
+                                </View>
+                            )}
+                            <View style={styles.storyStickerMeta}>
+                                <Text style={styles.storyStickerLabel}>{label}</Text>
+                                {bodyText ? (
+                                    <Text style={styles.storyStickerBody} numberOfLines={3}>
+                                        {bodyText}
+                                    </Text>
+                                ) : null}
+                                {item.storyId ? (
+                                    <Text style={styles.storyStickerHint}>Tap to view story</Text>
+                                ) : null}
+                            </View>
+                        </View>
+                    </TouchableOpacity>
+                    {renderReactionPills()}
+                </View>
+            );
+        }
+
+        const sharedPostId = item.postId || (item.text ? extractPostId(item.text) : null);
+        const sharedPost = sharedPostId ? sharedPosts[sharedPostId] : null;
+        if (sharedPostId) {
+            const sharedCard = sharedPost ? (
+                <DmSharedPostCard post={sharedPost} onTap={openScenesForPost} />
+            ) : (
+                <DmSharedPostPreviewCard
+                    postId={sharedPostId}
+                    userId={user?.id}
+                    onTap={() => openScenesForPostId(sharedPostId)}
+                />
+            );
+            return (
+                <View
+                    style={[
+                        styles.messageContainer,
+                        isFromMe ? styles.messageFromMe : styles.messageFromOther,
+                    ]}
+                >
+                    {!isFromMe ? (
+                        <TouchableOpacity
+                            onPress={() => {
+                                if (item.senderHandle) {
+                                    navigation.navigate('ViewProfile', {
+                                        handle: item.senderHandle,
+                                    });
+                                }
+                            }}
+                        >
+                            <Avatar
+                                src={senderAvatar}
+                                name={item.senderHandle?.split('@')[0] || 'User'}
+                                size={ox(28)}
+                            />
+                        </TouchableOpacity>
+                    ) : null}
+                    <View
+                        style={[
+                            styles.messageColumn,
+                            isFromMe ? styles.messageColumnMe : styles.messageColumnOther,
+                            styles.sharedPostColumn,
+                        ]}
+                    >
+                        <DmMessagePressable onLongPress={() => openMessageActions(item)}>
+                            {sharedCard}
+                        </DmMessagePressable>
+                        {renderReactionPills()}
+                        <View
+                            style={[
+                                styles.messageMetaRow,
+                                isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther,
+                            ]}
+                        >
+                            <Text style={styles.messageTimeOutside}>
+                                {formatMessageClock(item.timestamp)}
+                            </Text>
+                        </View>
                     </View>
+                    {isFromMe ? (
+                        <Avatar
+                            src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
+                            name={user?.handle?.split('@')[0] || 'Me'}
+                            size={ox(28)}
+                        />
+                    ) : null}
                 </View>
             );
         }
@@ -1542,7 +2108,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                             <View style={styles.replyPreviewThumb}>
                                 {isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
                                     <View style={styles.replyPreviewVideoBadge}>
-                                        <Icon name="videocam" size={12} color="#FFFFFF" />
+                                        <Icon name="videocam" size={ox(12)} color="#FFFFFF" />
                                     </View>
                                 ) : (
                                     <Image
@@ -1583,7 +2149,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 {item.imageUrl ? (
                     isLikelyVideoUrl(item.imageUrl) ? (
                         <View style={styles.messageVideoFallback}>
-                            <Icon name="videocam" size={18} color="#FFFFFF" />
+                            <Icon name="videocam" size={ox(18)} color="#FFFFFF" />
                             <Text style={styles.messageVideoFallbackText}>Video</Text>
                         </View>
                     ) : (
@@ -1599,7 +2165,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     >
                         <Icon
                             name={playingAudioId === item.audioUrl ? 'pause' : 'play'}
-                            size={16}
+                            size={ox(16)}
                             color="#FFFFFF"
                         />
                         <Text style={styles.audioMessageText}>
@@ -1607,32 +2173,17 @@ export default function MessagesScreen({ route, navigation }: any) {
                         </Text>
                     </TouchableOpacity>
                 ) : null}
-                {!!messageReactions[item.id]?.length && (
-                    <View style={styles.reactionsRow}>
-                        {messageReactions[item.id].map((reaction) => (
-                            <TouchableOpacity
-                                key={`${item.id}-${reaction.emoji}`}
-                                style={styles.reactionPill}
-                                onPress={() => handleToggleReaction(item.id, reaction.emoji)}
-                            >
-                                <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
-                                {reaction.users.length > 1 && (
-                                    <Text style={styles.reactionCount}>{reaction.users.length}</Text>
-                                )}
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                )}
+                {renderReactionPills()}
             </>
         );
 
         const messageMeta = (
             <View style={[styles.messageMetaRow, isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther]}>
-                <Text style={styles.messageTimeOutside}>{timeAgo(item.timestamp)}</Text>
+                <Text style={styles.messageTimeOutside}>{formatMessageClock(item.timestamp)}</Text>
                 {isFromMe && !isGroupThread ? (
                     <Icon
                         name="checkmark-done"
-                        size={13}
+                        size={ox(13)}
                         color={(item as any).read ? dmSentBubbleColor(dmSentStyle) : '#8E8E93'}
                     />
                 ) : null}
@@ -1654,7 +2205,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                               elevation: 0,
                           }
                         : messageReactions[item.id]?.length
-                          ? { paddingBottom: 22 }
+                          ? { paddingBottom: ox(22) }
                           : undefined
                 }
             >
@@ -1668,28 +2219,45 @@ export default function MessagesScreen({ route, navigation }: any) {
                 isFromMe ? styles.messageFromMe : styles.messageFromOther,
             ]}>
                 {!isFromMe ? (
-                    <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={32} />
+                    <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
                 ) : null}
-                {!isFromMe && swipingMessageId === item.id && swipeOffset > 18 ? (
-                    <View style={styles.swipeReplyCue}>
-                        <Icon name="arrow-undo" size={14} color="#E5E7EB" />
-                    </View>
+                {!isFromMe && swipingMessageId === item.id ? (
+                    <Animated.View
+                        style={[
+                            styles.swipeReplyCue,
+                            {
+                                opacity: swipeAnim.interpolate({
+                                    inputRange: [0, 24, 48],
+                                    outputRange: [0, 0.55, 1],
+                                    extrapolate: 'clamp',
+                                }),
+                                transform: [
+                                    {
+                                        scale: swipeAnim.interpolate({
+                                            inputRange: [0, 48, 84],
+                                            outputRange: [0.55, 1, 1.08],
+                                            extrapolate: 'clamp',
+                                        }),
+                                    },
+                                ],
+                            },
+                        ]}
+                    >
+                        <Icon name="arrow-undo" size={ox(14)} color="#E5E7EB" />
+                    </Animated.View>
                 ) : null}
                 <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
                     <Animated.View
-                        {...bubblePanResponder.panHandlers}
+                        {...(!isFromMe ? bubblePanResponder.panHandlers : {})}
                         style={
                             !isFromMe && swipingMessageId === item.id
-                                ? { transform: [{ translateX: swipeOffset }] }
+                                ? { transform: [{ translateX: swipeAnim }] }
                                 : undefined
                         }
                     >
-                        <TouchableOpacity
-                            activeOpacity={0.9}
-                            onLongPress={() => openMessageActions(item)}
-                        >
+                        <DmMessagePressable onLongPress={() => openMessageActions(item)}>
                             {bubbleShell}
-                        </TouchableOpacity>
+                        </DmMessagePressable>
                     </Animated.View>
                     {messageMeta}
                 </View>
@@ -1697,7 +2265,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     <Avatar
                         src={myAvatar}
                         name={user?.name || user?.handle || 'You'}
-                        size={32}
+                        size={ox(32)}
                     />
                 ) : null}
             </View>
@@ -1705,31 +2273,101 @@ export default function MessagesScreen({ route, navigation }: any) {
     };
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambient={false} style={styles.pageShell}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBackBtn} hitSlop={8}>
+                    <Icon name="chevron-back" size={ox(26)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <View style={styles.headerInfo}>
-                    <Avatar
-                        src={isGroupThread ? groupAvatarUrl : getAvatarForHandle(handle)}
-                        name={isGroupThread ? (groupName || 'Group') : (handle?.split('@')[0] || 'User')}
-                        size={32}
-                    />
-                    <Text style={styles.headerName}>{isGroupThread ? groupName : handle}</Text>
+                    <View style={styles.headerAvatarWrap}>
+                        <TouchableOpacity
+                            onPress={() => {
+                                if (isGroupThread || !handle) return;
+                                navigation.navigate('ViewProfile', { handle });
+                            }}
+                            disabled={isGroupThread}
+                        >
+                            <Avatar
+                                src={isGroupThread ? groupAvatarUrl : getAvatarForHandle(handle)}
+                                name={
+                                    isGroupThread
+                                        ? groupName || 'Group'
+                                        : handle?.split('@')[0] || 'User'
+                                }
+                                size={ox(36)}
+                            />
+                        </TouchableOpacity>
+                        {!isGroupThread &&
+                        user?.handle &&
+                        handle &&
+                        handle !== user.handle &&
+                        !isFollowing ? (
+                            <TouchableOpacity
+                                style={[
+                                    styles.followBadge,
+                                    {
+                                        backgroundColor:
+                                            dmSentStyle === 'green' ? '#34C759' : '#0A84FF',
+                                    },
+                                ]}
+                                onPress={() => {
+                                    void handleFollowFromHeader();
+                                }}
+                                disabled={isFollowLoading}
+                                accessibilityLabel="Follow user"
+                            >
+                                <Icon name="add" size={ox(12)} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        ) : null}
+                        {!isGroupThread &&
+                        user?.handle &&
+                        handle &&
+                        handle !== user.handle &&
+                        isFollowing &&
+                        showFollowCheck ? (
+                            <View style={[styles.followBadge, styles.followBadgeCheck]}>
+                                <Icon name="checkmark" size={ox(12)} color="#FFFFFF" />
+                            </View>
+                        ) : null}
+                    </View>
+                    <View style={styles.headerTextCol}>
+                        <TouchableOpacity
+                            onPress={() => {
+                                if (isGroupThread || !handle) return;
+                                navigation.navigate('ViewProfile', { handle });
+                            }}
+                            disabled={isGroupThread}
+                        >
+                            <Text style={styles.headerName} numberOfLines={1}>
+                                {isGroupThread ? groupName : handle}
+                            </Text>
+                        </TouchableOpacity>
+                        <Text style={styles.headerSubtitle}>
+                            {isGroupThread ? 'Group chat' : 'Active now'}
+                        </Text>
+                    </View>
                 </View>
                 <View style={styles.headerActions}>
+                    {!isGroupThread && handle ? (
+                        <TouchableOpacity
+                            onPress={openPlacesTraveled}
+                            style={styles.headerActionButton}
+                            accessibilityLabel="Places traveled"
+                        >
+                            <Icon name="location-outline" size={ox(22)} color="#FFFFFF" />
+                        </TouchableOpacity>
+                    ) : null}
                     {isGroupThread ? (
                         <TouchableOpacity
                             onPress={() => setInviteOpen(true)}
                             style={styles.headerActionButton}
                             accessibilityLabel="Invite to group"
                         >
-                            <Icon name="person-add-outline" size={22} color="#C4B5FD" />
+                            <Icon name="person-add-outline" size={ox(22)} color="#FFFFFF" />
                         </TouchableOpacity>
                     ) : null}
                     <TouchableOpacity style={styles.headerActionButton} onPress={openHeaderActions}>
-                        <Icon name="ellipsis-horizontal" size={22} color="#FFFFFF" />
+                        <Icon name="ellipsis-horizontal" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -1781,14 +2419,82 @@ export default function MessagesScreen({ route, navigation }: any) {
                 />
 
                 {(replyingTo || editingMessage) && (
-                    <View style={styles.composerContextWrap}>
+                    <Animated.View
+                        style={[
+                            styles.composerContextWrap,
+                            {
+                                opacity: replyBarAnim,
+                                transform: [
+                                    {
+                                        translateY: replyBarAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [10, 0],
+                                        }),
+                                    },
+                                ],
+                            },
+                        ]}
+                    >
                         <View style={styles.composerContextBar} />
+                        {(() => {
+                            if (editingMessage) return null;
+                            const replyPostId =
+                                replyingTo?.postId ||
+                                (replyingTo?.text ? extractPostId(replyingTo.text) : null);
+                            const replyPost = replyPostId ? sharedPosts[replyPostId] : null;
+                            const replyThumbUrl =
+                                replyingTo?.imageUrl ||
+                                replyPost?.mediaUrl ||
+                                replyPost?.mediaItems?.[0]?.url;
+                            if (!replyThumbUrl) return null;
+                            const isVideoReply =
+                                replyPost?.mediaType === 'video' ||
+                                replyPost?.mediaItems?.[0]?.type === 'video' ||
+                                isLikelyVideoUrl(replyThumbUrl);
+                            return (
+                                <View style={styles.composerContextThumbWrap}>
+                                    {isVideoReply ? (
+                                        <View style={styles.composerContextThumbFallback}>
+                                            <Icon name="videocam" size={ox(16)} color="#E5E7EB" />
+                                        </View>
+                                    ) : (
+                                        <Image
+                                            source={{ uri: replyThumbUrl }}
+                                            style={styles.composerContextThumb}
+                                        />
+                                    )}
+                                </View>
+                            );
+                        })()}
                         <View style={styles.composerContextBody}>
                             <Text style={styles.composerContextTitle}>
-                                {editingMessage ? 'Editing message' : `Replying to ${replyingTo?.senderHandle || ''}`}
+                                {editingMessage
+                                    ? 'Editing message'
+                                    : `Replying to ${replyingTo?.senderHandle || ''}`}
                             </Text>
                             <Text style={styles.composerContextText} numberOfLines={1}>
-                                {editingMessage?.text || replyingTo?.text || (replyingTo?.imageUrl ? 'Photo' : 'Message')}
+                                {editingMessage?.text ||
+                                    (() => {
+                                        if (!replyingTo) return 'Message';
+                                        const replyPostId =
+                                            replyingTo.postId ||
+                                            (replyingTo.text ? extractPostId(replyingTo.text) : null);
+                                        const replyPost = replyPostId
+                                            ? sharedPosts[replyPostId]
+                                            : null;
+                                        const replyThumbUrl =
+                                            replyingTo.imageUrl ||
+                                            replyPost?.mediaUrl ||
+                                            replyPost?.mediaItems?.[0]?.url;
+                                        if (replyThumbUrl) {
+                                            const isVideoReply =
+                                                replyPost?.mediaType === 'video' ||
+                                                replyPost?.mediaItems?.[0]?.type === 'video' ||
+                                                isLikelyVideoUrl(replyThumbUrl);
+                                            return isVideoReply ? 'Video' : 'Photo';
+                                        }
+                                        return replyingTo.text || 'Message';
+                                    })()}
                             </Text>
                         </View>
                         <TouchableOpacity
@@ -1798,9 +2504,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 setMessageText('');
                             }}
                         >
-                            <Icon name="close" size={18} color="#9CA3AF" />
+                            <Icon name="close" size={ox(18)} color="#9CA3AF" />
                         </TouchableOpacity>
-                    </View>
+                    </Animated.View>
                 )}
                 {imageCompose && (
                     <View style={styles.imageComposeWrap}>
@@ -1837,7 +2543,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 }}
                                 accessibilityLabel="Delete voice note"
                             >
-                                <Icon name="trash-outline" size={20} color="#9CA3AF" />
+                                <Icon name="trash-outline" size={ox(20)} color="#9CA3AF" />
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.voiceReviewPlayBtn}
@@ -1848,7 +2554,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                             >
                                 <Icon
                                     name={isPlayingVoiceDraft ? 'pause' : 'play'}
-                                    size={18}
+                                    size={ox(18)}
                                     color="#FFFFFF"
                                 />
                             </TouchableOpacity>
@@ -1887,7 +2593,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                         void continueVoiceRecording();
                                     }}
                                 >
-                                    <Icon name="mic" size={16} color="#FDE68A" />
+                                    <Icon name="mic" size={ox(16)} color="#FDE68A" />
                                     <Text style={styles.voiceReviewRecordText}>Record</Text>
                                 </TouchableOpacity>
                             ) : null}
@@ -1898,7 +2604,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 }}
                                 accessibilityLabel="Send voice note"
                             >
-                                <Icon name="send" size={20} color="#000000" />
+                                <Icon name="send" size={ox(20)} color="#000000" />
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1915,7 +2621,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                     }}
                                     accessibilityLabel="Discard recording"
                                 >
-                                    <Icon name="trash-outline" size={18} color="#9CA3AF" />
+                                    <Icon name="trash-outline" size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                                 <View style={styles.voiceHoldCenter}>
                                     <View style={styles.voiceRecDot} />
@@ -1930,7 +2636,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         ) : (
                             <View style={styles.inputShell}>
                                 <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
-                                    <Icon name="add" size={22} color="#FFFFFF" />
+                                    <Icon name="add" size={ox(22)} color="#FFFFFF" />
                                 </TouchableOpacity>
                                 <TextInput
                                     value={messageText}
@@ -1948,7 +2654,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                         setShowStickerPicker(true);
                                     }}
                                 >
-                                    <Icon name="happy-outline" size={20} color="#FFFFFF" />
+                                    <Icon name="happy-outline" size={ox(20)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             </View>
                         )}
@@ -1960,15 +2666,22 @@ export default function MessagesScreen({ route, navigation }: any) {
                             ]}
                             accessibilityLabel={isRecordingVoice ? 'Stop recording' : 'Record voice message'}
                         >
-                            <Icon
-                                name={isRecordingVoice ? 'square' : 'mic'}
-                                size={isRecordingVoice ? 15 : 17}
-                                color={isRecordingVoice ? '#000000' : '#D4AF37'}
-                            />
+                            {isRecordingVoice ? (
+                                <Icon name="square" size={ox(15)} color="#000000" />
+                            ) : (
+                                <LinearGradient
+                                    colors={['#D1D5DB', '#EAB308', '#6B7280']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.composerMicGradient}
+                                >
+                                    <Icon name="mic" size={ox(17)} color="#FFFFFF" />
+                                </LinearGradient>
+                            )}
                         </View>
                         {messageText.trim() && !isRecordingVoice ? (
                             <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
-                                <Icon name="send" size={20} color="#000000" />
+                                <Icon name="send" size={ox(20)} color="#000000" />
                             </TouchableOpacity>
                         ) : null}
                     </View>
@@ -2008,7 +2721,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     />
                     <Text style={styles.sheetLabel}>Group photo (optional)</Text>
                     <View style={styles.groupPhotoRow}>
-                        <Avatar src={newGroupAvatarDataUrl} name={newGroupName || 'Group'} size={42} />
+                        <Avatar src={newGroupAvatarDataUrl} name={newGroupName || 'Group'} size={ox(42)} />
                         <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={pickGroupAvatar}>
                             <Text style={styles.sheetSecondaryBtnText}>{newGroupAvatarDataUrl ? 'Change photo' : 'Choose photo'}</Text>
                         </TouchableOpacity>
@@ -2059,7 +2772,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         <View style={styles.suggestionsList}>
                             {inviteSuggestions.map((u) => (
                                 <TouchableOpacity key={u.handle} style={styles.suggestionRow} onPress={() => setInviteHandle(u.handle)}>
-                                    <Avatar src={u.avatarUrl} name={u.handle} size={28} />
+                                    <Avatar src={u.avatarUrl} name={u.handle} size={ox(28)} />
                                     <View style={{ flex: 1 }}>
                                         <Text style={styles.suggestionHandle}>{u.handle}</Text>
                                         {!!u.displayName && <Text style={styles.suggestionName}>{u.displayName}</Text>}
@@ -2102,16 +2815,16 @@ export default function MessagesScreen({ route, navigation }: any) {
                     <View style={styles.chatInfoHeader}>
                         <Text style={styles.chatInfoTitle}>Chat Info</Text>
                         <TouchableOpacity onPress={() => setShowChatInfo(false)}>
-                            <Icon name="close" size={24} color="#9CA3AF" />
+                            <Icon name="close" size={ox(24)} color="#9CA3AF" />
                         </TouchableOpacity>
                     </View>
                     {isGroupThread ? (
-                        <View style={styles.chatInfoBody}>
+                        <ScrollView style={styles.chatInfoBody} bounces={false}>
                             <View style={styles.chatInfoProfileRow}>
                                 <Avatar
                                     src={groupAvatarUrl}
                                     name={groupName || 'Group'}
-                                    size={56}
+                                    size={ox(56)}
                                 />
                                 <View style={styles.chatInfoProfileText}>
                                     <Text style={styles.chatInfoName}>{groupName}</Text>
@@ -2131,13 +2844,103 @@ export default function MessagesScreen({ route, navigation }: any) {
                                     <ActivityIndicator color="#EF4444" />
                                 ) : (
                                     <>
-                                        <Icon name="close-circle-outline" size={20} color="#EF4444" />
+                                        <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
                                         <Text style={styles.leaveGroupBtnText}>Leave Group</Text>
                                     </>
                                 )}
                             </TouchableOpacity>
-                        </View>
-                    ) : null}
+                        </ScrollView>
+                    ) : (
+                        <ScrollView style={styles.chatInfoBody} bounces={false}>
+                            <View style={styles.chatInfoProfileRow}>
+                                <Avatar
+                                    src={getAvatarForHandle(handle)}
+                                    name={handle?.split('@')[0] || 'User'}
+                                    size={ox(56)}
+                                />
+                                <View style={styles.chatInfoProfileText}>
+                                    <Text style={styles.chatInfoName}>{handle}</Text>
+                                    <Text style={styles.chatInfoSubtitle}>Active now</Text>
+                                </View>
+                            </View>
+
+                            <Text style={styles.dmBubbleLabel}>Your sent messages</Text>
+                            <Text style={styles.dmBubbleHint}>
+                                iMessage blue or SMS-style green (saved on this device).
+                            </Text>
+                            <View style={styles.dmBubbleToggle}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.dmBubbleOption,
+                                        dmSentStyle === 'blue' && styles.dmBubbleOptionBlue,
+                                    ]}
+                                    onPress={() => {
+                                        void handleToggleDmBubbleStyle('blue');
+                                    }}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.dmBubbleOptionText,
+                                            dmSentStyle === 'blue' && styles.dmBubbleOptionTextActive,
+                                        ]}
+                                    >
+                                        Blue
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.dmBubbleOption,
+                                        dmSentStyle === 'green' && styles.dmBubbleOptionGreen,
+                                    ]}
+                                    onPress={() => {
+                                        void handleToggleDmBubbleStyle('green');
+                                    }}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.dmBubbleOptionText,
+                                            dmSentStyle === 'green' && styles.dmBubbleOptionTextActive,
+                                        ]}
+                                    >
+                                        Green
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <TouchableOpacity
+                                style={styles.chatInfoActionRow}
+                                onPress={() => {
+                                    if (!handle) return;
+                                    setShowChatInfo(false);
+                                    navigation.navigate('ViewProfile', { handle });
+                                }}
+                            >
+                                <Icon name="person-outline" size={ox(20)} color="#FFFFFF" />
+                                <Text style={styles.chatInfoActionText}>View Profile</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.chatInfoActionRow}
+                                onPress={() => {
+                                    void handleToggleMuteFromSheet();
+                                }}
+                            >
+                                <Icon name="mic-outline" size={ox(20)} color="#FFFFFF" />
+                                <Text style={styles.chatInfoActionText}>
+                                    {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.chatInfoActionRow} onPress={confirmBlockUser}>
+                                <Icon name="alert-circle-outline" size={ox(20)} color="#EF4444" />
+                                <Text style={styles.chatInfoActionDangerText}>
+                                    {isBlocked ? 'Unblock User' : 'Block User'}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.chatInfoActionRow} onPress={confirmDeleteConversation}>
+                                <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
+                                <Text style={styles.chatInfoActionDangerText}>Delete Conversation</Text>
+                            </TouchableOpacity>
+                        </ScrollView>
+                    )}
                 </View>
             </View>
 
@@ -2156,6 +2959,29 @@ export default function MessagesScreen({ route, navigation }: any) {
                 }}
                 onDismiss={() => setSheetAlert(null)}
             />
+            <DmMessageActionsSheet
+                visible={messageActionsTarget != null}
+                timestampLabel={
+                    messageActionsTarget
+                        ? formatMessageClock(messageActionsTarget.timestamp)
+                        : undefined
+                }
+                onReact={(emoji) => {
+                    if (messageActionsTarget) {
+                        handleReactWithAnimation(messageActionsTarget.id, emoji);
+                    }
+                }}
+                actions={messageActionsTarget ? messageActionList(messageActionsTarget) : []}
+                onDismiss={closeMessageActions}
+            />
+            {reactionFly ? (
+                <DmReactionFlyOverlay
+                    emoji={reactionFly.emoji}
+                    target={reactionFly.target}
+                    onPopComplete={measureReactionFlyTarget}
+                    onComplete={() => setReactionFly(null)}
+                />
+            ) : null}
             <GazetteerMenuSheet
                 visible={sheetMenu != null}
                 title={sheetMenu?.title ?? ''}
@@ -2168,40 +2994,83 @@ export default function MessagesScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    pageShell: {
+        backgroundColor: '#000000',
+    },
     threadLoadingWrap: {
         flexGrow: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingVertical: 48,
+        paddingVertical: ox(48),
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
-        ...gazetteerHeader,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+        backgroundColor: 'rgba(0,0,0,0.95)',
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
+    },
+    headerBackBtn: {
+        width: ox(36),
+        height: ox(36),
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerInfo: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: ox(10),
         flex: 1,
-        marginLeft: 16,
+        marginLeft: ox(4),
+        minWidth: 0,
+    },
+    headerAvatarWrap: {
+        position: 'relative',
+        width: ox(36),
+        height: ox(36),
+    },
+    followBadge: {
+        position: 'absolute',
+        right: -ox(2),
+        bottom: -ox(2),
+        width: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
+        borderWidth: 2,
+        borderColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 2,
+    },
+    followBadgeCheck: {
+        backgroundColor: '#22C55E',
+    },
+    headerTextCol: {
+        flex: 1,
+        minWidth: 0,
     },
     headerName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
+    },
+    headerSubtitle: {
+        fontSize: ox(12),
+        color: '#9CA3AF',
+        marginTop: 1,
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: ox(4),
     },
     headerActionButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -2214,9 +3083,9 @@ const styles = StyleSheet.create({
     messagesContent: {
         flexGrow: 1,
         justifyContent: 'flex-end',
-        paddingHorizontal: 12,
-        paddingTop: 10,
-        paddingBottom: 12,
+        paddingHorizontal: ox(12),
+        paddingTop: ox(10),
+        paddingBottom: ox(12),
     },
     messagesContentEmpty: {
         justifyContent: 'center',
@@ -2225,18 +3094,18 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 8,
+        gap: ox(8),
+        paddingVertical: ox(8),
     },
     loadingOlderText: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     messageContainer: {
         flexDirection: 'row',
-        marginBottom: 10,
+        marginBottom: ox(10),
         alignItems: 'flex-end',
-        gap: 7,
+        gap: ox(7),
     },
     messageFromMe: {
         justifyContent: 'flex-end',
@@ -2256,12 +3125,15 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         flex: 1,
     },
+    sharedPostColumn: {
+        maxWidth: '88%',
+    },
     messageMetaRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
-        paddingTop: 4,
-        paddingHorizontal: 2,
+        gap: ox(4),
+        paddingTop: ox(4),
+        paddingHorizontal: ox(2),
     },
     messageMetaRowMe: {
         justifyContent: 'flex-end',
@@ -2270,17 +3142,17 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-start',
     },
     messageTimeOutside: {
-        fontSize: 10,
+        fontSize: ox(10),
         color: '#8E8E93',
     },
     messageTextPlain: {
-        fontSize: 15,
-        lineHeight: 20,
+        fontSize: ox(15),
+        lineHeight: ox(20),
         color: '#FFFFFF',
     },
     messageText: {
-        fontSize: 15,
-        lineHeight: 21,
+        fontSize: ox(15),
+        lineHeight: ox(21),
         flexShrink: 1,
     },
     messageTextFromMe: {
@@ -2292,48 +3164,48 @@ const styles = StyleSheet.create({
     messageImage: {
         width: 200,
         height: 200,
-        borderRadius: 12,
-        marginTop: 8,
+        borderRadius: ox(12),
+        marginTop: ox(8),
     },
     messageVideoFallback: {
         width: 200,
         height: 120,
-        borderRadius: 12,
-        marginTop: 8,
+        borderRadius: ox(12),
+        marginTop: ox(8),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.24)',
         backgroundColor: '#111827',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     messageVideoFallbackText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     audioMessagePill: {
-        marginTop: 8,
-        borderRadius: 999,
+        marginTop: ox(8),
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.24)',
         backgroundColor: 'rgba(0,0,0,0.25)',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'flex-start',
-        gap: 6,
+        gap: ox(6),
     },
     audioMessageText: {
         color: '#F3F4F6',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     messageTime: {
-        fontSize: 10,
-        marginTop: 3,
+        fontSize: ox(10),
+        marginTop: ox(3),
     },
     messageTimeFromMe: {
         color: 'rgba(255, 255, 255, 0.7)',
@@ -2343,71 +3215,141 @@ const styles = StyleSheet.create({
     },
     storyContextWrap: {
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     storyContextCard: {
         maxWidth: '86%',
-        borderRadius: 14,
+        borderRadius: ox(14),
         borderWidth: 1,
         borderColor: 'rgba(103, 232, 249, 0.3)',
         backgroundColor: 'rgba(6, 182, 212, 0.12)',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
     storyContextLabel: {
-        fontSize: 10,
+        fontSize: ox(10),
         color: '#A5F3FC',
         textTransform: 'uppercase',
-        letterSpacing: 0.8,
+        letterSpacing: ox(0.8),
         fontWeight: '700',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     storyContextText: {
-        fontSize: 13,
+        fontSize: ox(13),
         color: '#F9FAFB',
-        lineHeight: 18,
+        lineHeight: ox(18),
+    },
+    storyStickerCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(10),
+        maxWidth: ox(280),
+        backgroundColor: '#111827',
+        borderRadius: ox(16),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        padding: ox(8),
+        marginVertical: ox(4),
+    },
+    storyStickerCardMine: {
+        backgroundColor: '#0f172a',
+        borderColor: 'rgba(96,165,250,0.35)',
+    },
+    storyStickerThumb: {
+        width: ox(56),
+        height: ox(72),
+        borderRadius: ox(10),
+        backgroundColor: '#1F2937',
+    },
+    storyStickerThumbFallback: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    storyStickerMeta: {
+        flex: 1,
+        minWidth: 0,
+        paddingRight: ox(4),
+    },
+    storyStickerLabel: {
+        color: '#93C5FD',
+        fontSize: ox(12),
+        fontWeight: '700',
+        marginBottom: ox(2),
+    },
+    storyStickerBody: {
+        color: '#F9FAFB',
+        fontSize: ox(15),
+        fontWeight: '600',
+        lineHeight: ox(20),
+    },
+    storyStickerHint: {
+        color: '#6B7280',
+        fontSize: ox(11),
+        marginTop: ox(4),
     },
     inputContainer: {
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.08)',
-        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: '#000000',
     },
     inputRow: {
         flexDirection: 'row',
         alignItems: 'flex-end',
-        gap: 10,
+        gap: ox(10),
     },
     composerContextWrap: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 6,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.08)',
-        backgroundColor: 'rgba(0, 0, 0, 0.25)',
+        gap: ox(10),
+        paddingHorizontal: ox(16),
+        paddingTop: ox(10),
+        paddingBottom: ox(8),
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: '#000000',
     },
     composerContextBar: {
         width: 2,
-        height: 34,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.35)',
+        height: ox(44),
+        borderRadius: ox(2),
+        backgroundColor: 'rgba(255,255,255,0.25)',
+    },
+    composerContextThumbWrap: {
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(8),
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: '#09090b',
+    },
+    composerContextThumb: {
+        width: '100%',
+        height: '100%',
+    },
+    composerContextThumbFallback: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#111827',
     },
     composerContextBody: {
         flex: 1,
+        minWidth: 0,
     },
     composerContextTitle: {
-        color: '#9CA3AF',
-        fontSize: 11,
+        color: '#737373',
+        fontSize: ox(11),
         fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
         marginBottom: 1,
     },
     composerContextText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
     },
     inputShell: {
         flex: 1,
@@ -2427,54 +3369,55 @@ const styles = StyleSheet.create({
     },
     input: {
         width: '100%',
-        minHeight: 44,
+        minHeight: ox(44),
         backgroundColor: '#09090b',
-        borderRadius: 24,
+        borderRadius: ox(24),
         borderWidth: 2,
         borderColor: '#FFFFFF',
-        paddingLeft: 42,
-        paddingRight: 42,
-        paddingVertical: 10,
+        paddingLeft: ox(42),
+        paddingRight: ox(42),
+        paddingVertical: ox(10),
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         maxHeight: 100,
     },
     composerMicButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#4B5563',
+        overflow: 'hidden',
         borderWidth: 1,
-        borderColor: '#D4AF37',
-        shadowColor: '#E5E7EB',
-        shadowOpacity: 0.35,
-        shadowRadius: 5,
-        shadowOffset: { width: 0, height: 1 },
-        elevation: 3,
+        borderColor: '#FDE047',
+    },
+    composerMicGradient: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     composerMicButtonActive: {
-        backgroundColor: '#D4AF37',
+        backgroundColor: '#EAB308',
         borderColor: '#FFFFFF',
     },
     recordingBadge: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#D4AF37',
         backgroundColor: 'rgba(212,175,55,0.15)',
-        paddingHorizontal: 8,
-        paddingVertical: 6,
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(6),
     },
     recordingBadgeText: {
         color: '#FDE68A',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     sendButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
         backgroundColor: '#FFFFFF',
         justifyContent: 'center',
         alignItems: 'center',
@@ -2486,56 +3429,56 @@ const styles = StyleSheet.create({
         backgroundColor: '#D4AF37',
     },
     recordingHintWrap: {
-        marginHorizontal: 16,
-        marginBottom: 6,
+        marginHorizontal: ox(16),
+        marginBottom: ox(6),
     },
     recordingHintText: {
         color: '#D4AF37',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     recordingHintSubtleText: {
         color: '#6B7280',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
-        marginTop: 6,
-        marginHorizontal: 4,
+        marginTop: ox(6),
+        marginHorizontal: ox(4),
         textAlign: 'center',
     },
     voiceReviewSection: {
-        marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 4,
+        marginHorizontal: ox(16),
+        marginTop: ox(8),
+        marginBottom: ox(4),
     },
     voiceReviewLabel: {
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
-        marginBottom: 8,
+        marginBottom: ox(8),
         marginLeft: 2,
     },
     voiceReviewBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingVertical: 8,
-        paddingHorizontal: 10,
-        borderRadius: 24,
+        gap: ox(8),
+        paddingVertical: ox(8),
+        paddingHorizontal: ox(10),
+        borderRadius: ox(24),
         borderWidth: 2,
         borderColor: '#FFFFFF',
         backgroundColor: '#09090b',
     },
     voiceReviewIconBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
         alignItems: 'center',
         justifyContent: 'center',
     },
     voiceReviewPlayBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
         backgroundColor: '#D4AF37',
         alignItems: 'center',
         justifyContent: 'center',
@@ -2543,52 +3486,52 @@ const styles = StyleSheet.create({
     voiceReviewTrackWrap: {
         flex: 1,
         minWidth: 0,
-        gap: 4,
+        gap: ox(4),
     },
     voiceReviewTrack: {
         height: 4,
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: '#374151',
         overflow: 'hidden',
     },
     voiceReviewTrackFill: {
         height: '100%',
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: '#D4AF37',
     },
     voiceReviewDuration: {
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
         textAlign: 'right',
     },
     voiceReviewRecordBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
-        borderRadius: 999,
+        gap: ox(4),
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#92400E',
         backgroundColor: 'rgba(180,83,9,0.2)',
-        paddingHorizontal: 10,
-        paddingVertical: 7,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(7),
     },
     voiceReviewRecordText: {
         color: '#FDE68A',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     voiceActiveBar: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        minHeight: 44,
-        paddingHorizontal: 10,
-        borderRadius: 24,
+        minHeight: ox(44),
+        paddingHorizontal: ox(10),
+        borderRadius: ox(24),
         borderWidth: 2,
         borderColor: '#FFFFFF',
         backgroundColor: '#09090b',
-        gap: 10,
+        gap: ox(10),
     },
     voiceHoldCenter: {
         alignItems: 'center',
@@ -2596,25 +3539,25 @@ const styles = StyleSheet.create({
     },
     voiceHoldTimer: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '800',
     },
     voiceHoldHint: {
         color: '#D4AF37',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     voiceRecDot: {
         width: 8,
         height: 8,
-        borderRadius: 4,
+        borderRadius: ox(4),
         backgroundColor: '#D4AF37',
     },
     voiceRecordingCancelBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
         borderWidth: 1,
         borderColor: '#4B5563',
         backgroundColor: 'rgba(75,85,99,0.25)',
@@ -2623,24 +3566,24 @@ const styles = StyleSheet.create({
     },
     readReceiptWrap: {
         alignSelf: 'flex-end',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     replyPreviewWrap: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     replyPreviewBar: {
         width: 2,
         alignSelf: 'stretch',
         backgroundColor: 'rgba(255,255,255,0.35)',
-        borderRadius: 2,
+        borderRadius: ox(2),
         marginRight: 8,
     },
     replyPreviewThumb: {
-        width: 36,
-        height: 36,
-        borderRadius: 8,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(8),
         overflow: 'hidden',
         backgroundColor: '#000000',
         borderWidth: 1,
@@ -2663,18 +3606,18 @@ const styles = StyleSheet.create({
     },
     replyPreviewSender: {
         color: 'rgba(255,255,255,0.75)',
-        fontSize: 11,
-        marginBottom: 2,
+        fontSize: ox(11),
+        marginBottom: ox(2),
         fontWeight: '600',
     },
     replyPreviewText: {
         color: 'rgba(255,255,255,0.65)',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     swipeReplyCue: {
-        width: 22,
-        height: 22,
-        borderRadius: 11,
+        width: ox(22),
+        height: ox(22),
+        borderRadius: ox(11),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
         backgroundColor: '#0F172A',
@@ -2687,67 +3630,67 @@ const styles = StyleSheet.create({
         right: 4,
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 4,
+        gap: ox(4),
     },
     reactionPill: {
-        borderRadius: 999,
-        paddingHorizontal: 7,
-        paddingVertical: 3,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(7),
+        paddingVertical: ox(3),
         backgroundColor: 'rgba(255,255,255,0.92)',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: ox(4),
     },
     reactionEmoji: {
-        fontSize: 12,
+        fontSize: ox(12),
     },
     reactionCount: {
         color: '#374151',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
     },
     translatedOriginalText: {
-        marginTop: 4,
-        fontSize: 11,
-        lineHeight: 15,
+        marginTop: ox(4),
+        fontSize: ox(11),
+        lineHeight: ox(15),
         color: 'rgba(255,255,255,0.6)',
         fontStyle: 'italic',
     },
     stickerPicker: {
-        marginHorizontal: 16,
-        marginBottom: 8,
-        borderRadius: 12,
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        padding: 10,
+        padding: ox(10),
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
+        gap: ox(8),
         alignItems: 'center',
     },
     stickerBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#1F2937',
     },
     stickerBtnText: {
-        fontSize: 18,
+        fontSize: ox(18),
     },
     stickerCloseBtn: {
         marginLeft: 'auto',
-        borderRadius: 8,
+        borderRadius: ox(8),
         borderWidth: 1,
         borderColor: '#4B5563',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     stickerCloseBtnText: {
         color: '#E5E7EB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     hidden: {
@@ -2779,25 +3722,25 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         borderBottomWidth: 1,
         borderBottomColor: '#374151',
     },
     chatInfoTitle: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '700',
     },
     chatInfoBody: {
-        padding: 16,
-        paddingBottom: 24,
+        padding: ox(16),
+        paddingBottom: ox(24),
     },
     chatInfoProfileRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 16,
-        marginBottom: 20,
+        gap: ox(16),
+        marginBottom: ox(20),
     },
     chatInfoProfileText: {
         flex: 1,
@@ -2805,32 +3748,90 @@ const styles = StyleSheet.create({
     },
     chatInfoName: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
     },
     chatInfoSubtitle: {
         color: '#9CA3AF',
-        fontSize: 14,
-        marginTop: 2,
+        fontSize: ox(14),
+        marginTop: ox(2),
     },
     chatInfoHint: {
         color: '#9CA3AF',
-        fontSize: 12,
-        lineHeight: 18,
-        marginBottom: 16,
+        fontSize: ox(12),
+        lineHeight: ox(18),
+        marginBottom: ox(16),
     },
     leaveGroupBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        borderRadius: 12,
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(14),
+        borderRadius: ox(12),
     },
     leaveGroupBtnText: {
         color: '#EF4444',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
+    },
+    dmBubbleLabel: {
+        color: '#6B7280',
+        fontSize: ox(12),
+        marginBottom: ox(4),
+    },
+    dmBubbleHint: {
+        color: '#6B7280',
+        fontSize: ox(11),
+        marginBottom: ox(8),
+    },
+    dmBubbleToggle: {
+        flexDirection: 'row',
+        borderRadius: ox(12),
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        padding: 2,
+        marginBottom: ox(16),
+    },
+    dmBubbleOption: {
+        flex: 1,
+        paddingVertical: ox(10),
+        borderRadius: ox(10),
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    dmBubbleOptionBlue: {
+        backgroundColor: '#0A84FF',
+    },
+    dmBubbleOptionGreen: {
+        backgroundColor: '#34C759',
+    },
+    dmBubbleOptionText: {
+        color: '#9CA3AF',
+        fontSize: ox(14),
+        fontWeight: '600',
+    },
+    dmBubbleOptionTextActive: {
+        color: '#FFFFFF',
+    },
+    chatInfoActionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(14),
+        borderRadius: ox(12),
+    },
+    chatInfoActionText: {
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        fontWeight: '500',
+    },
+    chatInfoActionDangerText: {
+        color: '#EF4444',
+        fontSize: ox(16),
+        fontWeight: '500',
     },
     sheetCard: {
         backgroundColor: '#030712',
@@ -2838,71 +3839,71 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 18,
         borderTopWidth: 1,
         borderColor: '#1F2937',
-        padding: 16,
+        padding: ox(16),
     },
     sheetTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     sheetLabel: {
         color: '#D1D5DB',
-        fontSize: 13,
-        marginBottom: 6,
+        fontSize: ox(13),
+        marginBottom: ox(6),
     },
     sheetInput: {
         backgroundColor: '#111827',
-        borderRadius: 10,
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#FFFFFF',
         color: '#FFFFFF',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        fontSize: 14,
-        marginBottom: 12,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
+        fontSize: ox(14),
+        marginBottom: ox(12),
     },
     groupPhotoRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        marginBottom: 14,
+        gap: ox(8),
+        marginBottom: ox(14),
     },
     sheetActionsRow: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
-        gap: 8,
+        gap: ox(8),
     },
     sheetSecondaryBtn: {
-        borderRadius: 8,
+        borderRadius: ox(8),
         borderWidth: 1,
         borderColor: '#FFFFFF',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
     sheetSecondaryBtnText: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '600',
     },
     sheetPrimaryBtn: {
-        borderRadius: 8,
+        borderRadius: ox(8),
         backgroundColor: '#FFFFFF',
-        paddingHorizontal: 14,
-        paddingVertical: 8,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(8),
     },
     sheetPrimaryBtnDisabled: {
         opacity: 0.6,
     },
     sheetPrimaryBtnText: {
         color: '#030712',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     suggestionsList: {
-        marginBottom: 12,
+        marginBottom: ox(12),
         backgroundColor: '#111827',
-        borderRadius: 10,
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#374151',
         overflow: 'hidden',
@@ -2910,89 +3911,89 @@ const styles = StyleSheet.create({
     suggestionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        gap: ox(10),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
     suggestionHandle: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '600',
     },
     suggestionName: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     suggestionsHint: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginBottom: 12,
+        fontSize: ox(12),
+        marginBottom: ox(12),
     },
     imageComposeWrap: {
         flexDirection: 'row',
-        gap: 10,
-        marginHorizontal: 16,
-        marginTop: 8,
-        padding: 10,
-        borderRadius: 12,
+        gap: ox(10),
+        marginHorizontal: ox(16),
+        marginTop: ox(8),
+        padding: ox(10),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
     },
     imageComposePreview: {
-        width: 64,
-        height: 64,
-        borderRadius: 10,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(10),
     },
     imageComposeBody: {
         flex: 1,
     },
     imageComposeTitle: {
         color: '#E5E7EB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
-        marginBottom: 6,
+        marginBottom: ox(6),
     },
     imageComposeInput: {
-        borderRadius: 10,
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#4B5563',
         backgroundColor: '#0F172A',
         color: '#FFFFFF',
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        fontSize: 13,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
+        fontSize: ox(13),
     },
     imageComposeActions: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
-        gap: 8,
-        marginTop: 8,
+        gap: ox(8),
+        marginTop: ox(8),
     },
     imageComposeCancelBtn: {
-        borderRadius: 8,
+        borderRadius: ox(8),
         borderWidth: 1,
         borderColor: '#4B5563',
         backgroundColor: '#1F2937',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     imageComposeCancelText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     imageComposeSendBtn: {
-        borderRadius: 8,
+        borderRadius: ox(8),
         backgroundColor: '#3B82F6',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
     },
     imageComposeSendText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
 });

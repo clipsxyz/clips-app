@@ -90,6 +90,7 @@ import {
 } from '../services/notifications';
 import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
 import { timeAgo } from '../utils/timeAgo';
+import { ox } from '../constants/nativeOpticalScale';
 
 type ProfileAlertConfig = {
     title: string;
@@ -750,10 +751,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <Avatar
                         src={user?.avatarUrl}
                         name={user?.name || 'User'}
-                        size={32}
+                        size={ox(32)}
                     />
                     <View style={styles.headerAvatarBadge}>
-                        <Icon name="add" size={14} color="#FFFFFF" />
+                        <Icon name="add" size={ox(14)} color="#FFFFFF" />
                     </View>
                 </TouchableOpacity>
                 <Text style={styles.title} numberOfLines={1}>
@@ -768,7 +769,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 >
                     <Icon
                         name={isPrivate ? 'lock-closed' : 'lock-open'}
-                        size={24}
+                        size={ox(24)}
                         color="#FFFFFF"
                     />
                 </TouchableOpacity>
@@ -805,7 +806,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabInvite]}
                     onPress={() => setInviteFriendsOpen(true)}
                 >
-                    <Icon name="people-outline" size={20} color="#A5F3FC" />
+                    <Icon name="people-outline" size={ox(20)} color="#A5F3FC" />
                     <Text style={[styles.tabLabel, styles.tabLabelCyan]}>Invite Friends</Text>
                 </TouchableOpacity>
 
@@ -813,7 +814,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabChip]}
                     onPress={() => setMyFeedOpen(true)}
                 >
-                    <Icon name="newspaper-outline" size={20} color="#F3F4F6" />
+                    <Icon name="newspaper-outline" size={ox(20)} color="#F3F4F6" />
                     <Text style={styles.tabLabel}>My feed</Text>
                 </TouchableOpacity>
 
@@ -821,7 +822,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabChip]}
                     onPress={() => navigation.navigate('ProfileCover')}
                 >
-                    <Icon name="image-outline" size={20} color="#F3F4F6" />
+                    <Icon name="image-outline" size={ox(20)} color="#F3F4F6" />
                     <Text style={styles.tabLabel}>Cover</Text>
                 </TouchableOpacity>
 
@@ -829,7 +830,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabNewGroup]}
                     onPress={() => setCreateGroupOpen(true)}
                 >
-                    <Icon name="people" size={20} color="#A5F3FC" />
+                    <Icon name="people" size={ox(20)} color="#A5F3FC" />
                     <Text style={[styles.tabLabel, styles.tabLabelCyan]}>New group</Text>
                 </TouchableOpacity>
 
@@ -837,7 +838,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabChip]}
                     onPress={() => navigateMainTab(navigation, 'Inbox')}
                 >
-                    <Icon name="mail" size={20} color="#FFFFFF" />
+                    <Icon name="mail" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Messages</Text>
                     {unreadCount > 0 && (
                         <View style={styles.badge}>
@@ -852,7 +853,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabChip]}
                     onPress={() => setDraftsOpen(true)}
                 >
-                    <Icon name="document-text" size={20} color="#FFFFFF" />
+                    <Icon name="document-text" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Drafts</Text>
                     {drafts.length > 0 && (
                         <View style={styles.badge}>
@@ -870,7 +871,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         setCollectionsOpen(true);
                     }}
                 >
-                    <Icon name="bookmark" size={20} color="#FFFFFF" />
+                    <Icon name="bookmark" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Collections</Text>
                     {collections.length > 0 && (
                         <View style={styles.badge}>
@@ -888,7 +889,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         setCommentSafetyOpen(true);
                     }}
                 >
-                    <Icon name="shield-checkmark" size={20} color="#FBBF24" />
+                    <Icon name="shield-checkmark" size={ox(20)} color="#FBBF24" />
                     <Text style={styles.tabLabel}>Comment Safety</Text>
                 </TouchableOpacity>
 
@@ -901,7 +902,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         setSecurityModalOpen(true);
                     }}
                 >
-                    <Icon name="shield-checkmark-outline" size={20} color="#6EE7B7" />
+                    <Icon name="shield-checkmark-outline" size={ox(20)} color="#6EE7B7" />
                     <Text style={styles.tabLabelSecurity}>Security</Text>
                 </TouchableOpacity>
 
@@ -912,7 +913,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         setSettingsOpen(true);
                     }}
                 >
-                    <Icon name="settings" size={20} color="#FFFFFF" />
+                    <Icon name="settings" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Settings</Text>
                 </TouchableOpacity>
                     </ScrollView>
@@ -1004,7 +1005,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     >
                         <Icon 
                             name="grid" 
-                            size={20} 
+                            size={ox(20)} 
                             color={activeTab === 'posts' ? "#f472b6" : "#6B7280"} 
                         />
                     </TouchableOpacity>
@@ -1014,7 +1015,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     >
                         <Icon 
                             name="bookmark" 
-                            size={20} 
+                            size={ox(20)} 
                             color={activeTab === 'collections' ? "#f472b6" : "#6B7280"} 
                         />
                     </TouchableOpacity>
@@ -1081,7 +1082,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                         </View>
                                     ) : (
                                         <View style={styles.collectionThumbnailPlaceholder}>
-                                            <Icon name="bookmark" size={24} color="#6B7280" />
+                                            <Icon name="bookmark" size={ox(24)} color="#6B7280" />
                                         </View>
                                     )}
                                     <View style={styles.collectionInfo}>
@@ -1109,14 +1110,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.securityCardHeader}>
                             <View style={{ flex: 1 }} />
                             <TouchableOpacity onPress={closeSecurityModal} style={styles.securityCloseButton}>
-                                <Icon name="close" size={22} color="#9CA3AF" />
+                                <Icon name="close" size={ox(22)} color="#9CA3AF" />
                             </TouchableOpacity>
                         </View>
                         {securityStep === 'phone' ? (
                             <>
                                 <Text style={styles.securityTitle}>Add phone</Text>
                                 <View style={styles.securityWhatsAppBadge}>
-                                    <Icon name="logo-whatsapp" size={14} color="#DCFCE7" />
+                                    <Icon name="logo-whatsapp" size={ox(14)} color="#DCFCE7" />
                                     <Text style={styles.securityWhatsAppBadgeText}>We will text your verification code on WhatsApp</Text>
                                 </View>
                                 <Text style={styles.securityBody}>
@@ -1198,7 +1199,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.inviteHeaderRow}>
                             <Text style={styles.securityTitle}>Invite Friends</Text>
                             <TouchableOpacity onPress={() => setInviteFriendsOpen(false)} style={styles.inviteCloseBtn}>
-                                <Icon name="close" size={18} color="#D1D5DB" />
+                                <Icon name="close" size={ox(18)} color="#D1D5DB" />
                             </TouchableOpacity>
                         </View>
                         <TouchableOpacity
@@ -1207,7 +1208,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             disabled={inviteSyncing}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="logo-facebook" size={16} color="#60A5FA" />
+                                <Icon name="logo-facebook" size={ox(16)} color="#60A5FA" />
                                 <Text style={styles.inviteOptionTitle}>{inviteSyncing ? 'Syncing Facebook...' : 'Find Facebook Friends'}</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Sync friends who connected with your app.</Text>
@@ -1217,7 +1218,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             onPress={handleShareInviteToWhatsApp}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="logo-whatsapp" size={16} color="#86EFAC" />
+                                <Icon name="logo-whatsapp" size={ox(16)} color="#86EFAC" />
                                 <Text style={styles.inviteOptionTitle}>Share to WhatsApp</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Share the Gazetteer app with friends.</Text>
@@ -1227,7 +1228,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             onPress={handleShareInviteToMessenger}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="chatbubble-ellipses" size={16} color="#60A5FA" />
+                                <Icon name="chatbubble-ellipses" size={ox(16)} color="#60A5FA" />
                                 <Text style={styles.inviteOptionTitle}>Share to Messenger</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Share the Gazetteer app with friends.</Text>
@@ -1245,7 +1246,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             onPress={handleInviteByQrOrLink}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="qr-code-outline" size={16} color="#D1D5DB" />
+                                <Icon name="qr-code-outline" size={ox(16)} color="#D1D5DB" />
                                 <Text style={styles.inviteOptionTitle}>Invite by link or QR</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Share your profile and connect faster.</Text>
@@ -1302,7 +1303,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Drafts</Text>
                             <TouchableOpacity onPress={() => setDraftsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView style={styles.modalBody}>
@@ -1367,7 +1368,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             onPress={() => handleDeleteDraft(draft.id)}
                                             style={styles.deleteButton}
                                         >
-                                            <Icon name="trash" size={20} color="#EF4444" />
+                                            <Icon name="trash" size={ox(20)} color="#EF4444" />
                                         </TouchableOpacity>
                                     </View>
                                 ))
@@ -1391,7 +1392,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Collections</Text>
                             <TouchableOpacity onPress={() => setCollectionsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView style={styles.modalBody}>
@@ -1435,7 +1436,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 </View>
                                             ) : (
                                                 <View style={styles.collectionModalThumbnailPlaceholder}>
-                                                    <Icon name="bookmark" size={24} color="#6B7280" />
+                                                    <Icon name="bookmark" size={ox(24)} color="#6B7280" />
                                                 </View>
                                             )}
                                             <View style={styles.collectionModalInfo}>
@@ -1469,7 +1470,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <Text style={styles.myFeedTitle}>My feed</Text>
                         </View>
                         <TouchableOpacity onPress={() => setMyFeedOpen(false)} style={styles.myFeedCloseButton}>
-                            <Icon name="close" size={22} color="#FFFFFF" />
+                            <Icon name="close" size={ox(22)} color="#FFFFFF" />
                         </TouchableOpacity>
                     </View>
 
@@ -1705,7 +1706,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 {myFeedComments.length} {myFeedComments.length === 1 ? 'comment' : 'comments'}
                             </Text>
                             <TouchableOpacity onPress={() => setMyFeedCommentsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <View style={styles.myFeedCommentsModalBody}>
@@ -1812,7 +1813,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Settings</Text>
                             <TouchableOpacity onPress={() => setSettingsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView
@@ -1826,7 +1827,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Text style={styles.safetySectionTitle}>Content preferences</Text>
                                 <Text style={styles.toggleDescription}>Edit preferred locations for feed suggestions</Text>
                                 <TouchableOpacity
-                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
                                     onPress={() => {
                                         setSettingsOpen(false);
                                         navigation.navigate('ContentPreferences');
@@ -1842,7 +1843,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     Photo, video, text, and poll stories (Clip studio)
                                 </Text>
                                 <TouchableOpacity
-                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
                                     onPress={() => {
                                         setSettingsOpen(false);
                                         navigation.navigate('Clip');
@@ -1858,7 +1859,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     Feed autoplay and default mute for videos
                                 </Text>
                                 <TouchableOpacity
-                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
                                     onPress={() => {
                                         setSettingsOpen(false);
                                         navigation.navigate('VideoPlaybackSettings');
@@ -2016,25 +2017,25 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         borderBottomWidth: 1,
         borderBottomColor: profilePassportDivider,
         backgroundColor: 'rgba(2, 6, 23, 0.95)',
-        gap: 12,
+        gap: ox(12),
     },
     headerAvatarBtn: {
         position: 'relative',
-        width: 32,
-        height: 32,
+        width: ox(32),
+        height: ox(32),
     },
     headerAvatarBadge: {
         position: 'absolute',
         right: -2,
         bottom: -2,
-        width: 18,
-        height: 18,
-        borderRadius: 9,
+        width: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
         backgroundColor: '#f472b6',
         borderWidth: 2,
         borderColor: '#030712',
@@ -2043,7 +2044,7 @@ const styles = StyleSheet.create({
     },
     title: {
         flex: 1,
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: '700',
         color: '#FFFFFF',
         textAlign: 'center',
@@ -2053,59 +2054,59 @@ const styles = StyleSheet.create({
     },
     profileSection: {
         paddingHorizontal: profilePassportScrollInset,
-        paddingVertical: 16,
+        paddingVertical: ox(16),
     },
     profileInfo: {
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     userInfo: {
         flex: 1,
         justifyContent: 'center',
     },
     userName: {
-        fontSize: 19,
+        fontSize: ox(19),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     userHandle: {
-        fontSize: 15,
+        fontSize: ox(15),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     userBio: {
-        fontSize: 13,
+        fontSize: ox(13),
         color: '#D1D5DB',
-        marginTop: 4,
+        marginTop: ox(4),
     },
     statsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     statItem: {
         alignItems: 'center',
     },
     statNumber: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     statLabel: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     editButton: {
         backgroundColor: '#1F2937',
-        paddingVertical: 9,
-        paddingHorizontal: 20,
-        borderRadius: 9,
+        paddingVertical: ox(9),
+        paddingHorizontal: ox(20),
+        borderRadius: ox(9),
         alignSelf: 'center',
         borderWidth: 1,
         borderColor: '#374151',
     },
     editButtonText: {
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '600',
         color: '#FFFFFF',
     },
@@ -2115,7 +2116,7 @@ const styles = StyleSheet.create({
     },
     profileScrollContent: {
         flexGrow: 1,
-        paddingBottom: 24,
+        paddingBottom: ox(24),
         backgroundColor: profilePassportPageBg,
     },
     postsSection: {
@@ -2128,20 +2129,20 @@ const styles = StyleSheet.create({
     collectionsList: {},
     postsEmptyState: {
         alignItems: 'center',
-        paddingVertical: 32,
-        paddingHorizontal: 16,
+        paddingVertical: ox(32),
+        paddingHorizontal: ox(16),
     },
     postsHeader: {
         flexDirection: 'row',
         justifyContent: 'center',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
         borderTopWidth: 1,
         borderTopColor: 'rgba(255, 255, 255, 0.1)',
-        gap: 32,
+        gap: ox(32),
     },
     postsTab: {
-        paddingHorizontal: 20,
-        paddingVertical: 8,
+        paddingHorizontal: ox(20),
+        paddingVertical: ox(8),
     },
     postsTabActive: {
         borderBottomWidth: 2,
@@ -2165,28 +2166,28 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     collectionItem: {
-        padding: 16,
+        padding: ox(16),
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
     collectionName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     collectionCount: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 40,
+        padding: ox(40),
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#6B7280',
     },
     tabsWrap: {
@@ -2200,7 +2201,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'stretch',
         width: '100%',
-        minHeight: 66,
+        minHeight: ox(66),
     },
     tabsScrollFlex: {
         flex: 1,
@@ -2208,13 +2209,13 @@ const styles = StyleSheet.create({
     },
     tabsContentContainer: {
         flexDirection: 'row',
-        paddingVertical: 12,
-        paddingHorizontal: 8,
-        paddingRight: 10,
-        columnGap: 8,
+        paddingVertical: ox(12),
+        paddingHorizontal: ox(8),
+        paddingRight: ox(10),
+        columnGap: ox(8),
     },
     tabsCueColumn: {
-        width: 48,
+        width: ox(48),
         position: 'relative',
         justifyContent: 'center',
         alignItems: 'center',
@@ -2225,11 +2226,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         position: 'relative',
-        minHeight: 44,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 12,
-        gap: 8,
+        minHeight: ox(44),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(8),
+        borderRadius: ox(12),
+        gap: ox(8),
     },
     tabChip: {
         borderWidth: 1,
@@ -2252,17 +2253,17 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(6, 78, 59, 0.3)',
     },
     tabLabelSecurity: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#D1FAE5',
         fontWeight: '600',
     },
     tabLabel: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#F3F4F6',
         fontWeight: '600',
     },
     tabNewGroup: {
-        borderRadius: 12,
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(6, 182, 212, 0.35)',
         backgroundColor: 'rgba(8, 51, 68, 0.4)',
@@ -2275,10 +2276,10 @@ const styles = StyleSheet.create({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 2,
-        paddingHorizontal: 8,
-        paddingVertical: 8,
-        borderRadius: 14,
+        gap: ox(2),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(8),
+        borderRadius: ox(14),
         backgroundColor: 'rgba(15,23,42,0.96)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
@@ -2290,22 +2291,22 @@ const styles = StyleSheet.create({
     },
     tabsHintTextColumn: {
         color: '#F3F4F6',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '800',
-        letterSpacing: 0.3,
+        letterSpacing: ox(0.3),
     },
     tabsHintChevron: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '800',
-        marginTop: -2,
+        marginTop: ox(-2),
         includeFontPadding: false,
     },
     /** After user scrolls: always-visible “more” arrow (fixed column — never under ScrollView) */
     tabsMoreCue: {
-        width: 36,
-        height: 38,
-        borderRadius: 19,
+        width: ox(36),
+        height: ox(38),
+        borderRadius: ox(19),
         backgroundColor: 'rgba(217, 27, 92, 0.35)',
         borderWidth: 1.5,
         borderColor: 'rgba(244, 114, 182, 0.45)',
@@ -2314,10 +2315,10 @@ const styles = StyleSheet.create({
     },
     tabsMoreCueGlyph: {
         color: '#FFFFFF',
-        fontSize: 26,
+        fontSize: ox(26),
         fontWeight: '800',
         marginLeft: 3,
-        marginTop: -3,
+        marginTop: ox(-3),
         includeFontPadding: false,
     },
     badge: {
@@ -2325,35 +2326,35 @@ const styles = StyleSheet.create({
         top: -4,
         right: 0,
         backgroundColor: '#EF4444',
-        borderRadius: 10,
-        minWidth: 20,
-        height: 20,
+        borderRadius: ox(10),
+        minWidth: ox(20),
+        height: ox(20),
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 4,
+        paddingHorizontal: ox(4),
     },
     badgeText: {
         color: '#FFFFFF',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: 'bold',
     },
     collectionThumbnail: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
     },
     collectionThumbnailWrap: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
         overflow: 'hidden',
     },
     collectionThumbnailPlaceholder: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
         justifyContent: 'center',
         alignItems: 'center',
@@ -2361,11 +2362,11 @@ const styles = StyleSheet.create({
     collectionThumbnailTextFallback: {
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 6,
+        paddingHorizontal: ox(6),
         overflow: 'hidden',
     },
     collectionThumbnailText: {
-        fontSize: 10,
+        fontSize: ox(10),
         color: '#D1D5DB',
         textAlign: 'center',
     },
@@ -2381,8 +2382,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 14,
-        paddingVertical: 10,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(10),
         ...gazetteerHeader,
     },
     myFeedHeaderLeft: {
@@ -2390,37 +2391,37 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     myFeedLogo: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
+        width: ox(32),
+        height: ox(32),
+        borderRadius: ox(8),
         marginRight: 8,
     },
     myFeedTitle: {
-        fontSize: 22,
+        fontSize: ox(22),
         fontWeight: '700',
         color: '#FFFFFF',
     },
     myFeedCloseButton: {
-        borderRadius: 999,
-        padding: 8,
+        borderRadius: ox(999),
+        padding: ox(8),
         ...glassSurface,
     },
     myFeedListContent: {
-        padding: 12,
-        rowGap: 12,
-        paddingBottom: 28,
+        padding: ox(12),
+        rowGap: ox(12),
+        paddingBottom: ox(28),
     },
     myFeedCard: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'hidden',
         ...glassPanel,
     },
     myFeedCardHeader: {
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-        rowGap: 8,
+        rowGap: ox(8),
     },
     myFeedAuthorRow: {
         flexDirection: 'row',
@@ -2432,20 +2433,20 @@ const styles = StyleSheet.create({
     },
     myFeedLocationPill: {
         alignSelf: 'flex-start',
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#0F172A',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(4),
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
+        columnGap: ox(4),
         maxWidth: '100%',
     },
     myFeedLocationText: {
         color: '#BFDBFE',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
         maxWidth: 260,
     },
@@ -2472,47 +2473,47 @@ const styles = StyleSheet.create({
         backgroundColor: '#030712',
     },
     myFeedVideoPlaceholderText: {
-        marginTop: 8,
+        marginTop: ox(8),
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     myFeedTextCard: {
-        paddingHorizontal: 14,
-        paddingVertical: 16,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(16),
         ...glassSurface,
     },
     myFeedTextCardText: {
         color: '#FFFFFF',
-        fontSize: 15,
-        lineHeight: 22,
+        fontSize: ox(15),
+        lineHeight: ox(22),
     },
     myFeedCaptionWrap: {
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
     },
     myFeedCaptionText: {
         color: '#E5E7EB',
-        fontSize: 13,
-        lineHeight: 20,
+        fontSize: ox(13),
+        lineHeight: ox(20),
     },
     myFeedStatsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
         borderTopWidth: 1,
         borderTopColor: 'rgba(255, 255, 255, 0.08)',
-        columnGap: 12,
+        columnGap: ox(12),
     },
     myFeedStatPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
+        columnGap: ox(4),
     },
     myFeedStatText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     modalOverlay: {
@@ -2531,26 +2532,26 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     modalTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     modalBody: {
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
     },
     settingsModalScroll: {
         flexGrow: 0,
         flexShrink: 1,
     },
     settingsModalBody: {
-        paddingHorizontal: 14,
-        paddingTop: 12,
-        paddingBottom: 28,
+        paddingHorizontal: ox(14),
+        paddingTop: ox(12),
+        paddingBottom: ox(28),
     },
     myFeedCommentsModalContent: {
         borderTopLeftRadius: 20,
@@ -2563,61 +2564,61 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     myFeedCommentsModalBody: {
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
     },
     draftItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        padding: 12,
-        borderRadius: 12,
-        marginBottom: 12,
+        gap: ox(12),
+        padding: ox(12),
+        borderRadius: ox(12),
+        marginBottom: ox(12),
         ...glassSurface,
     },
     draftThumb: {
-        width: 52,
-        height: 52,
-        borderRadius: 8,
+        width: ox(52),
+        height: ox(52),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
     },
     draftInfo: {
         flex: 1,
     },
     draftDate: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#9CA3AF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     draftText: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#FFFFFF',
     },
     deleteButton: {
-        padding: 8,
+        padding: ox(8),
     },
     collectionModalItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
+        padding: ox(16),
+        borderRadius: ox(12),
+        marginBottom: ox(12),
         ...glassSurface,
     },
     collectionModalThumbnail: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
     },
     collectionModalThumbnailPlaceholder: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
         justifyContent: 'center',
         alignItems: 'center',
@@ -2627,260 +2628,260 @@ const styles = StyleSheet.create({
         marginLeft: 12,
     },
     collectionModalName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     collectionModalCount: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     logoutButton: {
         backgroundColor: '#EF4444',
-        paddingVertical: 12,
-        paddingHorizontal: 24,
-        borderRadius: 8,
+        paddingVertical: ox(12),
+        paddingHorizontal: ox(24),
+        borderRadius: ox(8),
         alignItems: 'center',
     },
     logoutButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     safetySection: {
-        borderRadius: 10,
-        padding: 11,
-        marginBottom: 10,
+        borderRadius: ox(10),
+        padding: ox(11),
+        marginBottom: ox(10),
         ...glassSurface,
     },
     safetySectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 10,
+        marginBottom: ox(10),
     },
     safetySectionTitle: {
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
         color: '#FFFFFF',
     },
     smallActionButton: {
         backgroundColor: '#374151',
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     smallActionButtonText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     toggleRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     toggleInfo: {
         flex: 1,
-        paddingRight: 10,
+        paddingRight: ox(10),
     },
     toggleLabel: {
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     toggleDescription: {
-        marginTop: 2,
-        fontSize: 12,
+        marginTop: ox(2),
+        fontSize: ox(12),
         color: '#9CA3AF',
     },
     toggleTrack: {
-        width: 46,
-        height: 26,
-        borderRadius: 13,
+        width: ox(46),
+        height: ox(26),
+        borderRadius: ox(13),
         backgroundColor: '#374151',
         justifyContent: 'center',
-        paddingHorizontal: 3,
+        paddingHorizontal: ox(3),
     },
     toggleTrackActive: {
         backgroundColor: '#d91b5c',
     },
     toggleThumb: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: ox(20),
+        height: ox(20),
+        borderRadius: ox(10),
         backgroundColor: '#FFFFFF',
     },
     toggleThumbActive: {
         alignSelf: 'flex-end',
     },
     inputLabel: {
-        fontSize: 13,
+        fontSize: ox(13),
         color: '#D1D5DB',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     wordInputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
+        columnGap: ox(8),
     },
     myFeedCommentsList: {
         maxHeight: 260,
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     myFeedCommentItem: {
-        paddingVertical: 8,
+        paddingVertical: ox(8),
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
     myFeedEditedBadge: {
         alignSelf: 'flex-start',
-        marginBottom: 4,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 999,
+        marginBottom: ox(4),
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(2),
+        borderRadius: ox(999),
         backgroundColor: '#1E3A8A',
         color: '#DBEAFE',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
         textTransform: 'uppercase',
     },
     myFeedCommentAuthor: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
-        marginBottom: 2,
+        marginBottom: ox(2),
     },
     myFeedCommentText: {
         color: '#D1D5DB',
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: ox(13),
+        lineHeight: ox(18),
     },
     myFeedCommentTime: {
-        marginTop: 3,
+        marginTop: ox(3),
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
     },
     myFeedCommentActionsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 14,
-        marginTop: 6,
+        columnGap: ox(14),
+        marginTop: ox(6),
     },
     myFeedCommentActionText: {
         color: '#93C5FD',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     myFeedReplyList: {
-        marginTop: 8,
-        paddingLeft: 10,
+        marginTop: ox(8),
+        paddingLeft: ox(10),
         borderLeftWidth: 1,
         borderLeftColor: '#374151',
-        rowGap: 6,
+        rowGap: ox(6),
     },
     myFeedReplyItem: {},
     myFeedReplyAuthor: {
         color: '#E5E7EB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     myFeedReplyText: {
         color: '#CBD5E1',
-        fontSize: 12,
-        lineHeight: 17,
+        fontSize: ox(12),
+        lineHeight: ox(17),
     },
     myFeedReplyTime: {
-        marginTop: 2,
+        marginTop: ox(2),
         color: '#94A3B8',
-        fontSize: 10,
+        fontSize: ox(10),
     },
     myFeedReplyActionText: {
-        marginTop: 3,
+        marginTop: ox(3),
         color: '#93C5FD',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
     },
     myFeedCommentInputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
+        columnGap: ox(8),
     },
     myFeedCommentInput: {
         flex: 1,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         ...glassSearch,
     },
     wordInput: {
         flex: 1,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         ...glassSearch,
     },
     addWordButton: {
         backgroundColor: '#d91b5c',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 9,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(9),
     },
     addWordButtonText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     sheetActionsRow: {
-        marginTop: 14,
+        marginTop: ox(14),
         flexDirection: 'row',
         justifyContent: 'flex-end',
-        columnGap: 8,
+        columnGap: ox(8),
     },
     wordChipWrap: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        columnGap: 6,
-        rowGap: 6,
-        marginTop: 10,
+        columnGap: ox(6),
+        rowGap: ox(6),
+        marginTop: ox(10),
     },
     wordChip: {
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         ...glassSurface,
     },
     wordChipText: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#E5E7EB',
     },
     queueCountText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#FBBF24',
         fontWeight: '600',
     },
     filterPillsRow: {
         flexDirection: 'row',
-        columnGap: 8,
-        marginBottom: 10,
+        columnGap: ox(8),
+        marginBottom: ox(10),
     },
     filterPill: {
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         ...glassSurface,
     },
     filterPillActive: {
         ...chipActiveMagenta,
     },
     filterPillText: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#9CA3AF',
         fontWeight: '600',
     },
@@ -2890,30 +2891,30 @@ const styles = StyleSheet.create({
     queueItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 8,
+        columnGap: ox(8),
+        borderRadius: ox(8),
+        padding: ox(10),
+        marginBottom: ox(8),
         ...glassSurface,
     },
     queueItemAuthor: {
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
         color: '#FFFFFF',
-        marginBottom: 3,
+        marginBottom: ox(3),
     },
     queueItemText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#D1D5DB',
     },
     queueActions: {
         flexDirection: 'row',
-        columnGap: 6,
+        columnGap: ox(6),
     },
     queueActionBtn: {
-        borderRadius: 6,
-        paddingHorizontal: 8,
-        paddingVertical: 6,
+        borderRadius: ox(6),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(6),
         ...glassSurface,
     },
     queueActionBtnDanger: {
@@ -2922,7 +2923,7 @@ const styles = StyleSheet.create({
     },
     queueActionText: {
         color: '#E5E7EB',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
     },
     queueActionTextDanger: {
@@ -2932,188 +2933,188 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(11, 7, 17, 0.82)',
         justifyContent: 'center',
-        paddingHorizontal: 18,
+        paddingHorizontal: ox(18),
     },
     securityCard: {
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: ox(16),
+        padding: ox(16),
         ...glassPanel,
     },
     securityCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     securityCloseButton: {
-        padding: 4,
+        padding: ox(4),
     },
     securityTitle: {
         color: '#FFFFFF',
-        fontSize: 28,
+        fontSize: ox(28),
         fontWeight: '700',
-        marginBottom: 10,
+        marginBottom: ox(10),
     },
     securityBody: {
         color: '#D1D5DB',
-        fontSize: 14,
-        lineHeight: 20,
-        marginBottom: 12,
+        fontSize: ox(14),
+        lineHeight: ox(20),
+        marginBottom: ox(12),
     },
     securityWhatsAppBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
+        columnGap: ox(8),
         backgroundColor: '#052E16',
         borderWidth: 1,
         borderColor: '#166534',
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        marginBottom: 10,
+        borderRadius: ox(10),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
+        marginBottom: ox(10),
     },
     securityWhatsAppBadgeText: {
         color: '#BBF7D0',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
         flex: 1,
     },
     securityPhoneRow: {
         flexDirection: 'row',
-        columnGap: 8,
-        marginBottom: 12,
+        columnGap: ox(8),
+        marginBottom: ox(12),
     },
     securityCountryInput: {
-        width: 92,
-        borderRadius: 10,
+        width: ox(92),
+        borderRadius: ox(10),
         color: '#FFFFFF',
-        paddingHorizontal: 10,
-        paddingVertical: 10,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
         ...glassSearch,
     },
     securityPhoneInput: {
         flex: 1,
-        borderRadius: 10,
+        borderRadius: ox(10),
         color: '#FFFFFF',
-        paddingHorizontal: 10,
-        paddingVertical: 10,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
         ...glassSearch,
     },
     securityCodeInput: {
-        borderRadius: 10,
+        borderRadius: ox(10),
         color: '#FFFFFF',
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        fontSize: 18,
-        letterSpacing: 6,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        fontSize: ox(18),
+        letterSpacing: ox(6),
         textAlign: 'center',
-        marginBottom: 12,
+        marginBottom: ox(12),
         ...glassSearch,
     },
     securityPrimaryButton: {
         backgroundColor: '#d91b5c',
-        borderRadius: 999,
+        borderRadius: ox(999),
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
     },
     securityPrimaryButtonDisabled: {
         opacity: 0.6,
     },
     securityPrimaryButtonText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     securitySecondaryButton: {
-        marginTop: 10,
-        borderRadius: 999,
+        marginTop: ox(10),
+        borderRadius: ox(999),
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
     },
     securitySecondaryButtonText: {
         color: '#D1D5DB',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '600',
     },
     inviteHeaderRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     inviteCloseBtn: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
+        width: ox(30),
+        height: ox(30),
+        borderRadius: ox(15),
         alignItems: 'center',
         justifyContent: 'center',
         ...glassSurface,
     },
     inviteOption: {
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        marginBottom: 10,
+        borderRadius: ox(12),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        marginBottom: ox(10),
         ...glassSurface,
     },
     inviteOptionTitle: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
-        marginBottom: 2,
+        marginBottom: ox(2),
     },
     inviteOptionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
-        marginBottom: 2,
+        columnGap: ox(8),
+        marginBottom: ox(2),
     },
     inviteOptionBody: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     inviteMatchesWrap: {
-        marginTop: 4,
+        marginTop: ox(4),
     },
     inviteMatchesLabel: {
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
-        marginBottom: 8,
+        marginBottom: ox(8),
         textTransform: 'uppercase',
     },
     inviteMatchRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 10,
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        marginBottom: 8,
+        columnGap: ox(10),
+        borderRadius: ox(10),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
+        marginBottom: ox(8),
         ...glassSurface,
     },
     inviteMatchTitle: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     inviteMatchHandle: {
         color: '#9CA3AF',
-        fontSize: 11,
-        marginTop: 2,
+        fontSize: ox(11),
+        marginTop: ox(2),
     },
     inviteFollowBtn: {
         backgroundColor: '#d91b5c',
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
     },
     inviteFollowBtnText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
 });

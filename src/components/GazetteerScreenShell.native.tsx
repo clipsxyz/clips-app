@@ -17,6 +17,7 @@ type GazetteerScreenShellProps = {
 
 const DISCOVER_WASH = ['#0b0711', '#201138', '#3a1528', '#201138', '#0b0711'] as const;
 const GOLD_WASH = ['#0a1323', '#1a1530', '#2a2410', '#1a1530', '#0a1323'] as const;
+const PASSPORT_WASH = ['#060d16', '#0f2430', '#1a3f3c', '#12263a', '#060d16'] as const;
 
 /**
  * Ambient strategy:
@@ -32,7 +33,12 @@ export default function GazetteerScreenShell({
     style,
     contentStyle,
 }: GazetteerScreenShellProps) {
-    const wash = ambientVariant === 'goldChrome' ? GOLD_WASH : DISCOVER_WASH;
+    const wash =
+        ambientVariant === 'goldChrome'
+            ? GOLD_WASH
+            : ambientVariant === 'passport'
+              ? PASSPORT_WASH
+              : DISCOVER_WASH;
 
     if (!ambient) {
         return (

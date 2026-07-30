@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { greetingLight, greetingSubLight } from '../theme/gazetteerAmbientNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function SplashScreen({ navigation }: any) {
   return (
@@ -22,26 +23,26 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: ox(24),
   },
   brand: {
     ...greetingLight,
-    fontSize: 36,
+    fontSize: ox(36),
   },
   subtitle: {
     ...greetingSubLight,
-    marginTop: 10,
+    marginTop: ox(10),
   },
   cta: {
-    marginTop: 24,
+    marginTop: ox(24),
     backgroundColor: '#d91b5c',
-    borderRadius: 999,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    borderRadius: ox(999),
+    paddingHorizontal: ox(24),
+    paddingVertical: ox(12),
   },
   ctaText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: ox(15),
     fontWeight: '700',
   },
 });

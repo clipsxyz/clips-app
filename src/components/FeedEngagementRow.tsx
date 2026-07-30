@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 4,
     },
     text: {
-        fontSize: 12,
+        fontSize: FEED_UI.type.actionCount,
         fontWeight: '400',
         fontVariant: ['tabular-nums'],
     },

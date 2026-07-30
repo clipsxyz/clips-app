@@ -8,6 +8,7 @@ import { useAuth } from '../context/Auth';
 import { updateAuthProfile } from '../api/client';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import type { LocationSuggestion } from '../api/locations';
+import { ox } from '../constants/nativeOpticalScale';
 
 const HIDDEN_PLACES_KEY = 'clips:suggestedPlacesDislikedPlaces';
 const HIDDEN_BUSINESS_KEY = 'clips:hiddenBusinessSuggestions';
@@ -133,11 +134,11 @@ export default function ContentPreferencesScreen({ navigation }: any) {
     <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={18} color="#FFFFFF" />
+          <Icon name="arrow-back" size={ox(18)} color="#FFFFFF" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Content Preferences</Text>
-        <View style={{ width: 50 }} />
+        <View style={{ width: ox(50) }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -195,47 +196,47 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: ox(16),
+    paddingVertical: ox(12),
     ...gazetteerHeader,
   },
-  backButton: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  backText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
-  headerTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  content: { padding: 16, gap: 12 },
+  backButton: { flexDirection: 'row', alignItems: 'center', gap: ox(6) },
+  backText: { color: '#FFFFFF', fontSize: ox(14), fontWeight: '600' },
+  headerTitle: { color: '#FFFFFF', fontSize: ox(16), fontWeight: '700' },
+  content: { padding: ox(16), gap: ox(12) },
   section: {
-    borderRadius: 10,
-    padding: 12,
+    borderRadius: ox(10),
+    padding: ox(12),
     ...glassPanel,
   },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  sectionSubtext: { marginTop: 6, color: '#9CA3AF', fontSize: 12 },
-  countHint: { marginTop: 8, color: '#6B7280', fontSize: 11 },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  sectionTitle: { color: '#FFFFFF', fontSize: ox(14), fontWeight: '700' },
+  sectionSubtext: { marginTop: ox(6), color: '#9CA3AF', fontSize: ox(12) },
+  countHint: { marginTop: ox(8), color: '#6B7280', fontSize: ox(11) },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: ox(6), marginTop: ox(10) },
   chip: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: ox(999),
+    paddingHorizontal: ox(10),
+    paddingVertical: ox(5),
     ...chipActiveMagenta,
   },
   chipStatic: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: ox(999),
+    paddingHorizontal: ox(10),
+    paddingVertical: ox(5),
     ...glassSurface,
   },
-  chipText: { color: '#FBCFE8', fontSize: 11 },
-  chipStaticText: { color: '#E5E7EB', fontSize: 11 },
+  chipText: { color: '#FBCFE8', fontSize: ox(11) },
+  chipStaticText: { color: '#E5E7EB', fontSize: ox(11) },
   saveButton: {
-    marginTop: 12,
-    borderRadius: 8,
+    marginTop: ox(12),
+    borderRadius: ox(8),
     backgroundColor: '#d91b5c',
-    paddingVertical: 10,
+    paddingVertical: ox(10),
     alignItems: 'center',
   },
-  saveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
-  resetText: { color: '#D1D5DB', fontSize: 12, textDecorationLine: 'underline' },
-  emptyText: { marginTop: 8, color: '#9CA3AF', fontSize: 12 },
+  saveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: ox(13) },
+  resetText: { color: '#D1D5DB', fontSize: ox(12), textDecorationLine: 'underline' },
+  emptyText: { marginTop: ox(8), color: '#9CA3AF', fontSize: ox(12) },
 });
 

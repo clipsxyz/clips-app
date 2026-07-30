@@ -21,6 +21,7 @@ import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarous
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
 import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 type PickerMode = 'feed' | 'story24';
 type CreateModeId = 'community' | 'text' | 'gallery' | 'story';
@@ -400,7 +401,7 @@ export default function InstantCreateScreen({ navigation }: any) {
             />
             <View style={styles.headerBar}>
                 <TouchableOpacity style={styles.backBtn} onPress={handleBack} accessibilityLabel="Back">
-                    <Icon name="arrow-back" size={16} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(16)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Create</Text>
                 <View style={styles.headerSpacer} />
@@ -414,7 +415,7 @@ export default function InstantCreateScreen({ navigation }: any) {
                                 <Avatar
                                     src={user?.avatarUrl}
                                     name={user?.name || user?.handle || 'User'}
-                                    size={84}
+                                    size={ox(84)}
                                 />
                             </View>
                         </View>
@@ -486,21 +487,21 @@ const styles = StyleSheet.create({
         top: 0,
         left: 0,
         right: 0,
-        height: 88,
+        height: ox(88),
         zIndex: 1,
     },
     headerBar: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         zIndex: 2,
     },
     backBtn: {
-        width: 32,
-        height: 32,
-        borderRadius: 999,
+        width: ox(32),
+        height: ox(32),
+        borderRadius: ox(999),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.6)',
@@ -512,33 +513,33 @@ const styles = StyleSheet.create({
         right: 0,
         textAlign: 'center',
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
-        letterSpacing: 0.3,
+        letterSpacing: ox(0.3),
     },
-    headerSpacer: { width: 32 },
+    headerSpacer: { width: ox(32) },
     body: {
         flex: 1,
         minHeight: 0,
     },
     orbitZone: {
         flex: 1,
-        minHeight: 320,
-        paddingTop: 24,
+        minHeight: ox(320),
+        paddingTop: ox(24),
         overflow: 'visible',
     },
     orbitStage: {
         flex: 1,
-        minHeight: 300,
+        minHeight: ox(300),
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'visible',
     },
     avatarRing: {
         position: 'absolute',
-        width: 88,
-        height: 88,
-        borderRadius: 44,
+        width: ox(88),
+        height: ox(88),
+        borderRadius: ox(44),
         padding: 1,
         backgroundColor: '#FFFFFF',
         shadowColor: '#FFFFFF',
@@ -550,7 +551,7 @@ const styles = StyleSheet.create({
     },
     avatarInner: {
         flex: 1,
-        borderRadius: 44,
+        borderRadius: ox(44),
         overflow: 'hidden',
         backgroundColor: '#000000',
         alignItems: 'center',
@@ -578,7 +579,7 @@ const styles = StyleSheet.create({
         overflow: 'visible',
     },
     modeTile: {
-        borderRadius: 12,
+        borderRadius: ox(12),
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
@@ -608,10 +609,10 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: -8,
         top: '50%',
-        marginTop: -14,
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        marginTop: ox(-14),
+        width: ox(28),
+        height: ox(28),
+        borderRadius: ox(14),
         backgroundColor: '#FFFFFF',
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.15)',
@@ -621,15 +622,15 @@ const styles = StyleSheet.create({
     },
     modePlusText: {
         color: '#000000',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     modeLabel: {
-        marginTop: 8,
+        marginTop: ox(8),
         minWidth: 120,
         maxWidth: 220,
         textAlign: 'center',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '600',
         color: '#FFFFFF',
         includeFontPadding: false,
@@ -638,13 +639,13 @@ const styles = StyleSheet.create({
     modeLabelIdle: { opacity: 0.7 },
     footer: {
         alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
+        gap: ox(8),
+        paddingHorizontal: ox(16),
     },
     helperText: {
         color: 'rgba(255,255,255,0.55)',
-        fontSize: 11,
-        lineHeight: 15,
+        fontSize: ox(11),
+        lineHeight: ox(15),
         textAlign: 'center',
     },
 });

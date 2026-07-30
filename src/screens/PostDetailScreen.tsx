@@ -56,9 +56,10 @@ import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedU
 import PostCommentsSheet from '../components/PostCommentsSheet';
 import { updatePost as apiUpdatePost } from '../api/client';
 import { toggleFollowForPost } from '../api/posts';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function PostDetailScreen({ route, navigation }: any) {
-    const { postId } = route.params;
+    const { postId, openComments } = route.params || {};
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const screenWidth = Dimensions.get('window').width;
@@ -67,7 +68,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [loading, setLoading] = useState(true);
     const [mediaHeight, setMediaHeight] = useState(screenWidth * FEED_UI.media.maxAspect);
     const [shareModalOpen, setShareModalOpen] = useState(false);
-    const [commentsOpen, setCommentsOpen] = useState(false);
+    const [commentsOpen, setCommentsOpen] = useState(!!openComments);
     const [overflowVisible, setOverflowVisible] = useState(false);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [saveModalVisible, setSaveModalVisible] = useState(false);
@@ -82,6 +83,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
     useEffect(() => {
         loadPost();
     }, [postId]);
+
+    useEffect(() => {
+        if (openComments) setCommentsOpen(true);
+    }, [openComments, postId]);
 
     useEffect(() => {
         setCarouselIndex(0);
@@ -257,14 +262,14 @@ export default function PostDetailScreen({ route, navigation }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Post</Text>
                 <TouchableOpacity
                     onPress={() => setOverflowVisible(true)}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                    <Icon name="ellipsis-horizontal" size={22} color="#E5E7EB" />
+                    <Icon name="ellipsis-horizontal" size={ox(22)} color="#E5E7EB" />
                 </TouchableOpacity>
             </View>
 
@@ -273,7 +278,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     <TouchableOpacity
                         onPress={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
                     >
-                        <Avatar src={undefined} name={post.userHandle.split('@')[0]} size={40} />
+                        <Avatar src={undefined} name={post.userHandle.split('@')[0]} size={ox(40)} />
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.postHeaderInfo}
@@ -584,11 +589,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
@@ -606,14 +611,14 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     userHandle: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     timeText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     mediaWrap: {
         width: '100%',
@@ -628,9 +633,9 @@ const styles = StyleSheet.create({
         paddingVertical: FEED_UI.spacing.normalV,
     },
     textContent: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#F9FAFB',
-        lineHeight: 24,
+        lineHeight: ox(24),
     },
     engagementBar: {
         flexDirection: 'row',
@@ -646,7 +651,7 @@ const styles = StyleSheet.create({
     actionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: ox(4),
     },
     actionText: {
         fontSize: FEED_UI.type.actionCount,
@@ -659,13 +664,13 @@ const styles = StyleSheet.create({
         paddingTop: 0,
     },
     statsText: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     errorText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#EF4444',
         textAlign: 'center',
-        marginTop: 40,
+        marginTop: ox(40),
     },
 });

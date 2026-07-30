@@ -18,6 +18,7 @@ import { mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { hasCustomProfileCover, resolveProfileCoverSource, DEFAULT_PROFILE_COVER_SOURCE } from '../utils/profileCoverNative';
 import type { User } from '../types';
+import { ox } from '../constants/nativeOpticalScale';
 
 type CoverAlertConfig = {
     title: string;
@@ -179,7 +180,7 @@ export default function ProfileCoverScreen({ navigation }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <View style={styles.headerCopy}>
                     <Text style={styles.headerTitle}>Profile Cover</Text>
@@ -209,7 +210,7 @@ export default function ProfileCoverScreen({ navigation }: any) {
                             <ActivityIndicator color="#111827" />
                         ) : (
                             <>
-                                <Icon name="image-outline" size={18} color="#111827" />
+                                <Icon name="image-outline" size={ox(18)} color="#111827" />
                                 <Text style={styles.primaryBtnText}>Upload image</Text>
                             </>
                         )}
@@ -219,7 +220,7 @@ export default function ProfileCoverScreen({ navigation }: any) {
                         onPress={handleRemove}
                         disabled={isSaving || !customCover}
                     >
-                        <Icon name="trash-outline" size={18} color="#FFFFFF" />
+                        <Icon name="trash-outline" size={ox(18)} color="#FFFFFF" />
                         <Text style={styles.secondaryBtnText}>Reset</Text>
                     </TouchableOpacity>
                 </View>
@@ -242,17 +243,17 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(14),
         ...gazetteerHeader,
     },
     headerCopy: { flex: 1 },
-    headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-    headerSubtitle: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-    body: { padding: 16, gap: 16 },
+    headerTitle: { color: '#FFFFFF', fontSize: ox(18), fontWeight: '700' },
+    headerSubtitle: { color: '#9CA3AF', fontSize: ox(12), marginTop: ox(2) },
+    body: { padding: ox(16), gap: ox(16) },
     previewCard: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
@@ -267,21 +268,21 @@ const styles = StyleSheet.create({
     },
     actions: {
         flexDirection: 'row',
-        gap: 10,
+        gap: ox(10),
     },
     primaryBtn: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
         backgroundColor: '#FFFFFF',
-        borderRadius: 14,
-        paddingVertical: 14,
+        borderRadius: ox(14),
+        paddingVertical: ox(14),
     },
     primaryBtnText: {
         color: '#111827',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     secondaryBtn: {
@@ -289,16 +290,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        borderRadius: 14,
-        paddingVertical: 14,
+        gap: ox(8),
+        borderRadius: ox(14),
+        paddingVertical: ox(14),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     secondaryBtnText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     btnDisabled: {

@@ -1231,6 +1231,16 @@ video {
   pointer-events: none;
 }
 
+/* View Profile — night atlas / passport ink (sea-glass, not IG magenta) */
+.passport-halftone-overlay {
+  mask-image: linear-gradient(35deg, rgba(0, 0, 0, 1) 20%, rgba(0, 0, 0, 0) 75%);
+  -webkit-mask-image: linear-gradient(35deg, rgba(0, 0, 0, 1) 20%, rgba(0, 0, 0, 0) 75%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='2.5' fill='%239fd4cb' fill-opacity='0.16'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+}
+
 .discover-greeting-compact {
   font-size: clamp(1.25rem, 5vw, 1.5rem);
   line-height: 1.2;

@@ -16,6 +16,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
+import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
+import {
+    getTextOnlyBackgroundColor,
+    getTextOnlyFontSize,
+    getTextOnlyTextColor,
+} from '../utils/effectiveTextPostStyleNative';
 
 type Props = {
     post: Post | null;
@@ -27,19 +33,13 @@ type Props = {
     onComment?: () => void;
     onReclip?: () => void | Promise<void>;
     onShare?: () => void;
+    onSave?: () => void;
+    isSaved?: boolean;
     onMenu?: () => void;
 };
 
 function collectImageUrls(post: Post): string[] {
-    const urls: string[] = [];
-    if (post.mediaItems?.length) {
-        for (const item of post.mediaItems) {
-            if (item.type !== 'image') continue;
-            if (item.url) urls.push(item.url);
-        }
-    }
-    if (!urls.length && post.mediaUrl && post.mediaType !== 'video') urls.push(post.mediaUrl);
-    return urls;
+    return collectFeedImageUrls(post);
 }
 
 /**
@@ -54,6 +54,8 @@ export default function ImageFullscreenModal({
     onComment,
     onReclip,
     onShare,
+    onSave,
+    isSaved = false,
     onMenu,
 }: Props) {
     const insets = useSafeAreaInsets();
@@ -62,9 +64,11 @@ export default function ImageFullscreenModal({
     const scrollRef = useRef<ScrollView>(null);
     const skipScrollSyncRef = useRef(false);
     const images = useMemo(() => (post ? collectImageUrls(post) : []), [post]);
+    const textBody = (post?.text || post?.caption || '').trim();
+    const isTextOnly = images.length === 0 && Boolean(textBody);
 
     useEffect(() => {
-        if (!visible) return;
+        if (!visible || isTextOnly) return;
         const max = Math.max(0, images.length - 1);
         const next = Math.min(Math.max(0, initialIndex), max);
         setIndex(next);
@@ -73,9 +77,27 @@ export default function ImageFullscreenModal({
         requestAnimationFrame(() => {
             skipScrollSyncRef.current = false;
         });
-    }, [visible, post?.id, initialIndex, images.length, screenWidth]);
+    }, [visible, post?.id, initialIndex, images.length, screenWidth, isTextOnly]);
 
-    if (!post || !images.length) return null;
+    if (!post) return null;
+
+    if (!images.length && !isTextOnly) {
+        return (
+            <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
+                <StatusBar barStyle="light-content" />
+                <View style={[styles.root, styles.emptyRoot]}>
+                    <Pressable
+                        style={[styles.closeBtn, { top: insets.top + 10 }]}
+                        onPress={onClose}
+                        accessibilityLabel="Close"
+                    >
+                        <Icon name="close" size={26} color="#FFFFFF" />
+                    </Pressable>
+                    <Text style={styles.emptyText}>No image to show</Text>
+                </View>
+            </Modal>
+        );
+    }
 
     const hasCarousel = images.length > 1;
     const canReclip = true;
@@ -109,7 +131,34 @@ export default function ImageFullscreenModal({
                     style={styles.topFade}
                 />
 
-                {hasCarousel ? (
+                {isTextOnly ? (
+                    <View style={[styles.textStage, { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 140 }]}>
+                        <View
+                            style={[
+                                styles.textCard,
+                                { backgroundColor: getTextOnlyBackgroundColor(post) },
+                            ]}
+                        >
+                            <ScrollView
+                                bounces={false}
+                                showsVerticalScrollIndicator={false}
+                                contentContainerStyle={styles.textCardScroll}
+                            >
+                                <Text
+                                    style={[
+                                        styles.textCardBody,
+                                        {
+                                            color: getTextOnlyTextColor(post),
+                                            fontSize: getTextOnlyFontSize(post),
+                                        },
+                                    ]}
+                                >
+                                    {textBody}
+                                </Text>
+                            </ScrollView>
+                        </View>
+                    </View>
+                ) : hasCarousel ? (
                     <ScrollView
                         ref={scrollRef}
                         horizontal
@@ -194,6 +243,20 @@ export default function ImageFullscreenModal({
                             <Text style={styles.footerCount}>{post.stats?.reclips ?? 0}</Text>
                         </Pressable>
 
+                        {onSave ? (
+                            <Pressable
+                                style={styles.footerAction}
+                                onPress={onSave}
+                                accessibilityLabel={isSaved ? 'Saved' : 'Save'}
+                            >
+                                <Icon
+                                    name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                                    size={26}
+                                    color={isSaved ? '#FBBF24' : '#FFFFFF'}
+                                />
+                            </Pressable>
+                        ) : null}
+
                         <Pressable style={[styles.footerAction, styles.footerActionShare]} onPress={onShare} accessibilityLabel="Share">
                             <Icon name="send-outline" size={24} color="#FFFFFF" />
                         </Pressable>
@@ -202,7 +265,7 @@ export default function ImageFullscreenModal({
                     <Text style={styles.handle} numberOfLines={1}>
                         {post.userHandle}
                     </Text>
-                    {post.text?.trim() ? (
+                    {!isTextOnly && post.text?.trim() ? (
                         <Text style={styles.caption} numberOfLines={3}>
                             {post.text}
                         </Text>
@@ -341,5 +404,34 @@ const styles = StyleSheet.create({
         fontSize: 13,
         marginBottom: 2,
         lineHeight: 18,
+    },
+    emptyRoot: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyText: {
+        color: '#D1D5DB',
+        fontSize: 15,
+        fontWeight: '500',
+    },
+    textStage: {
+        flex: 1,
+        paddingHorizontal: 20,
+        justifyContent: 'center',
+    },
+    textCard: {
+        borderRadius: 18,
+        maxHeight: '78%',
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    textCardScroll: {
+        paddingHorizontal: 22,
+        paddingVertical: 28,
+    },
+    textCardBody: {
+        fontWeight: '600',
+        lineHeight: 28,
     },
 });

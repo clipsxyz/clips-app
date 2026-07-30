@@ -43,6 +43,7 @@ import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 type TagUser = { handle: string; displayName?: string; avatarUrl?: string };
 
@@ -374,7 +375,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                 onPress={() => setShowTemplatePicker(true)}
                 accessibilityLabel="Choose template"
               >
-                <Icon name="layers-outline" size={20} color="#FFFFFF" />
+                <Icon name="layers-outline" size={ox(20)} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -384,7 +385,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
               onPress={() => setShowLocationSheet(true)}
               accessibilityLabel="Add location, venue, and landmark"
             >
-              <Icon name="location-outline" size={24} color="#FFFFFF" />
+              <Icon name="location-outline" size={ox(24)} color="#FFFFFF" />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => void handleSaveToDrafts()}
@@ -420,7 +421,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
               <Avatar
                 src={user?.avatarUrl}
                 name={user?.name || user?.handle || 'User'}
-                size={40}
+                size={ox(40)}
               />
             </View>
             <View style={styles.composerCol}>
@@ -468,7 +469,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Add details</Text>
               <TouchableOpacity onPress={() => setShowLocationSheet(false)} hitSlop={8}>
-                <Icon name="close" size={22} color="#FFFFFF" />
+                <Icon name="close" size={ox(22)} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetBody}>
@@ -504,7 +505,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
 
               <Text style={styles.fieldLabel}>Tag people</Text>
               <View style={styles.tagSearchRow}>
-                <Icon name="search" size={16} color="#6B7280" />
+                <Icon name="search" size={ox(16)} color="#6B7280" />
                 <TextInput
                   value={tagSearchQuery}
                   onChangeText={setTagSearchQuery}
@@ -534,7 +535,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                           <Avatar
                             src={u.avatarUrl}
                             name={u.displayName || u.handle}
-                            size={36}
+                            size={ox(36)}
                           />
                           <View style={styles.tagUserCopy}>
                             <Text style={styles.tagUserName}>{u.displayName || u.handle}</Text>
@@ -556,7 +557,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                       onPress={() => removeTaggedUser(handle)}
                     >
                       <Text style={styles.tagChipText}>@{handle}</Text>
-                      <Icon name="close" size={14} color="#FFFFFF" />
+                      <Icon name="close" size={ox(14)} color="#FFFFFF" />
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -581,7 +582,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Choose a template</Text>
               <TouchableOpacity onPress={() => setShowTemplatePicker(false)} hitSlop={8}>
-                <Icon name="close" size={22} color="#FFFFFF" />
+                <Icon name="close" size={ox(22)} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
             <FlatList
@@ -650,8 +651,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: ox(16),
+    paddingBottom: ox(12),
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
     backgroundColor: 'rgba(0,0,0,0.95)',
@@ -661,7 +662,7 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: ox(12),
     flexShrink: 1,
     overflow: 'visible',
     zIndex: 20,
@@ -669,18 +670,18 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: ox(10),
     flexShrink: 0,
   },
   cancelText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: ox(16),
     fontWeight: '500',
   },
   templateBtnWrap: {
     position: 'relative',
-    width: 34,
-    height: 34,
+    width: ox(34),
+    height: ox(34),
     overflow: 'visible',
     zIndex: 30,
   },
@@ -701,15 +702,15 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    borderRadius: ox(16),
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    paddingHorizontal: ox(14),
+    paddingVertical: ox(5),
   },
   templateCueText: {
     color: '#111827',
-    fontSize: 11,
+    fontSize: ox(11),
     fontWeight: '700',
     flexShrink: 0,
     includeFontPadding: false,
@@ -719,13 +720,13 @@ const styles = StyleSheet.create({
     height: 8,
     backgroundColor: '#d8dde3',
     transform: [{ rotate: '45deg' }],
-    marginTop: -4,
-    borderRadius: 2,
+    marginTop: ox(-4),
+    borderRadius: ox(2),
   },
   templateBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: ox(34),
+    height: ox(34),
+    borderRadius: ox(17),
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.4)',
     alignItems: 'center',
@@ -735,23 +736,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
   headerIconBtn: {
-    padding: 6,
+    padding: ox(6),
   },
   draftsText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: ox(16),
     fontWeight: '500',
   },
   headerDisabled: {
     opacity: 0.4,
   },
   postBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: ox(18),
+    paddingVertical: ox(8),
+    borderRadius: ox(999),
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
-    minWidth: 64,
+    minWidth: ox(64),
     alignItems: 'center',
   },
   postBtnActive: {
@@ -759,44 +760,44 @@ const styles = StyleSheet.create({
   },
   postBtnText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: ox(14),
     fontWeight: '600',
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 24,
+    paddingHorizontal: ox(16),
+    paddingTop: ox(16),
+    paddingBottom: ox(24),
   },
   composerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: ox(12),
   },
   avatarCol: {
-    paddingTop: 4,
+    paddingTop: ox(4),
   },
   composerCol: {
     flex: 1,
     minWidth: 0,
   },
   composerSurface: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minHeight: 96,
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(8),
+    minHeight: ox(96),
   },
   textInput: {
-    minHeight: 80,
-    lineHeight: 22,
+    minHeight: ox(80),
+    lineHeight: ox(22),
     padding: 0,
     margin: 0,
   },
   counterRow: {
     alignItems: 'flex-end',
-    marginTop: 4,
+    marginTop: ox(4),
   },
   counterText: {
     color: '#6B7280',
-    fontSize: 12,
+    fontSize: ox(12),
   },
   counterWarn: { color: '#FBBF24' },
   counterDanger: { color: '#F87171' },
@@ -828,67 +829,67 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: ox(16),
+    paddingVertical: ox(14),
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   sheetTitle: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: ox(18),
     fontWeight: '600',
   },
   sheetBody: {
-    padding: 16,
-    gap: 8,
-    paddingBottom: 8,
+    padding: ox(16),
+    gap: ox(8),
+    paddingBottom: ox(8),
   },
   fieldLabel: {
     color: '#9CA3AF',
-    fontSize: 11,
+    fontSize: ox(11),
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: ox(0.6),
     textTransform: 'uppercase',
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: ox(8),
+    marginBottom: ox(4),
   },
   tagSearchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: ox(8),
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: ox(10),
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(10),
     backgroundColor: '#000000',
   },
   tagSearchInput: {
     flex: 1,
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: ox(14),
     padding: 0,
   },
   tagResults: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 10,
+    borderRadius: ox(10),
     overflow: 'hidden',
-    marginTop: 4,
+    marginTop: ox(4),
     maxHeight: 192,
   },
   tagMeta: {
     color: '#9CA3AF',
-    fontSize: 14,
+    fontSize: ox(14),
     textAlign: 'center',
-    padding: 16,
+    padding: ox(16),
   },
   tagUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: ox(10),
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(10),
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.08)',
   },
@@ -896,53 +897,53 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   tagUserCopy: { flex: 1, minWidth: 0 },
-  tagUserName: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  tagUserHandle: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  taggedLabel: { color: '#6B7280', fontSize: 12 },
+  tagUserName: { color: '#FFFFFF', fontSize: ox(15), fontWeight: '600' },
+  tagUserHandle: { color: '#9CA3AF', fontSize: ox(12), marginTop: ox(2) },
+  taggedLabel: { color: '#6B7280', fontSize: ox(12) },
   tagChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
+    gap: ox(8),
+    marginTop: ox(8),
   },
   tagChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+    gap: ox(6),
+    paddingHorizontal: ox(10),
+    paddingVertical: ox(6),
+    borderRadius: ox(999),
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  tagChipText: { color: '#FFFFFF', fontSize: 13 },
+  tagChipText: { color: '#FFFFFF', fontSize: ox(13) },
   sheetDoneBtn: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
+    marginHorizontal: ox(16),
+    marginTop: ox(8),
+    paddingVertical: ox(14),
+    borderRadius: ox(12),
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
   },
   sheetDoneText: {
     color: '#000000',
-    fontSize: 14,
+    fontSize: ox(14),
     fontWeight: '700',
   },
   templateGrid: {
-    padding: 16,
-    gap: 12,
+    padding: ox(16),
+    gap: ox(12),
   },
   templateGridRow: {
-    gap: 12,
+    gap: ox(12),
   },
   templateCard: {
     flex: 1,
-    borderRadius: 12,
+    borderRadius: ox(12),
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    padding: 8,
+    padding: ox(8),
     alignItems: 'center',
-    gap: 6,
+    gap: ox(6),
   },
   templateCardActive: {
     borderColor: '#FFFFFF',
@@ -950,18 +951,18 @@ const styles = StyleSheet.create({
   },
   templatePreview: {
     width: '100%',
-    height: 96,
-    borderRadius: 8,
+    height: ox(96),
+    borderRadius: ox(8),
     alignItems: 'center',
     justifyContent: 'center',
   },
   templateAa: {
-    fontSize: 12,
+    fontSize: ox(12),
     fontWeight: '700',
   },
   templateName: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 12,
+    fontSize: ox(12),
     textAlign: 'center',
   },
 });

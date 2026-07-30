@@ -15,6 +15,7 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { getGlobalVideoMutedNative, setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 const AUTOPLAY_OPTIONS: { id: FeedAutoplayPref; label: string; hint: string }[] = [
     { id: 'always', label: 'Always', hint: 'Autoplay on Wi‑Fi and cellular' },
@@ -83,11 +84,11 @@ export default function VideoPlaybackSettingsScreen({ navigation }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={18} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(18)} color="#FFFFFF" />
                     <Text style={styles.backText}>Back</Text>
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Video playback</Text>
-                <View style={{ width: 50 }} />
+                <View style={{ width: ox(50) }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
@@ -118,7 +119,7 @@ export default function VideoPlaybackSettingsScreen({ navigation }: any) {
                                         </Text>
                                         <Text style={styles.optionHint}>{option.hint}</Text>
                                     </View>
-                                    {active ? <Icon name="checkmark-circle" size={22} color="#f472b6" /> : null}
+                                    {active ? <Icon name="checkmark-circle" size={ox(22)} color="#f472b6" /> : null}
                                 </TouchableOpacity>
                             );
                         })}
@@ -152,45 +153,45 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         ...gazetteerHeader,
     },
-    backButton: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    backText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
-    headerTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-    content: { padding: 16, gap: 12, paddingBottom: 32 },
+    backButton: { flexDirection: 'row', alignItems: 'center', gap: ox(6) },
+    backText: { color: '#FFFFFF', fontSize: ox(14), fontWeight: '600' },
+    headerTitle: { color: '#FFFFFF', fontSize: ox(16), fontWeight: '700' },
+    content: { padding: ox(16), gap: ox(12), paddingBottom: ox(32) },
     section: {
-        borderRadius: 12,
-        padding: 14,
+        borderRadius: ox(12),
+        padding: ox(14),
         ...glassPanel,
     },
-    sectionTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-    sectionSubtext: { marginTop: 6, color: '#9CA3AF', fontSize: 13, lineHeight: 18 },
-    networkText: { marginTop: 10, color: '#D1D5DB', fontSize: 12, fontWeight: '600' },
-    optionList: { marginTop: 12, gap: 8 },
+    sectionTitle: { color: '#FFFFFF', fontSize: ox(15), fontWeight: '700' },
+    sectionSubtext: { marginTop: ox(6), color: '#9CA3AF', fontSize: ox(13), lineHeight: ox(18) },
+    networkText: { marginTop: ox(10), color: '#D1D5DB', fontSize: ox(12), fontWeight: '600' },
+    optionList: { marginTop: ox(12), gap: ox(8) },
     optionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderRadius: 10,
-        padding: 12,
+        borderRadius: ox(10),
+        padding: ox(12),
         ...glassSurface,
     },
     optionRowActive: {
         ...chipActiveMagenta,
     },
-    optionTextWrap: { flex: 1, paddingRight: 10 },
-    optionLabel: { color: '#E5E7EB', fontSize: 14, fontWeight: '700' },
+    optionTextWrap: { flex: 1, paddingRight: ox(10) },
+    optionLabel: { color: '#E5E7EB', fontSize: ox(14), fontWeight: '700' },
     optionLabelActive: {
         color: '#FBCFE8',
     },
-    optionHint: { marginTop: 3, color: '#9CA3AF', fontSize: 12 },
+    optionHint: { marginTop: ox(3), color: '#9CA3AF', fontSize: ox(12) },
     toggleRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
-        gap: 12,
+        gap: ox(12),
     },
     toggleInfo: { flex: 1 },
 });

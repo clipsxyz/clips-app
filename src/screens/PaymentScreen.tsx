@@ -6,6 +6,7 @@ import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { activateBoost } from '../api/boost';
 import type { BoostDuration, BoostGoal } from '../components/BoostSelectionModal.native';
+import { ox } from '../constants/nativeOpticalScale';
 
 type PaymentRouteParams = {
   postId?: string;
@@ -62,7 +63,7 @@ export default function PaymentScreen({ route, navigation }: any) {
     <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
-          <Icon name="arrow-back" size={22} color="#FFFFFF" />
+          <Icon name="arrow-back" size={ox(22)} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Boost checkout</Text>
         <View style={styles.iconButton} />
@@ -71,7 +72,7 @@ export default function PaymentScreen({ route, navigation }: any) {
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.card}>
           <View style={styles.lockRow}>
-            <Icon name="lock-closed" size={16} color="#9CA3AF" />
+            <Icon name="lock-closed" size={ox(16)} color="#9CA3AF" />
             <Text style={styles.lockText}>Secure checkout</Text>
           </View>
 
@@ -141,70 +142,70 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: ox(16),
+    paddingVertical: ox(12),
     ...gazetteerHeader,
   },
   iconButton: {
-    width: 32,
-    height: 32,
+    width: ox(32),
+    height: ox(32),
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
-    fontSize: 18,
+    fontSize: ox(18),
     color: '#FFFFFF',
     fontWeight: '700',
   },
-  scroll: { paddingBottom: 24 },
+  scroll: { paddingBottom: ox(24) },
   card: {
-    margin: 16,
-    padding: 16,
-    borderRadius: 14,
+    margin: ox(16),
+    padding: ox(16),
+    borderRadius: ox(14),
     ...glassPanel,
   },
-  lockRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  lockText: { color: '#9CA3AF', fontSize: 12 },
+  lockRow: { flexDirection: 'row', alignItems: 'center', gap: ox(6), marginBottom: ox(12) },
+  lockText: { color: '#9CA3AF', fontSize: ox(12) },
   label: {
     color: '#9CA3AF',
-    fontSize: 12,
+    fontSize: ox(12),
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    letterSpacing: ox(0.6),
   },
   value: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: ox(17),
     fontWeight: '700',
-    marginTop: 4,
+    marginTop: ox(4),
   },
   amount: {
     color: '#FFFFFF',
-    fontSize: 28,
+    fontSize: ox(28),
     fontWeight: '800',
-    marginTop: 4,
+    marginTop: ox(4),
   },
   helper: {
     color: '#D1D5DB',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: ox(13),
+    lineHeight: ox(18),
   },
   spaced: {
-    marginTop: 14,
+    marginTop: ox(14),
   },
   payButton: {
-    marginTop: 20,
+    marginTop: ox(20),
     backgroundColor: '#d91b5c',
-    borderRadius: 10,
+    borderRadius: ox(10),
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
+    paddingVertical: ox(13),
   },
   payButtonDisabled: {
     opacity: 0.65,
   },
   payButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: ox(16),
     fontWeight: '700',
   },
 });

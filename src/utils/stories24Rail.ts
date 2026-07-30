@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
 import { getFollowedUsers } from '../api/posts';
+import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
 import {
     getStoryVideoPosterFallback,
@@ -123,7 +124,8 @@ export async function buildStories24RailItems(
         let thumb =
             firstImage ||
             (latestMediaType !== 'video' ? latestMediaUrl : undefined) ||
-            getStoryVideoPosterFallback(latest.mediaUrl);
+            getStoryVideoPosterFallback(latest.mediaUrl) ||
+            getAvatarForHandle(group.userHandle);
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.poll?.question || '').trim() ||

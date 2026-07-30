@@ -25,7 +25,7 @@ type DiscoverAmbientCanvasProps = {
     fixed?: boolean;
     /** Keep full-screen gradient when the mobile keyboard opens (do not shrink to visualViewport). */
     lockViewport?: boolean;
-    /** `goldChrome` — Stories 24 gold + silver wave palette. */
+    /** `goldChrome` — Stories 24 gold + silver. `passport` — night atlas for profiles. */
     variant?: DiscoverAmbientVariant;
 };
 
@@ -36,7 +36,11 @@ export default function DiscoverAmbientCanvas({
 }: DiscoverAmbientCanvasProps) {
     const palette = getAmbientPalette(variant);
     const halftoneClass =
-        variant === 'goldChrome' ? 'gold-chrome-halftone-overlay' : 'discover-halftone-overlay';
+        variant === 'goldChrome'
+            ? 'gold-chrome-halftone-overlay'
+            : variant === 'passport'
+              ? 'passport-halftone-overlay'
+              : 'discover-halftone-overlay';
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const frameRef = useRef<number | undefined>(undefined);
     const timeRef = useRef(0);

@@ -1,5 +1,6 @@
 import type { Story, StoryGroup, StickerOverlay } from '../types';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getAvatarForHandle } from './users';
 import { resolveStoryMediaUrl } from '../utils/storyMediaNative';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
@@ -579,7 +580,104 @@ let stories: Story[] = [
                 fontSize: 'small'
             }
         ]
-    }
+    },
+    // Ava@galway — demo Clips 24 stories for inbox reply/reaction testing
+    {
+        id: 'story-ava-1',
+        userId: 'ava-galway-1',
+        userHandle: 'Ava@galway',
+        text: 'Galway evenings hit different 🌅 Who’s around?',
+        textStyle: {
+            color: '#ffffff',
+            size: 'large',
+            background: 'linear-gradient(160deg, #0ea5e9 0%, #0369a1 45%, #0f172a 100%)',
+        },
+        createdAt: Date.now() - 120000,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000 - 120000,
+        location: 'Galway',
+        views: 12,
+        viewerHandles: ['Bob@Ireland', 'Sarah@Artane'],
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined,
+    },
+    {
+        id: 'story-ava-2',
+        userId: 'ava-galway-1',
+        userHandle: 'Ava@galway',
+        mediaUrl: 'https://images.unsplash.com/photo-1500375592092-40eb2168fd21?w=800',
+        mediaType: 'image',
+        text: 'Salt air + coffee run',
+        createdAt: Date.now() - 90000,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000 - 90000,
+        location: 'Salthill',
+        views: 8,
+        viewerHandles: ['Bob@Ireland'],
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'location-sticker-ava-2',
+                stickerId: 'location-sticker-ava-2',
+                sticker: {
+                    id: 'location-sticker-ava-2',
+                    name: 'Salthill, Galway',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false,
+                },
+                x: 50,
+                y: 88,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Salthill, Galway',
+                textColor: '#FFFFFF',
+                fontSize: 'small',
+            },
+        ],
+    },
+    {
+        id: 'story-ava-3',
+        userId: 'ava-galway-1',
+        userHandle: 'Ava@galway',
+        mediaUrl: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800',
+        mediaType: 'image',
+        createdAt: Date.now() - 45000,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000 - 45000,
+        location: 'Galway',
+        views: 5,
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-ava-3',
+                stickerId: 'text-sticker-ava-3',
+                sticker: {
+                    id: 'text-sticker-ava-3',
+                    name: 'Reply if you’re free later ✨',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false,
+                },
+                x: 50,
+                y: 78,
+                scale: 1,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Reply if you’re free later ✨',
+                textColor: '#FFFFFF',
+                fontSize: 'medium',
+            },
+        ],
+    },
 ];
 
 function delay(ms = 300): Promise<void> {
@@ -667,7 +765,7 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
                 userId: story.userId,
                 userHandle: story.userHandle,
                 name: story.userHandle.split('@')[0],
-                avatarUrl: story.userId === userId ? undefined : undefined, // Will be set from user context
+                avatarUrl: getAvatarForHandle(story.userHandle),
                 stories: [story]
             });
         }
@@ -740,7 +838,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
                 userId: stories[0].userId,
                 userHandle: stories[0].userHandle,
                 name: stories[0].userHandle.split('@')[0],
-                avatarUrl: undefined,
+                avatarUrl: getAvatarForHandle(stories[0].userHandle),
                 stories: sortStoriesNewestFirst(stories),
             };
         } catch (error) {
@@ -761,7 +859,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
         userId: activeStories[0].userId,
         userHandle: activeStories[0].userHandle,
         name: activeStories[0].userHandle.split('@')[0],
-        avatarUrl: undefined,
+        avatarUrl: getAvatarForHandle(activeStories[0].userHandle),
         stories: activeStories.sort((a, b) => b.createdAt - a.createdAt),
     };
 }
@@ -1009,24 +1107,39 @@ export async function incrementStoryViews(storyId: string): Promise<void> {
 
 // Add reaction to story
 export async function addStoryReaction(storyId: string, userId: string, userHandle: string, emoji: string): Promise<void> {
-    await delay();
+    const pushMockReaction = () => {
+        const story = stories.find(s => s.id === storyId);
+        if (story) {
+            story.reactions = story.reactions.filter(r => r.userId !== userId);
+            story.reactions.push({
+                id: `reaction-${Date.now()}`,
+                userId,
+                userHandle,
+                emoji,
+                createdAt: Date.now()
+            });
+            story.userReaction = emoji;
+        }
+    };
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        // Remove existing reaction from this user
-        story.reactions = story.reactions.filter(r => r.userId !== userId);
-
-        // Add new reaction
-        story.reactions.push({
-            id: `reaction-${Date.now()}`,
-            userId,
-            userHandle,
-            emoji,
-            createdAt: Date.now()
-        });
-
-        story.userReaction = emoji;
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            await apiRequest(`/stories/${storyId}/reaction`, {
+                method: 'POST',
+                body: JSON.stringify({ emoji }),
+            });
+            pushMockReaction();
+            return;
+        } catch (error: any) {
+            const isConnectionFallback =
+                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+            if (!isConnectionFallback) throw error;
+        }
     }
+
+    await delay();
+    pushMockReaction();
 }
 
 // Add reply to story
@@ -1137,6 +1250,9 @@ export interface StoryInsight {
     viewers: string[];
     likes: number;
     likers: string[]; // user handles who reacted (heart/thumbs-up)
+    /** All emoji reactions (Instagram-style attribution). */
+    reactions: Array<{ userHandle: string; emoji: string; createdAt: number }>;
+    replies: Array<{ userHandle: string; text: string; createdAt: number }>;
     question?: {
         prompt: string;
         responseCount: number;
@@ -1158,17 +1274,26 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
     const ownStories = stories.filter((s) => {
         if ((s.userHandle || '').trim().toLowerCase() !== normalizedHandle) return false;
         if (s.expiresAt <= now) return false;
-        // Re-shared stories should not create owner insight alerts.
-        if (s.sharedFromPost) return false;
-        if (s.sharedFromUser && (s.sharedFromUser || '').trim().toLowerCase() !== normalizedHandle) return false;
         return true;
     });
 
     return ownStories
         .map<StoryInsight>(story => {
-            // Count common positive reactions as likes in insights (heart + thumbs-up).
-            const likeReactions = (story.reactions || []).filter(r => r.emoji === '❤️' || r.emoji === '👍');
-            const likers = Array.from(new Set(likeReactions.map(r => r.userHandle)));
+            const ownerNorm = normalizedHandle;
+            // All reactions except the owner's own (IG: your self-taps aren't activity).
+            const reactionRows = (story.reactions || [])
+                .filter((r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm)
+                .map((r) => ({
+                    userHandle: r.userHandle,
+                    emoji: r.emoji,
+                    createdAt: r.createdAt || story.createdAt,
+                }))
+                .sort((a, b) => b.createdAt - a.createdAt);
+
+            const likeReactions = reactionRows.filter(
+                (r) => r.emoji === '❤️' || r.emoji === '♥️' || r.emoji === '❤' || r.emoji === '👍',
+            );
+            const likers = Array.from(new Set(likeReactions.map((r) => r.userHandle)));
             const viewers = Array.from(
                 new Set(
                     (story.viewerHandles || [])
@@ -1177,6 +1302,13 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 )
             );
             const views = Math.max(Number(story.views || 0), viewers.length);
+            const replyRows = (story.replies || [])
+                .filter((r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm)
+                .map((r) => ({
+                    userHandle: r.userHandle,
+                    text: r.text,
+                    createdAt: r.createdAt,
+                }));
             const questionResponseCount = story.question?.responses?.length || 0;
             return {
                 storyId: story.id,
@@ -1188,6 +1320,8 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 viewers,
                 likes: likers.length,
                 likers,
+                reactions: reactionRows,
+                replies: replyRows,
                 question: story.question ? {
                     prompt: story.question.prompt,
                     responseCount: questionResponseCount,
@@ -1195,8 +1329,15 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 } : undefined
             };
         })
-        // Only surface actionable insights (likes or question responses).
-        .filter((item) => item.views > 0 || item.likes > 0 || (item.question?.responseCount || 0) > 0)
+        // Surface stories with real other-person activity (or views).
+        .filter(
+            (item) =>
+                item.views > 0 ||
+                item.likes > 0 ||
+                item.reactions.length > 0 ||
+                item.replies.length > 0 ||
+                (item.question?.responseCount || 0) > 0,
+        )
         // Newest stories first
         .sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -1251,8 +1392,11 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                 if (!page.hasMore) break;
             } while (cursor && pages < maxPages);
 
+            const followedSet = new Set(
+                (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase()).filter(Boolean),
+            );
             const filtered = collected.filter((story) =>
-                story.userId === userId || followedUserHandles.includes(story.userHandle),
+                story.userId === userId || followedSet.has((story.userHandle || '').trim().toLowerCase()),
             );
 
             // Merge in local stories so createStory mock fallbacks (API create failed) still show
@@ -1262,7 +1406,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                 if (s.expiresAt <= now) return false;
                 const audience = s.audience || 'public';
                 if (s.userId === userId) return true;
-                if (!followedUserHandles.includes(s.userHandle)) return false;
+                if (!followedSet.has((s.userHandle || '').trim().toLowerCase())) return false;
                 if (audience === 'only_me') return false;
                 return true;
             });
@@ -1285,7 +1429,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                         userId: story.userId,
                         userHandle: story.userHandle,
                         name: story.userHandle.split('@')[0],
-                        avatarUrl: undefined,
+                        avatarUrl: getAvatarForHandle(story.userHandle),
                         stories: [story],
                     });
                 }
@@ -1303,32 +1447,32 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
 
     // Filter out expired stories
     const now = Date.now();
+    const followedSet = new Set(
+        (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase()).filter(Boolean),
+    );
     const activeStories = stories.filter(s => {
         if (s.expiresAt <= now) return false;
         const audience = s.audience || 'public';
         if (s.userId === userId) return true;
-        if (!followedUserHandles.includes(s.userHandle)) return false;
+        if (!followedSet.has((s.userHandle || '').trim().toLowerCase())) return false;
         if (audience === 'only_me') return false;
         return true; // public + close_friends for followed users
     });
 
-    // Group stories by user and filter by followed users
+    // Group stories by user (already filtered to self + followed)
     const groups = activeStories.reduce((acc, story) => {
-        // Only include stories from followed users or current user
-        if (story.userId === userId || followedUserHandles.includes(story.userHandle)) {
-            const existingGroup = acc.find(g => g.userId === story.userId);
+        const existingGroup = acc.find(g => g.userId === story.userId);
 
-            if (existingGroup) {
-                existingGroup.stories.push(story);
-            } else {
-                acc.push({
-                    userId: story.userId,
-                    userHandle: story.userHandle,
-                    name: story.userHandle.split('@')[0],
-                    avatarUrl: undefined,
-                    stories: [story]
-                });
-            }
+        if (existingGroup) {
+            existingGroup.stories.push(story);
+        } else {
+            acc.push({
+                userId: story.userId,
+                userHandle: story.userHandle,
+                name: story.userHandle.split('@')[0],
+                avatarUrl: getAvatarForHandle(story.userHandle),
+                stories: [story]
+            });
         }
 
         return acc;

@@ -3,6 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel } from '../theme/gazetteerAmbientNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function PaymentSuccessScreen({ navigation, route }: any) {
   const amount = Number(route?.params?.amount || 0);
@@ -12,7 +13,7 @@ export default function PaymentSuccessScreen({ navigation, route }: any) {
     <GazetteerScreenShell contentStyle={styles.content}>
       <View style={styles.inner}>
         <View style={styles.successIconWrap}>
-          <Icon name="checkmark-circle" size={76} color="#22C55E" />
+          <Icon name="checkmark-circle" size={ox(76)} color="#22C55E" />
         </View>
         <Text style={styles.title}>Payment Complete</Text>
         <Text style={styles.subtitle}>
@@ -39,63 +40,63 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: ox(24),
   },
   inner: {
     alignItems: 'center',
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: ox(16),
+    padding: ox(24),
     ...glassPanel,
   },
   successIconWrap: {
-    marginBottom: 20,
+    marginBottom: ox(20),
   },
   title: {
-    fontSize: 24,
+    fontSize: ox(24),
     fontWeight: '800',
     color: '#FFFFFF',
   },
   subtitle: {
-    marginTop: 10,
+    marginTop: ox(10),
     textAlign: 'center',
     color: '#D1D5DB',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: ox(14),
+    lineHeight: ox(20),
   },
   amount: {
-    marginTop: 12,
+    marginTop: ox(12),
     color: '#E5E7EB',
-    fontSize: 18,
+    fontSize: ox(18),
     fontWeight: '700',
   },
   primaryButton: {
-    marginTop: 24,
+    marginTop: ox(24),
     width: '100%',
     backgroundColor: '#d91b5c',
-    borderRadius: 10,
+    borderRadius: ox(10),
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
+    paddingVertical: ox(13),
   },
   primaryButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: ox(16),
     fontWeight: '700',
   },
   secondaryButton: {
-    marginTop: 10,
+    marginTop: ox(10),
     width: '100%',
-    borderRadius: 10,
+    borderRadius: ox(10),
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
+    paddingVertical: ox(13),
     backgroundColor: 'rgba(24, 24, 28, 0.65)',
   },
   secondaryButtonText: {
     color: '#E5E7EB',
-    fontSize: 15,
+    fontSize: ox(15),
     fontWeight: '600',
   },
 });

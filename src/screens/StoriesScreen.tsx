@@ -10,8 +10,10 @@ import {
     ActivityIndicator,
     Modal,
     Alert,
+    Pressable,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
 import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
@@ -48,10 +50,9 @@ import {
 import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
 import { isStoryVideo } from '../utils/storyMediaNative';
 import {
-    buildStoryReplyContext,
-    resolveStoryReplyThumbnail,
-} from '../utils/storyReplyNative';
-import { getStoryTextContent } from '../utils/storyTextStyleNative';
+    deliverStoryReactionToInbox,
+    deliverStoryReplyToInbox,
+} from '../utils/sendStoryInteractionToInbox';
 import {
     buildStoryMetadataItems,
     getStoryOverlayText,
@@ -62,12 +63,21 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, setFollowState } from '../api/posts';
+import { getFollowedUsers, getPostById, getState, getFollowState, setFollowState, toggleLike, reclipPost, fetchComments } from '../api/posts';
 import { toggleFollow } from '../api/client';
 import { getAvatarForHandle } from '../api/users';
-import { appendMessage } from '../api/messages';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getCollectionsForPost } from '../api/collections';
 import type { Post, Story, StoryGroup } from '../types';
 import Avatar from '../components/Avatar';
+import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
+import PostCommentsSheet from '../components/PostCommentsSheet';
+import FeedShareModal from '../components/FeedShareModal';
+import SavePostModal from '../components/SavePostModal.native';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
+import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
@@ -119,11 +129,18 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [isFollowingStoryUser, setIsFollowingStoryUser] = useState(false);
     const [isFollowLoading, setIsFollowLoading] = useState(false);
     const [showSharedPostModal, setShowSharedPostModal] = useState(false);
+    const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
+    const [fullscreenCommentsPost, setFullscreenCommentsPost] = useState<Post | null>(null);
+    const [fullscreenSharePost, setFullscreenSharePost] = useState<Post | null>(null);
+    const [fullscreenSavePost, setFullscreenSavePost] = useState<Post | null>(null);
+    const [fullscreenPostSaved, setFullscreenPostSaved] = useState(false);
     const [deliveryFx, setDeliveryFx] = useState<StoryDeliveryFxState | null>(null);
     const [localReactionByStoryId, setLocalReactionByStoryId] = useState<Record<string, string>>({});
     const avatarRef = useRef<View>(null);
     const lastLikeTapAtRef = useRef(0);
     const lastMuteToggleAtRef = useRef(0);
+    const openedFullPostRef = useRef(false);
+    const fullscreenHoldRef = useRef<Post | null>(null);
     const deliveryFxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const deliveryFxFlyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const showInlineReplyComposerRef = useRef(false);
@@ -131,6 +148,12 @@ export default function StoriesScreen({ route, navigation }: any) {
     const pausedRef = useRef(false);
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const currentStoryIndexRef = useRef(0);
+    const currentGroupIndexRef = useRef(0);
+    const storyGroupsRef = useRef(storyGroups);
+    currentStoryIndexRef.current = currentStoryIndex;
+    currentGroupIndexRef.current = currentGroupIndex;
+    storyGroupsRef.current = storyGroups;
     const formatRelativeTime = (timestamp?: number) => {
         if (!timestamp || Number.isNaN(timestamp)) return 'just now';
         const diffMs = Date.now() - timestamp;
@@ -240,6 +263,10 @@ export default function StoriesScreen({ route, navigation }: any) {
         showInsightsSheet ||
             showStoryShareModal ||
             showSharedPostModal ||
+            imageFullscreenPost ||
+            fullscreenCommentsPost ||
+            fullscreenSharePost ||
+            fullscreenSavePost ||
             showStoryProfileCard ||
             deliveryFx ||
             showInlineReplyComposer ||
@@ -383,7 +410,29 @@ export default function StoriesScreen({ route, navigation }: any) {
                 });
             }
 
-            setStoryGroups(withGazetteerWorldGroup(groups));
+            // Match web StoriesPage: mock handles (e.g. Ava@galway) resolve via getAvatarForHandle
+            const groupsWithAvatars = await Promise.all(
+                groups.map(async (group) => {
+                    if (group.userId === user.id && user.avatarUrl) {
+                        return { ...group, avatarUrl: user.avatarUrl };
+                    }
+                    let avatarUrl = group.avatarUrl || getAvatarForHandle(group.userHandle);
+                    if (!avatarUrl) {
+                        try {
+                            const { fetchUserProfile } = await import('../api/client');
+                            const profile = await fetchUserProfile(group.userHandle, user.id);
+                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                                avatarUrl = profile.avatar_url || profile.avatarUrl;
+                            }
+                        } catch {
+                            /* keep undefined — Avatar shows initials */
+                        }
+                    }
+                    return { ...group, avatarUrl };
+                }),
+            );
+
+            setStoryGroups(withGazetteerWorldGroup(groupsWithAvatars));
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
@@ -458,24 +507,30 @@ export default function StoriesScreen({ route, navigation }: any) {
             clearInterval(timerRef.current);
         }
 
-        const currentGroup = storyGroups[currentGroupIndex];
+        const groups = storyGroupsRef.current;
+        const groupIndex = currentGroupIndexRef.current;
+        const storyIndex = currentStoryIndexRef.current;
+        const currentGroup = groups[groupIndex];
         if (!currentGroup) return;
 
-        if (currentStoryIndex < currentGroup.stories.length - 1) {
-            setCurrentStoryIndex(currentStoryIndex + 1);
+        if (storyIndex < currentGroup.stories.length - 1) {
+            const nextIndex = storyIndex + 1;
+            currentStoryIndexRef.current = nextIndex;
+            setCurrentStoryIndex(nextIndex);
+            setProgress(0);
+            progressRef.current = 0;
+            startProgress();
+        } else if (groupIndex < groups.length - 1) {
+            const nextGroup = groupIndex + 1;
+            currentGroupIndexRef.current = nextGroup;
+            currentStoryIndexRef.current = 0;
+            setCurrentGroupIndex(nextGroup);
+            setCurrentStoryIndex(0);
             setProgress(0);
             progressRef.current = 0;
             startProgress();
         } else {
-            if (currentGroupIndex < storyGroups.length - 1) {
-                setCurrentGroupIndex(currentGroupIndex + 1);
-                setCurrentStoryIndex(0);
-                setProgress(0);
-                progressRef.current = 0;
-                startProgress();
-            } else {
-                closeStories();
-            }
+            closeStories();
         }
     };
 
@@ -484,20 +539,28 @@ export default function StoriesScreen({ route, navigation }: any) {
             clearInterval(timerRef.current);
         }
 
-        if (currentStoryIndex > 0) {
-            setCurrentStoryIndex(currentStoryIndex - 1);
+        const groups = storyGroupsRef.current;
+        const groupIndex = currentGroupIndexRef.current;
+        const storyIndex = currentStoryIndexRef.current;
+
+        if (storyIndex > 0) {
+            const prevIndex = storyIndex - 1;
+            currentStoryIndexRef.current = prevIndex;
+            setCurrentStoryIndex(prevIndex);
             setProgress(0);
             progressRef.current = 0;
             startProgress();
-        } else {
-            if (currentGroupIndex > 0) {
-                setCurrentGroupIndex(currentGroupIndex - 1);
-                const prevGroup = storyGroups[currentGroupIndex - 1];
-                setCurrentStoryIndex(prevGroup?.stories.length - 1 || 0);
-                setProgress(0);
-                progressRef.current = 0;
-                startProgress();
-            }
+        } else if (groupIndex > 0) {
+            const prevGroupIndex = groupIndex - 1;
+            const prevGroup = groups[prevGroupIndex];
+            const prevIndex = prevGroup?.stories.length - 1 || 0;
+            currentGroupIndexRef.current = prevGroupIndex;
+            currentStoryIndexRef.current = prevIndex;
+            setCurrentGroupIndex(prevGroupIndex);
+            setCurrentStoryIndex(prevIndex);
+            setProgress(0);
+            progressRef.current = 0;
+            startProgress();
         }
     };
 
@@ -578,6 +641,17 @@ export default function StoriesScreen({ route, navigation }: any) {
     const handleStoryFollowQuickToggle = async () => {
         if (!currentGroup?.userHandle || !user?.id || isFollowLoading) return;
         const handle = currentGroup.userHandle;
+        const nextFollowing = !isFollowingStoryUser;
+        // Optimistic + local-first so mock users (Ava@galway etc.) work even when Laravel has no account
+        setIsFollowingStoryUser(nextFollowing);
+        setFollowState(user.id, handle, nextFollowing);
+        setShowStoryProfileCard(false);
+
+        const isKnownMockUser = Boolean(getAvatarForHandle(handle));
+        if (isKnownMockUser || !isLaravelApiEnabled()) {
+            return;
+        }
+
         setIsFollowLoading(true);
         try {
             const result = await toggleFollow(handle);
@@ -588,35 +662,163 @@ export default function StoriesScreen({ route, navigation }: any) {
                       ? true
                       : result?.status === 'unfollowed'
                         ? false
-                        : !isFollowingStoryUser;
+                        : nextFollowing;
             setIsFollowingStoryUser(resolved);
             setFollowState(user.id, handle, resolved);
         } catch {
-            const fallback = !isFollowingStoryUser;
-            setIsFollowingStoryUser(fallback);
-            setFollowState(user.id, handle, fallback);
+            // Keep optimistic local follow — demo / offline accounts
         } finally {
             setIsFollowLoading(false);
         }
     };
 
+    const closeSharedPostModal = () => {
+        setShowSharedPostModal(false);
+        if (!showInlineReplyComposer) setPaused(false);
+    };
+
     const openFullPostFromStory = () => {
         if (!originalPost) return;
         setShowSharedPostModal(false);
-        const video =
-            originalPost.mediaType === 'video' ||
-            originalPost.mediaItems?.some((m) => m.type === 'video');
-        if (video) {
+        setPaused(true);
+
+        // Scenes is video-only — still images + text use the fullscreen overlay (wired actions).
+        if (postHasVideoMedia(originalPost)) {
+            openedFullPostRef.current = true;
             navigation.navigate('Scenes', {
                 initialPostId: originalPost.id,
                 posts: [originalPost],
+                feedLabel: 'Stories',
             });
-        } else {
-            navigation.navigate('PostDetail', { postId: originalPost.id });
+            return;
+        }
+
+        if (
+            collectFeedImageUrls(originalPost).length > 0 ||
+            isTextOnlyPost(originalPost) ||
+            Boolean((originalPost.text || originalPost.caption || '').trim())
+        ) {
+            setImageFullscreenPost(originalPost);
+            return;
+        }
+
+        openedFullPostRef.current = true;
+        navigation.navigate('PostDetail', { postId: originalPost.id });
+    };
+
+    const syncFullscreenPost = useCallback((updated: Post) => {
+        setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
+        setOriginalPost((prev) => (prev?.id === updated.id ? updated : prev));
+        setFullscreenCommentsPost((prev) => (prev?.id === updated.id ? updated : prev));
+        if (fullscreenHoldRef.current?.id === updated.id) {
+            fullscreenHoldRef.current = updated;
+        }
+    }, []);
+
+    /** RN Modal cannot host another Modal/BottomSheet — park fullscreen first. */
+    const dismissFullscreenForOverlay = useCallback(() => {
+        setImageFullscreenPost((prev) => {
+            if (prev) fullscreenHoldRef.current = prev;
+            return null;
+        });
+    }, []);
+
+    const restoreFullscreenFromHold = useCallback(() => {
+        const held = fullscreenHoldRef.current;
+        fullscreenHoldRef.current = null;
+        if (held) setImageFullscreenPost(held);
+    }, []);
+
+    const handleFullscreenLike = async () => {
+        if (!imageFullscreenPost || !user?.id) return;
+        try {
+            const updated = await toggleLike(user.id, imageFullscreenPost.id, imageFullscreenPost);
+            syncFullscreenPost(updated);
+        } catch (error) {
+            console.error('Fullscreen like failed:', error);
+            Alert.alert('Could not like', 'Please try again.');
         }
     };
 
-    const startDeliveryFx = useCallback((kind: 'message' | 'like', toHandle: string) => {
+    const handleFullscreenComment = () => {
+        if (!imageFullscreenPost) return;
+        const post = imageFullscreenPost;
+        dismissFullscreenForOverlay();
+        // Let the fullscreen Modal unmount before presenting the sheet.
+        setTimeout(() => setFullscreenCommentsPost(post), 40);
+    };
+
+    const handleFullscreenReclip = async () => {
+        if (!imageFullscreenPost || !user?.id || !user?.handle) return;
+        if (imageFullscreenPost.userHandle === user.handle) {
+            Alert.alert('Cannot reclip', 'You can’t reclip your own post.');
+            return;
+        }
+        try {
+            const result = await reclipPost(user.id, imageFullscreenPost.id, user.handle);
+            if (result?.originalPost) syncFullscreenPost(result.originalPost);
+            else {
+                syncFullscreenPost({
+                    ...imageFullscreenPost,
+                    userReclipped: true,
+                    stats: {
+                        ...imageFullscreenPost.stats,
+                        reclips: (imageFullscreenPost.stats?.reclips ?? 0) + 1,
+                    },
+                });
+            }
+            Alert.alert('Reposted', 'Post added to your profile.');
+        } catch (error) {
+            console.error('Fullscreen reclip failed:', error);
+            Alert.alert('Could not repost', 'Please try again.');
+        }
+    };
+
+    const handleFullscreenShare = () => {
+        if (!imageFullscreenPost) return;
+        const post = imageFullscreenPost;
+        dismissFullscreenForOverlay();
+        setTimeout(() => setFullscreenSharePost(post), 40);
+    };
+
+    const handleFullscreenSave = () => {
+        if (!imageFullscreenPost) return;
+        const post = imageFullscreenPost;
+        dismissFullscreenForOverlay();
+        setTimeout(() => setFullscreenSavePost(post), 40);
+    };
+
+    useEffect(() => {
+        if (!imageFullscreenPost?.id || !user?.id) {
+            setFullscreenPostSaved(false);
+            return;
+        }
+        let cancelled = false;
+        void getCollectionsForPost(user.id, imageFullscreenPost.id)
+            .then((cols) => {
+                if (!cancelled) setFullscreenPostSaved(cols.length > 0);
+            })
+            .catch(() => {
+                if (!cancelled) setFullscreenPostSaved(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [imageFullscreenPost?.id, user?.id]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!openedFullPostRef.current) return;
+            openedFullPostRef.current = false;
+            if (!showInlineReplyComposerRef.current) setPaused(false);
+        }, []),
+    );
+
+    const startDeliveryFx = useCallback((
+        kind: 'message' | 'like' | 'react',
+        toHandle: string,
+        emoji?: string,
+    ) => {
         if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
         if (deliveryFxFlyTimerRef.current) clearTimeout(deliveryFxFlyTimerRef.current);
 
@@ -634,6 +836,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                 targetX,
                 targetY,
                 phase: 'start',
+                emoji,
             });
             deliveryFxFlyTimerRef.current = setTimeout(() => {
                 setDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
@@ -661,11 +864,34 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const handleReaction = async (emoji: string) => {
         if (!currentStory || !user?.id || !user?.handle) return;
+        const toHandle = currentGroup?.userHandle;
+        // Optimistic UI — mock store may miss API-loaded stories; still show selection.
+        setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
         try {
             await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
-            setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
+            if (
+                toHandle &&
+                toHandle.trim().toLowerCase() !== user.handle.trim().toLowerCase()
+            ) {
+                try {
+                    await deliverStoryReactionToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        emoji,
+                    });
+                } catch (inboxError) {
+                    console.warn('Story reaction inbox delivery failed:', inboxError);
+                }
+            }
         } catch (error) {
             console.error('Error adding reaction:', error);
+            setLocalReactionByStoryId((prev) => {
+                const next = { ...prev };
+                delete next[currentStory.id];
+                return next;
+            });
         }
     };
 
@@ -676,7 +902,17 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (currentGroup?.userHandle) {
             startDeliveryFx('like', currentGroup.userHandle);
         }
-        void handleReaction('👍');
+        void handleReaction('❤️');
+    };
+
+    const triggerQuickReact = (emoji: string) => {
+        const now = Date.now();
+        if (now - lastLikeTapAtRef.current < 260) return;
+        lastLikeTapAtRef.current = now;
+        if (currentGroup?.userHandle) {
+            startDeliveryFx('react', currentGroup.userHandle, emoji);
+        }
+        void handleReaction(emoji);
     };
 
     const handleReply = async () => {
@@ -696,49 +932,27 @@ export default function StoriesScreen({ route, navigation }: any) {
             await addStoryReply(currentStory.id, user.id, user.handle, normalizedReply);
 
             if (toHandle && !isSelfStory) {
-                const sharedPostForContext =
-                    currentStory.sharedFromPost && !originalPost
-                        ? await getPostById(currentStory.sharedFromPost, user.id)
-                        : null;
-                const storyThumb = await resolveStoryReplyThumbnail(
-                    currentStory,
-                    originalPost,
-                    sharedPostForContext,
-                );
-                const { contextOwner, storyContextText, isVisualStory } = buildStoryReplyContext(
-                    currentStory,
-                    toHandle,
-                    originalPost,
-                    sharedPostForContext,
-                );
-
-                if (storyThumb) {
-                    await appendMessage(user.handle, toHandle, {
-                        imageUrl: storyThumb,
-                        storyId: currentStory.id,
-                        storyContextOwner: contextOwner || undefined,
+                try {
+                    await deliverStoryReplyToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        replyText: normalizedReply,
                     });
-                } else {
-                    const contextBubbleText = storyContextText
-                        ? `Replying to @${contextOwner}'s story:\n"${storyContextText}"`
-                        : `Replying to @${contextOwner}'s story`;
-                    await appendMessage(user.handle, toHandle, {
-                        text: contextBubbleText,
-                        isSystemMessage: true,
-                    });
+                } catch (inboxError) {
+                    console.warn('Story reply inbox delivery failed:', inboxError);
+                    Alert.alert(
+                        'Reply saved',
+                        'Your reply was sent, but it may not show in Messages yet.',
+                    );
                 }
-                await appendMessage(user.handle, toHandle, {
-                    text: normalizedReply,
-                    imageUrl: isVisualStory ? undefined : storyThumb,
-                    storyId: currentStory.id,
-                    storyContextText: isVisualStory ? undefined : storyContextText || undefined,
-                    storyContextOwner: contextOwner || undefined,
-                });
-                await appendMessage(toHandle, user.handle, {
-                    text: 'You replied to their story',
-                    isSystemMessage: true,
-                });
                 startDeliveryFx('message', toHandle);
+            } else if (isSelfStory) {
+                Alert.alert(
+                    'Your story',
+                    'That reply stays on your story insights. Messages in Inbox are for when other people reply or react to your story.',
+                );
             } else if (toHandle) {
                 startDeliveryFx('message', toHandle);
             }
@@ -854,7 +1068,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     if (showStories24HoldScreen) {
         return (
             <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="goldChrome">
-                <StoriesPopIcon size={80} />
+                <StoriesPopIcon size={ox(80)} />
                 <Text style={styles.storiesOpeningText}>Opening stories…</Text>
                 <Text style={styles.stories24HoldSubtext}>Stories 24</Text>
             </GazetteerScreenShell>
@@ -877,7 +1091,6 @@ export default function StoriesScreen({ route, navigation }: any) {
     }
 
     const isCurrentStoryVideo = isStoryVideo(currentStory, originalPost);
-    const storyDisplayText = getStoryTextContent(currentStory);
     const currentStoryText = getStoryOverlayText(currentStory);
     const storyMetadataItems = buildStoryMetadataItems(currentStory, originalPost);
     const sharedCredit = shouldShowSharedStoryCredit(
@@ -885,18 +1098,16 @@ export default function StoriesScreen({ route, navigation }: any) {
         originalPost,
         currentGroup?.userHandle,
     );
-    const showTextOnlyOverlay =
-        !!storyDisplayText &&
-        !currentStory?.sharedFromPost &&
-        !(currentStory?.mediaUrl && currentStory.mediaUrl.trim());
+    // Captions on media stories only — text-only body is rendered by StoryViewerMedia /
+    // StorySharedPostViewer (a second overlay was duplicating shared feed statements).
     const showMediaTextOverlay =
         !!currentStoryText &&
         !currentStory?.sharedFromPost &&
         !!currentStory?.mediaUrl &&
         !currentStory.mediaUrl.startsWith('data:image');
-    const hasStoryReaction = Boolean(
-        (currentStory && localReactionByStoryId[currentStory.id]) || currentStory?.userReaction,
-    );
+    const heartReaction =
+        (currentStory && localReactionByStoryId[currentStory.id]) || currentStory?.userReaction;
+    const hasHeartReaction = heartReaction === '❤️' || heartReaction === '♥️' || heartReaction === '❤';
 
     if (!viewingStories) {
         // Story list view
@@ -904,10 +1115,10 @@ export default function StoriesScreen({ route, navigation }: any) {
             <GazetteerScreenShell>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => navigation.goBack()}>
-                        <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                        <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Clips 24</Text>
-                    <View style={{ width: 24 }} />
+                    <View style={{ width: ox(24) }} />
                 </View>
 
                 <View style={styles.storyList}>
@@ -947,7 +1158,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             {currentStory && currentGroup && (
                 <>
                     <StorySwipeLayer
-                        enabled={!showInlineReplyComposer && !deliveryFx}
+                        enabled={!showInlineReplyComposer && !deliveryFx && !showStoryProfileCard}
                         style={styles.mediaLayer}
                         onSwipeLeft={nextStory}
                         onSwipeRight={previousStory}
@@ -991,6 +1202,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             currentGroup.userHandle !== user.handle &&
                             !isFollowingStoryUser
                         }
+                        followLoading={isFollowLoading}
                         metadataItems={storyMetadataItems}
                         showVideoMute={isCurrentStoryVideo}
                         isMuted={isMuted}
@@ -998,11 +1210,12 @@ export default function StoriesScreen({ route, navigation }: any) {
                             setShowStoryProfileCard((v) => !v);
                             setPaused(true);
                         }}
+                        onFollowPress={() => void handleStoryFollowQuickToggle()}
                         onToggleMute={toggleGlobalMute}
                         onClose={closeStories}
                     />
                     {showStoryProfileCard && currentGroup.userHandle !== user?.handle ? (
-                        <View style={styles.profileCardHost}>
+                        <View style={styles.profileCardHost} pointerEvents="box-none">
                             <StoryProfileCard
                                 isFollowing={isFollowingStoryUser}
                                 followLoading={isFollowLoading}
@@ -1034,23 +1247,15 @@ export default function StoriesScreen({ route, navigation }: any) {
                             }}
                         >
                             <Text style={styles.ownerInsightsText}>
-                                {(currentStory.views ?? 0)} views • {(currentStory.replies?.length ?? 0)} replies • tap for insights
+                                {(currentStory.views ?? 0)} views •{' '}
+                                {(currentStory.reactions?.filter(
+                                    (r) =>
+                                        (r.userHandle || '').trim().toLowerCase() !==
+                                        (user?.handle || '').trim().toLowerCase(),
+                                ).length ?? 0)}{' '}
+                                reactions • {(currentStory.replies?.length ?? 0)} replies
                             </Text>
                         </TouchableOpacity>
-                    ) : null}
-
-                    {showTextOnlyOverlay ? (
-                        <StoryTextOverlay
-                            text={storyDisplayText}
-                            taggedUsers={currentStory.taggedUsers}
-                            textColor={currentStory.textColor || '#fff'}
-                            onMentionPress={(handle) => {
-                                closeStories();
-                                setTimeout(() => {
-                                    navigation.navigate('ViewProfile', { handle });
-                                }, 100);
-                            }}
-                        />
                     ) : null}
 
                     {currentStory.poll ? (
@@ -1121,7 +1326,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         ]}
                                     >
                                         <View style={styles.storyLinkIconTile}>
-                                            <Icon name="link-outline" size={15} color={iconColor} />
+                                            <Icon name="link-outline" size={ox(15)} color={iconColor} />
                                         </View>
                                         <Text numberOfLines={1} style={[styles.storyLinkLabel, { color: labelColor }]}>
                                             {label}
@@ -1132,13 +1337,23 @@ export default function StoriesScreen({ route, navigation }: any) {
 
                     <StoryBottomBar
                         hidden={isHoldingToPause}
-                        showReplyComposer={showInlineReplyComposer}
+                        ownerMode={isViewingOwnStory}
+                        ownerSummary={`${currentStory.views ?? 0} views · tap for insights`}
+                        onOpenInsights={() => {
+                            setShowInsightsSheet(true);
+                            setPaused(true);
+                        }}
+                        showReplyComposer={showInlineReplyComposer && !isViewingOwnStory}
                         replyText={replyText}
-                        replyPlaceholder={`Reply to ${currentGroup.userHandle || 'story'}`}
+                        replyPlaceholder="Message..."
                         isSending={isSendingReply}
-                        hasReaction={hasStoryReaction}
+                        hasReaction={hasHeartReaction}
+                        activeQuickEmoji={
+                            heartReaction === '😍' || heartReaction === '😂' ? heartReaction : null
+                        }
                         onReplyTextChange={setReplyText}
                         onOpenReply={() => {
+                            if (isViewingOwnStory) return;
                             setShowInlineReplyComposer(true);
                             setPaused(true);
                         }}
@@ -1150,6 +1365,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         onSendReply={() => void handleReply()}
                         onLike={triggerLikeAction}
                         onShare={() => setShowStoryShareModal(true)}
+                        onQuickReact={triggerQuickReact}
                     />
 
                     {deliveryFx ? (
@@ -1162,22 +1378,61 @@ export default function StoriesScreen({ route, navigation }: any) {
                 visible={showSharedPostModal}
                 transparent
                 animationType="fade"
-                onRequestClose={() => {
-                    setShowSharedPostModal(false);
-                    if (!showInlineReplyComposer) setPaused(false);
-                }}
+                onRequestClose={closeSharedPostModal}
             >
-                <View style={styles.replyModal}>
-                    <View style={styles.replyModalContent}>
-                        <Text style={styles.replyModalTitle}>View original post</Text>
+                <View style={styles.sharedPostBackdrop}>
+                    <Pressable
+                        style={StyleSheet.absoluteFillObject}
+                        onPress={closeSharedPostModal}
+                        accessibilityRole="button"
+                        accessibilityLabel="Dismiss"
+                    />
+                    <View style={styles.sharedPostCard}>
+                        <View style={styles.sharedPostCardHeader}>
+                            <Text style={styles.sharedPostCardTitle}>View original post</Text>
+                            <TouchableOpacity
+                                onPress={closeSharedPostModal}
+                                style={styles.sharedPostCloseBtn}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Close"
+                            >
+                                <Icon name="close" size={ox(22)} color="#9CA3AF" />
+                            </TouchableOpacity>
+                        </View>
+
                         {originalPost ? (
                             <Text style={styles.sharedModalSub}>
-                                This story was shared from {originalPost.userHandle}
+                                This story was shared from a post by{' '}
+                                <Text style={styles.sharedModalSubStrong}>
+                                    {originalPost.userHandle}
+                                </Text>
                             </Text>
-                        ) : null}
-                        <TouchableOpacity style={styles.sheetActionButton} onPress={openFullPostFromStory}>
+                        ) : sharedPostFetchFailed ? (
+                            <Text style={styles.sharedModalSub}>
+                                Couldn’t load the original post.
+                            </Text>
+                        ) : (
+                            <View style={styles.sharedPostLoadingRow}>
+                                <ActivityIndicator size="small" color="#60A5FA" />
+                                <Text style={[styles.sharedModalSub, { marginBottom: 0 }]}>
+                                    Loading post…
+                                </Text>
+                            </View>
+                        )}
+
+                        <TouchableOpacity
+                            style={[
+                                styles.sheetActionButton,
+                                styles.sheetActionPrimary,
+                                !originalPost && styles.sheetActionDisabled,
+                            ]}
+                            onPress={openFullPostFromStory}
+                            disabled={!originalPost}
+                        >
                             <Text style={styles.sheetActionText}>View full post</Text>
                         </TouchableOpacity>
+
                         {originalPost ? (
                             <TouchableOpacity
                                 style={[styles.sheetActionButton, styles.sheetActionSecondary]}
@@ -1194,18 +1449,87 @@ export default function StoriesScreen({ route, navigation }: any) {
                                 <Text style={styles.sheetActionTextSecondary}>View profile</Text>
                             </TouchableOpacity>
                         ) : null}
-                        <TouchableOpacity
-                            onPress={() => {
-                                setShowSharedPostModal(false);
-                                if (!showInlineReplyComposer) setPaused(false);
-                            }}
-                            style={styles.replyCancelButton}
-                        >
-                            <Text style={styles.replyCancelText}>Close</Text>
-                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
+
+            <ImageFullscreenModal
+                post={imageFullscreenPost}
+                visible={Boolean(imageFullscreenPost)}
+                onClose={() => {
+                    fullscreenHoldRef.current = null;
+                    setImageFullscreenPost(null);
+                    if (
+                        !showInlineReplyComposer &&
+                        !fullscreenCommentsPost &&
+                        !fullscreenSharePost &&
+                        !fullscreenSavePost
+                    ) {
+                        setPaused(false);
+                    }
+                }}
+                onLike={() => void handleFullscreenLike()}
+                onComment={handleFullscreenComment}
+                onReclip={() => void handleFullscreenReclip()}
+                onShare={handleFullscreenShare}
+                onSave={handleFullscreenSave}
+                isSaved={fullscreenPostSaved}
+            />
+
+            <PostCommentsSheet
+                postId={fullscreenCommentsPost?.id ?? ''}
+                post={fullscreenCommentsPost}
+                isOpen={fullscreenCommentsPost !== null}
+                commentAuthorHandle={user?.handle || ''}
+                currentUserHandle={user?.handle}
+                onClose={() => {
+                    const closed = fullscreenCommentsPost;
+                    setFullscreenCommentsPost(null);
+                    restoreFullscreenFromHold();
+                    if (!closed?.id) return;
+                    void fetchComments(closed.id)
+                        .then((list) => {
+                            syncFullscreenPost({
+                                ...closed,
+                                stats: {
+                                    ...closed.stats,
+                                    comments: list.length,
+                                },
+                            });
+                        })
+                        .catch(() => {});
+                }}
+            />
+
+            <FeedShareModal
+                post={fullscreenSharePost}
+                isOpen={fullscreenSharePost !== null}
+                onClose={() => {
+                    setFullscreenSharePost(null);
+                    restoreFullscreenFromHold();
+                }}
+            />
+
+            {fullscreenSavePost && user?.id ? (
+                <SavePostModal
+                    post={fullscreenSavePost}
+                    userId={user.id}
+                    visible={fullscreenSavePost !== null}
+                    onClose={() => {
+                        setFullscreenSavePost(null);
+                        restoreFullscreenFromHold();
+                    }}
+                    onSaved={async () => {
+                        if (!user?.id || !fullscreenSavePost) return;
+                        try {
+                            const cols = await getCollectionsForPost(user.id, fullscreenSavePost.id);
+                            setFullscreenPostSaved(cols.length > 0);
+                        } catch {
+                            setFullscreenPostSaved(true);
+                        }
+                    }}
+                />
+            ) : null}
 
             {currentStory && currentGroup ? (
                 <StoryShareSheet
@@ -1239,43 +1563,43 @@ const styles = StyleSheet.create({
     loadingShell: {
         justifyContent: 'center',
         alignItems: 'center',
-        gap: 16,
+        gap: ox(16),
     },
     storiesOpeningText: {
-        marginTop: 8,
-        fontSize: 14,
+        marginTop: ox(8),
+        fontSize: ox(14),
         fontWeight: '600',
         color: 'rgba(255,255,255,0.7)',
     },
     stories24HoldSubtext: {
-        marginTop: 4,
-        fontSize: 11,
+        marginTop: ox(4),
+        fontSize: ox(11),
         color: 'rgba(255,255,255,0.35)',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     headerTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     storyList: {
         flex: 1,
-        padding: 16,
+        padding: ox(16),
     },
     storyItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        marginBottom: 16,
+        gap: ox(12),
+        marginBottom: ox(16),
     },
     storyUserName: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#FFFFFF',
         fontWeight: '500',
     },
@@ -1290,7 +1614,8 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 72,
         left: 16,
-        zIndex: 70,
+        zIndex: 140,
+        elevation: 140,
     },
     ownerInsightsBar: {
         position: 'absolute',
@@ -1298,29 +1623,29 @@ const styles = StyleSheet.create({
         left: 16,
         right: 16,
         zIndex: 65,
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         backgroundColor: 'rgba(0,0,0,0.45)',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
     ownerInsightsText: {
         color: 'rgba(255,255,255,0.9)',
-        fontSize: 11,
+        fontSize: ox(11),
         textAlign: 'center',
     },
     progressContainer: {
         flexDirection: 'row',
-        paddingHorizontal: 8,
-        paddingTop: 8,
-        gap: 4,
+        paddingHorizontal: ox(8),
+        paddingTop: ox(8),
+        gap: ox(4),
     },
     progressBarContainer: {
         flex: 1,
         height: 3,
         backgroundColor: 'rgba(255, 255, 255, 0.3)',
-        borderRadius: 2,
+        borderRadius: ox(2),
         overflow: 'hidden',
     },
     progressBar: {
@@ -1336,33 +1661,33 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        paddingTop: 40,
+        padding: ox(16),
+        paddingTop: ox(40),
     },
     storyHeaderLeft: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: ox(12),
     },
     storyHeaderName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     storyHeaderTime: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#D1D5DB',
     },
     audienceBadge: {
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.35)',
         backgroundColor: 'rgba(0, 0, 0, 0.45)',
-        borderRadius: 999,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(2),
     },
     audienceBadgeText: {
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
         color: '#FFFFFF',
     },
@@ -1373,8 +1698,8 @@ const styles = StyleSheet.create({
         right: 16,
     },
     storyText: {
-        fontSize: 18,
-        lineHeight: 24,
+        fontSize: ox(18),
+        lineHeight: ox(24),
         color: '#FFFFFF',
         fontWeight: '600',
         flexShrink: 1,
@@ -1392,12 +1717,12 @@ const styles = StyleSheet.create({
         right: 16,
         bottom: 128,
         zIndex: 55,
-        borderRadius: 16,
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: 'rgba(0,0,0,0.3)',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         maxWidth: 400,
         alignSelf: 'center',
     },
@@ -1407,19 +1732,19 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        borderRadius: 999,
+        gap: ox(8),
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
         backgroundColor: 'rgba(0,0,0,0.6)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
         zIndex: 75,
     },
-    sharedCreditText: { color: 'rgba(255,255,255,0.9)', fontSize: 12 },
+    sharedCreditText: { color: 'rgba(255,255,255,0.9)', fontSize: ox(12) },
     sharedCreditBold: { fontWeight: '700', color: '#fff' },
     storyTextCredit: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: 'rgba(255,255,255,0.9)',
         fontWeight: '700',
         textShadowColor: 'rgba(0, 0, 0, 0.65)',
@@ -1434,13 +1759,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
         zIndex: 24,
     },
     sharedAuthorAvatar: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: ox(20),
+        height: ox(20),
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.35)',
     },
@@ -1451,7 +1776,7 @@ const styles = StyleSheet.create({
         right: 16,
         flexDirection: 'row',
         justifyContent: 'center',
-        gap: 32,
+        gap: ox(32),
         zIndex: 10,
     },
     storyActionsHidden: {
@@ -1463,61 +1788,61 @@ const styles = StyleSheet.create({
         right: 12,
         bottom: 104,
         zIndex: 16,
-        borderRadius: 14,
+        borderRadius: ox(14),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         backgroundColor: 'rgba(3, 7, 18, 0.92)',
-        padding: 8,
+        padding: ox(8),
     },
     inlineReplyInput: {
         flex: 1,
         backgroundColor: 'rgba(31,41,55,0.95)',
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
         color: '#FFFFFF',
-        fontSize: 14,
-        minHeight: 36,
+        fontSize: ox(14),
+        minHeight: ox(36),
     },
     inlineReplyActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     quickReactionButton: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(17),
         backgroundColor: 'rgba(31,41,55,0.95)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     quickReactionText: {
-        fontSize: 14,
+        fontSize: ox(14),
     },
     inlineReplyCancelButton: {
-        paddingHorizontal: 10,
-        paddingVertical: 7,
-        borderRadius: 999,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(7),
+        borderRadius: ox(999),
         backgroundColor: '#374151',
         alignItems: 'center',
     },
     inlineReplyCancelText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     inlineReplySendButton: {
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-        borderRadius: 999,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(7),
+        borderRadius: ox(999),
         backgroundColor: '#3B82F6',
         alignItems: 'center',
     },
     actionButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(24),
         backgroundColor: 'rgba(0, 0, 0, 0.3)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -1541,8 +1866,8 @@ const styles = StyleSheet.create({
     storyLinkSticker: {
         position: 'absolute',
         width: 176,
-        height: 32,
-        borderRadius: 16,
+        height: ox(32),
+        borderRadius: ox(16),
         backgroundColor: 'rgba(255,255,255,0.72)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.52)',
@@ -1557,10 +1882,10 @@ const styles = StyleSheet.create({
         zIndex: 25,
     },
     storyLinkIconTile: {
-        width: 18,
-        height: 18,
+        width: ox(18),
+        height: ox(18),
         marginLeft: 6,
-        borderRadius: 9,
+        borderRadius: ox(9),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.68)',
         backgroundColor: 'rgba(255,255,255,0.58)',
@@ -1571,11 +1896,11 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 7,
         marginRight: 7,
-        fontSize: 11,
-        lineHeight: 11.5,
+        fontSize: ox(11),
+        lineHeight: ox(11.5),
         fontFamily: 'Inter-SemiBold',
         fontWeight: '600',
-        letterSpacing: 0.05,
+        letterSpacing: ox(0.05),
         color: '#0B1220',
     },
     replyModal: {
@@ -1587,45 +1912,45 @@ const styles = StyleSheet.create({
         backgroundColor: '#030712',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        padding: 20,
-        paddingBottom: 40,
+        padding: ox(20),
+        paddingBottom: ox(40),
     },
     replyModalTitle: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     replyInput: {
         backgroundColor: '#1F2937',
-        borderRadius: 12,
-        padding: 16,
+        borderRadius: ox(12),
+        padding: ox(16),
         color: '#FFFFFF',
-        fontSize: 16,
-        minHeight: 100,
+        fontSize: ox(16),
+        minHeight: ox(100),
         textAlignVertical: 'top',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     replyModalActions: {
         flexDirection: 'row',
-        gap: 12,
+        gap: ox(12),
     },
     replyCancelButton: {
         flex: 1,
-        padding: 12,
-        borderRadius: 8,
+        padding: ox(12),
+        borderRadius: ox(8),
         backgroundColor: '#1F2937',
         alignItems: 'center',
     },
     replyCancelText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     replySendButton: {
         flex: 1,
-        padding: 12,
-        borderRadius: 8,
+        padding: ox(12),
+        borderRadius: ox(8),
         backgroundColor: '#3B82F6',
         alignItems: 'center',
     },
@@ -1634,51 +1959,108 @@ const styles = StyleSheet.create({
     },
     replySendText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     sheetActionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        borderRadius: 10,
+        justifyContent: 'center',
+        gap: ox(10),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginBottom: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        marginBottom: ox(10),
+    },
+    sheetActionPrimary: {
+        backgroundColor: '#3B82F6',
+        borderColor: '#3B82F6',
     },
     sheetActionText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     sheetActionSecondary: {
         backgroundColor: '#1f2937',
+        marginBottom: 0,
     },
     sheetActionTextSecondary: {
         color: '#e5e7eb',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     sharedModalSub: {
-        color: '#9ca3af',
-        fontSize: 13,
-        marginBottom: 12,
+        color: '#9CA3AF',
+        fontSize: ox(14),
+        lineHeight: ox(20),
+        marginBottom: ox(16),
+    },
+    sharedModalSubStrong: {
+        color: '#F3F4F6',
+        fontWeight: '600',
+    },
+    sharedPostBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: ox(20),
+    },
+    sharedPostCard: {
+        width: '100%',
+        maxWidth: ox(400),
+        borderRadius: ox(16),
+        backgroundColor: '#111827',
+        borderWidth: 1,
+        borderColor: '#1F2937',
+        padding: ox(20),
+    },
+    sharedPostCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: ox(12),
+    },
+    sharedPostCardTitle: {
+        flex: 1,
+        fontSize: ox(18),
+        fontWeight: '700',
+        color: '#FFFFFF',
+        paddingRight: ox(8),
+    },
+    sharedPostCloseBtn: {
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+    },
+    sharedPostLoadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(10),
+        marginBottom: ox(16),
+    },
+    sheetActionDisabled: {
+        opacity: 0.45,
     },
     insightsTabRow: {
         flexDirection: 'row',
-        gap: 10,
-        marginBottom: 12,
+        gap: ox(10),
+        marginBottom: ox(12),
     },
     insightsTabBtn: {
         flex: 1,
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingVertical: 8,
+        paddingVertical: ox(8),
         alignItems: 'center',
     },
     insightsTabBtnActive: {
@@ -1687,7 +2069,7 @@ const styles = StyleSheet.create({
     },
     insightsTabBtnText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     insightsTabBtnTextActive: {
@@ -1695,21 +2077,21 @@ const styles = StyleSheet.create({
     },
     insightsScroll: {
         maxHeight: 280,
-        marginBottom: 14,
+        marginBottom: ox(14),
     },
     insightsScrollContent: {
-        gap: 8,
+        gap: ox(8),
     },
     insightRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderRadius: 10,
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
     },
     insightRowInner: {
         flexDirection: 'row',
@@ -1722,24 +2104,24 @@ const styles = StyleSheet.create({
     },
     insightPrimary: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     insightSecondary: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginTop: 4,
+        fontSize: ox(12),
+        marginTop: ox(4),
     },
     insightTertiary: {
         color: '#6B7280',
-        fontSize: 11,
-        marginTop: 4,
+        fontSize: ox(11),
+        marginTop: ox(4),
     },
     emptyInsightsText: {
         color: '#9CA3AF',
-        fontSize: 13,
+        fontSize: ox(13),
         textAlign: 'center',
-        paddingVertical: 20,
+        paddingVertical: ox(20),
     },
 });
 

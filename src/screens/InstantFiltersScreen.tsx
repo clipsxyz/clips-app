@@ -9,6 +9,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video from 'react-native-video';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { ox } from '../constants/nativeOpticalScale';
 import {
     chipActiveMagenta,
     chipActiveMagentaText,
@@ -71,7 +72,7 @@ export default function InstantFiltersScreen({ navigation, route }: any) {
                 <Text style={styles.emptyTitle}>No video found</Text>
                 <Text style={styles.emptySubtext}>Go back and pick a video from your gallery.</Text>
                 <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={18} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(18)} color="#FFFFFF" />
                     <Text style={styles.primaryBtnText}>Go back</Text>
                 </TouchableOpacity>
             </GazetteerScreenShell>
@@ -82,7 +83,7 @@ export default function InstantFiltersScreen({ navigation, route }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Filters</Text>
                 <TouchableOpacity onPress={goToComposer} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -105,7 +106,7 @@ export default function InstantFiltersScreen({ navigation, route }: any) {
                         <View pointerEvents="none" style={[styles.filterOverlay, filterOverlayStyle]} />
                     ) : null}
                     <TouchableOpacity style={styles.pauseBtn} onPress={() => setIsPaused((v) => !v)}>
-                        <Icon name={isPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
+                        <Icon name={isPaused ? 'play' : 'pause'} size={ox(18)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
                 <Text style={styles.hint}>
@@ -133,12 +134,12 @@ export default function InstantFiltersScreen({ navigation, route }: any) {
 
             <View style={styles.footer}>
                 <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-back" size={18} color="#E5E7EB" />
+                    <Icon name="arrow-back" size={ox(18)} color="#E5E7EB" />
                     <Text style={styles.secondaryBtnText}>Back</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.primaryBtn} onPress={goToComposer}>
                     <Text style={styles.primaryBtnText}>Continue</Text>
-                    <Icon name="arrow-forward" size={18} color="#FFFFFF" />
+                    <Icon name="arrow-forward" size={ox(18)} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
         </GazetteerScreenShell>
@@ -149,30 +150,30 @@ const styles = StyleSheet.create({
     centered: {
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        padding: ox(24),
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(14),
         ...gazetteerHeader,
     },
     headerTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
     },
     nextText: {
         color: '#f472b6',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     previewWrap: {
         flex: 1,
-        paddingHorizontal: 16,
-        paddingTop: 12,
+        paddingHorizontal: ox(16),
+        paddingTop: ox(12),
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -181,7 +182,7 @@ const styles = StyleSheet.create({
         maxWidth: 400,
         aspectRatio: 9 / 16,
         maxHeight: '70%',
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'hidden',
         backgroundColor: '#000000',
         ...glassPanel,
@@ -197,43 +198,43 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 12,
         top: 12,
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(17),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.45)',
     },
     hint: {
-        marginTop: 14,
+        marginTop: ox(14),
         color: 'rgba(227, 227, 227, 0.72)',
-        fontSize: 13,
+        fontSize: ox(13),
         textAlign: 'center',
-        lineHeight: 18,
+        lineHeight: ox(18),
         maxWidth: 360,
     },
     filtersCard: {
-        marginHorizontal: 16,
-        marginBottom: 8,
-        borderRadius: 14,
-        padding: 12,
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        borderRadius: ox(14),
+        padding: ox(12),
         ...glassPanel,
     },
     filtersTitle: {
         color: '#F3F4F6',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
-        marginBottom: 10,
+        marginBottom: ox(10),
     },
     filterRow: {
         flexDirection: 'row',
-        gap: 8,
-        paddingRight: 8,
+        gap: ox(8),
+        paddingRight: ox(8),
     },
     filterChip: {
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 7,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(7),
         ...glassSurface,
     },
     filterChipActive: {
@@ -241,7 +242,7 @@ const styles = StyleSheet.create({
     },
     filterChipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     filterChipTextActive: {
@@ -249,49 +250,49 @@ const styles = StyleSheet.create({
     },
     footer: {
         flexDirection: 'row',
-        gap: 10,
-        paddingHorizontal: 16,
-        paddingBottom: 16,
-        paddingTop: 4,
+        gap: ox(10),
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(16),
+        paddingTop: ox(4),
     },
     primaryBtn: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
         backgroundColor: '#d91b5c',
-        borderRadius: 12,
-        paddingVertical: 13,
+        borderRadius: ox(12),
+        paddingVertical: ox(13),
     },
     primaryBtnText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     secondaryBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
-        paddingHorizontal: 14,
-        borderRadius: 12,
+        gap: ox(6),
+        paddingHorizontal: ox(14),
+        borderRadius: ox(12),
         ...glassSurface,
     },
     secondaryBtnText: {
         color: '#E5E7EB',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     emptyTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
     },
     emptySubtext: {
-        marginTop: 8,
+        marginTop: ox(8),
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
         textAlign: 'center',
     },
 });

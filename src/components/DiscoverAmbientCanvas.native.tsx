@@ -11,6 +11,7 @@ import {
     discoverAmbientTimeFromElapsedMs,
     getAmbientPalette,
     getDiscoverAmbientWaveGeometry,
+    PASSPORT_ABYSS,
     type DiscoverAmbientVariant,
 } from '../utils/discoverAmbientPalette';
 
@@ -37,7 +38,12 @@ export default function DiscoverAmbientCanvas({
     const width = widthProp && widthProp > 0 ? widthProp : winW;
     const height = heightProp && heightProp > 0 ? heightProp : winH;
     const palette = getAmbientPalette(variant);
-    const baseFill = variant === 'goldChrome' ? GOLD_CHROME_BASE : GAZETTEER_ABYSS;
+    const baseFill =
+        variant === 'goldChrome'
+            ? GOLD_CHROME_BASE
+            : variant === 'passport'
+              ? PASSPORT_ABYSS
+              : GAZETTEER_ABYSS;
 
     const [tick, setTick] = useState(0);
     const [reduceMotion, setReduceMotion] = useState(false);

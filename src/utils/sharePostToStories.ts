@@ -53,7 +53,7 @@ export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPa
                 : undefined),
         locationLabel: post.locationLabel,
         venue: post.venue,
-        sharedFromPost: isTextOnlyShare ? undefined : post.id,
+        sharedFromPost: post.id,
         sharedFromUser: post.userHandle,
     };
 }

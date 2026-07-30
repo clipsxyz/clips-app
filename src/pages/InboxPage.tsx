@@ -1055,6 +1055,15 @@ export default function InboxPage() {
             navigate(`/user/${encodeURIComponent(notif.fromHandle)}`, {
                 state: notif.postId ? { sourcePostId: notif.postId } : undefined,
             });
+        } else if (
+            (notif.type === 'comment' || notif.type === 'reply') &&
+            notif.postId &&
+            !notif.storyId
+        ) {
+            // Instagram-style Activity: open the post comments thread.
+            navigate(`/post/${encodeURIComponent(notif.postId)}`, {
+                state: { openComments: true, focusCommentId: notif.commentId },
+            });
         } else if (notif.type === 'sticker' || notif.type === 'reply') {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'dm') {
@@ -1078,11 +1087,21 @@ export default function InboxPage() {
                 ? `Replied to your 24hr story${ownerSuffix}: ${replyPreview}${contextSuffix}`
                 : `Replied to your 24hr story${ownerSuffix}${contextSuffix}`;
         }
+        if (notif.type === 'comment' && notif.postId) {
+            const preview = (notif.message || '').trim();
+            return preview ? `Commented: ${preview}` : 'Commented on your post';
+        }
+        if (notif.type === 'reply' && notif.postId) {
+            const preview = (notif.message || '').trim();
+            return preview ? `Replied to your comment: ${preview}` : 'Replied to your comment';
+        }
         switch (notif.type) {
             case 'sticker':
                 return `Sent you a sticker: ${notif.message || ''}`;
             case 'reply':
                 return notif.message || 'Replied to your post';
+            case 'comment':
+                return notif.message || 'Commented on your post';
             case 'dm':
                 return notif.message || 'Sent you a message';
             case 'follow_request':

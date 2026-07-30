@@ -23,6 +23,7 @@ import Avatar from '../components/Avatar.native';
 import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
 import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
 import { clearPendingLocationFeed } from '../utils/pendingLocationNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 const POPULAR = [
     'Dublin', 'Cork', 'London', 'Paris', 'Berlin', 'New York', 'Tokyo', 'Sydney',
@@ -237,7 +238,7 @@ export default function DiscoverScreen({ navigation }: any) {
                     accessibilityLabel="Back to Feed"
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                    <Icon name="home-outline" size={22} color="#E5E7EB" />
+                    <Icon name="home-outline" size={ox(22)} color="#E5E7EB" />
                 </TouchableOpacity>
                 <View style={styles.topBarRight}>
                     <TouchableOpacity
@@ -298,7 +299,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                               onPress={() => onSuggestionSelected(s)}
                                               style={styles.suggestionItem}
                                           >
-                                              <Icon name="location" size={16} color="#f472b6" />
+                                              <Icon name="location" size={ox(16)} color="#f472b6" />
                                               <View style={styles.suggestionContent}>
                                                   <Text style={styles.suggestionPrimary}>{primary}</Text>
                                                   <Text style={styles.suggestionSecondary}>{s.name}</Text>
@@ -314,7 +315,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                           onPress={() => selectPopularCity(name)}
                                           style={styles.suggestionItem}
                                       >
-                                          <Icon name="location" size={16} color="#f472b6" />
+                                          <Icon name="location" size={ox(16)} color="#f472b6" />
                                           <Text style={styles.suggestionPrimary}>{name}</Text>
                                       </TouchableOpacity>
                                   ))
@@ -324,7 +325,7 @@ export default function DiscoverScreen({ navigation }: any) {
                 ) : null}
 
                 <View style={styles.searchPill}>
-                    <Icon name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
+                    <Icon name="search" size={ox(20)} color="#9CA3AF" style={styles.searchIcon} />
                     <TextInput
                         ref={inputRef}
                         value={query}
@@ -344,7 +345,7 @@ export default function DiscoverScreen({ navigation }: any) {
                     />
                     {hasSearchQuery ? (
                         <TouchableOpacity onPress={clearSearch} style={styles.clearBtn}>
-                            <Icon name="close" size={16} color="#9CA3AF" />
+                            <Icon name="close" size={ox(16)} color="#9CA3AF" />
                         </TouchableOpacity>
                     ) : null}
                     {loading ? <ActivityIndicator size="small" color="#d91b5c" /> : null}
@@ -398,29 +399,29 @@ const styles = StyleSheet.create({
     },
     ui: {
         flex: 1,
-        paddingHorizontal: 16,
+        paddingHorizontal: ox(16),
         justifyContent: 'space-between',
     },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        minHeight: 44,
-        marginBottom: 4,
+        minHeight: ox(44),
+        marginBottom: ox(4),
     },
     topBarBtn: {
-        padding: 8,
+        padding: ox(8),
         marginLeft: -4,
     },
     topBarRight: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: ox(10),
     },
     localChip: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
+        borderRadius: ox(8),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.85)',
         backgroundColor: 'rgba(3, 7, 18, 0.55)',
@@ -428,7 +429,7 @@ const styles = StyleSheet.create({
     },
     localChipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     greetingBlock: {
@@ -438,21 +439,21 @@ const styles = StyleSheet.create({
     },
     greetingBlockCompact: {
         flex: 0,
-        paddingTop: 8,
+        paddingTop: ox(8),
         justifyContent: 'flex-start',
     },
     greetingText: {
         color: '#FFFFFF',
-        fontSize: 30,
-        lineHeight: 38,
+        fontSize: ox(30),
+        lineHeight: ox(38),
         fontWeight: '400',
         textAlign: 'center',
         includeFontPadding: false,
     },
     greetingSub: {
-        marginTop: 12,
+        marginTop: ox(12),
         color: '#EEEEEE',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '400',
         textAlign: 'center',
         includeFontPadding: false,
@@ -463,58 +464,58 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
     },
     suggestionsPanel: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
         backgroundColor: '#1a1524',
         overflow: 'hidden',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     suggestionsPanelAbove: { maxHeight: 256 },
     suggestionsPanelKeyboard: { maxHeight: 180 },
     suggestionEmpty: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     suggestionItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255,255,255,0.05)',
     },
     suggestionContent: { flex: 1, minWidth: 0 },
-    suggestionPrimary: { color: '#F3F4F6', fontSize: 14, fontWeight: '500' },
-    suggestionSecondary: { color: '#6B7280', fontSize: 11, marginTop: 2 },
+    suggestionPrimary: { color: '#F3F4F6', fontSize: ox(14), fontWeight: '500' },
+    suggestionSecondary: { color: '#6B7280', fontSize: ox(11), marginTop: ox(2) },
     searchPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: '#1c1624',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
-        paddingHorizontal: 14,
-        minHeight: 52,
+        paddingHorizontal: ox(14),
+        minHeight: ox(52),
     },
     searchIcon: { marginRight: 8 },
     searchInput: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '400',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
         backgroundColor: 'transparent',
         includeFontPadding: false,
         ...(Platform.OS === 'android' ? { textAlignVertical: 'center' as const } : null),
     },
     clearBtn: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        width: ox(28),
+        height: ox(28),
+        borderRadius: ox(14),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(255,255,255,0.08)',

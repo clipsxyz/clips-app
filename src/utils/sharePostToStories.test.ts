@@ -14,6 +14,8 @@ describe('buildSharePostToStoriesPayload', () => {
         expect(payload.isTextOnlyShare).toBe(true);
         expect(payload.mediaUrl).toBeUndefined();
         expect(payload.shareText).toContain('Hello');
+        expect(payload.sharedFromPost).toBe('t1');
+        expect(payload.sharedFromUser).toBe('@a');
     });
 
     it('media post includes media url', () => {

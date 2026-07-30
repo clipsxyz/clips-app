@@ -21,9 +21,10 @@ export default function HalftoneOverlay({
     height: heightProp,
     idPrefix,
 }: Props) {
-    const dotFill = variant === 'goldChrome' ? '#f6e27a' : '#ffffff';
-    const dotOpacity = variant === 'goldChrome' ? 0.18 : 0.15;
-    const layerOpacity = variant === 'goldChrome' ? 0.72 : 0.85;
+    const dotFill =
+        variant === 'goldChrome' ? '#f6e27a' : variant === 'passport' ? '#9fd4cb' : '#ffffff';
+    const dotOpacity = variant === 'goldChrome' ? 0.18 : variant === 'passport' ? 0.16 : 0.15;
+    const layerOpacity = variant === 'goldChrome' ? 0.72 : variant === 'passport' ? 0.7 : 0.85;
     const { width: winW, height: winH } = useWindowDimensions();
     const width = widthProp && widthProp > 0 ? widthProp : winW;
     const height = heightProp && heightProp > 0 ? heightProp : winH;
