@@ -240,11 +240,13 @@ function App(): React.JSX.Element {
         <UploadProgressToast />
         <NavigationContainer ref={navigationRef}>
           <Stack.Navigator
+            initialRouteName="Splash"
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: '#0b0711' },
             }}
           >
+          <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Discover" component={DiscoverScreen} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
@@ -324,7 +326,6 @@ function App(): React.JSX.Element {
             component={PaymentSuccessScreen}
             options={{ presentation: 'modal' }}
           />
-          <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="Landing" component={LandingScreen} />
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
