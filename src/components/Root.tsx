@@ -66,8 +66,9 @@ export default function Root() {
                             <Route path="/landing" element={<LandingPage />} />
                             <Route path="/p/:token" element={<PublicPostPage />} />
                             <Route path="/post/:id" element={<PublicPostPage />} />
-                            <Route path="/" element={<App />}>
-                                <Route index element={<Navigate to="/splash" replace />} />
+                            {/* Cold start: go to splash without mounting App chrome first */}
+                            <Route path="/" element={<Navigate to="/splash" replace />} />
+                            <Route element={<App />}>
                                 <Route path="feed" element={<FeedPage />} />
                                 <Route path="create" element={<CreatePage />} />
                                 <Route path="create/instant" element={<InstantCreatePage />} />

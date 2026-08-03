@@ -373,6 +373,44 @@ video {
   animation: splash-logo-pop 700ms ease-out forwards;
 }
 
+/* Splash greeting soft bounce-in */
+@keyframes splash-greeting-bounce {
+  0% {
+    opacity: 0;
+    transform: translateY(28px) scale(0.92);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1.03);
+  }
+  75% {
+    transform: translateY(3px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.splash-greeting-bounce {
+  animation: splash-greeting-bounce 900ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+@keyframes splash-tagline-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.splash-tagline-fade {
+  animation: splash-tagline-fade 700ms ease-out 280ms both;
+}
+
 @keyframes border-rotate {
   to {
     --border-angle: 360deg;

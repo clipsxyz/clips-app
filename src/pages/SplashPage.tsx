@@ -1,38 +1,104 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiMapPin } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
-import splashLogo from '../assets/gazetteer-splash-logo.png';
+import {
+    getDayPart,
+    getSplashGreetingLine,
+    SPLASH_BACKDROP_BY_DAY_PART,
+} from '../utils/timeGreeting';
 
+const INTRO_FADE_MS = 700;
+const GREETING_HOLD_MS = 2500;
+const EXIT_FADE_MS = 500;
+
+/**
+ * IKEA-style cold-start welcome (web).
+ * Lifestyle backdrop + time greeting only — no metallic logo beat.
+ */
 export default function SplashPage() {
     const navigate = useNavigate();
     const { user } = useAuth();
+    const dayPart = useMemo(() => getDayPart(), []);
+    const backdropUri = SPLASH_BACKDROP_BY_DAY_PART[dayPart];
 
-    // After a short delay, move off the splash screen
+    const userRef = useRef(user);
+    userRef.current = user;
+
+    const [greeting, setGreeting] = useState(() =>
+        getSplashGreetingLine(user?.name ?? null),
+    );
+    const [phase, setPhase] = useState<'intro' | 'hold' | 'exit'>('intro');
+
     useEffect(() => {
-        const timer = setTimeout(() => {
-            if (user) {
+        setGreeting(getSplashGreetingLine(user?.name ?? null));
+    }, [user?.name]);
+
+    useEffect(() => {
+        // Next frame: fade backdrop + greeting in
+        const t0 = window.requestAnimationFrame(() => setPhase('hold'));
+        const tExit = window.setTimeout(
+            () => setPhase('exit'),
+            INTRO_FADE_MS + GREETING_HOLD_MS,
+        );
+        const tNav = window.setTimeout(() => {
+            if (userRef.current) {
                 navigate('/feed', { replace: true });
             } else {
                 navigate('/landing', { replace: true });
             }
-        }, 3000);
+        }, INTRO_FADE_MS + GREETING_HOLD_MS + EXIT_FADE_MS);
 
-        return () => clearTimeout(timer);
-    }, [user, navigate]);
+        return () => {
+            window.cancelAnimationFrame(t0);
+            window.clearTimeout(tExit);
+            window.clearTimeout(tNav);
+        };
+    }, [navigate]);
+
+    const visible = phase === 'hold';
+    const exiting = phase === 'exit';
 
     return (
-        <div className="relative min-h-screen min-h-[100dvh] w-full flex flex-col items-center justify-center bg-black px-6">
-            <img
-                src={splashLogo}
-                alt="Gazetteer"
-                className="w-[min(280px,72vw)] max-w-[320px] h-auto object-contain splash-logo-animate"
+        <div
+            className="relative min-h-screen min-h-[100dvh] w-full overflow-hidden bg-[#0b0711]"
+            style={{
+                opacity: exiting ? 0 : 1,
+                transition: `opacity ${EXIT_FADE_MS}ms ease-out`,
+            }}
+        >
+            <div
+                className="absolute inset-0 bg-cover bg-center"
+                style={{
+                    backgroundImage: `url(${backdropUri})`,
+                    opacity: visible || exiting ? 1 : 0,
+                    transition: `opacity ${INTRO_FADE_MS}ms ease-out`,
+                }}
+                aria-hidden
             />
-            <div className="mt-5 inline-flex items-center gap-2 text-base font-semibold tracking-[0.24em] uppercase text-white">
-                <FiMapPin className="w-4 h-4" />
-                <span>Gazetteer</span>
+            <div
+                className="absolute inset-0 bg-[#0b0711]/45"
+                style={{
+                    opacity: visible || exiting ? 1 : 0,
+                    transition: `opacity ${INTRO_FADE_MS}ms ease-out`,
+                }}
+                aria-hidden
+            />
+
+            <div
+                className="absolute inset-x-6 bottom-[18%] flex flex-col items-center text-center"
+                style={{ pointerEvents: 'none' }}
+            >
+                {(visible || exiting) && (
+                    <>
+                        <p className="splash-greeting-bounce text-[28px] font-light leading-9 tracking-tight text-[#F5F5F5]">
+                            {greeting}
+                        </p>
+                        <p className="splash-tagline-fade mt-2.5 text-sm font-light tracking-wide text-[#F5F5F5]/72">
+                            let's go social traveling
+                        </p>
+                    </>
+                )}
             </div>
         </div>
     );
 }
-
