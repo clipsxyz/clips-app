@@ -51,7 +51,7 @@ import { fetchUserProfile } from '../api/client';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
 import { extractPostId } from '../utils/extractPostId';
 import { DmSharedPostCard, DmSharedPostPreviewCard } from '../components/DmSharedPostCard.native';
-import { isProfilePrivate, hasPendingFollowRequest } from '../api/privacy';
+import { hasPendingFollowRequest } from '../api/privacy';
 import { followOrRequest } from '../utils/followOrRequest';
 import type { Post } from '../types';
 import { unifiedSearch } from '../api/search';
@@ -162,6 +162,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>('blue');
     const [sharedPosts, setSharedPosts] = useState<Record<string, Post>>({});
     const [isFollowing, setIsFollowing] = useState(false);
+    const [followRequestPending, setFollowRequestPending] = useState(false);
     const [showFollowCheck, setShowFollowCheck] = useState(false);
     const [isFollowLoading, setIsFollowLoading] = useState(false);
     const [otherUserPlacesTraveled, setOtherUserPlacesTraveled] = useState<string[] | undefined>(
@@ -432,13 +433,18 @@ export default function MessagesScreen({ route, navigation }: any) {
             try {
                 const followedUsers = await getFollowedUsers(user.id);
                 const following = followedUsers.includes(handle);
+                const pending =
+                    !following &&
+                    Boolean(user.handle && hasPendingFollowRequest(user.handle, handle));
                 if (!cancelled) {
                     setIsFollowing(following);
+                    setFollowRequestPending(pending);
                     setShowFollowCheck(following);
                 }
             } catch {
                 if (!cancelled) {
                     setIsFollowing(false);
+                    setFollowRequestPending(false);
                     setShowFollowCheck(false);
                 }
             }
@@ -549,27 +555,20 @@ export default function MessagesScreen({ route, navigation }: any) {
         if (!user?.id || !user?.handle || !handle || isFollowLoading || handle === user.handle) return;
         setIsFollowLoading(true);
         try {
-            const profilePrivate = isProfilePrivate(handle);
-            const hasPending = hasPendingFollowRequest(user.handle, handle);
-            if (profilePrivate && hasPending) {
-                showAlert({
-                    title: 'Follow Request Already Sent',
-                    message: `You have already sent a follow request to ${handle}. You will be notified when they respond.`,
-                    icon: 'alert',
-                    confirmButtonText: 'OK',
-                });
-                return;
-            }
             const s = getState(user.id);
             const wasFollowing = getFollowState(s.follows, handle);
+            const wasRequested = hasPendingFollowRequest(user.handle, handle);
+            // Following → unfollow; Requested → cancel; else → follow/request.
+            const nextFollowing = wasFollowing ? false : wasRequested ? false : true;
             const result = await followOrRequest({
                 userId: user.id,
                 targetHandle: handle,
                 viewerHandle: user.handle,
-                nextFollowing: !wasFollowing,
+                nextFollowing,
             });
             setIsFollowing(result.following);
-            if (result.requested) {
+            setFollowRequestPending(result.requested);
+            if (result.requested && !wasRequested) {
                 showAlert({
                     title: 'Follow Request Sent',
                     message: `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
@@ -580,6 +579,9 @@ export default function MessagesScreen({ route, navigation }: any) {
         } catch {
             const current = getFollowState(getState(user.id).follows, handle);
             setIsFollowing(current);
+            setFollowRequestPending(
+                Boolean(user.handle && handle && hasPendingFollowRequest(user.handle, handle)),
+            );
             showAlert({
                 title: 'Action failed',
                 message: 'Could not update follow status right now.',
@@ -2318,9 +2320,15 @@ export default function MessagesScreen({ route, navigation }: any) {
                                     void handleFollowFromHeader();
                                 }}
                                 disabled={isFollowLoading}
-                                accessibilityLabel="Follow user"
+                                accessibilityLabel={
+                                    followRequestPending ? 'Cancel follow request' : 'Follow user'
+                                }
                             >
-                                <Icon name="add" size={ox(12)} color="#FFFFFF" />
+                                <Icon
+                                    name={followRequestPending ? 'time-outline' : 'add'}
+                                    size={ox(12)}
+                                    color="#FFFFFF"
+                                />
                             </TouchableOpacity>
                         ) : null}
                         {!isGroupThread &&

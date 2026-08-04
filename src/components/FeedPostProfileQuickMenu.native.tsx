@@ -96,10 +96,6 @@ export default function FeedPostProfileQuickMenu({
                         <TouchableOpacity
                             style={styles.item}
                             onPress={async () => {
-                                if (isRequested && !isFollowing) {
-                                    onClose();
-                                    return;
-                                }
                                 onClose();
                                 await onFollow();
                             }}

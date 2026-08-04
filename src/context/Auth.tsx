@@ -2,7 +2,7 @@ import React from 'react';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate, hydratePrivacyStorage } from '../api/privacy';
-import { hydrateFollowsStorage } from '../api/posts';
+import { hydrateFollowsStorage, clearUserState, getState } from '../api/posts';
 import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
@@ -292,6 +292,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       termsAcceptedAt: userData.termsAcceptedAt,
       guidelinesAcceptedAt: userData.guidelinesAcceptedAt,
     };
+    // Drop stale in-memory follows before AsyncStorage hydrate so getState() reloads cleanly.
+    clearUserState(u.id);
     setUser(u);
     // Persist large base64 avatar in IndexedDB (survives refresh); strip from localStorage to avoid quota exceeded
     const toStore = { ...u };
@@ -301,32 +303,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     localStorage.setItem('user', JSON.stringify(toStore));
     persistUserToNativeStorage(JSON.stringify(toStore));
-    // Sync privacy setting + hydrate this account's follows from AsyncStorage (RN).
-    void hydrateFollowsStorage(u.id).catch(() => {});
-    void hydratePrivacyStorage().catch(() => {});
-    if (u.handle) {
-      setProfilePrivacy(u.handle, !!u.is_private);
+
+    void (async () => {
       try {
-        connectSocket(u.handle);
-      } catch (e) {
-        console.warn('Socket connect skipped:', e);
+        await Promise.all([hydrateFollowsStorage(u.id), hydratePrivacyStorage()]);
+      } catch {
+        // continue even if native storage hydrate fails
       }
-      // Initialize Firebase notifications when user logs in
-      import('../services/notifications').then(({ initializeNotifications }) => {
-        initializeNotifications();
-      });
-    }
-    setSentryUser({ id: u.id, username: u.name });
+      // Warm cache from hydrated storage (hydrateFollowsStorage also merges if cache already exists).
+      getState(u.id);
+      if (u.handle) {
+        setProfilePrivacy(u.handle, !!u.is_private);
+        try {
+          connectSocket(u.handle);
+        } catch (e) {
+          console.warn('Socket connect skipped:', e);
+        }
+        import('../services/notifications').then(({ initializeNotifications }) => {
+          initializeNotifications();
+        });
+      }
+      setSentryUser({ id: u.id, username: u.name });
+    })();
   };
 
   const logout = () => {
     authRefreshGenRef.current += 1;
+    const prevId = user?.id;
     // Disconnect Socket.IO when user logs out
     disconnectSocket();
     import('../services/notifications')
       .then(({ clearNotificationSession }) => clearNotificationSession?.())
       .catch(() => {});
     setUser(null);
+    if (prevId) clearUserState(prevId);
     localStorage.removeItem('user');
     persistUserToNativeStorage(null);
     void clearAuthToken();

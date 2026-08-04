@@ -739,11 +739,28 @@ export async function hydrateFollowsStorage(userId: string): Promise<void> {
   try {
     const m = await import('./postsStorage.native');
     const follows = await m.getFollowsFromStorageNative(uid);
-    if (follows && Object.keys(follows).length > 0 && typeof localStorage !== 'undefined') {
-      localStorage.setItem(FOLLOWS_STORAGE_KEY(uid), JSON.stringify(follows));
+    if (follows && Object.keys(follows).length > 0) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(FOLLOWS_STORAGE_KEY(uid), JSON.stringify(follows));
+      }
+      // Keep getState() cache in sync — it may already exist before AsyncStorage resolves.
+      if (userState[uid]) {
+        userState[uid].follows = { ...follows, ...userState[uid].follows };
+      }
     }
   } catch {
     // web / unavailable
+  }
+}
+
+/** Drop in-memory likes/follows/etc so the next getState() reloads from storage. */
+export function clearUserState(userId?: string): void {
+  if (userId != null && String(userId)) {
+    delete userState[String(userId)];
+    return;
+  }
+  for (const key of Object.keys(userState)) {
+    delete userState[key];
   }
 }
 
@@ -1877,9 +1894,18 @@ export async function toggleFollowForPost(
       } as Post;
     }
 
+    // Second tap on a pending request cancels it (matches View Profile / Search / Stories).
     if (hasPendingFollowRequest(viewer, handle)) {
+      removeFollowRequest(viewer, handle);
       setFollowStateKey(s.follows, handle, false);
       saveFollowsToStorage(userId, s.follows);
+      if (isLaravelApiEnabled()) {
+        try {
+          await apiClient.toggleFollow(handle);
+        } catch {
+          // Keep local cancel even if the server call fails.
+        }
+      }
       if (p) return { ...decorateForUser(userId, p), isFollowing: false };
       return {
         id,
