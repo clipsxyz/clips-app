@@ -301,7 +301,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     localStorage.setItem('user', JSON.stringify(toStore));
     persistUserToNativeStorage(JSON.stringify(toStore));
-    // Sync privacy setting
+    // Sync privacy setting + hydrate this account's follows from AsyncStorage (RN).
+    void hydrateFollowsStorage(u.id).catch(() => {});
+    void hydratePrivacyStorage().catch(() => {});
     if (u.handle) {
       setProfilePrivacy(u.handle, !!u.is_private);
       try {

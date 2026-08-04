@@ -1,12 +1,7 @@
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import * as apiClient from './client';
-import { isFrontendOnlyPostId, setFollowState } from './posts';
-import {
-    createFollowRequest,
-    hasPendingFollowRequest,
-    isProfilePrivate,
-    removeFollowRequest,
-} from './privacy';
+import { isFrontendOnlyPostId } from './posts';
+import { followOrRequest } from '../utils/followOrRequest';
 import {
     generateFeedLikerHandles,
     getFollowingSetForHandles,
@@ -100,28 +95,10 @@ export async function toggleFollowFromLikesSheet(
     nextFollowing: boolean,
     viewerHandle?: string,
 ): Promise<{ following: boolean; requested: boolean }> {
-    if (nextFollowing && isProfilePrivate(handle) && viewerHandle) {
-        if (hasPendingFollowRequest(viewerHandle, handle)) {
-            setFollowState(userId, handle, false);
-            return { following: false, requested: true };
-        }
-        createFollowRequest(viewerHandle, handle);
-        setFollowState(userId, handle, false);
-        return { following: false, requested: true };
-    }
-
-    setFollowState(userId, handle, nextFollowing);
-    if (!nextFollowing && viewerHandle) {
-        removeFollowRequest(viewerHandle, handle);
-    }
-    if (!isLaravelApiEnabled()) {
-        return { following: nextFollowing, requested: false };
-    }
-    try {
-        await apiClient.toggleFollow(handle);
-        return { following: nextFollowing, requested: false };
-    } catch (error) {
-        setFollowState(userId, handle, !nextFollowing);
-        throw error;
-    }
+    return followOrRequest({
+        userId,
+        targetHandle: handle,
+        viewerHandle,
+        nextFollowing,
+    });
 }

@@ -1855,13 +1855,15 @@ export async function toggleFollowForPost(
   }
   const s = getState(userId);
   const wasFollowing = getFollowState(s.follows, handle);
+  const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
 
   // Private accounts: follow → request (not instant follow). Matches View Profile / Scenes.
-  if (!wasFollowing && isProfilePrivate(handle) && viewerHandle) {
-    if (hasPendingFollowRequest(viewerHandle, handle)) {
+  if (!wasFollowing && isProfilePrivate(handle)) {
+    // Without a viewer handle we must not silently auto-follow private accounts.
+    if (!viewer) {
       setFollowStateKey(s.follows, handle, false);
       saveFollowsToStorage(userId, s.follows);
-      if (p) return decorateForUser(userId, p);
+      if (p) return { ...decorateForUser(userId, p), isFollowing: false };
       return {
         id,
         userHandle: handle,
@@ -1874,7 +1876,67 @@ export async function toggleFollowForPost(
         userLiked: false,
       } as Post;
     }
-    createFollowRequest(viewerHandle, handle);
+
+    if (hasPendingFollowRequest(viewer, handle)) {
+      setFollowStateKey(s.follows, handle, false);
+      saveFollowsToStorage(userId, s.follows);
+      if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+      return {
+        id,
+        userHandle: handle,
+        locationLabel: '',
+        tags: [],
+        createdAt: Date.now(),
+        stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: false,
+        isFollowing: false,
+        userLiked: false,
+      } as Post;
+    }
+
+    if (isLaravelApiEnabled()) {
+      try {
+        const result = await apiClient.toggleFollow(handle);
+        if (result?.status === 'pending') {
+          createFollowRequest(viewer, handle);
+          setFollowStateKey(s.follows, handle, false);
+          saveFollowsToStorage(userId, s.follows);
+          if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+          return {
+            id,
+            userHandle: handle,
+            locationLabel: '',
+            tags: [],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: false,
+            userLiked: false,
+          } as Post;
+        }
+        if (result?.status === 'accepted' || result?.following === true) {
+          setFollowStateKey(s.follows, handle, true);
+          saveFollowsToStorage(userId, s.follows);
+          removeFollowRequest(viewer, handle);
+          if (p) return decorateForUser(userId, p);
+          return {
+            id,
+            userHandle: handle,
+            locationLabel: '',
+            tags: [],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: true,
+            userLiked: false,
+          } as Post;
+        }
+      } catch {
+        // Fall through to local mock request.
+      }
+    }
+
+    createFollowRequest(viewer, handle);
     setFollowStateKey(s.follows, handle, false);
     saveFollowsToStorage(userId, s.follows);
     if (p) return { ...decorateForUser(userId, p), isFollowing: false };
@@ -1894,8 +1956,8 @@ export async function toggleFollowForPost(
   const nextFollowing = !wasFollowing;
   setFollowStateKey(s.follows, handle, nextFollowing);
   saveFollowsToStorage(userId, s.follows);
-  if (!nextFollowing && viewerHandle) {
-    removeFollowRequest(viewerHandle, handle);
+  if (!nextFollowing && viewer) {
+    removeFollowRequest(viewer, handle);
   }
 
   if (p) return decorateForUser(userId, p);

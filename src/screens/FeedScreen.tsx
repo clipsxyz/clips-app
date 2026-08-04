@@ -1392,6 +1392,7 @@ const FeedCard = React.memo(function FeedCard({
         prev.isCurrentUser === next.isCurrentUser &&
         prev.isVideoActive === next.isVideoActive &&
         prev.feedVideoMuted === next.feedVideoMuted &&
+        prev.viewerHandle === next.viewerHandle &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
         a.clientLocalMediaUri === b.clientLocalMediaUri &&
