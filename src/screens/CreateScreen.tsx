@@ -721,7 +721,7 @@ export default function CreateScreen({ navigation, route }: any) {
     };
 
     return (
-        <GazetteerScreenShell edges={['top', 'bottom']}>
+        <GazetteerScreenShell edges={['top', 'bottom']} ambientVariant="passport">
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="close" size={ox(24)} color="#FFFFFF" />

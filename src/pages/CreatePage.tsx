@@ -992,8 +992,8 @@ export default function CreatePage() {
     }, [locationState?.filterInfo, currentFilterStyle]);
 
     return (
-        <div className="relative min-h-screen overflow-hidden bg-[#0b0711]">
-            <DiscoverAmbientCanvas />
+        <div className="relative min-h-screen overflow-hidden bg-[#060d16]">
+            <DiscoverAmbientCanvas variant="passport" />
             <div className="relative z-10 min-h-screen transition-colors duration-200">
             {/* Header - Enhanced with better animations */}
             <div className="sticky top-0 z-40 border-b border-white/10 bg-black/35 backdrop-blur-md">

@@ -23,7 +23,7 @@ export function getSplashGreetingLine(userName?: string | null): string {
   return `${greeting}, Welcome`;
 }
 
-/** Travel / lifestyle backdrops by time of day (Gazetteer-flavored). */
+/** Travel / lifestyle backdrops by time of day (remote — web CSS / browsers). */
 export const SPLASH_BACKDROP_BY_DAY_PART: Record<DayPart, string> = {
   morning:
     'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&q=80&auto=format&fit=crop',

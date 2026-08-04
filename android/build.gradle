@@ -28,5 +28,6 @@ allprojects {
         maven {
             url = uri("${rootDir}/ffmpeg-kit-local-maven")
         }
+        maven { url 'https://www.jitpack.io' }
     }
 }

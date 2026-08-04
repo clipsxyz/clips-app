@@ -19,7 +19,7 @@ import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -391,7 +391,7 @@ export default function InstantCreateScreen({ navigation }: any) {
         <GazetteerScreenShell
             edges={['top']}
             ambient
-            ambientVariant="discover"
+            ambientVariant="passport"
             style={styles.shell}
         >
             <LinearGradient
@@ -480,7 +480,7 @@ export default function InstantCreateScreen({ navigation }: any) {
 const styles = StyleSheet.create({
     shell: {
         flex: 1,
-        backgroundColor: GAZETTEER_ABYSS,
+        backgroundColor: PASSPORT_ABYSS,
     },
     headerScrim: {
         position: 'absolute',

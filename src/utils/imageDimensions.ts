@@ -38,17 +38,31 @@ export const getInstagramImageDimensions = (
   screenWidth?: number
 ): ImageDimensions => {
   const width = screenWidth ?? getScreenWidth();
-  
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 360;
+
+  if (
+    !Number.isFinite(originalWidth) ||
+    !Number.isFinite(originalHeight) ||
+    originalWidth <= 0 ||
+    originalHeight <= 0
+  ) {
+    return {
+      width: safeWidth,
+      height: safeWidth * MAX_ASPECT,
+      aspectRatio: MAX_ASPECT,
+    };
+  }
+
   // Calculate original aspect ratio
   const aspectRatio = originalHeight / originalWidth;
-  
+
   // Clamp to Instagram limits
   const clampedAspect = Math.min(Math.max(aspectRatio, MIN_ASPECT), MAX_ASPECT);
-  
+
   return {
-    width,
-    height: width * clampedAspect,
-    aspectRatio: clampedAspect
+    width: safeWidth,
+    height: safeWidth * clampedAspect,
+    aspectRatio: clampedAspect,
   };
 };
 

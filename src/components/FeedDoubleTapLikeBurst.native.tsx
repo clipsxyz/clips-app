@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import Svg, { G, Line } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
 
 const LINE_COUNT = 36;
 const BURST_SIZE = 200;
@@ -78,8 +79,16 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
         });
     }, [glowOpacity, glowScale, onDone, thumbOpacity, thumbScale]);
 
+    if (!hasFinitePoint(x, y)) return null;
+
     return (
-        <View style={[styles.root, { left: x, top: y }]} pointerEvents="none">
+        <View
+            style={[
+                styles.root,
+                { left: safeLayoutNumber(x), top: safeLayoutNumber(y) },
+            ]}
+            pointerEvents="none"
+        >
             <Animated.View
                 style={[
                     styles.glowWrap,

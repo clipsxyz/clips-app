@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet } from 'react-native';
 import type { StickerOverlay } from '../types';
 import { clampStickerY } from '../utils/stickerLayoutNative';
 import { adjustStickersForFeedDisplay } from '../utils/feedStickerLayout';
+import { safeLayoutNumber, safePositiveLayoutNumber, safeScale } from '../utils/safeLayoutNative';
 
 type Props = {
     stickers?: StickerOverlay[];
@@ -26,23 +27,31 @@ function FeedStickerItem({
     containerHeight: number;
 }) {
     const isTextSticker = overlay.sticker.category === 'Text' || Boolean(overlay.textContent);
+    const scale = safeScale(overlay.scale, 1);
     const baseSize = overlay.sticker.category === 'GIF' ? 80 : isTextSticker ? 120 : 50;
-    const width = baseSize * overlay.scale;
-    const height = (overlay.sticker.category === 'GIF' ? 80 : isTextSticker ? 72 : 50) * overlay.scale;
-    const y = clampStickerY(overlay.y);
-    const left = containerWidth > 0 ? (overlay.x / 100) * containerWidth - width / 2 : 0;
+    const width = safePositiveLayoutNumber(baseSize * scale, baseSize);
+    const height = safePositiveLayoutNumber(
+        (overlay.sticker.category === 'GIF' ? 80 : isTextSticker ? 72 : 50) * scale,
+        baseSize,
+    );
+    const xPct = safeLayoutNumber(overlay.x, 50);
+    const y = clampStickerY(safeLayoutNumber(overlay.y, 50));
+    const rotation = safeLayoutNumber(overlay.rotation, 0);
+    const left = containerWidth > 0 ? (xPct / 100) * containerWidth - width / 2 : 0;
     const top = containerHeight > 0 ? (y / 100) * containerHeight - height / 2 : 0;
+    const fontSize = safePositiveLayoutNumber(fontSizePx(overlay.fontSize) * scale, 14);
+    const emojiSize = safePositiveLayoutNumber(Math.min(width, height) * 0.85, 14);
 
     return (
         <View
             style={[
                 styles.item,
                 {
-                    left,
-                    top,
+                    left: safeLayoutNumber(left),
+                    top: safeLayoutNumber(top),
                     width,
                     height,
-                    transform: [{ rotate: `${overlay.rotation || 0}deg` }],
+                    transform: [{ rotate: `${rotation}deg` }],
                 },
             ]}
             pointerEvents="none"
@@ -53,7 +62,7 @@ function FeedStickerItem({
                         styles.textSticker,
                         {
                             color: overlay.textColor || '#FFFFFF',
-                            fontSize: fontSizePx(overlay.fontSize) * overlay.scale,
+                            fontSize,
                         },
                     ]}
                     numberOfLines={4}
@@ -67,7 +76,7 @@ function FeedStickerItem({
                     resizeMode="contain"
                 />
             ) : (
-                <Text style={[styles.emojiSticker, { fontSize: Math.min(width, height) * 0.85 }]}>
+                <Text style={[styles.emojiSticker, { fontSize: emojiSize }]}>
                     {overlay.sticker.emoji || overlay.sticker.name}
                 </Text>
             )}
@@ -77,12 +86,14 @@ function FeedStickerItem({
 
 /** Read-only sticker layer for feed media and text bubbles (web StickerOverlay read-only parity). */
 export default function FeedStickerOverlays({ stickers, containerWidth, containerHeight }: Props) {
+    const safeW = safePositiveLayoutNumber(containerWidth, 0);
+    const safeH = safePositiveLayoutNumber(containerHeight, 0);
     const adjusted = useMemo(
         () => (stickers?.length ? adjustStickersForFeedDisplay(stickers) : []),
         [stickers],
     );
 
-    if (!adjusted.length || containerWidth <= 0 || containerHeight <= 0) return null;
+    if (!adjusted.length || safeW <= 0 || safeH <= 0) return null;
 
     return (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -90,8 +101,8 @@ export default function FeedStickerOverlays({ stickers, containerWidth, containe
                 <FeedStickerItem
                     key={overlay.id}
                     overlay={overlay}
-                    containerWidth={containerWidth}
-                    containerHeight={containerHeight}
+                    containerWidth={safeW}
+                    containerHeight={safeH}
                 />
             ))}
         </View>

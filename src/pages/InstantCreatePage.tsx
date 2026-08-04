@@ -1415,8 +1415,8 @@ export default function InstantCreatePage() {
     );
 
         return (
-        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-[#0b0711]">
-            <DiscoverAmbientCanvas />
+        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-[#060d16]">
+            <DiscoverAmbientCanvas variant="passport" />
             {/* Top bar: mode picker (simple) vs camera controls */}
             <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/50 to-transparent px-4 py-3">
                 {showCreateModePicker && !previewUrl ? (

@@ -62,9 +62,11 @@ export default defineConfig({
       'Last-Modified': new Date().toUTCString(),
       'ETag': '', // Disable ETag caching
     },
+    // Don't force HMR to localhost — that blanks/breaks phone tabs on the LAN IP.
+    // Vite will use the page hostname (e.g. 192.168.1.12) when opened from Oppo.
     hmr: {
       protocol: 'ws',
-      host: 'localhost', // For laptop dev; when on phone via IP, HMR may fail but app still loads
+      clientPort: 5173,
     },
     proxy: {
       '/api': {

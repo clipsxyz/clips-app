@@ -6,9 +6,11 @@ import {
   StyleSheet,
   Linking,
   Image,
+  Dimensions,
 } from 'react-native';
 import FeedPostMedia from './FeedPostMedia.native';
 import { timeAgo } from '../utils/timeAgo';
+import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import type { Ad } from '../types';
 
 type Props = {
@@ -19,6 +21,8 @@ type Props = {
 
 export default function FeedAdCard({ ad, onImpression, onClick }: Props) {
   const [hasBeenViewed, setHasBeenViewed] = React.useState(false);
+  const mediaWidth = safePositiveLayoutNumber(Dimensions.get('window').width, 360);
+  const mediaHeight = 280;
 
   React.useEffect(() => {
     if (hasBeenViewed) return;
@@ -47,15 +51,32 @@ export default function FeedAdCard({ ad, onImpression, onClick }: Props) {
         {ad.createdAt ? <Text style={styles.time}>{timeAgo(ad.createdAt)}</Text> : null}
       </View>
 
-      <View style={styles.mediaWrap}>
+      <View style={[styles.mediaWrap, { width: mediaWidth, minHeight: mediaHeight }]}>
         {ad.mediaType === 'video' ? (
           <FeedPostMedia
-            post={{ mediaUrl: ad.mediaUrl, mediaType: 'video' } as any}
-            isVideoActive={false}
-            feedVideoMuted
+            post={
+              {
+                id: `ad-${ad.id}`,
+                mediaUrl: ad.mediaUrl,
+                mediaType: 'video',
+                userHandle: ad.advertiserHandle || '@sponsor',
+                text: ad.title || '',
+                createdAt: ad.createdAt || Date.now(),
+                stats: { likes: 0, comments: 0, shares: 0, views: 0, reclips: 0 },
+              } as any
+            }
+            width={mediaWidth}
+            height={mediaHeight}
+            mode="feed"
+            isActive={false}
+            muted
           />
         ) : (
-          <Image source={{ uri: ad.mediaUrl }} style={styles.image} resizeMode="cover" />
+          <Image
+            source={{ uri: ad.mediaUrl }}
+            style={{ width: mediaWidth, height: mediaHeight }}
+            resizeMode="cover"
+          />
         )}
         <TouchableOpacity style={styles.ctaBtn} onPress={() => void handleClick()} activeOpacity={0.85}>
           <Text style={styles.ctaText}>{ad.callToAction || 'Learn More'}</Text>
@@ -117,19 +138,13 @@ const styles = StyleSheet.create({
   },
   mediaWrap: {
     position: 'relative',
-    minHeight: 220,
     backgroundColor: '#111827',
-  },
-  image: {
-    width: '100%',
-    height: 280,
   },
   ctaBtn: {
     position: 'absolute',
     bottom: 16,
-    alignSelf: 'center',
-    left: '20%',
-    right: '20%',
+    left: 48,
+    right: 48,
     backgroundColor: '#7C3AED',
     borderRadius: 999,
     paddingVertical: 10,

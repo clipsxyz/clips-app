@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Dimensions, Modal, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { hasFinitePoint, safeLayoutNumber, safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 
 export type FeedDmDeliveryFxState = {
     toHandle: string;
@@ -23,6 +24,8 @@ export default function FeedDmDeliveryFx({ fx }: Props) {
 
     useEffect(() => {
         if (!fx) return;
+        if (!hasFinitePoint(fx.startX, fx.startY) || !hasFinitePoint(fx.targetX, fx.targetY)) return;
+
         translateX.setValue(0);
         translateY.setValue(0);
         scale.setValue(1);
@@ -30,8 +33,8 @@ export default function FeedDmDeliveryFx({ fx }: Props) {
 
         if (fx.phase !== 'fly') return;
 
-        const dx = fx.targetX - fx.startX;
-        const dy = fx.targetY - fx.startY;
+        const dx = safeLayoutNumber(fx.targetX) - safeLayoutNumber(fx.startX);
+        const dy = safeLayoutNumber(fx.targetY) - safeLayoutNumber(fx.startY);
 
         Animated.parallel([
             Animated.timing(translateX, {
@@ -56,9 +59,11 @@ export default function FeedDmDeliveryFx({ fx }: Props) {
         ]).start();
     }, [fx, translateX, translateY, scale, opacity]);
 
-    if (!fx) return null;
+    if (!fx || !hasFinitePoint(fx.startX, fx.startY)) return null;
 
-    const { width, height } = Dimensions.get('window');
+    const { width: winW, height: winH } = Dimensions.get('window');
+    const width = safePositiveLayoutNumber(winW, 360);
+    const height = safePositiveLayoutNumber(winH, 640);
 
     return (
         <Modal transparent visible animationType="none" statusBarTranslucent pointerEvents="none">
@@ -67,8 +72,8 @@ export default function FeedDmDeliveryFx({ fx }: Props) {
                     style={[
                         styles.badge,
                         {
-                            left: fx.startX,
-                            top: fx.startY,
+                            left: safeLayoutNumber(fx.startX),
+                            top: safeLayoutNumber(fx.startY),
                             transform: [{ translateX }, { translateY }, { scale }],
                             opacity,
                         },

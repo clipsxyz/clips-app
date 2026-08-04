@@ -4,12 +4,20 @@ import { useAuth } from '../context/Auth';
 import {
     getDayPart,
     getSplashGreetingLine,
-    SPLASH_BACKDROP_BY_DAY_PART,
 } from '../utils/timeGreeting';
+import splashMorning from '../assets/splash/morning.png';
+import splashAfternoon from '../assets/splash/afternoon.png';
+import splashEvening from '../assets/splash/evening.png';
 
 const INTRO_FADE_MS = 700;
 const GREETING_HOLD_MS = 2500;
 const EXIT_FADE_MS = 500;
+
+const SPLASH_BACKDROP_WEB = {
+    morning: splashMorning,
+    afternoon: splashAfternoon,
+    evening: splashEvening,
+} as const;
 
 /**
  * IKEA-style cold-start welcome (web).
@@ -19,7 +27,7 @@ export default function SplashPage() {
     const navigate = useNavigate();
     const { user } = useAuth();
     const dayPart = useMemo(() => getDayPart(), []);
-    const backdropUri = SPLASH_BACKDROP_BY_DAY_PART[dayPart];
+    const backdropUri = SPLASH_BACKDROP_WEB[dayPart];
 
     const userRef = useRef(user);
     userRef.current = user;

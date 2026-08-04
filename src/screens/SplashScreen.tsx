@@ -1,37 +1,49 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   Easing,
-  ImageBackground,
+  Image,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import {
-  getDayPart,
-  getSplashGreetingLine,
-  SPLASH_BACKDROP_BY_DAY_PART,
-} from '../utils/timeGreeting';
+import { getDayPart, getSplashGreetingLine, type DayPart } from '../utils/timeGreeting';
 
 const INTRO_FADE_MS = 700;
 const GREETING_HOLD_MS = 2500;
 const EXIT_FADE_MS = 500;
 
+/** Keep requires in this screen so Metro always packs the assets into the RN bundle. */
+const SPLASH_BACKDROPS: Record<DayPart, number> = {
+  morning: require('../assets/splash/morning.png'),
+  afternoon: require('../assets/splash/afternoon.png'),
+  evening: require('../assets/splash/evening.png'),
+};
+
+const FALLBACK_GRADIENT: Record<DayPart, string[]> = {
+  morning: ['#1a3a4a', '#3d6b7a', '#c4a574', '#0b0711'],
+  afternoon: ['#1e4d6b', '#4a90a4', '#e8b86d', '#0b0711'],
+  evening: ['#0b0711', '#1a1040', '#3d2a6b', '#0b0711'],
+};
+
 /**
  * IKEA-style cold-start welcome (native).
- * Lifestyle backdrop + time greeting with a soft bounce-in.
+ * Bundled JPEG backdrop + gradient underlay (Android Image decode can fail silently).
  */
 export default function SplashScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
   const dayPart = useMemo(() => getDayPart(), []);
-  const backdropUri = SPLASH_BACKDROP_BY_DAY_PART[dayPart];
+  const backdropSource = SPLASH_BACKDROPS[dayPart];
+  const { width: screenW, height: screenH } = Dimensions.get('window');
+  const [imageFailed, setImageFailed] = useState(false);
   const greeting = useMemo(
     () => getSplashGreetingLine(user?.name ?? null),
     [user?.name],
   );
 
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
   const greetingOpacity = useRef(new Animated.Value(0)).current;
   const greetingTranslateY = useRef(new Animated.Value(28)).current;
   const greetingScale = useRef(new Animated.Value(0.92)).current;
@@ -54,12 +66,6 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
         navigation.replace('Landing');
       }
     };
-
-    Animated.timing(backdropOpacity, {
-      toValue: 1,
-      duration: INTRO_FADE_MS,
-      useNativeDriver: true,
-    }).start();
 
     Animated.parallel([
       Animated.timing(greetingOpacity, {
@@ -129,7 +135,6 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
 
     return () => {
       timers.forEach(clearTimeout);
-      backdropOpacity.stopAnimation();
       greetingOpacity.stopAnimation();
       greetingTranslateY.stopAnimation();
       greetingScale.stopAnimation();
@@ -138,7 +143,6 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
       screenOpacity.stopAnimation();
     };
   }, [
-    backdropOpacity,
     greetingOpacity,
     greetingScale,
     greetingTranslateY,
@@ -152,20 +156,31 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
     <Animated.View style={[styles.root, { opacity: screenOpacity }]}>
       <View style={styles.solidBg} />
 
-      <Animated.View
-        style={[styles.absoluteFill, { opacity: backdropOpacity }]}
-        pointerEvents="none"
-      >
-        <ImageBackground
-          source={{ uri: backdropUri }}
-          style={styles.absoluteFill}
-          resizeMode="cover"
-        >
-          <View style={styles.scrim} />
-        </ImageBackground>
-      </Animated.View>
+      {/* Do not animate opacity on the image layer — Android/Adreno often fails to composite
+          Image under an Animated parent opacity fade (shows solid dark only). */}
+      <View style={styles.fill} pointerEvents="none">
+        <LinearGradient
+          colors={FALLBACK_GRADIENT[dayPart]}
+          start={{ x: 0.2, y: 0 }}
+          end={{ x: 0.8, y: 1 }}
+          style={styles.fill}
+        />
+        {!imageFailed ? (
+          <Image
+            source={backdropSource}
+            style={[styles.fill, { width: screenW, height: screenH }]}
+            resizeMode="cover"
+            fadeDuration={0}
+            onError={(e) => {
+              console.warn('Splash backdrop failed to decode; using gradient', e?.nativeEvent);
+              setImageFailed(true);
+            }}
+          />
+        ) : null}
+        <View style={styles.scrim} />
+      </View>
 
-      <View style={styles.greetingWrap} pointerEvents="none">
+      <View style={[styles.greetingWrap, { bottom: Math.round(screenH * 0.18) }]} pointerEvents="none">
         <Animated.Text
           style={[
             styles.greeting,
@@ -202,21 +217,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0711',
   },
   solidBg: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#0b0711',
   },
-  absoluteFill: {
-    ...StyleSheet.absoluteFillObject,
+  fill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(11, 7, 17, 0.45)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(11, 7, 17, 0.28)',
   },
   greetingWrap: {
     position: 'absolute',
     left: 24,
     right: 24,
-    bottom: '18%',
     alignItems: 'center',
   },
   greeting: {
