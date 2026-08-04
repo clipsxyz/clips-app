@@ -20,7 +20,7 @@ import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSel
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import Avatar from '../components/Avatar.native';
-import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
 import { clearPendingLocationFeed } from '../utils/pendingLocationNative';
 import { ox } from '../constants/nativeOpticalScale';
@@ -35,7 +35,8 @@ const ROTATING_CITIES = [
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
 
-const ANDROID_WASH = ['#0b0711', '#201138', '#3a1528', '#201138', '#0b0711'] as const;
+/** Same wash as View Profile / GazetteerScreenShell passport (Android parent gradient). */
+const ANDROID_WASH = ['#060d16', '#0f2430', '#1a3f3c', '#12263a', '#060d16'] as const;
 
 /**
  * iOS: animated canvas behind UI.
@@ -359,7 +360,7 @@ export default function DiscoverScreen({ navigation }: any) {
             {Platform.OS === 'ios' ? (
                 <View style={styles.root} collapsable={false}>
                     <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
-                        <DiscoverAmbientCanvas variant="discover" fillParent />
+                        <DiscoverAmbientCanvas variant="passport" fillParent />
                     </View>
                     {ui}
                 </View>
@@ -392,7 +393,7 @@ export default function DiscoverScreen({ navigation }: any) {
 const styles = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: GAZETTEER_ABYSS,
+        backgroundColor: PASSPORT_ABYSS,
     },
     ambientBack: {
         ...StyleSheet.absoluteFillObject,

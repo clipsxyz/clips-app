@@ -324,7 +324,7 @@ export default function LoginScreen({ navigation, route }: any) {
     };
 
     return (
-        <GazetteerScreenShell edges={['top', 'bottom']}>
+        <GazetteerScreenShell edges={['top', 'bottom']} ambientVariant="passport">
             <View style={styles.screen}>
                 <ScrollView
                     style={styles.scroll}

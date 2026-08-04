@@ -153,7 +153,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
 
     if (!user) {
         return (
-            <GazetteerScreenShell contentStyle={styles.centeredShell}>
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>Please sign in to view your posts</Text>
             </GazetteerScreenShell>
         );
@@ -161,22 +161,22 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
 
     if (loading) {
         return (
-            <GazetteerScreenShell contentStyle={styles.centeredShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
+                <ActivityIndicator size="large" color="#3d9b8f" />
             </GazetteerScreenShell>
         );
     }
 
     if (error) {
         return (
-            <GazetteerScreenShell contentStyle={styles.centeredShell}>
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>{error}</Text>
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambientVariant="passport">
             <View style={styles.header}>
                 <Text style={styles.title}>Your Posts</Text>
                 <Text style={styles.subtitle}>Boost your posts to reach more people</Text>

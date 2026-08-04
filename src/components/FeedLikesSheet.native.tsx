@@ -91,7 +91,20 @@ export default function FeedLikesSheet({
                 return copy;
             });
             try {
-                await toggleFollowFromLikesSheet(userId, handle, next);
+                const result = await toggleFollowFromLikesSheet(userId, handle, next, viewerHandle || undefined);
+                if (result.requested || !result.following) {
+                    setFollowing((prev) => {
+                        const copy = new Set(prev);
+                        copy.delete(handle);
+                        return copy;
+                    });
+                } else if (result.following) {
+                    setFollowing((prev) => {
+                        const copy = new Set(prev);
+                        copy.add(handle);
+                        return copy;
+                    });
+                }
             } catch {
                 setFollowing((prev) => {
                     const copy = new Set(prev);
@@ -101,7 +114,7 @@ export default function FeedLikesSheet({
                 });
             }
         },
-        [following, userId],
+        [following, userId, viewerHandle],
     );
 
     const renderItem = useCallback(

@@ -27,6 +27,7 @@ export type FeedPostProfileQuickMenuProps = {
     isMutualFollow: boolean;
     hasStory: boolean;
     isFollowing: boolean;
+    isRequested?: boolean;
     onClose: () => void;
     onVisitProfile: () => void;
     onFollow?: () => Promise<void>;
@@ -44,6 +45,7 @@ export default function FeedPostProfileQuickMenu({
     isMutualFollow,
     hasStory,
     isFollowing,
+    isRequested = false,
     onClose,
     onVisitProfile,
     onFollow,
@@ -94,16 +96,28 @@ export default function FeedPostProfileQuickMenu({
                         <TouchableOpacity
                             style={styles.item}
                             onPress={async () => {
+                                if (isRequested && !isFollowing) {
+                                    onClose();
+                                    return;
+                                }
                                 onClose();
                                 await onFollow();
                             }}
                         >
                             <Icon
-                                name={isFollowing ? 'person-remove-outline' : 'person-add-outline'}
+                                name={
+                                    isFollowing
+                                        ? 'person-remove-outline'
+                                        : isRequested
+                                          ? 'time-outline'
+                                          : 'person-add-outline'
+                                }
                                 size={18}
                                 color="#FFFFFF"
                             />
-                            <Text style={styles.itemText}>{isFollowing ? 'Unfollow' : 'Follow'}</Text>
+                            <Text style={styles.itemText}>
+                                {isFollowing ? 'Unfollow' : isRequested ? 'Requested' : 'Follow'}
+                            </Text>
                         </TouchableOpacity>
                     ) : null}
 

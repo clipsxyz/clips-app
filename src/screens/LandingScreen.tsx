@@ -6,7 +6,7 @@ import { ox } from '../constants/nativeOpticalScale';
 
 export default function LandingScreen({ navigation }: any) {
   return (
-    <GazetteerScreenShell edges={['top', 'bottom']}>
+    <GazetteerScreenShell edges={['top', 'bottom']} ambientVariant="passport">
       <View style={styles.content}>
         <Text style={styles.tagline}>No algorithms, just places</Text>
         <Text style={styles.title}>Gazetteer</Text>

@@ -433,7 +433,7 @@ export default function ScenesViewer({
     const handleFollow = useCallback(async () => {
         if (!activePost || !viewerHandle) return;
         try {
-            const updated = await toggleFollowForPost(viewerUserId, activePost.id, activePost.userHandle);
+            const updated = await toggleFollowForPost(viewerUserId, activePost.id, activePost.userHandle, viewerHandle);
             patchPost(activePost.id, () => updated);
             setHasPendingRequest(
                 !updated?.isFollowing &&

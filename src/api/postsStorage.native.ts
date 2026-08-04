@@ -40,3 +40,37 @@ export async function consumePendingCreatedPostNative(): Promise<Post | null> {
         return null;
     }
 }
+
+const followsKey = (userId: string) => `clips_app_follows_${userId}`;
+
+export async function getFollowsFromStorageNative(
+    userId: string,
+): Promise<Record<string, boolean>> {
+    try {
+        const raw = await AsyncStorage.getItem(followsKey(userId));
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {};
+    } catch {
+        return {};
+    }
+}
+
+export async function saveFollowsToStorageNative(
+    userId: string,
+    follows: Record<string, boolean>,
+): Promise<void> {
+    try {
+        await AsyncStorage.setItem(followsKey(userId), JSON.stringify(follows));
+    } catch {
+        // ignore
+    }
+}
+
+export async function removeFollowsFromStorageNative(userId: string): Promise<void> {
+    try {
+        await AsyncStorage.removeItem(followsKey(userId));
+    } catch {
+        // ignore
+    }
+}

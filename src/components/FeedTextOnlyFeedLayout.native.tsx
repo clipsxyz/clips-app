@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { userHasStoriesByHandle } from '../api/stories';
@@ -7,12 +7,12 @@ import { getAvatarForHandle } from '../api/users';
 import { useAuth } from '../context/Auth';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { getReclipDisplay } from '../utils/feedPostMeta';
+import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import Avatar from './Avatar';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
 import TaggedAvatars from './TaggedAvatars.native';
 import { FEED_UI } from '../constants/feedUiTokens';
-
 const AVATAR_COLUMN_WIDTH = FEED_UI.icon.avatar + 8;
 const BUBBLE_MAX_WIDTH = 480;
 
@@ -56,6 +56,14 @@ export default function FeedTextOnlyFeedLayout({
     const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(profileHandle);
     const isFollowing = post.isFollowing === true;
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
+    const viewer = viewerHandle ?? user?.handle;
+    const hasPendingRequest = Boolean(
+        !isCurrentUser &&
+            !isFollowing &&
+            viewer &&
+            isProfilePrivate(profileHandle) &&
+            hasPendingFollowRequest(viewer, profileHandle),
+    );
     const bubbleMaxWidth = Math.min(Math.max(120, cardWidth - AVATAR_COLUMN_WIDTH - 8), BUBBLE_MAX_WIDTH);
 
     const registerAnchor = useCallback(
@@ -114,10 +122,15 @@ export default function FeedTextOnlyFeedLayout({
                                 hasStory={hasStory}
                             />
                         </TouchableOpacity>
-                        {!isCurrentUser && onFollow && !isFollowing ? (
+                        {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                             <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
                                 <Icon name="add" size={12} color="#FFFFFF" />
                             </TouchableOpacity>
+                        ) : null}
+                        {!isCurrentUser && hasPendingRequest ? (
+                            <View style={styles.requestedPill} pointerEvents="none">
+                                <Text style={styles.requestedPillText}>Req</Text>
+                            </View>
                         ) : null}
                         {!isCurrentUser && isMutualFollow && onOpenDM ? (
                             <TouchableOpacity
@@ -189,6 +202,26 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 1.5,
         borderColor: '#030712',
+    },
+    requestedPill: {
+        position: 'absolute',
+        right: -10,
+        bottom: -2,
+        minWidth: 28,
+        height: 18,
+        paddingHorizontal: 4,
+        borderRadius: 9,
+        backgroundColor: 'rgba(61, 155, 143, 0.95)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#030712',
+    },
+    requestedPillText: {
+        color: '#FFFFFF',
+        fontSize: 8,
+        fontWeight: '700',
+        letterSpacing: 0.2,
     },
     dmButton: {
         position: 'absolute',

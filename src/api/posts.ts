@@ -1,7 +1,12 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import { evaluateCommentModeration } from '../utils/commentModeration';
-import { isLaravelApiEnabled, isLaravelUnreachableThisSession, isViteDevMode } from '../config/runtimeEnv';
+import {
+  isLaravelApiEnabled,
+  isLaravelUnreachableThisSession,
+  isViteDevMode,
+  markLaravelUnreachable,
+} from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
@@ -9,6 +14,12 @@ import { getActiveBoostedPostIds, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { MOCK_FEED_VIDEO_POSTERS, MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
+import {
+  createFollowRequest,
+  hasPendingFollowRequest,
+  isProfilePrivate,
+  removeFollowRequest,
+} from './privacy';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -716,6 +727,24 @@ function saveFollowsToStorage(userId: string, follows: Record<string, boolean>):
       localStorage.setItem(FOLLOWS_STORAGE_KEY(userId), JSON.stringify(follows));
     }
   } catch (_) {}
+  void import('./postsStorage.native')
+    .then((m) => m.saveFollowsToStorageNative(userId, follows))
+    .catch(() => {});
+}
+
+/** RN: pull follows for a userId into the in-memory localStorage shim (call early on startup). */
+export async function hydrateFollowsStorage(userId: string): Promise<void> {
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  if (!uid) return;
+  try {
+    const m = await import('./postsStorage.native');
+    const follows = await m.getFollowsFromStorageNative(uid);
+    if (follows && Object.keys(follows).length > 0 && typeof localStorage !== 'undefined') {
+      localStorage.setItem(FOLLOWS_STORAGE_KEY(uid), JSON.stringify(follows));
+    }
+  } catch {
+    // web / unavailable
+  }
 }
 
 /** Follows for Following feed: storage + in-memory (RN has no localStorage, so taps live in userState). */
@@ -752,6 +781,9 @@ export function getState(userId: string): UserState {
         try {
           if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('anon'));
         } catch (_) {}
+        void import('./postsStorage.native')
+          .then((m) => m.removeFollowsFromStorageNative('anon'))
+          .catch(() => {});
       }
       // Merge from 'test-user' so follows made before signup don't vanish (test-user is the default pre-login user)
       if (uid !== 'test-user') {
@@ -762,6 +794,9 @@ export function getState(userId: string): UserState {
           try {
             if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('test-user'));
           } catch (_) {}
+          void import('./postsStorage.native')
+            .then((m) => m.removeFollowsFromStorageNative('test-user'))
+            .catch(() => {});
         }
       }
     }
@@ -1806,7 +1841,12 @@ export async function toggleBookmark(userId: string, id: string): Promise<Post> 
   return decorateForUser(userId, p);
 }
 
-export async function toggleFollowForPost(userId: string, id: string, userHandle?: string): Promise<Post> {
+export async function toggleFollowForPost(
+  userId: string,
+  id: string,
+  userHandle?: string,
+  viewerHandle?: string,
+): Promise<Post> {
   await delay(150);
   const p = posts.find(x => x.id === id);
   const handle = p?.userHandle ?? userHandle;
@@ -1815,8 +1855,48 @@ export async function toggleFollowForPost(userId: string, id: string, userHandle
   }
   const s = getState(userId);
   const wasFollowing = getFollowState(s.follows, handle);
-  setFollowStateKey(s.follows, handle, !wasFollowing);
+
+  // Private accounts: follow → request (not instant follow). Matches View Profile / Scenes.
+  if (!wasFollowing && isProfilePrivate(handle) && viewerHandle) {
+    if (hasPendingFollowRequest(viewerHandle, handle)) {
+      setFollowStateKey(s.follows, handle, false);
+      saveFollowsToStorage(userId, s.follows);
+      if (p) return decorateForUser(userId, p);
+      return {
+        id,
+        userHandle: handle,
+        locationLabel: '',
+        tags: [],
+        createdAt: Date.now(),
+        stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: false,
+        isFollowing: false,
+        userLiked: false,
+      } as Post;
+    }
+    createFollowRequest(viewerHandle, handle);
+    setFollowStateKey(s.follows, handle, false);
+    saveFollowsToStorage(userId, s.follows);
+    if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+    return {
+      id,
+      userHandle: handle,
+      locationLabel: '',
+      tags: [],
+      createdAt: Date.now(),
+      stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+    } as Post;
+  }
+
+  const nextFollowing = !wasFollowing;
+  setFollowStateKey(s.follows, handle, nextFollowing);
   saveFollowsToStorage(userId, s.follows);
+  if (!nextFollowing && viewerHandle) {
+    removeFollowRequest(viewerHandle, handle);
+  }
 
   if (p) return decorateForUser(userId, p);
   // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
@@ -1828,7 +1908,7 @@ export async function toggleFollowForPost(userId: string, id: string, userHandle
     createdAt: Date.now(),
     stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
     isBookmarked: false,
-    isFollowing: !wasFollowing,
+    isFollowing: nextFollowing,
     userLiked: false
   } as Post;
 }
@@ -2726,8 +2806,6 @@ export async function createPost(
   videoFrameMode?: 'crop' | 'fit' | 'original',
   videoPosterUrl?: string,
 ): Promise<Post> {
-  // Use real Laravel API
-  const { createPost: createPostAPI } = await import('./client');
   const currentUserAccountType = (() => {
     try {
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
@@ -2740,123 +2818,131 @@ export async function createPost(
     }
   })();
 
-  try {
-    const response = await createPostAPI({
-      text: text || undefined,
-      location: location || undefined,
-      venue: venue || undefined,
-      landmark: landmark || undefined,
-      socialFormat: socialFormat || undefined,
-      mediaUrl: imageUrl || undefined,
-      mediaType: mediaType || undefined,
-      videoFrameMode: videoFrameMode || undefined,
-      videoPosterUrl: videoPosterUrl || undefined,
-      caption: caption || undefined,
-      imageText: imageText || undefined,
-      bannerText: bannerText || undefined,
-      stickers: stickers || undefined,
-      templateId: templateId || undefined,
-      mediaItems: mediaItems || undefined,
-      textStyle: textStyle || undefined,
-      taggedUsers: taggedUsers || undefined,
-      videoCaptionsEnabled: videoCaptionsEnabled || undefined,
-      videoCaptionText: videoCaptionText || undefined,
-      subtitlesEnabled: subtitlesEnabled || undefined,
-      subtitleText: subtitleText || undefined,
-      editTimeline: editTimeline || undefined,
-      musicTrackId: musicTrackId || undefined,
-    });
-
-    // Transform Laravel response using the same helper we use for feeds
-    // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
-    let transformed = transformLaravelPost(response);
-
-    // Ensure we preserve/override location from the current user when available,
-    // and always keep the venue/landmark that the creator entered so the metadata carousel
-    // and feeds can rely on them even if the API omits them.
-    const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
-      for (const v of vals) {
-        if (typeof v === 'string') {
-          const s = v.trim();
-          if (s.length > 0) return s;
-        }
-      }
-      return undefined;
-    };
-
-    const normalizedCreatedLocations = resolveAuthorLocations({
-      userHandle,
-      userLocal: userLocal ?? transformed.userLocal,
-      userRegional: userRegional ?? transformed.userRegional,
-      userNational: userNational ?? transformed.userNational,
-    });
-
-    transformed = {
-      ...transformed,
-      // Preserve user-entered copy even if API response omits it on create.
-      text: pickNonEmptyString(transformed.text, text),
-      caption: pickNonEmptyString(transformed.caption, caption, text),
-      ...normalizedCreatedLocations,
-      userAccountType: transformed.userAccountType ?? currentUserAccountType,
-      venue: venue || transformed.venue,
-      landmark: landmark || transformed.landmark,
-      socialFormat: socialFormat ?? transformed.socialFormat,
-      videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
-      videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
-      mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
-    };
-    (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
-
-    // Also store newly created posts in the local in-memory array + localStorage
-    // so Boost page and mock-mode feeds can see them immediately.
+  // Mock / offline mode: never touch the Laravel client. A dynamic import of ./client on RN
+  // can throw LoadBundleFromServerRequestError outside any catch and mark the upload failed.
+  if (isLaravelApiEnabled()) {
     try {
-      posts.unshift(transformed);
-      savePostsToStorage(posts);
-    } catch (e) {
-      console.warn('Failed to cache created post locally:', e);
+      const response = await apiClient.createPost({
+        text: text || undefined,
+        location: location || undefined,
+        venue: venue || undefined,
+        landmark: landmark || undefined,
+        socialFormat: socialFormat || undefined,
+        mediaUrl: imageUrl || undefined,
+        mediaType: mediaType || undefined,
+        videoFrameMode: videoFrameMode || undefined,
+        videoPosterUrl: videoPosterUrl || undefined,
+        caption: caption || undefined,
+        imageText: imageText || undefined,
+        bannerText: bannerText || undefined,
+        stickers: stickers || undefined,
+        templateId: templateId || undefined,
+        mediaItems: mediaItems || undefined,
+        textStyle: textStyle || undefined,
+        taggedUsers: taggedUsers || undefined,
+        videoCaptionsEnabled: videoCaptionsEnabled || undefined,
+        videoCaptionText: videoCaptionText || undefined,
+        subtitlesEnabled: subtitlesEnabled || undefined,
+        subtitleText: subtitleText || undefined,
+        editTimeline: editTimeline || undefined,
+        musicTrackId: musicTrackId || undefined,
+      });
+
+      // Transform Laravel response using the same helper we use for feeds
+      // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
+      let transformed = transformLaravelPost(response);
+
+      // Ensure we preserve/override location from the current user when available,
+      // and always keep the venue/landmark that the creator entered so the metadata carousel
+      // and feeds can rely on them even if the API omits them.
+      const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
+        for (const v of vals) {
+          if (typeof v === 'string') {
+            const s = v.trim();
+            if (s.length > 0) return s;
+          }
+        }
+        return undefined;
+      };
+
+      const normalizedCreatedLocations = resolveAuthorLocations({
+        userHandle,
+        userLocal: userLocal ?? transformed.userLocal,
+        userRegional: userRegional ?? transformed.userRegional,
+        userNational: userNational ?? transformed.userNational,
+      });
+
+      transformed = {
+        ...transformed,
+        // Preserve user-entered copy even if API response omits it on create.
+        text: pickNonEmptyString(transformed.text, text),
+        caption: pickNonEmptyString(transformed.caption, caption, text),
+        ...normalizedCreatedLocations,
+        userAccountType: transformed.userAccountType ?? currentUserAccountType,
+        venue: venue || transformed.venue,
+        landmark: landmark || transformed.landmark,
+        socialFormat: socialFormat ?? transformed.socialFormat,
+        videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
+        videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
+        mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
+      };
+      (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
+
+      // Also store newly created posts in the local in-memory array + localStorage
+      // so Boost page and mock-mode feeds can see them immediately.
+      try {
+        posts.unshift(transformed);
+        savePostsToStorage(posts);
+      } catch (e) {
+        console.warn('Failed to cache created post locally:', e);
+      }
+
+      void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
+        notifySubscribersOfCreatorPost(userHandle, transformed.id),
+      );
+
+      return transformed;
+    } catch (error: any) {
+      console.error('Error creating post via API:', error);
+      console.error('Error details:', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+        response: error?.response,
+      });
+
+      const msg = String(error?.message || '');
+      const isConnectionError =
+        error?.name === 'ConnectionRefused' ||
+        error?.name === 'LoadBundleFromServerRequestError' ||
+        msg.includes('CONNECTION_REFUSED') ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('Could not load bundle') ||
+        msg.includes('Network request failed') ||
+        (error?.name === 'TypeError' && msg.includes('fetch'));
+
+      const isAuthError =
+        msg.includes('Authentication required') ||
+        msg.includes('Unauthenticated') ||
+        error?.status === 401;
+
+      if (isConnectionError) {
+        markLaravelUnreachable();
+        console.log('⚠️ API connection failed, using mock fallback for post creation');
+        await delay(500);
+      } else if (isAuthError) {
+        console.log('⚠️ API requires authentication, using mock fallback for post creation');
+        await delay(500);
+      } else {
+        console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
+        await delay(500);
+      }
     }
+  }
 
-    void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
-      notifySubscribersOfCreatorPost(userHandle, transformed.id),
-    );
-
-    return transformed;
-  } catch (error: any) {
-    console.error('Error creating post via API:', error);
-    console.error('Error details:', {
-      name: error?.name,
-      message: error?.message,
-      status: error?.status,
-      response: error?.response
-    });
-
-    // Check if it's a connection error - if so, use mock fallback
-    const isConnectionError =
-      error?.name === 'ConnectionRefused' ||
-      error?.message?.includes('CONNECTION_REFUSED') ||
-      error?.message?.includes('Failed to fetch') ||
-      error?.message?.includes('NetworkError') ||
-      (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-
-    // Also fall back to mock when backend requires auth but user isn't logged in (e.g. no token)
-    const isAuthError =
-      error?.message?.includes('Authentication required') ||
-      error?.message?.includes('Unauthenticated') ||
-      error?.status === 401;
-
-    if (isConnectionError) {
-      console.log('⚠️ API connection failed, using mock fallback for post creation');
-      console.log('This is normal when backend is not running or not accessible from your device');
-      await delay(500);
-    } else if (isAuthError) {
-      console.log('⚠️ API requires authentication, using mock fallback for post creation');
-      await delay(500);
-    } else {
-      // For other errors (validation, etc), still fall back to mock so local dev always works
-      console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
-      await delay(500);
-    }
-
+  // Mock create (local-only) — used when API is off or after API failure.
+  {
     // Helper function to convert blob URL to data URL for persistence
     async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {

@@ -232,6 +232,7 @@ import {
     saveLocationNotifyPrefs,
 } from '../utils/locationNotifyPrefNative';
 import { useMutualFollow } from '../hooks/useMutualFollow';
+import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard.native';
 import SuggestedPlacesFeedSection from '../components/SuggestedPlacesFeedSection.native';
 import LocalBusinessSuggestionCard from '../components/LocalBusinessSuggestionCard.native';
@@ -1008,6 +1009,13 @@ const FeedCard = React.memo(function FeedCard({
     );
     const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
     const { profileHandle } = getReclipDisplay(post, viewerHandle);
+    const isRequested = Boolean(
+        !isCurrentUser &&
+            !post.isFollowing &&
+            viewerHandle &&
+            isProfilePrivate(profileHandle) &&
+            hasPendingFollowRequest(viewerHandle, profileHandle),
+    );
     const postTags = Array.isArray(post.tags) ? post.tags : [];
     const showBoostMetrics =
         isCurrentUser && !post.originalUserHandle && (post.isBoosted || boostMetricsActive);
@@ -1342,6 +1350,7 @@ const FeedCard = React.memo(function FeedCard({
                 isMutualFollow={isMutualFollow}
                 hasStory={headerHasStory}
                 isFollowing={post.isFollowing === true}
+                isRequested={isRequested}
                 onClose={closeProfileMenu}
                 onVisitProfile={() => {
                     if (onVisitHandle) onVisitHandle(profileHandle);
@@ -1365,6 +1374,8 @@ const FeedCard = React.memo(function FeedCard({
         a.userLiked === b.userLiked &&
         a.isBookmarked === b.isBookmarked &&
         a.isFollowing === b.isFollowing &&
+        (a as { isFollowRequested?: boolean }).isFollowRequested ===
+            (b as { isFollowRequested?: boolean }).isFollowRequested &&
         a.stats.likes === b.stats.likes &&
         a.stats.comments === b.stats.comments &&
         a.stats.views === b.stats.views &&
@@ -1504,6 +1515,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const pendingFeedScrollRestoreRef = useRef<number | null>(null);
     const pendingStories24CollapseRef = useRef<Stories24RailReturnPayload | null>(null);
     const feedLoadGenRef = useRef(0);
+    /** Keeps freshly created posts visible if a force-refresh finishes after upload complete. */
+    const recentCreatedPostsRef = useRef<Post[]>([]);
     const feedRetryBusyRef = useRef(false);
     const pagesRef = useRef<Post[][]>([]);
     const feedFetchCtxRef = useRef({
@@ -2200,9 +2213,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, []);
 
+    // Avoid leaking another account's just-created posts into this viewer's feed.
+    useEffect(() => {
+        recentCreatedPostsRef.current = [];
+    }, [userId]);
+
     useEffect(() => {
         return subscribePendingFeedUploadComplete((tempId, createdPost) => {
             const decorated = decorateForUser(userId, createdPost);
+            recentCreatedPostsRef.current = [
+                decorated,
+                ...recentCreatedPostsRef.current.filter((p) => String(p.id) !== String(decorated.id)),
+            ].slice(0, 20);
             setPages((prev) => {
                 if (prev.length === 0) {
                     return [[decorated]];
@@ -2224,8 +2246,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const applyFeedPageResult = React.useCallback(
         (items: Post[], nextCursor: string | number | null) => {
-            if (items.length > 0) {
-                setPages([items]);
+            const recent = recentCreatedPostsRef.current;
+            const recentIds = new Set(recent.map((p) => String(p.id)));
+            const withoutDupes = items.filter((p) => !recentIds.has(String(p.id)));
+            const merged = recent.length > 0 ? [...recent, ...withoutDupes] : items;
+            if (merged.length > 0) {
+                setPages([merged]);
                 setCursor(nextCursor);
                 setEnd(nextCursor == null);
             } else {
@@ -2280,8 +2306,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             const msg = err instanceof Error ? err.message : '';
             setError(msg.includes('timed out') ? 'Feed load timed out' : 'Failed to load feed');
-            setPages([]);
-            setEnd(true);
+            // Keep just-created posts visible even when the feed fetch fails/times out.
+            applyFeedPageResult([], null);
         } finally {
             firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
@@ -2921,8 +2947,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         async (post: Post) => {
             if (!user) return;
             try {
-                const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
-                setPages((prev) => prev.map((page) => page.map((p) => (p.id === post.id ? updated : p))));
+                const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user.handle);
+                const isFollowRequested = Boolean(
+                    !updated.isFollowing &&
+                        user.handle &&
+                        isProfilePrivate(post.userHandle) &&
+                        hasPendingFollowRequest(user.handle, post.userHandle),
+                );
+                setPages((prev) =>
+                    prev.map((page) =>
+                        page.map((p) =>
+                            p.id === post.id ? ({ ...updated, isFollowRequested } as Post) : p,
+                        ),
+                    ),
+                );
             } catch (err) {
                 console.error('Follow from suggestion card failed:', err);
             }
@@ -2944,9 +2982,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onFollow={async (post) => {
                             if (!user) return;
                             try {
-                                const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
+                                const updated = await toggleFollowForPost(
+                                    userId,
+                                    post.id,
+                                    post.userHandle,
+                                    user?.handle,
+                                );
+                                const isFollowRequested = Boolean(
+                                    !updated.isFollowing &&
+                                        user?.handle &&
+                                        isProfilePrivate(post.userHandle) &&
+                                        hasPendingFollowRequest(user.handle, post.userHandle),
+                                );
                                 setPages((prev) =>
-                                    prev.map((page) => page.map((p) => (p.id === post.id ? updated : p))),
+                                    prev.map((page) =>
+                                        page.map((p) =>
+                                            p.id === post.id
+                                                ? ({ ...updated, isFollowRequested } as Post)
+                                                : p,
+                                        ),
+                                    ),
                                 );
                             } catch (err) {
                                 console.error('Follow from suggested card failed:', err);
@@ -3119,12 +3174,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             const updated = await toggleFollowForPost(
                                 userId,
                                 mergedPost.id,
-                                mergedPost.userHandle
+                                mergedPost.userHandle,
+                                user.handle,
+                            );
+                            const isFollowRequested = Boolean(
+                                !updated.isFollowing &&
+                                    user.handle &&
+                                    isProfilePrivate(mergedPost.userHandle) &&
+                                    hasPendingFollowRequest(user.handle, mergedPost.userHandle),
                             );
                             setPages((prev) =>
                                 prev.map((page) =>
-                                    page.map((p) => (p.id === mergedPost.id ? updated : p))
-                                )
+                                    page.map((p) =>
+                                        p.id === mergedPost.id
+                                            ? ({ ...updated, isFollowRequested } as Post)
+                                            : p,
+                                    ),
+                                ),
                             );
                         } catch (err) {
                             console.error('Error toggling follow in FeedScreen:', err);
@@ -3794,7 +3860,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     const updated = await toggleFollowForPost(
                         userId,
                         overflowPost.id,
-                        overflowPost.userHandle
+                        overflowPost.userHandle,
+                        user?.handle,
                     );
                     updatePost(overflowPost.id, (p) => ({
                         ...p,

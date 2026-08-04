@@ -46,12 +46,12 @@ import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/c
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { getAvatarForHandle } from '../api/users';
-import { getPostById, getFollowedUsers, getState, setFollowState } from '../api/posts';
+import { getPostById, getFollowedUsers, getState, setFollowState, getFollowState } from '../api/posts';
 import { fetchUserProfile, toggleFollow } from '../api/client';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
 import { extractPostId } from '../utils/extractPostId';
 import { DmSharedPostCard, DmSharedPostPreviewCard } from '../components/DmSharedPostCard.native';
-import { isProfilePrivate, hasPendingFollowRequest } from '../api/privacy';
+import { isProfilePrivate, hasPendingFollowRequest, createFollowRequest, removeFollowRequest } from '../api/privacy';
 import type { Post } from '../types';
 import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
@@ -560,10 +560,25 @@ export default function MessagesScreen({ route, navigation }: any) {
                 return;
             }
             const s = getState(user.id);
-            const wasFollowing = s.follows[handle] === true;
+            const wasFollowing = getFollowState(s.follows, handle);
+            if (profilePrivate && !wasFollowing) {
+                createFollowRequest(user.handle, handle);
+                setFollowState(user.id, handle, false);
+                setIsFollowing(false);
+                showAlert({
+                    title: 'Follow Request Sent',
+                    message: `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
+                    icon: 'success',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
             const newFollowingState = !wasFollowing;
             setFollowState(user.id, handle, newFollowingState);
             setIsFollowing(newFollowingState);
+            if (!newFollowingState) {
+                removeFollowRequest(user.handle, handle);
+            }
             try {
                 const result = await toggleFollow(handle);
                 if (result && typeof result.following === 'boolean') {
@@ -574,7 +589,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 // keep optimistic local state
             }
         } catch {
-            const current = getState(user.id).follows[handle] === true;
+            const current = getFollowState(getState(user.id).follows, handle);
             setIsFollowing(current);
             showAlert({
                 title: 'Action failed',
