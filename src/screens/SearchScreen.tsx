@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,13 +7,13 @@ import { unifiedSearch, type SearchSections } from '../api/search';
 import { searchLocations, type LocationSuggestion } from '../api/locations';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
-import { toggleFollow } from '../api/client';
+import { followOrRequest } from '../utils/followOrRequest';
+import { hasPendingFollowRequest } from '../api/privacy';
 import { useAuth } from '../context/Auth';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { ox } from '../constants/nativeOpticalScale';
-
 
 type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
 type SearchRefinement = 'all' | 'local' | 'regional';
@@ -77,6 +77,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [savedSearches, setSavedSearches] = useState<RecentSearchItem[]>([]);
     const [followBusyHandle, setFollowBusyHandle] = useState<string | null>(null);
     const [localFollowState, setLocalFollowState] = useState<Record<string, boolean>>({});
+    const [localRequestState, setLocalRequestState] = useState<Record<string, boolean>>({});
     const [suggestedUsers, setSuggestedUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [placeSuggestions, setPlaceSuggestions] = useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = useState(false);
@@ -179,9 +180,20 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
             .then((r) => {
                 const items = Array.isArray(r.sections?.users?.items) ? r.sections!.users!.items : [];
                 setSuggestedUsers(items);
+                if (user?.handle) {
+                    const nextRequests: Record<string, boolean> = {};
+                    for (const item of items) {
+                        if (item?.handle && hasPendingFollowRequest(user.handle, item.handle)) {
+                            nextRequests[item.handle] = true;
+                        }
+                    }
+                    if (Object.keys(nextRequests).length > 0) {
+                        setLocalRequestState((prev) => ({ ...prev, ...nextRequests }));
+                    }
+                }
             })
             .catch(() => setSuggestedUsers([]));
-    }, [user?.local]);
+    }, [user?.local, user?.handle]);
 
     useEffect(() => {
         if (searchMode === 'nearby') {
@@ -399,13 +411,33 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     };
 
     const onToggleFollowSuggested = async (handle: string) => {
+        if (!user?.id || !user?.handle) {
+            Alert.alert('Sign in required', 'Log in to follow people.');
+            return;
+        }
         setFollowBusyHandle(handle);
         try {
-            const result = await toggleFollow(handle);
-            const nextFollowing = result?.status === 'accepted' || result?.following === true;
-            setLocalFollowState((prev) => ({ ...prev, [handle]: nextFollowing }));
+            const wasFollowing = localFollowState[handle] === true;
+            const wasRequested =
+                localRequestState[handle] === true ||
+                Boolean(user.handle && hasPendingFollowRequest(user.handle, handle));
+            const nextFollowing = wasFollowing ? false : wasRequested ? false : true;
+            const result = await followOrRequest({
+                userId: String(user.id),
+                targetHandle: handle,
+                viewerHandle: user.handle,
+                nextFollowing,
+            });
+            setLocalFollowState((prev) => ({ ...prev, [handle]: result.following }));
+            setLocalRequestState((prev) => ({ ...prev, [handle]: result.requested }));
+            if (result.requested && !wasRequested) {
+                Alert.alert(
+                    'Follow Request Sent',
+                    `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
+                );
+            }
         } catch {
-            // no-op
+            Alert.alert('Action failed', 'Could not update follow status right now.');
         } finally {
             setFollowBusyHandle(null);
         }
@@ -782,14 +814,24 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                             </View>
                                         </TouchableOpacity>
                                         <TouchableOpacity
-                                            style={[styles.suggestFollowBtn, localFollowState[u.handle] && styles.suggestFollowingBtn]}
+                                            style={[
+                                                styles.suggestFollowBtn,
+                                                (localFollowState[u.handle] || localRequestState[u.handle]) &&
+                                                    styles.suggestFollowingBtn,
+                                            ]}
                                             disabled={followBusyHandle === u.handle}
                                             onPress={() => void onToggleFollowSuggested(u.handle)}
                                         >
                                             {followBusyHandle === u.handle ? (
                                                 <ActivityIndicator size="small" color="#FFFFFF" />
                                             ) : (
-                                                <Text style={styles.suggestFollowText}>{localFollowState[u.handle] ? 'Following' : 'Follow'}</Text>
+                                                <Text style={styles.suggestFollowText}>
+                                                    {localFollowState[u.handle]
+                                                        ? 'Following'
+                                                        : localRequestState[u.handle]
+                                                          ? 'Requested'
+                                                          : 'Follow'}
+                                                </Text>
                                             )}
                                         </TouchableOpacity>
                                     </View>

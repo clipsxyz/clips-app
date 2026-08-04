@@ -208,7 +208,8 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     const tryReclip = async () => {
         if (!post || !user?.handle) return;
-        if (post.userHandle === user.handle) {
+        const norm = (h?: string) => String(h || '').trim().toLowerCase();
+        if (norm(post.userHandle) === norm(user.handle)) {
             Alert.alert('Cannot reclip', 'You cannot reclip your own post.');
             return;
         }
@@ -216,7 +217,8 @@ export default function PostDetailScreen({ route, navigation }: any) {
             Alert.alert('Already reclipped', 'You have already reclipped this post.');
             return;
         }
-        const newReclips = post.stats.reclips + 1;
+        const prevReclips = post.stats.reclips;
+        const newReclips = prevReclips + 1;
         setReclipState(userId, post.id, true);
         setPost((p) =>
             p
@@ -228,9 +230,21 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 : null
         );
         try {
-            await reclipPost(userId, post.id, user.handle);
+            const result = await reclipPost(userId, post.id, user.handle);
+            if (result.originalPost) setPost(result.originalPost);
         } catch (err: any) {
-            console.warn('Reclip failed (UI already updated):', err);
+            console.warn('Reclip failed:', err);
+            setReclipState(userId, post.id, false);
+            setPost((p) =>
+                p
+                    ? {
+                          ...p,
+                          userReclipped: false,
+                          stats: { ...p.stats, reclips: prevReclips },
+                      }
+                    : null,
+            );
+            Alert.alert('Could not reclip', err?.message || 'Please try again.');
         }
     };
 

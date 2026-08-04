@@ -446,18 +446,29 @@ export default function ScenesViewer({
     }, [activePost, patchPost, viewerHandle, viewerUserId]);
 
     const handleReclip = useCallback(async () => {
-        if (!activePost || !viewerHandle || activePost.userHandle === viewerHandle) return;
+        if (!activePost || !viewerHandle) return;
+        const norm = (h?: string) => String(h || '').trim().toLowerCase();
+        if (norm(activePost.userHandle) === norm(viewerHandle)) return;
         if (activePost.userReclipped) return;
-        const nextReclips = activePost.stats.reclips + 1;
+        const prevReclips = activePost.stats.reclips;
+        const nextReclips = prevReclips + 1;
         setReclipState(viewerUserId, activePost.id, true);
         patchPost(activePost.id, {
             userReclipped: true,
             stats: { ...activePost.stats, reclips: nextReclips },
         });
         try {
-            await reclipPost(viewerUserId, activePost.id, viewerHandle);
+            const result = await reclipPost(viewerUserId, activePost.id, viewerHandle);
+            if (result.originalPost) {
+                patchPost(activePost.id, result.originalPost);
+            }
         } catch (err) {
             console.warn('Reclip failed in Scenes:', err);
+            setReclipState(viewerUserId, activePost.id, false);
+            patchPost(activePost.id, {
+                userReclipped: false,
+                stats: { ...activePost.stats, reclips: prevReclips },
+            });
         }
     }, [activePost, patchPost, viewerHandle, viewerUserId]);
 

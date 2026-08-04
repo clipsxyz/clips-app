@@ -52,7 +52,7 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, fetchFollowers, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, fetchFollowers, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
@@ -1265,10 +1265,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                         <TouchableOpacity
                                             style={styles.inviteFollowBtn}
                                             onPress={async () => {
-                                                try {
-                                                    await toggleFollow(friend.handle);
+                                                if (!user?.id || !user?.handle) {
                                                     showProfileAlert({
-                                                        title: 'Followed',
+                                                        title: 'Sign in required',
+                                                        message: 'Log in to follow people.',
+                                                        icon: 'alert',
+                                                    });
+                                                    return;
+                                                }
+                                                try {
+                                                    const { followOrRequest } = await import('../utils/followOrRequest');
+                                                    const result = await followOrRequest({
+                                                        userId: String(user.id),
+                                                        targetHandle: friend.handle,
+                                                        viewerHandle: user.handle,
+                                                        nextFollowing: true,
+                                                    });
+                                                    showProfileAlert({
+                                                        title: result.requested
+                                                            ? 'Follow Request Sent'
+                                                            : result.following
+                                                              ? 'Followed'
+                                                              : 'Updated',
                                                         message: friend.handle,
                                                         icon: 'success',
                                                     });

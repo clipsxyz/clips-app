@@ -22,8 +22,9 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers, setFollowState, toggleLike, reclipPost, posts as allPosts } from '../api/posts';
-import { fetchUserProfile, toggleFollow, fetchFollowers, fetchFollowing } from '../api/client';
+import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts } from '../api/posts';
+import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
+import { followOrRequest } from '../utils/followOrRequest';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { userHasStoriesByHandle } from '../api/stories';
 import {
@@ -31,9 +32,6 @@ import {
     canViewProfile,
     hasPendingFollowRequest,
     canSendMessage,
-    createFollowRequest,
-    removeFollowRequest,
-    normalizeHandleForPrivacy,
 } from '../api/privacy';
 import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
@@ -325,102 +323,44 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             Alert.alert('Error', 'Unable to follow user. Please try again.');
             return;
         }
-        if (!user?.handle && isProfilePrivate(decodeURIComponent(handle))) {
+        if (!user?.handle) {
             Alert.alert('Error', 'Unable to send follow request. Please sign in with a full profile.');
             return;
         }
 
         const decodedHandle = decodeURIComponent(handle);
         const handleToUse = profileUser?.handle || decodedHandle;
-        const canonicalHandle = normalizeHandleForPrivacy(handleToUse);
         const wasFollowingBeforeClick = isFollowing;
-        const profilePrivate = isProfilePrivate(canonicalHandle);
         const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
-        const isKnownMockUser = Boolean(getAvatarForHandle(handleToUse));
-
-        // Mock-only / known demo handles (Ava@galway etc.): local follow — no Laravel account required.
-        if (!isLaravelApiEnabled() || isKnownMockUser) {
-            const newFollowing = !wasFollowingBeforeClick;
-            if (profilePrivate && newFollowing && user?.handle) {
-                createFollowRequest(user.handle, canonicalHandle);
-                setHasPendingRequest(true);
-                setIsFollowing(false);
-                setFollowState(followUserId, handleToUse, false);
-                setShowFollowRequestAlert(true);
-            } else {
-                setFollowState(followUserId, handleToUse, newFollowing);
-                setIsFollowing(newFollowing);
-                setHasPendingRequest(false);
-                if (!newFollowing) {
-                    if (user?.handle) {
-                        void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
-                        setPostNotifyLevel('off');
-                        setPostNotifySheetMode(null);
-                    }
-                    setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
-                } else {
-                    setStats((prev) => ({ ...prev, followers: prev.followers + 1 }));
-                }
-                if (profilePrivate) setCanView(newFollowing);
-            }
-            return;
-        }
 
         try {
-            const followedUsers = await getFollowedUsers(followUserId);
-            const isCurrentlyFollowing = followedUsers.some(
-                (h) => h.toLowerCase() === handleToUse.toLowerCase(),
-            );
-
-            let result;
-            try {
-                result = await toggleFollow(decodedHandle);
-            } catch {
-                // API down — fall back to local follow state
-                const nextFollowing = !isCurrentlyFollowing;
-                setFollowState(followUserId, handleToUse, nextFollowing);
-                setIsFollowing(nextFollowing);
-                setHasPendingRequest(false);
-                if (!nextFollowing && user?.handle) {
-                    void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
-                    setPostNotifyLevel('off');
-                    setPostNotifySheetMode(null);
-                }
-                setStats((prev) => ({
-                    ...prev,
-                    followers: Math.max(0, prev.followers + (nextFollowing ? 1 : -1)),
-                }));
-                if (profilePrivate) setCanView(nextFollowing);
-                return;
-            }
-
-            if (result.status === 'unfollowed') {
-                setFollowState(followUserId, handleToUse, false);
-                if (posts[0]?.id) {
-                    await toggleFollowForPost(followUserId, posts[0].id, handleToUse);
-                }
-                setIsFollowing(false);
-                setHasPendingRequest(false);
-                if (user?.handle) {
-                    void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
-                    setPostNotifyLevel('off');
-                    setPostNotifySheetMode(null);
-                }
-                setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
-                if (profilePrivate) setCanView(false);
-            } else if (result.status === 'pending') {
-                setHasPendingRequest(true);
-                setIsFollowing(false);
+            // Requested → cancel; Following → unfollow; else → follow/request.
+            const nextFollowing = hasPendingRequest
+                ? false
+                : !wasFollowingBeforeClick;
+            const wasRequested = hasPendingRequest;
+            const result = await followOrRequest({
+                userId: followUserId,
+                targetHandle: handleToUse,
+                viewerHandle: user.handle,
+                nextFollowing,
+            });
+            setIsFollowing(result.following);
+            setHasPendingRequest(result.requested);
+            if (result.requested && !wasRequested) {
                 setShowFollowRequestAlert(true);
-            } else if (result.status === 'accepted' || result.following === true) {
-                setFollowState(followUserId, handleToUse, true);
-                if (posts[0]?.id) {
-                    await toggleFollowForPost(followUserId, posts[0].id, handleToUse);
-                }
-                setIsFollowing(true);
-                setHasPendingRequest(false);
-                setCanView(true);
+            }
+            if (!result.following && !result.requested && wasFollowingBeforeClick) {
+                void clearProfilePostNotifyForCreatorMobile(followUserId, user.handle, handleToUse);
+                setPostNotifyLevel('off');
+                setPostNotifySheetMode(null);
+                setStats((prev) => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
+                setCanView(canViewProfile(user.handle, handleToUse, await getFollowedUsers(followUserId)));
+            } else if (result.following && !wasFollowingBeforeClick) {
                 setStats((prev) => ({ ...prev, followers: prev.followers + 1 }));
+                setCanView(true);
+            } else if (result.requested) {
+                setCanView(false);
             }
         } catch (error: any) {
             console.error('Error toggling follow:', error);
@@ -732,50 +672,41 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     });
 
     const toggleConnectionFollow = async (entryHandle: string) => {
-        if (!user) return;
+        if (!user?.id || !user?.handle) return;
         if (connectionActionLoadingMap[entryHandle]) return;
         const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
         const key = entryHandle;
         const current = connectionFollowMap[key] === true;
         const requested = connectionRequestMap[key] === true;
-        const row =
-            followersList.find((r) => r.handleNoAt === key) ||
-            followingList.find((r) => r.handleNoAt === key) ||
-            suggestedList.find((r) => r.handleNoAt === key);
-        const rowPrivate = !!row?.isPrivate || isProfilePrivate(key);
 
         setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: true }));
         try {
-            if (!current && rowPrivate && requested) {
-                if (user?.handle) removeFollowRequest(user.handle, key);
+            if (!current && requested) {
+                // Second tap on Requested cancels the local pending request.
+                const result = await followOrRequest({
+                    userId: followUserId,
+                    targetHandle: key,
+                    viewerHandle: user.handle,
+                    nextFollowing: false,
+                });
+                setConnectionFollowMap((prev) => ({ ...prev, [key]: result.following }));
                 setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
                 return;
             }
-            if (!current && rowPrivate) {
-                if (user?.handle) createFollowRequest(user.handle, key);
-                setConnectionRequestMap((prev) => ({ ...prev, [key]: true }));
-                return;
-            }
 
-            const nextFollowing = !current;
-            setConnectionFollowMap((prev) => ({ ...prev, [key]: nextFollowing }));
-            setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
+            const result = await followOrRequest({
+                userId: followUserId,
+                targetHandle: key,
+                viewerHandle: user.handle,
+                nextFollowing: !current,
+            });
+            setConnectionFollowMap((prev) => ({ ...prev, [key]: result.following }));
+            setConnectionRequestMap((prev) => ({ ...prev, [key]: result.requested }));
             const nextSet = new Set(viewerFollowedSet);
             const norm = normalizeHandleKey(key);
-            if (nextFollowing) nextSet.add(norm);
+            if (result.following) nextSet.add(norm);
             else nextSet.delete(norm);
             setViewerFollowedSet(nextSet);
-
-            if (!isLaravelApiEnabled()) {
-                setFollowState(followUserId, key, nextFollowing);
-            } else {
-                try {
-                    await toggleFollow(key);
-                } catch {
-                    /* fall through to local state */
-                }
-                setFollowState(followUserId, key, nextFollowing);
-            }
         } catch (error) {
             console.error('Failed to toggle connection follow:', error);
             setConnectionFollowMap((prev) => ({ ...prev, [key]: current }));
@@ -826,13 +757,21 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
     const handlePeekReclip = async () => {
         if (!gridPeekPost || !user?.id || !user?.handle || isOwnProfile) return;
+        const norm = (h?: string) => String(h || '').trim().toLowerCase();
+        if (norm(gridPeekPost.userHandle) === norm(user.handle)) {
+            Alert.alert('Cannot reclip', 'You cannot reclip your own post.');
+            return;
+        }
         try {
-            await reclipPost(user.id, gridPeekPost.id, user.handle);
+            setReclipState(String(user.id), gridPeekPost.id, true);
+            const result = await reclipPost(user.id, gridPeekPost.id, user.handle);
+            if (result.originalPost) syncPeekPost(result.originalPost);
             closeGridPeek();
-            Alert.alert('Reposted', 'Post added to your profile.');
-        } catch (error) {
+            Alert.alert('Reposted', 'Post added to your Following feed and profile.');
+        } catch (error: any) {
             console.error('Reclip failed:', error);
-            Alert.alert('Could not repost', 'Please try again.');
+            setReclipState(String(user.id), gridPeekPost.id, false);
+            Alert.alert('Could not repost', error?.message || 'Please try again.');
         }
     };
 

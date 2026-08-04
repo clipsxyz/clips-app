@@ -2229,8 +2229,9 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
     throw new Error(`Original post with id ${originalPostId} not found`);
   }
 
-  // Prevent users from reclipping their own posts
-  if (originalPost.userHandle === userHandle) {
+  // Prevent users from reclipping their own posts (case-insensitive)
+  const norm = (h?: string) => String(h || '').trim().toLowerCase();
+  if (norm(originalPost.userHandle) === norm(userHandle)) {
     console.log('Cannot reclip your own post:', originalPostId);
     throw new Error('Cannot reclip your own post');
   }

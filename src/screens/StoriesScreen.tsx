@@ -63,10 +63,10 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, setFollowState, toggleLike, reclipPost, fetchComments } from '../api/posts';
-import { toggleFollow } from '../api/client';
+import { getFollowedUsers, getPostById, getState, getFollowState, toggleLike, reclipPost, fetchComments } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { followOrRequest } from '../utils/followOrRequest';
+import { hasPendingFollowRequest } from '../api/privacy';
 import { getCollectionsForPost } from '../api/collections';
 import type { Post, Story, StoryGroup } from '../types';
 import Avatar from '../components/Avatar';
@@ -127,6 +127,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [sharedPostFetchFailed, setSharedPostFetchFailed] = useState(false);
     const [showStoryProfileCard, setShowStoryProfileCard] = useState(false);
     const [isFollowingStoryUser, setIsFollowingStoryUser] = useState(false);
+    const [storyFollowRequested, setStoryFollowRequested] = useState(false);
     const [isFollowLoading, setIsFollowLoading] = useState(false);
     const [showSharedPostModal, setShowSharedPostModal] = useState(false);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
@@ -243,15 +244,24 @@ export default function StoriesScreen({ route, navigation }: any) {
     useEffect(() => {
         if (!viewingStories || !currentGroup?.userHandle || !user?.id) {
             setIsFollowingStoryUser(false);
+            setStoryFollowRequested(false);
             return;
         }
         if (currentGroup.userHandle === user.handle) {
             setIsFollowingStoryUser(false);
+            setStoryFollowRequested(false);
             return;
         }
         if (user?.id) {
             const cached = getFollowState(getState(user.id).follows || {}, currentGroup.userHandle);
             setIsFollowingStoryUser(cached);
+            setStoryFollowRequested(
+                Boolean(
+                    user.handle &&
+                        !cached &&
+                        hasPendingFollowRequest(user.handle, currentGroup.userHandle),
+                ),
+            );
         }
     }, [viewingStories, currentGroup?.userHandle, user?.id, user?.handle]);
 
@@ -639,34 +649,31 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, []);
 
     const handleStoryFollowQuickToggle = async () => {
-        if (!currentGroup?.userHandle || !user?.id || isFollowLoading) return;
+        if (!currentGroup?.userHandle || !user?.id || !user?.handle || isFollowLoading) return;
         const handle = currentGroup.userHandle;
-        const nextFollowing = !isFollowingStoryUser;
-        // Optimistic + local-first so mock users (Ava@galway etc.) work even when Laravel has no account
-        setIsFollowingStoryUser(nextFollowing);
-        setFollowState(user.id, handle, nextFollowing);
-        setShowStoryProfileCard(false);
-
-        const isKnownMockUser = Boolean(getAvatarForHandle(handle));
-        if (isKnownMockUser || !isLaravelApiEnabled()) {
-            return;
-        }
-
+        const wasRequested = storyFollowRequested;
+        const nextFollowing = isFollowingStoryUser ? false : wasRequested ? false : true;
         setIsFollowLoading(true);
+        setShowStoryProfileCard(false);
         try {
-            const result = await toggleFollow(handle);
-            const resolved =
-                typeof result?.following === 'boolean'
-                    ? result.following
-                    : result?.status === 'accepted'
-                      ? true
-                      : result?.status === 'unfollowed'
-                        ? false
-                        : nextFollowing;
-            setIsFollowingStoryUser(resolved);
-            setFollowState(user.id, handle, resolved);
+            const result = await followOrRequest({
+                userId: String(user.id),
+                targetHandle: handle,
+                viewerHandle: user.handle,
+                nextFollowing,
+            });
+            setIsFollowingStoryUser(result.following);
+            setStoryFollowRequested(result.requested);
+            if (result.requested && !wasRequested) {
+                Alert.alert(
+                    'Follow Request Sent',
+                    `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
+                );
+            }
         } catch {
-            // Keep optimistic local follow — demo / offline accounts
+            // Keep prior local follow on hard failure
+            setIsFollowingStoryUser(isFollowingStoryUser);
+            setStoryFollowRequested(storyFollowRequested);
         } finally {
             setIsFollowLoading(false);
         }
@@ -750,7 +757,8 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const handleFullscreenReclip = async () => {
         if (!imageFullscreenPost || !user?.id || !user?.handle) return;
-        if (imageFullscreenPost.userHandle === user.handle) {
+        const norm = (h?: string) => String(h || '').trim().toLowerCase();
+        if (norm(imageFullscreenPost.userHandle) === norm(user.handle)) {
             Alert.alert('Cannot reclip', 'You can’t reclip your own post.');
             return;
         }
@@ -767,7 +775,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     },
                 });
             }
-            Alert.alert('Reposted', 'Post added to your profile.');
+            Alert.alert('Reposted', 'Post added to your Following feed and profile.');
         } catch (error) {
             console.error('Fullscreen reclip failed:', error);
             Alert.alert('Could not repost', 'Please try again.');
@@ -1200,7 +1208,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                             !!currentGroup.userHandle &&
                             !!user?.handle &&
                             currentGroup.userHandle !== user.handle &&
-                            !isFollowingStoryUser
+                            !isFollowingStoryUser &&
+                            !storyFollowRequested
                         }
                         followLoading={isFollowLoading}
                         metadataItems={storyMetadataItems}
@@ -1218,6 +1227,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         <View style={styles.profileCardHost} pointerEvents="box-none">
                             <StoryProfileCard
                                 isFollowing={isFollowingStoryUser}
+                                isRequested={storyFollowRequested}
                                 followLoading={isFollowLoading}
                                 isOwnStory={false}
                                 onViewProfile={() => {

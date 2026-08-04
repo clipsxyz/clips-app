@@ -2020,7 +2020,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const tryReclipPost = React.useCallback(
         async (p: Post) => {
-            if (!user || p.userHandle === user.handle) {
+            const norm = (h?: string) => String(h || '').trim().toLowerCase();
+            if (!user || norm(p.userHandle) === norm(user.handle)) {
                 setFeedGazetteerAlert({
                     title: 'Cannot reclip',
                     message: 'You cannot reclip your own post',
@@ -2045,7 +2046,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const p = reclipConfirmPost;
         setReclipConfirmPost(null);
         if (!p || !user) return;
-        const newReclips = p.stats.reclips + 1;
+        const prevReclips = p.stats.reclips;
+        const newReclips = prevReclips + 1;
         setReclipState(userId, p.id, true);
         updatePost(p.id, (prev) => ({
             ...prev,
@@ -2053,11 +2055,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             stats: { ...prev.stats, reclips: newReclips },
         }));
         try {
-            await reclipPost(userId, p.id, user.handle);
+            const result = await reclipPost(userId, p.id, user.handle);
+            if (result.originalPost) {
+                updatePost(p.id, () => result.originalPost);
+            }
+            // Following feed should pick up your reclip on next load.
+            if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                setReloadTick((t) => t + 1);
+            }
         } catch (err: any) {
-            console.warn('Reclip failed (UI already updated):', err);
+            console.warn('Reclip failed:', err);
+            setReclipState(userId, p.id, false);
+            updatePost(p.id, (prev) => ({
+                ...prev,
+                userReclipped: false,
+                stats: { ...prev.stats, reclips: prevReclips },
+            }));
+            setFeedGazetteerAlert({
+                title: 'Could not reclip',
+                message: err?.message || 'Please try again.',
+                icon: 'alert',
+            });
         }
-    }, [reclipConfirmPost, user, userId, updatePost]);
+    }, [reclipConfirmPost, user, userId, updatePost, showFollowingFeed, currentFilter]);
 
     useEffect(() => {
         if (user?.national) {
