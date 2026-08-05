@@ -6,7 +6,6 @@ import {
     NativeSyntheticEvent,
     Platform,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     View,
@@ -14,6 +13,7 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
+import { RectButton, ScrollView } from 'react-native-gesture-handler';
 import type { StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -38,7 +38,7 @@ import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 
-const FEED_DOUBLE_TAP_MS = 300;
+const FEED_DOUBLE_TAP_MS = 280;
 
 export type FeedPostMediaHandle = {
     toggleVideoMute: () => void;
@@ -71,8 +71,6 @@ type Props = {
     style?: StyleProp<ViewStyle>;
     /** Feed video: opens vertical Scenes viewer. */
     onOpenScenes?: () => void;
-    /** Feed card tap layer lives in FeedScreen (above native media surfaces). */
-    feedTouchesHandledExternally?: boolean;
 };
 
 const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function FeedPostMedia(
@@ -92,7 +90,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         muted = true,
         style,
         onOpenScenes,
-        feedTouchesHandledExternally = false,
     },
     ref,
 ) {
@@ -300,15 +297,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     }, [post, textOnly]);
 
     const feedTapCapture =
-        mode === 'feed' &&
-        !feedTouchesHandledExternally &&
-        Boolean(onDoubleLike || onSingleTap || onPress);
+        mode === 'feed' && Boolean(onDoubleLike || onSingleTap || onPress);
 
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
-    const mediaPointerEvents =
-        mode === 'feed' && (feedTapCapture || feedTouchesHandledExternally)
-            ? ('none' as const)
-            : undefined;
+    const mediaPointerEvents = mode === 'feed' && feedTapCapture ? ('none' as const) : undefined;
 
     const clearPendingSingleTap = useCallback(() => {
         if (singleTapTimerRef.current) {
@@ -317,51 +309,33 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         }
     }, []);
 
-    const resolveLocalTap = useCallback(
-        (e: GestureResponderEvent): { x: number; y: number } => {
-            const { locationX, locationY } = e.nativeEvent;
-            if (typeof locationX === 'number' && typeof locationY === 'number') {
-                return { x: locationX, y: locationY };
-            }
-            return { x: width / 2, y: height / 2 };
-        },
-        [height, width],
-    );
+    const handleMediaTap = useCallback(() => {
+        if (onPress && !onDoubleLike && !onSingleTap) {
+            onPress();
+            return;
+        }
 
-    const handleMediaTap = useCallback(
-        (e: GestureResponderEvent) => {
-            if (onPress && !onDoubleLike && !onSingleTap) {
-                onPress(e);
-                return;
-            }
+        const now = Date.now();
+        const timeSinceLastTap = now - lastTapRef.current;
 
-            const now = Date.now();
-            const timeSinceLastTap = now - lastTapRef.current;
+        clearPendingSingleTap();
 
-            clearPendingSingleTap();
+        if (timeSinceLastTap < FEED_DOUBLE_TAP_MS && lastTapRef.current > 0) {
+            lastTapRef.current = 0;
+            fireBurstAt(width / 2, height / 2);
+            onDoubleLike?.();
+            return;
+        }
 
-            if (timeSinceLastTap < FEED_DOUBLE_TAP_MS && lastTapRef.current > 0) {
-                const local = resolveLocalTap(e);
-                fireBurstAt(local.x, local.y);
-                onDoubleLike?.();
-            } else if (onSingleTap) {
-                singleTapTimerRef.current = setTimeout(() => {
-                    onSingleTap();
-                    singleTapTimerRef.current = null;
-                }, FEED_DOUBLE_TAP_MS);
-            }
-
-            lastTapRef.current = now;
-        },
-        [
-            clearPendingSingleTap,
-            fireBurstAt,
-            onDoubleLike,
-            onPress,
-            onSingleTap,
-            resolveLocalTap,
-        ],
-    );
+        lastTapRef.current = now;
+        if (onSingleTap) {
+            singleTapTimerRef.current = setTimeout(() => {
+                singleTapTimerRef.current = null;
+                lastTapRef.current = 0;
+                onSingleTap();
+            }, FEED_DOUBLE_TAP_MS);
+        }
+    }, [clearPendingSingleTap, fireBurstAt, height, onDoubleLike, onPress, onSingleTap, width]);
 
     useEffect(
         () => () => {
@@ -380,23 +354,21 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const feedVideoSurfaceProps =
         Platform.OS === 'android' && mode === 'feed'
-            ? { viewType: ViewType.TEXTURE as const, useTextureView: true }
+            ? { viewType: ViewType.TEXTURE as const, useTextureView: true, disableFocus: true as const }
             : {};
 
     /**
-     * Scenes-style tap capture above media.
-     * Use RN Pressable (not RNGH) so FlatList doesn’t cancel single-taps on still images.
-     * Image/Video keep pointerEvents="none" so the native surface cannot steal hits.
+     * RectButton above non-interactive media — FlatList-safe (Software Mansion guidance).
+     * Previous bug: non-carousel slides never mounted a tap overlay at all.
      */
-    const renderFeedTapOverlay = (opts?: { forCarouselSlide?: boolean }) => {
+    const renderFeedTapOverlay = () => {
         if (!feedTapCapture) return null;
-        if (hasCarousel && !opts?.forCarouselSlide) return null;
-        if (!hasCarousel && opts?.forCarouselSlide) return null;
         return (
-            <Pressable
+            <RectButton
                 style={styles.tapCapture}
                 onPress={handleMediaTap}
-                android_disableSound
+                rippleColor="transparent"
+                underlayColor="transparent"
                 accessibilityRole="button"
                 accessibilityLabel="Double tap to like"
             />
@@ -533,7 +505,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 style={frameStyle}
                 resizeMode="cover"
                 resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                progressiveRenderingEnabled
+                progressiveRenderingEnabled={false}
                 pointerEvents={mediaPointerEvents}
                 onLoadStart={() => beginUrlLoad(slideRawUrl)}
                 onLoad={() => markUrlLoaded(slideRawUrl)}
@@ -543,13 +515,15 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
         return (
             <View style={frameStyle} collapsable={false}>
-                {slideInner}
+                <View style={StyleSheet.absoluteFill} pointerEvents="none" collapsable={false}>
+                    {slideInner}
+                </View>
                 {showLoader ? (
                     <View style={styles.loadingOverlay} pointerEvents="none">
                         <ActivityIndicator color="#f472b6" />
                     </View>
                 ) : null}
-                {renderFeedTapOverlay({ forCarouselSlide: true })}
+                {renderFeedTapOverlay()}
             </View>
         );
     };
@@ -745,9 +719,9 @@ const styles = StyleSheet.create({
     tapCapture: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 22,
-        elevation: Platform.OS === 'android' ? 22 : 0,
+        // No elevation — elevated overlays steal overlaid PostHeader taps on Android.
         // Non-zero alpha so Android includes this view in hit-testing.
-        backgroundColor: 'rgba(0,0,0,0.002)',
+        backgroundColor: 'rgba(0,0,0,0.01)',
     },
     burstLayer: {
         ...StyleSheet.absoluteFillObject,
