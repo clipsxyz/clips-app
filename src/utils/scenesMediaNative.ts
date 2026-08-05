@@ -1,5 +1,5 @@
 import type { Post, PostMediaItem } from '../types';
-import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
+import { mockFeedVideoSource, resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 import { decodeScenesTextSlideContent } from './scenesTextSlideNative';
 
 export type ScenesMediaSlide = {
@@ -38,4 +38,9 @@ export function getScenesMediaSlides(post: Post): ScenesMediaSlide[] {
 
 export function resolveScenesVideoUrl(raw: string): string {
     return resolveMockFeedVideoUrl(raw);
+}
+
+/** Video source for Scenes — bundled require for mock demo paths. */
+export function scenesVideoSource(raw: string): number | { uri: string } {
+    return mockFeedVideoSource(raw);
 }

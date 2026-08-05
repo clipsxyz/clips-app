@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 12,
         bottom: 12,
-        zIndex: 26,
-        elevation: Platform.OS === 'android' ? 26 : 0,
+        zIndex: 40,
+        elevation: Platform.OS === 'android' ? 40 : 0,
     },
     pillRow: {
         flexDirection: 'row',

@@ -566,7 +566,62 @@ if (!postsInitialized) {
     userNational: 'Ireland',
   } as Post;
 
-  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
+  // Extra Finglas locals so the home (local) tab has more than Alice's videos
+  const finglasPosts: Post[] = [
+    {
+      id: `finglas-post-1-${artaneNow - 2400000}`,
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas Village',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800',
+      mediaType: 'image',
+      caption: 'Saturday market haul — strawberries were perfect',
+      createdAt: artaneNow - 2400000,
+      stats: { likes: 38, views: 201, comments: 6, shares: 2, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+    } as Post,
+    {
+      id: `finglas-post-2-${artaneNow - 10800000}`,
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas, Dublin',
+      tags: [],
+      text: 'Anyone else hear the buskers on the main street tonight? Absolute class. Community vibes on point. 🎸',
+      createdAt: artaneNow - 10800000,
+      stats: { likes: 19, views: 97, comments: 8, shares: 1, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+      mediaUrl: undefined,
+      mediaType: undefined,
+    } as Post,
+    {
+      id: `finglas-post-3-${artaneNow - 15000000}`,
+      userHandle: 'Bob@Finglas',
+      locationLabel: 'Jamestown Road',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=800',
+      mediaType: 'image',
+      caption: 'New coffee spot near the roundabout — 10/10 flat white',
+      createdAt: artaneNow - 15000000,
+      stats: { likes: 52, views: 310, comments: 11, shares: 4, reclips: 2 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+    } as Post,
+  ];
+
+  posts = [...posts, ...artanePosts, ...bobPosts, ...finglasPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
 
   // Dedupe by id (keep first occurrence) so corrupted localStorage or old saves don't leave thousands of duplicates
   const seenIds = new Set<string>();
@@ -1083,7 +1138,7 @@ export async function fetchSuggestedPostsByPlaces(params: {
   });
 }
 
-/** Mock Sarah and Bob video posts for Scenes testing – always merged into first page of feed when in dev. */
+/** Mock Sarah / Bob / Alice video posts for Scenes + feed testing – merged into first page when in mock mode. */
 function getMockScenesVideoPosts(): Post[] {
   const now = Date.now();
   return [
@@ -1140,7 +1195,43 @@ function getMockScenesVideoPosts(): Post[] {
       userLocal: 'Galway',
       userRegional: 'Galway',
       userNational: 'Ireland'
-    }
+    },
+    {
+      id: 'mock-scenes-alice-1',
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas, Dublin',
+      tags: [],
+      mediaUrl: MOCK_FEED_VIDEO_URLS.blazes,
+      mediaType: 'video',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.blazes,
+      caption: 'Evening walk around Finglas village — golden hour hits different',
+      createdAt: now - 5400000,
+      stats: { likes: 41, views: 220, comments: 9, shares: 3, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: 'mock-scenes-alice-2',
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Tolka Valley Park',
+      tags: [],
+      mediaUrl: MOCK_FEED_VIDEO_URLS.elephants,
+      mediaType: 'video',
+      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.elephants,
+      caption: 'Park loop before work — birds were loud today 🐦',
+      createdAt: now - 43200000,
+      stats: { likes: 28, views: 164, comments: 4, shares: 1, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
   ];
 }
 
@@ -1169,25 +1260,34 @@ function collectDevMockVideoPostCandidates(): Post[] {
 
 function devMockVideosForDiscoverTab(userId: string): Post[] {
   const all = collectDevMockVideoPostCandidates();
+  // Pure mock mode: always surface demo MP4s on Following (no Laravel).
+  if (!isLaravelApiEnabled()) return all;
   const follows = getFollowsForDiscover(userId);
   const followsSarah = getFollowState(follows, 'Sarah@Artane');
   const followsBob =
     getFollowState(follows, 'Bob@Ireland') || getFollowState(follows, 'Bob@Finglas');
-  if (!followsSarah && !followsBob) return [];
+  const followsAlice = getFollowState(follows, 'Alice@Finglas');
+  if (!followsSarah && !followsBob && !followsAlice) return [];
   return all.filter((p) => {
     const h = (p.userHandle || '').toLowerCase();
     if (followsSarah && h.includes('sarah')) return true;
     if (followsBob && h.includes('bob')) return true;
+    if (followsAlice && h.includes('alice')) return true;
     return false;
   });
 }
 
-/** Demo MP4 cards must obey the same tab rules as organic posts (location / Following). */
+/** Which demo MP4 posts belong on this tab (mock mode is permissive on core location tabs). */
 function collectDevMockVideoPostsForTab(tab: string, userId: string): Post[] {
   const t = tab.toLowerCase();
   if (t === 'clips') return [];
   if (t === 'discover') return devMockVideosForDiscoverTab(userId);
-  return collectDevMockVideoPostCandidates().filter((p) => postMatchesLocationTab(p, tab));
+  const all = collectDevMockVideoPostCandidates();
+  // Mock mode: show all demo videos on Finglas / Dublin / Ireland so the news feed isn't empty.
+  if (!isLaravelApiEnabled() && (t === 'finglas' || t === 'dublin' || t === 'ireland')) {
+    return all;
+  }
+  return all.filter((p) => postMatchesLocationTab(p, tab));
 }
 
 /** Prepend demo MP4 cards on feed page 0 (location tabs + Following when you follow Sarah/Bob). */

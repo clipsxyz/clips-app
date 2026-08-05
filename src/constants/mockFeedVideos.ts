@@ -11,6 +11,8 @@ export const MOCK_FEED_VIDEO_URLS = {
     escapes: '/demo-videos/escapes.mp4',
     fun: '/demo-videos/fun.mp4',
     joyrides: '/demo-videos/joyrides.mp4',
+    blazes: '/demo-videos/blazes.mp4',
+    elephants: '/demo-videos/elephants.mp4',
 } as const;
 
 const NATIVE_REMOTE_BY_DEMO_PATH: Record<string, string> = {
@@ -20,6 +22,9 @@ const NATIVE_REMOTE_BY_DEMO_PATH: Record<string, string> = {
     // Google sample bucket often returns 403; use MDN flower like escapes.
     [MOCK_FEED_VIDEO_URLS.joyrides]:
         'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    [MOCK_FEED_VIDEO_URLS.blazes]:
+        'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    [MOCK_FEED_VIDEO_URLS.elephants]: 'https://www.w3schools.com/html/mov_bbb.mp4',
     '/demo-videos/flower.mp4':
         'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
 };
@@ -33,6 +38,8 @@ export const MOCK_FEED_VIDEO_POSTERS = {
     escapes: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800',
     fun: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
     joyrides: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
+    blazes: 'https://images.unsplash.com/photo-1514931109608-ef9bcc8af3c0?w=800',
+    elephants: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800',
 } as const;
 
 function isReactNativeRuntime(): boolean {
@@ -67,6 +74,12 @@ export function resolveMockFeedVideoPosterUrl(url: string | undefined): string |
     if (url.includes(MOCK_FEED_VIDEO_URLS.joyrides) || url.includes('joyrides.mp4')) {
         return MOCK_FEED_VIDEO_POSTERS.joyrides;
     }
+    if (url.includes(MOCK_FEED_VIDEO_URLS.blazes) || url.includes('blazes.mp4')) {
+        return MOCK_FEED_VIDEO_POSTERS.blazes;
+    }
+    if (url.includes(MOCK_FEED_VIDEO_URLS.elephants) || url.includes('elephants.mp4')) {
+        return MOCK_FEED_VIDEO_POSTERS.elephants;
+    }
     if (url.includes('flower.mp4')) {
         return MOCK_FEED_VIDEO_POSTERS.escapes;
     }
@@ -89,4 +102,14 @@ export function resolveMockFeedVideoUrl(url: string | undefined): string {
         return WEB_DEMO_MP4;
     }
     return url;
+}
+
+/** Web: always a URI object. Native `.native.ts` returns bundled require for demo paths. */
+export function isMockDemoVideoPath(url: string | undefined | null): boolean {
+    if (!url) return false;
+    return url.startsWith('/demo-videos/') || NATIVE_REMOTE_BY_DEMO_PATH[url] != null;
+}
+
+export function mockFeedVideoSource(url: string | undefined): number | { uri: string } {
+    return { uri: resolveMockFeedVideoUrl(url) };
 }

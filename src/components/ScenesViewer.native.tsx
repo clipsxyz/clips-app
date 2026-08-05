@@ -611,7 +611,7 @@ export default function ScenesViewer({
     const dismissOpacity = Math.max(0.55, 1 - dismissPull / (windowHeight * 0.45));
     const railBottom = commentsOpen
         ? Math.max(insets.bottom + 16, windowHeight - sheetTop + 20)
-        : insets.bottom + 108;
+        : insets.bottom + 96;
     const captionLong = caption.length > 50;
 
     const renderCaptionMentions = (text: string) => {
@@ -715,7 +715,9 @@ export default function ScenesViewer({
             </View>
 
             <Pressable style={[styles.backBtn, { top: insets.top + 14 }]} onPress={handleBack}>
-                <Icon name="chevron-back" size={18} color="#FFFFFF" />
+                <View style={styles.chromeCircle}>
+                    <Icon name="chevron-back" size={18} color="#FFFFFF" />
+                </View>
             </Pressable>
 
             <View style={[styles.topRight, { top: insets.top + 14 }]}>
@@ -734,7 +736,9 @@ export default function ScenesViewer({
             </View>
 
             <Pressable style={[styles.muteBtn, { top: insets.top + 14 }]} onPress={toggleMute}>
-                <Icon name={muted ? 'volume-mute' : 'volume-high'} size={24} color="#FFFFFF" />
+                <View style={styles.chromeCircle}>
+                    <Icon name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#FFFFFF" />
+                </View>
             </Pressable>
 
             <View style={[styles.actionRail, { bottom: railBottom }]}>
@@ -745,7 +749,11 @@ export default function ScenesViewer({
                             onPress={() => void handleLike()}
                             accessibilityLabel={activePost.userLiked ? 'Unlike' : 'Like'}
                         >
-                            <FeedLikeThumbsIcon size={22} color="#000000" filled={activePost.userLiked} />
+                            <FeedLikeThumbsIcon
+                                size={26}
+                                color="#FFFFFF"
+                                filled={activePost.userLiked}
+                            />
                         </Pressable>
                     </View>
                     <Text style={styles.actionCount}>{activePost.stats.likes}</Text>
@@ -756,7 +764,7 @@ export default function ScenesViewer({
                         onPress={openComments}
                         accessibilityLabel="Comments"
                     >
-                        <Icon name="chatbubble-outline" size={22} color="#000000" />
+                        <Icon name="chatbubble-outline" size={26} color="#FFFFFF" />
                     </Pressable>
                     <Text style={styles.actionCount}>{activePost.stats.comments}</Text>
                 </View>
@@ -766,7 +774,7 @@ export default function ScenesViewer({
                         onPress={() => setSharePost(activePost)}
                         accessibilityLabel="Share"
                     >
-                        <Icon name="share-social-outline" size={22} color="#000000" />
+                        <Icon name="paper-plane-outline" size={26} color="#FFFFFF" />
                     </Pressable>
                     <Text style={styles.actionCount}>{activePost.stats.shares}</Text>
                 </View>
@@ -778,8 +786,8 @@ export default function ScenesViewer({
                     >
                         <Icon
                             name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                            size={22}
-                            color="#000000"
+                            size={26}
+                            color="#FFFFFF"
                         />
                     </Pressable>
                     <Text style={styles.actionCount}>{isSaved ? 'Saved' : 'Save'}</Text>
@@ -790,7 +798,7 @@ export default function ScenesViewer({
                         onPress={() => canReclip && void handleReclip()}
                         disabled={!canReclip}
                     >
-                        <Icon name="repeat" size={22} color="#000000" />
+                        <Icon name="repeat" size={26} color="#FFFFFF" />
                     </Pressable>
                     <Text style={styles.actionCount}>{activePost.stats.reclips}</Text>
                 </View>
@@ -798,11 +806,11 @@ export default function ScenesViewer({
 
             {!commentsOpen ? (
             <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']}
-                locations={[0, 0.45, 1]}
+                colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.72)']}
+                locations={[0, 0.4, 1]}
                 style={[
                     styles.bottomChrome,
-                    { paddingBottom: insets.bottom + 58 },
+                    { paddingBottom: insets.bottom + 52 },
                 ]}
                 pointerEvents="box-none"
             >
@@ -811,17 +819,19 @@ export default function ScenesViewer({
                         style={styles.avatarBtn}
                         onPress={() => onVisitProfile(profileHandle)}
                     >
-                        <ScenesProfileAvatarRing revealKey={activePost.id} size={32}>
-                            <Avatar
-                                src={isOwn ? undefined : getAvatarForHandle(profileHandle)}
-                                name={displayHandle.split('@')[0]}
-                                size="sm"
-                            />
-                        </ScenesProfileAvatarRing>
+                        <View style={styles.avatarRing}>
+                            <ScenesProfileAvatarRing revealKey={activePost.id} size={36}>
+                                <Avatar
+                                    src={isOwn ? undefined : getAvatarForHandle(profileHandle)}
+                                    name={displayHandle.split('@')[0]}
+                                    size="sm"
+                                />
+                            </ScenesProfileAvatarRing>
+                        </View>
                     </Pressable>
                     {!activePost.isFollowing && !isOwn && !hasPendingRequest ? (
                         <Pressable style={styles.followPlus} onPress={() => void handleFollow()}>
-                            <Icon name="add" size={14} color="#000000" />
+                            <Icon name="add" size={12} color="#FFFFFF" />
                         </Pressable>
                     ) : !activePost.isFollowing && hasPendingRequest && !isOwn ? (
                         <View style={styles.requestedPill}>
@@ -838,16 +848,16 @@ export default function ScenesViewer({
                     <View style={styles.profileTextCol}>
                         <Pressable onPress={() => onVisitProfile(profileHandle)}>
                             <Text style={styles.handleText} numberOfLines={1}>
-                                {displayHandle}
+                                {displayHandle.replace(/^@/, '')}
                             </Text>
                         </Pressable>
                         {activePost.locationLabel ? (
                             <View style={styles.locationRow}>
-                                <Icon name="location-outline" size={12} color="rgba(255,255,255,0.7)" />
+                                <Icon name="location-outline" size={11} color="rgba(255,255,255,0.75)" />
                                 <Text style={styles.locationText} numberOfLines={1}>
                                     {activePost.locationLabel}
                                 </Text>
-                                <Flag value={getFlagForHandle(profileHandle) || ''} size={12} />
+                                <Flag value={getFlagForHandle(profileHandle) || ''} size={11} />
                             </View>
                         ) : null}
                     </View>
@@ -865,11 +875,10 @@ export default function ScenesViewer({
                     </View>
                 ) : null}
                 <Pressable onPress={openComments} style={styles.commentsLink}>
-                    <Icon name="chatbubble-outline" size={14} color="rgba(255,255,255,0.85)" />
                     <Text style={styles.commentsLinkText}>
                         {activePost.stats.comments > 0
                             ? `View all ${activePost.stats.comments} comments`
-                            : 'Add the first comment'}
+                            : 'Add a comment…'}
                     </Text>
                 </Pressable>
             </LinearGradient>
@@ -1201,20 +1210,23 @@ const styles = StyleSheet.create({
     },
     backBtn: {
         position: 'absolute',
-        left: 12,
+        left: 10,
         zIndex: 25,
-        width: 36,
-        height: 36,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 999,
-        backgroundColor: 'rgba(0,0,0,0.45)',
     },
     muteBtn: {
         position: 'absolute',
-        right: 12,
+        right: 10,
         zIndex: 25,
-        padding: 8,
+    },
+    chromeCircle: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.38)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.22)',
     },
     topRight: {
         position: 'absolute',
@@ -1230,8 +1242,10 @@ const styles = StyleSheet.create({
         gap: 4,
         paddingHorizontal: 8,
         paddingVertical: 4,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.45)',
+        borderRadius: 999,
+        backgroundColor: 'rgba(0,0,0,0.38)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.18)',
         maxWidth: 160,
     },
     metaPillText: {
@@ -1242,150 +1256,158 @@ const styles = StyleSheet.create({
     },
     actionRail: {
         position: 'absolute',
-        right: 10,
+        right: 6,
         zIndex: 28,
         alignItems: 'center',
-        gap: 10,
+        gap: 14,
     },
     actionCol: {
         alignItems: 'center',
-        gap: 2,
+        gap: 3,
+        minWidth: 44,
     },
     actionBtn: {
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        backgroundColor: '#FFFFFF',
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.1)',
-        ...Platform.select({
-            ios: {
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.26,
-                shadowRadius: 8,
-            },
-            android: { elevation: 6 },
-        }),
+        backgroundColor: 'transparent',
     },
     actionBtnDisabled: {
-        opacity: 0.4,
+        opacity: 0.35,
     },
     actionCount: {
-        color: 'rgba(255,255,255,0.9)',
+        color: '#FFFFFF',
         fontSize: 11,
-        fontWeight: '700',
+        fontWeight: '600',
+        textShadowColor: 'rgba(0,0,0,0.55)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 3,
     },
     bottomChrome: {
         position: 'absolute',
         left: 0,
-        right: 72,
+        right: 56,
         bottom: 0,
         zIndex: 15,
-        paddingHorizontal: 16,
-        paddingTop: 48,
+        paddingHorizontal: 14,
+        paddingTop: 56,
         backgroundColor: 'transparent',
     },
     profileRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 10,
     },
     avatarBtn: {
-        borderRadius: 8,
-        overflow: 'hidden',
+        borderRadius: 999,
+    },
+    avatarRing: {
+        borderRadius: 999,
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.95)',
+        padding: 1,
     },
     followPlus: {
-        marginLeft: -10,
-        marginTop: 14,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
+        marginLeft: -12,
+        marginTop: 18,
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        backgroundColor: '#0095F6',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 2,
+        borderWidth: 1.5,
+        borderColor: '#000000',
     },
     followingPill: {
-        marginLeft: 6,
-        marginTop: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
+        marginLeft: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
         borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.14)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.28)',
     },
     followingPillText: {
         color: '#FFFFFF',
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: '600',
     },
     requestedPill: {
-        marginLeft: 6,
-        marginTop: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
+        marginLeft: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
         borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(255,255,255,0.18)',
     },
     requestedPillText: {
         color: '#FFFFFF',
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: '600',
     },
     captionRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         alignItems: 'flex-end',
-        marginBottom: 6,
+        marginBottom: 8,
+        paddingRight: 4,
     },
     captionMention: {
-        color: '#A5B4FC',
-        fontWeight: '600',
+        color: '#FFFFFF',
+        fontWeight: '700',
     },
     captionMore: {
-        color: 'rgba(255,255,255,0.8)',
+        color: 'rgba(255,255,255,0.55)',
         fontSize: 13,
-        fontWeight: '600',
+        fontWeight: '500',
         marginLeft: 4,
-        marginBottom: 6,
     },
     profileTextCol: {
         flex: 1,
-        marginLeft: 8,
+        marginLeft: 10,
         minWidth: 0,
     },
     handleText: {
         color: '#FFFFFF',
         fontSize: 14,
         fontWeight: '700',
+        letterSpacing: 0.1,
+        textShadowColor: 'rgba(0,0,0,0.45)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
     },
     locationRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
-        marginTop: 2,
+        marginTop: 3,
     },
     locationText: {
-        color: 'rgba(255,255,255,0.7)',
+        color: 'rgba(255,255,255,0.72)',
         fontSize: 11,
         flexShrink: 1,
     },
     caption: {
         flex: 1,
-        color: '#FFFFFF',
+        color: 'rgba(255,255,255,0.96)',
         fontSize: 13,
         lineHeight: 18,
+        textShadowColor: 'rgba(0,0,0,0.4)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
     },
     commentsLink: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        marginTop: 2,
     },
     commentsLinkText: {
-        color: 'rgba(255,255,255,0.85)',
+        color: 'rgba(255,255,255,0.55)',
         fontSize: 12,
+        fontWeight: '500',
     },
     footerRow: {
         position: 'absolute',

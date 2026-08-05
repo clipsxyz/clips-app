@@ -111,7 +111,8 @@ export const FEED_CARD_MEDIA_TAP_LAYER = {
     top: FEED_CARD_MEDIA_TAP_LAYER_TOP,
     left: 0,
     right: 0,
-    bottom: 0,
+    // Leave bottom chrome clear for Scenes CTA + mute (external tap layer sits above media).
+    bottom: 56,
     zIndex: 15,
     // Android skips fully transparent views for hit-testing.
     backgroundColor: 'rgba(0,0,0,0.01)',

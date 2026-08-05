@@ -57,6 +57,7 @@ import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
+import VideoCTAOverlay from '../components/VideoCTAOverlay.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
 } from '../components/ImageFullscreenModal.native';
@@ -1324,6 +1325,12 @@ const FeedCard = React.memo(function FeedCard({
                                         accessibilityLabel="Double tap to like"
                                     />
                                 </GestureDetector>
+                            ) : null}
+                            {useExternalMediaTap && showVideoMuteOnMedia && mediaGesturesEnabled ? (
+                                <VideoCTAOverlay
+                                    onPress={handleOpenScenesPress}
+                                    userHandle={post.userHandle}
+                                />
                             ) : null}
                             <FeedPostHeader
                                 post={post}

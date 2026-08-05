@@ -15,7 +15,11 @@ import Video, { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import ScenesTextPostCard from './ScenesTextPostCard.native';
-import { getScenesMediaSlides, resolveScenesVideoUrl } from '../utils/scenesMediaNative';
+import {
+    getScenesMediaSlides,
+    resolveScenesVideoUrl,
+    scenesVideoSource,
+} from '../utils/scenesMediaNative';
 
 type Props = {
     post: Post;
@@ -137,7 +141,7 @@ export default function ScenesMediaPlayer({
                     slideActive ? (
                         <Video
                             ref={slideActive ? videoRef : undefined}
-                            source={{ uri: playbackUrl }}
+                            source={scenesVideoSource(rawUrl)}
                             style={StyleSheet.absoluteFill}
                             pointerEvents="none"
                             resizeMode="contain"
@@ -221,7 +225,7 @@ export default function ScenesMediaPlayer({
                                     <View style={[styles.slide, { width, height }]}>
                                         <Video
                                             ref={videoRef}
-                                            source={{ uri: resolveScenesVideoUrl(slide.url) }}
+                                            source={scenesVideoSource(slide.url)}
                                             style={StyleSheet.absoluteFill}
                                             resizeMode="contain"
                                             repeat
@@ -251,7 +255,7 @@ export default function ScenesMediaPlayer({
                     <View style={[styles.slide, { width, height }]}>
                         <Video
                             ref={videoRef}
-                            source={{ uri: resolveScenesVideoUrl(slides[0].url) }}
+                            source={scenesVideoSource(slides[0].url)}
                             style={StyleSheet.absoluteFill}
                             resizeMode="contain"
                             repeat

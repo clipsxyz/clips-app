@@ -32,6 +32,8 @@ import {
 import { postHasVideoMedia } from '../utils/postMedia';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
+    isMockDemoVideoPath,
+    mockFeedVideoSource,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
 import VideoCTAOverlay from './VideoCTAOverlay.native';
@@ -210,7 +212,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && activeIsVideo && !!mediaUrl;
     const showScenesCta =
-        mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
+        mode === 'feed' &&
+        video &&
+        postHasVideoMedia(post) &&
+        Boolean(onOpenScenes) &&
+        !feedTouchesHandledExternally;
     const feedShouldPlay = mode === 'feed' && video && isActive && !playFailed;
     const showMuteButton = video && mode === 'feed' && (feedShouldPlay || muteFlash);
 
@@ -401,7 +407,14 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const frameStyle = { width, height, backgroundColor: '#000000' };
 
-    const videoSource = (uri: string) => {
+    const videoSource = (uri: string, rawUrl?: string) => {
+        // Demo MP4s: pass bundled require — URI from resolveAssetSource often fails on device.
+        if (rawUrl && isMockDemoVideoPath(rawUrl)) {
+            return mockFeedVideoSource(rawUrl);
+        }
+        if (isMockDemoVideoPath(uri)) {
+            return mockFeedVideoSource(uri);
+        }
         const lower = uri.toLowerCase();
         if (lower.includes('.m3u8')) return { uri, type: 'm3u8' as const };
         if (lower.includes('.webm')) return { uri, type: 'webm' as const };
@@ -469,7 +482,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                             ? feedVideoRef
                             : undefined
                     }
-                    source={videoSource(slideUrl)}
+                    source={videoSource(slideUrl, slideRawUrl)}
                     style={frameStyle}
                     resizeMode={mode === 'detail' ? 'contain' : 'cover'}
                     controls={mode === 'detail'}
