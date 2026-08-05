@@ -228,7 +228,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         clearBurstTimerRef.current = setTimeout(() => {
             setBurstAt(null);
             clearBurstTimerRef.current = null;
-        }, 500);
+        }, 700);
     }, []);
 
     useImperativeHandle(
@@ -305,7 +305,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         Boolean(onDoubleLike || onSingleTap || onPress);
 
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
-    const mediaPointerEvents = mode === 'feed' && feedTapCapture ? ('none' as const) : undefined;
+    const mediaPointerEvents =
+        mode === 'feed' && (feedTapCapture || feedTouchesHandledExternally)
+            ? ('none' as const)
+            : undefined;
 
     const clearPendingSingleTap = useCallback(() => {
         if (singleTapTimerRef.current) {

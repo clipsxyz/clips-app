@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import Svg, { G, Line } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
@@ -50,14 +50,28 @@ type Props = {
     onDone?: () => void;
 };
 
-/** In-bubble double-tap burst (web TextCard tapPosition + heartPopUp / shortsThumbGlow). */
+/** YouTube Shorts-style double-tap burst at the tap point (same as text-only cards). */
 export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
     const glowScale = useRef(new Animated.Value(0.4)).current;
     const glowOpacity = useRef(new Animated.Value(0)).current;
     const thumbScale = useRef(new Animated.Value(0.3)).current;
     const thumbOpacity = useRef(new Animated.Value(0)).current;
 
+    const left = safeLayoutNumber(x, 0);
+    const top = safeLayoutNumber(y, 0);
+    const canPlace = hasFinitePoint(left, top);
+
     useEffect(() => {
+        if (!canPlace) {
+            onDone?.();
+            return;
+        }
+        // Reset so remounts (new key) always animate from hidden → visible.
+        glowOpacity.setValue(0);
+        glowScale.setValue(0.4);
+        thumbOpacity.setValue(0);
+        thumbScale.setValue(0.3);
+
         Animated.parallel([
             Animated.sequence([
                 Animated.timing(glowOpacity, { toValue: 1, duration: 90, useNativeDriver: true }),
@@ -66,34 +80,34 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
             Animated.timing(glowScale, { toValue: 1.15, duration: 500, useNativeDriver: true }),
             Animated.sequence([
                 Animated.timing(thumbOpacity, { toValue: 1, duration: 60, useNativeDriver: true }),
-                Animated.delay(250),
+                Animated.delay(280),
                 Animated.timing(thumbOpacity, { toValue: 0, duration: 190, useNativeDriver: true }),
             ]),
             Animated.sequence([
-                Animated.spring(thumbScale, { toValue: 1, speed: 12, bounciness: 8, useNativeDriver: true }),
-                Animated.delay(250),
+                Animated.spring(thumbScale, {
+                    toValue: 1,
+                    speed: 12,
+                    bounciness: 8,
+                    useNativeDriver: true,
+                }),
+                Animated.delay(280),
                 Animated.timing(thumbScale, { toValue: 0.95, duration: 190, useNativeDriver: true }),
             ]),
         ]).start(({ finished }) => {
             if (finished) onDone?.();
         });
-    }, [glowOpacity, glowScale, onDone, thumbOpacity, thumbScale]);
+    }, [canPlace, glowOpacity, glowScale, onDone, thumbOpacity, thumbScale]);
 
-    if (!hasFinitePoint(x, y)) return null;
+    if (!canPlace) return null;
 
     return (
-        <View
-            style={[
-                styles.root,
-                { left: safeLayoutNumber(x), top: safeLayoutNumber(y) },
-            ]}
-            pointerEvents="none"
-        >
+        <View style={[styles.root, { left, top }]} pointerEvents="none" collapsable={false}>
             <Animated.View
                 style={[
                     styles.glowWrap,
                     { opacity: glowOpacity, transform: [{ scale: glowScale }] },
                 ]}
+                pointerEvents="none"
             >
                 <BurstLines />
             </Animated.View>
@@ -102,8 +116,15 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
                     styles.thumbWrap,
                     { opacity: thumbOpacity, transform: [{ scale: thumbScale }] },
                 ]}
+                pointerEvents="none"
             >
-                <Icon name="thumbs-up" size={56} color="#FFFFFF" />
+                {/* Ionicons thumbs-up — same glyph path text-only cards use successfully. */}
+                <Icon
+                    name="thumbs-up"
+                    size={64}
+                    color="#FFFFFF"
+                    style={Platform.OS === 'android' ? styles.thumbAndroid : undefined}
+                />
             </Animated.View>
         </View>
     );
@@ -112,7 +133,8 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
 const styles = StyleSheet.create({
     root: {
         position: 'absolute',
-        zIndex: 50,
+        zIndex: 1000,
+        elevation: Platform.OS === 'android' ? 1000 : 0,
         width: 0,
         height: 0,
     },
@@ -131,9 +153,10 @@ const styles = StyleSheet.create({
         top: -THUMB_SIZE / 2,
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
+    },
+    thumbAndroid: {
+        textShadowColor: 'rgba(0,0,0,0.55)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 8,
     },
 });

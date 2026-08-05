@@ -89,8 +89,13 @@ export const FEED_CARD_MEDIA_WRAP = {
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
 export const FEED_CARD_MEDIA_FX_LAYER = {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 50,
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 45,
+    elevation: Platform.OS === 'android' ? 45 : 0,
 } as const;
 
 /** Space left clear above the still-tap layer for overlaid PostHeader chrome. */

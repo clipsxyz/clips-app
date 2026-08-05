@@ -56,6 +56,7 @@ import { isLikelyImageUri } from '../utils/imageDimensions';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
 } from '../components/ImageFullscreenModal.native';
@@ -994,6 +995,37 @@ const FeedCard = React.memo(function FeedCard({
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
     const mediaWrapRef = React.useRef<View>(null);
     const postViewRecordedRef = React.useRef(false);
+    const mediaBurstClearRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [mediaBurst, setMediaBurst] = React.useState<{ x: number; y: number; key: number } | null>(
+        null,
+    );
+    /** Window-space burst — Android TextureView/Image punch through in-tree overlays. */
+    const showMediaLikeBurst = React.useCallback((localX: number, localY: number) => {
+        const place = (windowX: number, windowY: number) => {
+            setMediaBurst({ x: windowX, y: windowY, key: Date.now() });
+            if (mediaBurstClearRef.current) clearTimeout(mediaBurstClearRef.current);
+            mediaBurstClearRef.current = setTimeout(() => {
+                setMediaBurst(null);
+                mediaBurstClearRef.current = null;
+            }, 750);
+        };
+        const node = mediaWrapRef.current;
+        if (node?.measureInWindow) {
+            node.measureInWindow((wx, wy, w, h) => {
+                const x = (w > 8 ? wx : 0) + localX;
+                const y = (h > 8 ? wy : 0) + localY;
+                place(x, y);
+            });
+            return;
+        }
+        place(localX, localY);
+    }, []);
+    React.useEffect(
+        () => () => {
+            if (mediaBurstClearRef.current) clearTimeout(mediaBurstClearRef.current);
+        },
+        [],
+    );
     const { width: windowWidth } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
     // Web Media: FEED_MIN_ASPECT 3/4, FEED_TARGET_ASPECT 5/4 (height/width)
@@ -1129,8 +1161,10 @@ const FeedCard = React.memo(function FeedCard({
     }, [onOpenScenes]);
 
     const handleMediaDoubleLike = React.useCallback(() => {
+        showMediaLikeBurst(cardMediaWidth / 2, mediaFrameHeight / 2);
+        videoMediaRef.current?.showLikeBurstAt(cardMediaWidth / 2, mediaFrameHeight / 2);
         void onLike();
-    }, [onLike]);
+    }, [cardMediaWidth, mediaFrameHeight, onLike, showMediaLikeBurst]);
 
     const openStillFullscreen = React.useCallback(() => {
         const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
@@ -1160,44 +1194,55 @@ const FeedCard = React.memo(function FeedCard({
         openStillFullscreen();
     }, [carouselIndex, openStillFullscreen, post]);
 
-    const stillSlideActive = hasFeedMedia && !currentFeedSlideIsVideo(post, carouselIndex);
     const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
     /**
-     * External still-tap layer sits above FeedPostMedia and blocks carousel ScrollView pans.
-     * Use it only for single stills (Android Image touch stealing); carousel keeps in-media taps.
+     * External tap layer above Image/Video — FlatList-safe on Android (native surfaces steal touches).
+     * Skip for carousels so horizontal ScrollView pans still work.
      */
-    const useExternalStillTap = stillSlideActive && mediaGesturesEnabled && !isCarouselPost;
+    const useExternalMediaTap = hasFeedMedia && mediaGesturesEnabled && !isCarouselPost;
 
-    const fireStillSingleTap = React.useCallback(() => {
-        openStillFullscreen();
-    }, [openStillFullscreen]);
+    const fireMediaSingleTap = React.useCallback(() => {
+        handleMediaSingleTap();
+    }, [handleMediaSingleTap]);
 
-    const fireStillDoubleTap = React.useCallback(
+    const fireMediaDoubleTap = React.useCallback(
         (x: number, y: number) => {
+            const fallbackX = cardMediaWidth / 2;
+            const fallbackY = mediaFrameHeight / 2;
+            const localX = Number.isFinite(x) ? x : fallbackX;
             // Tap layer is inset from the media top; burst renders in media-local coords.
-            videoMediaRef.current?.showLikeBurstAt(x, y + FEED_CARD_MEDIA_TAP_LAYER_TOP);
+            const localY = Number.isFinite(y)
+                ? y + FEED_CARD_MEDIA_TAP_LAYER_TOP
+                : fallbackY;
+            // Draw above the external tap overlay (inside FeedPostMedia is covered by it on Android).
+            showMediaLikeBurst(localX, localY);
             void onLike();
         },
-        [onLike],
+        [cardMediaWidth, mediaFrameHeight, onLike, showMediaLikeBurst],
     );
 
-    /** Still images: Exclusive tap gestures outside native Image (RNGH FlatList safe). */
-    const stillMediaTapGesture = React.useMemo(() => {
-        const single = Gesture.Tap()
-            .maxDuration(280)
-            .onEnd(() => {
-                'worklet';
-                runOnJS(fireStillSingleTap)();
-            });
-        const double = Gesture.Tap()
+    /** Still + video: Exclusive taps outside native Image/Video (RNGH FlatList safe). */
+    const mediaTapGesture = React.useMemo(() => {
+        const doubleTap = Gesture.Tap()
             .numberOfTaps(2)
-            .maxDuration(320)
-            .onEnd((e) => {
+            .maxDuration(280)
+            .onEnd((e, success) => {
                 'worklet';
-                runOnJS(fireStillDoubleTap)(e.x, e.y);
+                if (!success) return;
+                runOnJS(fireMediaDoubleTap)(e.x, e.y);
             });
-        return Gesture.Exclusive(double, single);
-    }, [fireStillDoubleTap, fireStillSingleTap]);
+        const singleTap = Gesture.Tap()
+            .numberOfTaps(1)
+            .maxDuration(280)
+            .onEnd((_e, success) => {
+                'worklet';
+                if (!success) return;
+                runOnJS(fireMediaSingleTap)();
+            });
+        singleTap.requireExternalGestureToFail(doubleTap);
+        return Gesture.Exclusive(doubleTap, singleTap);
+    }, [fireMediaDoubleTap, fireMediaSingleTap]);
+
 
     return (
         <View style={FEED_POST_CARD_STYLE}>
@@ -1243,14 +1288,14 @@ const FeedCard = React.memo(function FeedCard({
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
                                 height={mediaFrameHeight}
-                                feedTouchesHandledExternally={useExternalStillTap}
+                                feedTouchesHandledExternally={useExternalMediaTap}
                                 onDoubleLike={
-                                    mediaGesturesEnabled && !useExternalStillTap
+                                    mediaGesturesEnabled && !useExternalMediaTap
                                         ? handleMediaDoubleLike
                                         : undefined
                                 }
                                 onSingleTap={
-                                    mediaGesturesEnabled && !useExternalStillTap
+                                    mediaGesturesEnabled && !useExternalMediaTap
                                         ? handleMediaSingleTap
                                         : undefined
                                 }
@@ -1270,13 +1315,13 @@ const FeedCard = React.memo(function FeedCard({
                                     mediaGesturesEnabled ? handleOpenScenesPress : undefined
                                 }
                             />
-                            {useExternalStillTap ? (
-                                <GestureDetector gesture={stillMediaTapGesture}>
+                            {useExternalMediaTap ? (
+                                <GestureDetector gesture={mediaTapGesture}>
                                     <View
                                         style={FEED_CARD_MEDIA_TAP_LAYER}
                                         collapsable={false}
                                         accessibilityRole="button"
-                                        accessibilityLabel="Open image fullscreen"
+                                        accessibilityLabel="Double tap to like"
                                     />
                                 </GestureDetector>
                             ) : null}
@@ -1438,6 +1483,25 @@ const FeedCard = React.memo(function FeedCard({
                 onBlock={onBlockUser}
                 onReport={onReportUser}
             />
+            {/* Modal sits above Android TextureView/Image punch-through layers. */}
+            <Modal
+                visible={mediaBurst != null}
+                transparent
+                animationType="none"
+                statusBarTranslucent
+                hardwareAccelerated
+                onRequestClose={() => setMediaBurst(null)}
+            >
+                <View style={styles.mediaBurstPortal} pointerEvents="none">
+                    {mediaBurst ? (
+                        <FeedDoubleTapLikeBurst
+                            key={mediaBurst.key}
+                            x={mediaBurst.x}
+                            y={mediaBurst.y}
+                        />
+                    ) : null}
+                </View>
+            </Modal>
         </View>
     );
 }, (prev, next) => {
@@ -4248,6 +4312,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 };
 
 const styles = StyleSheet.create({
+    mediaBurstPortal: {
+        ...StyleSheet.absoluteFillObject,
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+    },
     container: {
         flex: 1,
         backgroundColor: FEED_PAGE_BG,
