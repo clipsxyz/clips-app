@@ -6,7 +6,8 @@ import FeedLiveShareIcon from './FeedLiveShareIcon.native';
 
 const BRAND_ACTIVE = '#7A8AF0';
 const ACTION_ICON = FEED_UI.icon.action;
-const ACTION_HIT = Math.max(44, ACTION_ICON + 16);
+/** Web share control is `w-11 h-11` (44) around a 24px glyph — keep hit box, smaller glyph. */
+const ACTION_HIT = 40;
 
 type Props = {
     onShare?: () => void;
@@ -50,7 +51,8 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 16,
+        columnGap: 8,
+        flexShrink: 0,
     },
     button: {
         width: ACTION_HIT,

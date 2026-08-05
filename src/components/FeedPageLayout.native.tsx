@@ -93,15 +93,21 @@ export const FEED_CARD_MEDIA_FX_LAYER = {
     zIndex: 50,
 } as const;
 
-/** Transparent tap layer above media (below header + chrome controls). */
+/** Space left clear above the still-tap layer for overlaid PostHeader chrome. */
+export const FEED_CARD_MEDIA_TAP_LAYER_TOP = 72;
+
+/** Transparent tap layer above media (below header + chrome controls).
+ * No elevation — Android elevation would sit above the overlaid PostHeader
+ * (zIndex-only) and steal overflow / avatar taps into fullscreen open.
+ * Top inset leaves PostHeader chrome hit-testable even under RNGH.
+ */
 export const FEED_CARD_MEDIA_TAP_LAYER = {
     position: 'absolute' as const,
-    top: 0,
+    top: FEED_CARD_MEDIA_TAP_LAYER_TOP,
     left: 0,
     right: 0,
     bottom: 0,
     zIndex: 15,
-    elevation: Platform.OS === 'android' ? 16 : 0,
     // Android skips fully transparent views for hit-testing.
     backgroundColor: 'rgba(0,0,0,0.01)',
 } as const;
@@ -329,22 +335,22 @@ export const FEED_PILL_TABS_BG = '#000000';
 /** Web location pill: `bg-[#36454F]`. */
 export const FEED_LOCATION_PILL_BG = '#36454F';
 
-/** Web header title typography (PillTabs location label) — optically bumped for phone. */
+/** Web header title typography (PillTabs location label — 18px / 700). */
 export const FEED_HEADER_TITLE = {
-    fontSize: ox(20),
+    fontSize: 18,
     fontWeight: '700' as const,
-    lineHeight: ox(22),
+    lineHeight: 20,
     color: '#E5E7EB',
 };
 
-/** Web PillTabs grid row: grid-cols-[auto_1fr_auto] gap-2 px-3 — taller for IG weight. */
+/** Web PillTabs grid row: grid-cols-[auto_1fr_auto] gap-2 px-3. */
 export const FEED_HEADER_PICKER_ROW = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
-    paddingHorizontal: ox(12),
-    minHeight: ox(52),
-    gap: ox(8),
+    paddingHorizontal: 12,
+    minHeight: 44,
+    gap: 8,
     zIndex: 30,
 };
 
@@ -356,9 +362,9 @@ export const FEED_HEADER_SIDE_ACTION = {
 
 export const FEED_HEADER_SIDE_LABEL = {
     marginTop: 2,
-    fontSize: ox(11),
-    lineHeight: ox(13),
-    fontWeight: '600' as const,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '500' as const,
     color: '#FFFFFF',
 };
 
@@ -369,30 +375,30 @@ export const FEED_HEADER_CENTER = {
     position: 'relative' as const,
 };
 
-/** Web location pill: rounded-lg bg-[#36454F] — padded for Instagram chrome weight. */
+/** Web location pill: rounded-lg bg-[#36454F] px-3 py-1.5 gap-2. */
 export const FEED_HEADER_LOCATION_PILL = {
     position: 'relative' as const,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    gap: ox(8),
+    gap: 8,
     maxWidth: '100%' as const,
-    paddingHorizontal: ox(14),
-    paddingVertical: ox(9),
-    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
     backgroundColor: FEED_LOCATION_PILL_BG,
     overflow: 'visible' as const,
 };
 
 export const FEED_HEADER_ACTIVE_DOT = {
-    width: ox(11),
-    height: ox(11),
+    width: 8,
+    height: 8,
     borderRadius: 999,
 };
 
 export const FEED_HEADER_LOCATION_TITLE = {
     flexShrink: 1,
-    maxWidth: ox(160),
+    maxWidth: 160,
     ...FEED_HEADER_TITLE,
 };
 

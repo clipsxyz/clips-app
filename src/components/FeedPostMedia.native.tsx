@@ -61,6 +61,8 @@ type Props = {
     onDoubleLike?: () => void;
     /** Feed: delayed single-tap — image fullscreen or video mute flash (web Media). */
     onSingleTap?: () => void;
+    /** Parent owns still-image taps (GestureDetector above media); skip internal RectButton. */
+    feedTouchesHandledExternally?: boolean;
     stickers?: StickerOverlay[];
     onMediaLoad?: () => void;
     mode?: 'feed' | 'detail';
@@ -83,6 +85,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         onPress,
         onDoubleLike,
         onSingleTap,
+        feedTouchesHandledExternally = false,
         stickers,
         onMediaLoad,
         mode = 'feed',
@@ -297,7 +300,9 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     }, [post, textOnly]);
 
     const feedTapCapture =
-        mode === 'feed' && Boolean(onDoubleLike || onSingleTap || onPress);
+        mode === 'feed' &&
+        !feedTouchesHandledExternally &&
+        Boolean(onDoubleLike || onSingleTap || onPress);
 
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
     const mediaPointerEvents = mode === 'feed' && feedTapCapture ? ('none' as const) : undefined;

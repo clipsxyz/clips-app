@@ -59,7 +59,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
-        maxWidth: 168,
+        maxWidth: 140,
         minHeight: FEED_UI.type.metaIcon,
     },
     wrapRight: {

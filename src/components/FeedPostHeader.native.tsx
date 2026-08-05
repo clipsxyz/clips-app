@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
@@ -210,17 +211,19 @@ export default function FeedPostHeader({
                     <FeedPostMetaCarousel items={metadataItems} overlaid={isOverlaid} align="right" />
                 ) : null}
                 {onOverflowPress ? (
-                    <TouchableOpacity
+                    <GesturePressable
                         onPress={onOverflowPress}
                         style={styles.overflowBtn}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Post options"
                     >
                         <Icon
                             name="ellipsis-horizontal"
                             size={16}
                             color={isOverlaid ? '#FFFFFF' : '#9CA3AF'}
                         />
-                    </TouchableOpacity>
+                    </GesturePressable>
                 ) : null}
             </View>
         </View>
@@ -265,8 +268,9 @@ const styles = StyleSheet.create({
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 20,
-        // No elevation — elevated full-width headers steal taps on Android even with box-none.
+        zIndex: 30,
+        // No elevation — elevated full-width headers steal media taps on Android even with box-none.
+        // Still-image tap layer is inset below this chrome (see FEED_CARD_MEDIA_TAP_LAYER).
     },
     content: {
         zIndex: 1,

@@ -145,17 +145,20 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 16,
+        // Web uses gap-4; on ~360dp phones that wraps once counts hit 3 digits + “Save”.
+        columnGap: 10,
         flexShrink: 1,
-        flexWrap: 'wrap',
+        flexWrap: 'nowrap',
+        minWidth: 0,
     },
-    // Instagram-weight hit row (optical bump vs web 40)
+    /** Web EngagementBar: `min-h-[40px] px-1 gap-1`. */
     item: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
-        minHeight: 44,
-        paddingHorizontal: 4,
+        columnGap: 3,
+        minHeight: 40,
+        paddingHorizontal: 2,
+        flexShrink: 0,
     },
     text: {
         fontSize: FEED_UI.type.actionCount,

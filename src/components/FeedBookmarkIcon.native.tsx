@@ -16,7 +16,7 @@ export default function FeedBookmarkIcon({
             <Path
                 d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"
                 stroke={filled ? 'none' : color}
-                strokeWidth={filled ? 0 : 1.75}
+                strokeWidth={filled ? 0 : 1.5}
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />

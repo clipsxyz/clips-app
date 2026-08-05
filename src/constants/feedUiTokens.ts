@@ -1,16 +1,15 @@
-import { ox, NATIVE_OPTICAL_SCALE } from './nativeOpticalScale';
-
 export type FeedUiMode = 'compact' | 'comfortable';
 
 /**
  * Aspect values are height/width (Instagram feed policy), matching web Media in App.tsx:
  * FEED_MIN_ASPECT = 3/4, FEED_TARGET_ASPECT = 5/4 (4:5 portrait max).
  *
- * Optical scale: on same physical phone size, RN density-independent px usually reads
- * smaller than mobile Safari/Chrome CSS px. Bump feed chrome so Nokia RN matches Oppo web.
+ * Icon/type sizes match mobile web (App.tsx BottomNav + feed engagement):
+ * - tab icons 16px in 28px squares (w-7 h-7)
+ * - engagement actions w-6 h-6 → 24
+ * - avatar sm w-8 h-8 → 32
+ * - Stories header 32 / Passport w-8 h-8 → 32
  */
-export const FEED_OPTICAL_SCALE = NATIVE_OPTICAL_SCALE;
-
 const FEED_UI_BY_MODE = {
   compact: {
     media: {
@@ -18,34 +17,37 @@ const FEED_UI_BY_MODE = {
       maxAspect: 5 / 4,
     },
     spacing: {
-      inset: ox(12),
-      compactV: ox(8),
-      normalV: ox(12),
-      cardGap: ox(8),
-      groupGap: ox(12),
-      groupGapTight: ox(10),
+      inset: 12,
+      compactV: 8,
+      normalV: 12,
+      cardGap: 8,
+      groupGap: 12,
+      groupGapTight: 10,
       hairlineGap: 0.5,
     },
     type: {
-      actionCount: ox(12),
-      // Web text-sm ≈ 14 CSS px — optically larger on RN phones.
-      handle: ox(16),
-      meta: ox(12),
-      metaIcon: ox(14),
-      reclip: ox(13),
-      caption: ox(14),
-      captionMore: ox(12),
+      actionCount: 12,
+      /** Web PostHeader `text-sm`; slightly under so RN bold doesn’t look oversized on phone. */
+      handle: 13,
+      /** Web metadata carousel `text-[10px]`. */
+      meta: 10,
+      /** Web metadata icon `w-3 h-3`. */
+      metaIcon: 12,
+      reclip: 11,
+      caption: 14,
+      captionMore: 12,
     },
     icon: {
-      // Web engagement icons ≈ 24 CSS px.
-      action: ox(28),
-      flag: ox(18),
-      avatar: ox(36),
-      tab: ox(22),
-      tabSquare: ox(36),
-      headerStories: ox(36),
-      headerLocation: ox(20),
-      headerPassport: ox(36),
+      /** Web EngagementBar `w-6 h-6` (24). Use 20 so RN SVG stroke weight matches Fi visual size. */
+      action: 20,
+      flag: 12,
+      /** Web avatar `w-8 h-8` (32); 28 reads closer on dense phone feed. */
+      avatar: 28,
+      tab: 16,
+      tabSquare: 28,
+      headerStories: 32,
+      headerLocation: 16,
+      headerPassport: 32,
     },
   },
   comfortable: {
@@ -54,32 +56,32 @@ const FEED_UI_BY_MODE = {
       maxAspect: 5 / 4,
     },
     spacing: {
-      inset: ox(14),
-      compactV: ox(10),
-      normalV: ox(12),
-      cardGap: ox(12),
-      groupGap: ox(14),
-      groupGapTight: ox(12),
+      inset: 14,
+      compactV: 10,
+      normalV: 12,
+      cardGap: 12,
+      groupGap: 14,
+      groupGapTight: 12,
       hairlineGap: 1,
     },
     type: {
-      actionCount: ox(13),
-      handle: ox(16),
-      meta: ox(12),
-      metaIcon: ox(14),
-      reclip: ox(13),
-      caption: ox(14),
-      captionMore: ox(12),
+      actionCount: 12,
+      handle: 13,
+      meta: 10,
+      metaIcon: 12,
+      reclip: 11,
+      caption: 14,
+      captionMore: 12,
     },
     icon: {
-      action: ox(28),
-      flag: ox(18),
-      avatar: ox(36),
-      tab: ox(22),
-      tabSquare: ox(36),
-      headerStories: ox(36),
-      headerLocation: ox(20),
-      headerPassport: ox(36),
+      action: 20,
+      flag: 12,
+      avatar: 28,
+      tab: 16,
+      tabSquare: 28,
+      headerStories: 32,
+      headerLocation: 16,
+      headerPassport: 32,
     },
   },
 } as const;

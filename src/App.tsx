@@ -5675,14 +5675,25 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             comments: post.stats.comments,
             shares: post.stats.shares,
             reclips: post.stats.reclips,
+            views: post.stats.views,
             userLiked: post.userLiked,
             userReclipped: !!post.userReclipped,
             userHandle: post.userHandle,
             currentUserHandle: user?.handle,
+            isFollowing: !!post.isFollowing,
+            viewerAvatarUrl: user?.avatarUrl,
+            viewerName: user?.name || user?.handle,
             onLike,
             onComment: handleImageFullscreenComment,
             onReclip: handleImageFullscreenReclip,
             onShare,
+            onFollow,
+            onVisitProfile: () => {
+              handleCloseImageFullscreen();
+              navigate(`/user/${encodeURIComponent(post.userHandle)}`, {
+                state: { sourcePostId: post.id },
+              });
+            },
           }}
         />
       )}

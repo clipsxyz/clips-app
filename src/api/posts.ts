@@ -390,7 +390,7 @@ if (!postsInitialized) {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1514931109608-ef9bcc8af3c0?w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=800',
       mediaType: 'image',
       caption: 'Amazing sunset over Galway Bay! The west of Ireland never disappoints.',
       createdAt: artaneNow - 9000000, // 2.5 hours ago

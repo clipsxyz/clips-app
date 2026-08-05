@@ -158,17 +158,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-around',
-    paddingHorizontal: 6,
-    paddingTop: 8,
+    paddingHorizontal: 8,
+    paddingTop: 2,
     backgroundColor: '#030712',
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
+    paddingVertical: 6,
   },
   iconStack: {
     position: 'relative',
@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
   iconSquare: {
     width: FEED_UI.icon.tabSquare,
     height: FEED_UI.icon.tabSquare,
-    borderRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -188,13 +188,13 @@ const styles = StyleSheet.create({
   },
   iconSquareInactive: {
     backgroundColor: 'transparent',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#FFFFFF',
   },
   label: {
-    marginTop: 5,
-    fontSize: Math.round(FEED_UI.type.meta * 0.95),
-    fontWeight: '600',
+    marginTop: 4,
+    fontSize: 10,
+    fontWeight: '500',
   },
   labelActive: {
     color: '#FFFFFF',
@@ -221,7 +221,7 @@ const styles = StyleSheet.create({
   },
   addYoursBubble: {
     position: 'absolute',
-    bottom: 44,
+    bottom: 40,
     alignItems: 'center',
     zIndex: 20,
   },

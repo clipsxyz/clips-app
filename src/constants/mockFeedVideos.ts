@@ -17,8 +17,9 @@ const NATIVE_REMOTE_BY_DEMO_PATH: Record<string, string> = {
     [MOCK_FEED_VIDEO_URLS.escapes]:
         'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     [MOCK_FEED_VIDEO_URLS.fun]: 'https://www.w3schools.com/html/mov_bbb.mp4',
+    // Google sample bucket often returns 403; use MDN flower like escapes.
     [MOCK_FEED_VIDEO_URLS.joyrides]:
-        'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+        'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     '/demo-videos/flower.mp4':
         'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
 };
@@ -28,8 +29,9 @@ export const MOCK_FEED_VIDEO_REMOTE_FALLBACK =
 
 /** Thumbnails for demo videos only — must not reuse URLs from mock feed image posts. */
 export const MOCK_FEED_VIDEO_POSTERS = {
-    escapes: 'https://images.unsplash.com/photo-1469474968028-7fd8a59945c0?w=800',
-    fun: 'https://images.unsplash.com/photo-1449824913931-80a239ad0d6c?w=800',
+    // Prefer live Unsplash IDs (several older photo-* links now 404).
+    escapes: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800',
+    fun: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
     joyrides: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
 } as const;
 

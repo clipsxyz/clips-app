@@ -1,6 +1,21 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { FiX, FiHeart, FiMessageCircle, FiRepeat, FiSend, FiMoreHorizontal, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import {
+  FiX,
+  FiHeart,
+  FiMessageCircle,
+  FiRepeat,
+  FiShare2,
+  FiMoreVertical,
+  FiChevronLeft,
+  FiChevronRight,
+  FiBookmark,
+  FiBarChart2,
+  FiArrowLeft,
+  FiImage,
+  FiMaximize2,
+} from 'react-icons/fi';
+import { getAvatarForHandle } from '../api/users';
 
 export type ImageFullscreenItem = {
   url: string;
@@ -19,14 +34,22 @@ export type ImageFullscreenEngagement = {
   comments: number;
   shares: number;
   reclips: number;
+  views?: number;
   userLiked: boolean;
   userReclipped: boolean;
   userHandle: string;
   currentUserHandle?: string;
+  isFollowing?: boolean;
+  viewerAvatarUrl?: string;
+  viewerName?: string;
   onLike: () => void | Promise<void>;
   onComment: () => void;
   onReclip: () => void | Promise<void>;
   onShare: () => void;
+  onFollow?: () => void | Promise<void>;
+  onSave?: () => void;
+  isSaved?: boolean;
+  onVisitProfile?: () => void;
 };
 
 type ImageFullscreenViewerProps = {
@@ -45,14 +68,30 @@ const COLLAPSE_MS = 720;
 const EXPAND_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
 const COLLAPSE_EASE = 'cubic-bezier(0.34, 1.28, 0.32, 1)';
 
-const chromeBtn =
-  'p-2.5 rounded-full bg-black/50 text-white hover:bg-black/65 active:bg-black/75 transition-colors backdrop-blur-sm';
-
 type MotionPhase = 'idle' | 'start' | 'expand' | 'collapse';
 
+function compactCount(n: number | undefined): string {
+  const v = Math.max(0, Number(n) || 0);
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(v >= 10_000 ? 0 : 1).replace(/\.0$/, '')}K`;
+  return String(v);
+}
+
+function displayNameFromHandle(handle: string): string {
+  const raw = String(handle || '').trim();
+  if (!raw) return 'User';
+  return raw.split('@')[0] || raw;
+}
+
+function atHandle(handle: string): string {
+  const raw = String(handle || '').trim();
+  if (!raw) return '';
+  return raw.startsWith('@') ? raw : `@${raw}`;
+}
+
 /**
- * Threads-style fullscreen still-image viewer (not Scenes).
- * Opens/closes with the same card → fullscreen motion as Stories 24 on the feed.
+ * Twitter/X-style fullscreen still-image viewer.
+ * Opens/closes with feed card → fullscreen motion; tap image toggles chrome.
  */
 export default function ImageFullscreenViewer({
   images,
@@ -69,7 +108,10 @@ export default function ImageFullscreenViewer({
   const [comments, setComments] = React.useState(engagement?.comments ?? 0);
   const [shares, setShares] = React.useState(engagement?.shares ?? 0);
   const [reclips, setReclips] = React.useState(engagement?.reclips ?? 0);
+  const [views, setViews] = React.useState(engagement?.views ?? 0);
   const [userReclipped, setUserReclipped] = React.useState(engagement?.userReclipped ?? false);
+  const [following, setFollowing] = React.useState(engagement?.isFollowing ?? false);
+  const [chromeVisible, setChromeVisible] = React.useState(true);
   const [motionPhase, setMotionPhase] = React.useState<MotionPhase>('idle');
   const [viewport, setViewport] = React.useState({ w: 0, h: 0 });
   const originRectRef = React.useRef<ImageFullscreenOriginRect | null>(null);
@@ -87,7 +129,10 @@ export default function ImageFullscreenViewer({
   }, []);
 
   React.useEffect(() => {
-    if (isOpen) setIndex(initialIndex);
+    if (isOpen) {
+      setIndex(initialIndex);
+      setChromeVisible(true);
+    }
   }, [isOpen, initialIndex]);
 
   React.useEffect(() => {
@@ -97,14 +142,18 @@ export default function ImageFullscreenViewer({
     setComments(engagement.comments);
     setShares(engagement.shares);
     setReclips(engagement.reclips);
+    setViews(engagement.views ?? 0);
     setUserReclipped(engagement.userReclipped);
+    setFollowing(engagement.isFollowing ?? false);
   }, [
     engagement?.userLiked,
     engagement?.likes,
     engagement?.comments,
     engagement?.shares,
     engagement?.reclips,
+    engagement?.views,
     engagement?.userReclipped,
+    engagement?.isFollowing,
   ]);
 
   React.useEffect(() => {
@@ -245,6 +294,10 @@ export default function ImageFullscreenViewer({
   const current = images[safeIndex];
   const hasMultiple = images.length > 1;
   const canReclip = engagement && engagement.userHandle !== engagement.currentUserHandle;
+  const isOwn =
+    Boolean(engagement?.userHandle) &&
+    Boolean(engagement?.currentUserHandle) &&
+    engagement!.userHandle === engagement!.currentUserHandle;
   const origin = originRectRef.current;
   const useMotionShell = Boolean(origin && hasOrigin);
 
@@ -257,6 +310,15 @@ export default function ImageFullscreenViewer({
   const transitionEase = motionPhase === 'collapse' ? COLLAPSE_EASE : EXPAND_EASE;
   const backdropOpacity =
     motionPhase === 'expand' ? 1 : motionPhase === 'collapse' ? 0.28 : 0;
+
+  const authorHandle = engagement?.userHandle || '';
+  const authorName = displayNameFromHandle(authorHandle);
+  const authorAt = atHandle(authorHandle);
+  const authorAvatar = authorHandle ? getAvatarForHandle(authorHandle) : undefined;
+  const viewerAvatar =
+    engagement?.viewerAvatarUrl ||
+    (engagement?.currentUserHandle ? getAvatarForHandle(engagement.currentUserHandle) : undefined);
+  const showChrome = isExpanded && chromeVisible;
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0]?.clientX ?? null;
@@ -271,6 +333,12 @@ export default function ImageFullscreenViewer({
     if (Math.abs(dx) < 48) return;
     if (dx < 0) setIndex((i) => (i + 1) % images.length);
     else setIndex((i) => (i - 1 + images.length) % images.length);
+  };
+
+  const onImageSurfaceClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isExpanded) return;
+    setChromeVisible((v) => !v);
   };
 
   return createPortal(
@@ -308,59 +376,26 @@ export default function ImageFullscreenViewer({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative flex h-full w-full flex-col">
-          <header
-            className="absolute top-0 left-0 right-0 z-40 flex items-center justify-between px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2"
-            style={{
-              opacity: isExpanded ? 1 : 0,
-              transition: `opacity ${transitionMs}ms ${transitionEase}`,
-              pointerEvents: isExpanded ? 'auto' : 'none',
-            }}
-          >
-            <button type="button" onClick={requestClose} className={chromeBtn} aria-label="Close">
-              <FiX size={22} strokeWidth={2.25} />
-            </button>
-            <div className="flex items-center gap-2">
-              {hasMultiple && (
-                <span className="text-sm font-medium text-white/75 tabular-nums px-2">
-                  {safeIndex + 1} / {images.length}
-                </span>
-              )}
-              {onMenu && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMenu();
-                  }}
-                  className={chromeBtn}
-                  aria-label="More options"
-                >
-                  <FiMoreHorizontal size={22} strokeWidth={2.25} />
-                </button>
-              )}
-            </div>
-          </header>
-
+        <div className="relative flex h-full w-full flex-col bg-black">
+          {/* Image stage — tap toggles chrome */}
           <main
-            className="absolute inset-0 flex items-center justify-center"
+            className="relative flex min-h-0 flex-1 items-center justify-center"
             style={{
-              paddingTop: isExpanded ? 'max(3.5rem, calc(env(safe-area-inset-top) + 2.75rem))' : 0,
-              paddingBottom: isExpanded && engagement
-                ? 'max(5.5rem, calc(env(safe-area-inset-bottom) + 4.5rem))'
-                : 0,
+              paddingTop: showChrome ? 'max(3.25rem, calc(env(safe-area-inset-top) + 2.5rem))' : 'env(safe-area-inset-top)',
+              paddingBottom: showChrome && engagement ? '9.5rem' : 'env(safe-area-inset-bottom)',
             }}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
+            onClick={onImageSurfaceClick}
           >
-            {isExpanded && hasMultiple && (
+            {showChrome && hasMultiple && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIndex((i) => (i - 1 + images.length) % images.length);
                 }}
-                className={`absolute left-2 top-1/2 z-30 -translate-y-1/2 ${chromeBtn}`}
+                className="absolute left-2 top-1/2 z-30 -translate-y-1/2 rounded-full bg-black/50 p-2.5 text-white"
                 aria-label="Previous image"
               >
                 <FiChevronLeft size={26} />
@@ -370,20 +405,20 @@ export default function ImageFullscreenViewer({
             <img
               src={current.url}
               alt=""
-              className={`w-full h-full select-none pointer-events-none ${
+              className={`h-full w-full select-none pointer-events-none ${
                 isExpanded ? 'object-contain' : 'object-cover'
               }`}
               draggable={false}
             />
 
-            {isExpanded && hasMultiple && (
+            {showChrome && hasMultiple && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIndex((i) => (i + 1) % images.length);
                 }}
-                className={`absolute right-2 top-1/2 z-30 -translate-y-1/2 ${chromeBtn}`}
+                className="absolute right-2 top-1/2 z-30 -translate-y-1/2 rounded-full bg-black/50 p-2.5 text-white"
                 aria-label="Next image"
               >
                 <FiChevronRight size={26} />
@@ -391,63 +426,200 @@ export default function ImageFullscreenViewer({
             )}
           </main>
 
+          {/* X-style header */}
           {engagement && (
-            <footer
-              className="absolute bottom-0 left-0 right-0 z-40 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
+            <header
+              className="absolute top-0 left-0 right-0 z-40 flex items-center gap-1 px-1.5 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]"
               style={{
-                opacity: isExpanded ? 1 : 0,
+                opacity: showChrome ? 1 : 0,
                 transition: `opacity ${transitionMs}ms ${transitionEase}`,
-                pointerEvents: isExpanded ? 'auto' : 'none',
+                pointerEvents: showChrome ? 'auto' : 'none',
+                background: 'linear-gradient(to bottom, rgba(0,0,0,0.72), rgba(0,0,0,0))',
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center gap-7">
+              <button
+                type="button"
+                onClick={requestClose}
+                className="flex h-10 w-10 items-center justify-center text-white"
+                aria-label="Close"
+              >
+                <FiArrowLeft size={22} strokeWidth={2.25} />
+              </button>
+
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                onClick={() => engagement.onVisitProfile?.()}
+                disabled={!engagement.onVisitProfile}
+              >
+                {authorAvatar ? (
+                  <img
+                    src={authorAvatar}
+                    alt=""
+                    className="h-[34px] w-[34px] shrink-0 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs font-semibold text-white">
+                    {authorName.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-bold text-white">{authorName}</span>
+                  <span className="block truncate text-[13px] text-[#8B98A5]">{authorAt}</span>
+                </span>
+              </button>
+
+              {!isOwn && engagement.onFollow ? (
                 <button
                   type="button"
-                  className="flex items-center gap-2 min-h-[44px] text-white"
+                  onClick={() => {
+                    void Promise.resolve(engagement.onFollow?.()).then(() => {
+                      setFollowing((f) => !f);
+                    });
+                  }}
+                  className="mr-1 rounded-full border border-white/80 px-3.5 py-1.5 text-[13px] font-bold text-white"
+                >
+                  {following ? 'Following' : 'Follow'}
+                </button>
+              ) : null}
+
+              {onMenu ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMenu();
+                  }}
+                  className="flex h-10 w-10 items-center justify-center text-white"
+                  aria-label="More options"
+                >
+                  <FiMoreVertical size={20} strokeWidth={2.25} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={requestClose}
+                  className="flex h-10 w-10 items-center justify-center text-white"
+                  aria-label="Close"
+                >
+                  <FiX size={20} />
+                </button>
+              )}
+            </header>
+          )}
+
+          {showChrome && hasMultiple ? (
+            <div className="pointer-events-none absolute right-4 top-[max(3.25rem,calc(env(safe-area-inset-top)+2.75rem))] z-40 rounded-full bg-black/45 px-2 py-1 text-xs font-semibold text-white tabular-nums">
+              {safeIndex + 1}/{images.length}
+            </div>
+          ) : null}
+
+          {/* Engagement + reply (X) */}
+          {engagement && (
+            <div
+              className="absolute bottom-0 left-0 right-0 z-40"
+              style={{
+                opacity: showChrome ? 1 : 0,
+                transition: `opacity ${transitionMs}ms ${transitionEase}`,
+                pointerEvents: showChrome ? 'auto' : 'none',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-t border-white/10 px-4 py-3">
+                <button
+                  type="button"
+                  className="flex min-h-9 items-center gap-1.5 text-[#8B98A5]"
+                  onClick={engagement.onComment}
+                  aria-label="Reply"
+                >
+                  <FiMessageCircle size={20} strokeWidth={1.75} />
+                  <span className="text-[13px] tabular-nums">{compactCount(comments)}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`flex min-h-9 items-center gap-1.5 ${
+                    userReclipped ? 'text-[#00BA7C]' : 'text-[#8B98A5]'
+                  } ${!canReclip || userReclipped ? 'opacity-40' : ''}`}
+                  onClick={() => canReclip && !userReclipped && void engagement.onReclip()}
+                  disabled={!canReclip || userReclipped}
+                  aria-label="Reclip"
+                >
+                  <FiRepeat size={20} strokeWidth={1.75} />
+                  <span className="text-[13px] tabular-nums">{compactCount(reclips)}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`flex min-h-9 items-center gap-1.5 ${liked ? 'text-[#F91880]' : 'text-[#8B98A5]'}`}
                   onClick={() => void engagement.onLike()}
                   aria-pressed={liked}
                   aria-label={liked ? 'Unlike' : 'Like'}
                 >
                   <FiHeart
-                    size={26}
-                    className={liked ? 'fill-white text-white' : 'text-white'}
+                    size={20}
+                    className={liked ? 'fill-current' : undefined}
                     strokeWidth={liked ? 0 : 1.75}
                   />
-                  <span className="text-[15px] font-normal tabular-nums">{likes}</span>
+                  <span className="text-[13px] tabular-nums">{compactCount(likes)}</span>
                 </button>
-
+                <span className="flex min-h-9 items-center gap-1.5 text-[#8B98A5]" aria-label="Views">
+                  <FiBarChart2 size={20} strokeWidth={1.75} />
+                  <span className="text-[13px] tabular-nums">{compactCount(views || shares)}</span>
+                </span>
+                {engagement.onSave ? (
+                  <button
+                    type="button"
+                    className={`flex min-h-9 w-7 items-center justify-center ${
+                      engagement.isSaved ? 'text-[#1D9BF0]' : 'text-[#8B98A5]'
+                    }`}
+                    onClick={engagement.onSave}
+                    aria-label={engagement.isSaved ? 'Saved' : 'Save'}
+                  >
+                    <FiBookmark
+                      size={20}
+                      className={engagement.isSaved ? 'fill-current' : undefined}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="flex items-center gap-2 min-h-[44px] text-white"
-                  onClick={engagement.onComment}
-                  aria-label="Comments"
-                >
-                  <FiMessageCircle size={26} strokeWidth={1.75} />
-                  <span className="text-[15px] font-normal tabular-nums">{comments}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className={`flex items-center gap-2 min-h-[44px] ${canReclip && !userReclipped ? 'text-white' : 'text-white/35'}`}
-                  onClick={() => canReclip && !userReclipped && void engagement.onReclip()}
-                  disabled={!canReclip || userReclipped}
-                  aria-label="Reclip"
-                >
-                  <FiRepeat size={26} strokeWidth={1.75} className={userReclipped ? 'text-cyan-400' : undefined} />
-                  <span className="text-[15px] font-normal tabular-nums">{reclips}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="flex items-center min-h-[44px] text-white ml-auto"
+                  className="flex min-h-9 w-7 items-center justify-center text-[#8B98A5]"
                   onClick={engagement.onShare}
                   aria-label="Share"
                 >
-                  <FiSend size={24} strokeWidth={1.75} />
+                  <FiShare2 size={20} strokeWidth={1.75} />
                 </button>
               </div>
-            </footer>
+
+              <div className="flex items-center gap-2.5 border-t border-white/10 px-3.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2">
+                {viewerAvatar ? (
+                  <img
+                    src={viewerAvatar}
+                    alt=""
+                    className="h-8 w-8 shrink-0 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-700 text-[10px] font-semibold text-white">
+                    {(engagement.viewerName || 'Y').slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={engagement.onComment}
+                  className="flex min-h-10 flex-1 items-center rounded-full bg-[#16181C] px-3.5 text-left"
+                >
+                  <span className="flex-1 text-[15px] text-[#8B98A5]">Post your reply</span>
+                  <span className="flex items-center gap-3 text-[#8B98A5]">
+                    <FiImage size={18} />
+                    <span className="rounded border border-[#8B98A5] px-1 text-[10px] font-extrabold leading-none">
+                      GIF
+                    </span>
+                    <FiMaximize2 size={18} />
+                  </span>
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

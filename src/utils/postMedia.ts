@@ -13,3 +13,17 @@ export function postHasVideoMedia(post: Post): boolean {
   if (post.mediaUrl && VIDEO_URL_RE.test(post.mediaUrl)) return true;
   return false;
 }
+
+/** True when the active feed carousel slide (or sole media) is video. */
+export function currentFeedSlideIsVideo(post: Post, carouselIndex = 0): boolean {
+  const items = (post.mediaItems || []).filter(
+    (item) => item?.type === 'image' || item?.type === 'video',
+  );
+  if (items.length > 0) {
+    const item = items[Math.min(Math.max(0, carouselIndex), items.length - 1)];
+    if (item?.type === 'video') return true;
+    if (item?.type === 'image') return false;
+    return VIDEO_URL_RE.test(item?.url || '');
+  }
+  return postHasVideoMedia(post);
+}

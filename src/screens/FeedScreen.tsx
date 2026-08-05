@@ -10,7 +10,6 @@ import {
     View,
     Text,
     StyleSheet,
-    RefreshControl,
     TouchableOpacity,
     Image,
     ActivityIndicator,
@@ -54,11 +53,14 @@ import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { isLikelyImageUri } from '../utils/imageDimensions';
+import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
-import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
+import ImageFullscreenModal, {
+    type ImageFullscreenOrigin,
+} from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
-import { postHasVideoMedia } from '../utils/postMedia';
+import { postHasVideoMedia, currentFeedSlideIsVideo } from '../utils/postMedia';
 import NetInfo from '@react-native-community/netinfo';
 import {
     getFeedAutoplayPref,
@@ -73,7 +75,9 @@ import {
     getGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { FlatList } from 'react-native-gesture-handler';
+import { FlatList, Gesture, GestureDetector, RefreshControl } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+
 import FeedPageLayout, {
     FEED_CARD_BODY,
     FEED_CARD_CAPTION_PADDING,
@@ -82,6 +86,8 @@ import FeedPageLayout, {
     FEED_CARD_ENGAGEMENT_LEFT,
     FEED_CARD_MEDIA_FRAME,
     FEED_CARD_MEDIA_WRAP,
+    FEED_CARD_MEDIA_TAP_LAYER,
+    FEED_CARD_MEDIA_TAP_LAYER_TOP,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
     FEED_CARD_SPONSORED_ROW,
@@ -945,7 +951,7 @@ const FeedCard = React.memo(function FeedCard({
     onReclip: () => Promise<void>;
     onBookmark: () => Promise<void>;
     onPostPress?: () => void;
-    onOpenImageFullscreen?: (startIndex?: number) => void;
+    onOpenImageFullscreen?: (startIndex?: number, origin?: ImageFullscreenOrigin | null) => void;
     onOpenScenes?: () => void;
     onVisitProfile?: () => void;
     onVisitHandle?: (handle: string) => void;
@@ -986,9 +992,10 @@ const FeedCard = React.memo(function FeedCard({
     const [boostMetricsActive, setBoostMetricsActive] = React.useState(Boolean(post.isBoosted));
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
+    const mediaWrapRef = React.useRef<View>(null);
     const postViewRecordedRef = React.useRef(false);
     const { width: windowWidth } = useWindowDimensions();
-    const cardMediaWidth = windowWidth;
+    const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
     // Web Media: FEED_MIN_ASPECT 3/4, FEED_TARGET_ASPECT 5/4 (height/width)
     const MEDIA_MIN_ASPECT = FEED_UI.media.minAspect;
     const MEDIA_MAX_ASPECT = FEED_UI.media.maxAspect;
@@ -1059,12 +1066,12 @@ const FeedCard = React.memo(function FeedCard({
 
     React.useEffect(() => {
         if (!mediaSizingUrl || imageDimensions) return;
-        // Web: still images use a fixed 4:5 frame; videos default to 4:5 while loading.
-        if (sizingIsVideoPost || !isCarouselPost) {
+        // Web: still images use a fixed 4:5 frame.
+        if (!sizingIsVideoPost && !isCarouselPost) {
             setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
             return;
         }
-        // Carousel: lock to first slide aspect, clamped like web (3/4 … 5/4).
+        // Videos + carousels: lock to measured/poster aspect, clamped like web (3/4 … 5/4).
         if (isLikelyImageUri(mediaSizingUrl)) {
             Image.getSize(
                 mediaSizingUrl,
@@ -1125,14 +1132,72 @@ const FeedCard = React.memo(function FeedCard({
         void onLike();
     }, [onLike]);
 
+    const openStillFullscreen = React.useCallback(() => {
+        const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
+        const open = (origin?: ImageFullscreenOrigin | null) => {
+            onOpenImageFullscreen?.(startIndex, origin ?? null);
+        };
+        const node = mediaWrapRef.current;
+        if (!node?.measureInWindow) {
+            open(null);
+            return;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            if (width > 8 && height > 8) {
+                open({ x, y, width, height });
+            } else {
+                open(null);
+            }
+        });
+    }, [carouselIndex, onOpenImageFullscreen, post]);
+
     const handleMediaSingleTap = React.useCallback(() => {
-        if (postHasVideoMedia(post)) {
+        // Mute flash only on the active video slide — stills open fullscreen (web Media parity).
+        if (currentFeedSlideIsVideo(post, carouselIndex)) {
             videoMediaRef.current?.flashMuteControl();
             return;
         }
-        const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
-        onOpenImageFullscreen?.(startIndex);
-    }, [carouselIndex, onOpenImageFullscreen, post]);
+        openStillFullscreen();
+    }, [carouselIndex, openStillFullscreen, post]);
+
+    const stillSlideActive = hasFeedMedia && !currentFeedSlideIsVideo(post, carouselIndex);
+    const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
+    /**
+     * External still-tap layer sits above FeedPostMedia and blocks carousel ScrollView pans.
+     * Use it only for single stills (Android Image touch stealing); carousel keeps in-media taps.
+     */
+    const useExternalStillTap = stillSlideActive && mediaGesturesEnabled && !isCarouselPost;
+
+    const fireStillSingleTap = React.useCallback(() => {
+        openStillFullscreen();
+    }, [openStillFullscreen]);
+
+    const fireStillDoubleTap = React.useCallback(
+        (x: number, y: number) => {
+            // Tap layer is inset from the media top; burst renders in media-local coords.
+            videoMediaRef.current?.showLikeBurstAt(x, y + FEED_CARD_MEDIA_TAP_LAYER_TOP);
+            void onLike();
+        },
+        [onLike],
+    );
+
+    /** Still images: Exclusive tap gestures outside native Image (RNGH FlatList safe). */
+    const stillMediaTapGesture = React.useMemo(() => {
+        const single = Gesture.Tap()
+            .maxDuration(280)
+            .onEnd(() => {
+                'worklet';
+                runOnJS(fireStillSingleTap)();
+            });
+        const double = Gesture.Tap()
+            .numberOfTaps(2)
+            .maxDuration(320)
+            .onEnd((e) => {
+                'worklet';
+                runOnJS(fireStillDoubleTap)(e.x, e.y);
+            });
+        return Gesture.Exclusive(double, single);
+    }, [fireStillDoubleTap, fireStillSingleTap]);
 
     return (
         <View style={FEED_POST_CARD_STYLE}>
@@ -1169,7 +1234,7 @@ const FeedCard = React.memo(function FeedCard({
             ) : (
                 <View style={FEED_CARD_BODY}>
                     {hasFeedMedia ? (
-                        <View style={FEED_CARD_MEDIA_WRAP}>
+                        <View style={FEED_CARD_MEDIA_WRAP} ref={mediaWrapRef} collapsable={false}>
                             <FeedPostMedia
                                 ref={videoMediaRef}
                                 post={post}
@@ -1178,15 +1243,16 @@ const FeedCard = React.memo(function FeedCard({
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
                                 height={mediaFrameHeight}
+                                feedTouchesHandledExternally={useExternalStillTap}
                                 onDoubleLike={
-                                    isClientUploading || isClientUploadFailed
-                                        ? undefined
-                                        : handleMediaDoubleLike
+                                    mediaGesturesEnabled && !useExternalStillTap
+                                        ? handleMediaDoubleLike
+                                        : undefined
                                 }
                                 onSingleTap={
-                                    isClientUploading || isClientUploadFailed
-                                        ? undefined
-                                        : handleMediaSingleTap
+                                    mediaGesturesEnabled && !useExternalStillTap
+                                        ? handleMediaSingleTap
+                                        : undefined
                                 }
                                 onMediaLoad={
                                     isClientUploading
@@ -1201,11 +1267,19 @@ const FeedCard = React.memo(function FeedCard({
                                 isActive={isVideoActive && !isClientUploading}
                                 muted={feedVideoMuted}
                                 onOpenScenes={
-                                    isClientUploading || isClientUploadFailed
-                                        ? undefined
-                                        : handleOpenScenesPress
+                                    mediaGesturesEnabled ? handleOpenScenesPress : undefined
                                 }
                             />
+                            {useExternalStillTap ? (
+                                <GestureDetector gesture={stillMediaTapGesture}>
+                                    <View
+                                        style={FEED_CARD_MEDIA_TAP_LAYER}
+                                        collapsable={false}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Open image fullscreen"
+                                    />
+                                </GestureDetector>
+                            ) : null}
                             <FeedPostHeader
                                 post={post}
                                 viewerHandle={viewerHandle}
@@ -1446,6 +1520,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
     const [imageFullscreenStartIndex, setImageFullscreenStartIndex] = useState(0);
+    const [imageFullscreenOrigin, setImageFullscreenOrigin] = useState<ImageFullscreenOrigin | null>(
+        null,
+    );
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
@@ -1528,7 +1605,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         userRegional: 'Dublin',
         userNational: 'Ireland',
     });
-    const reloadFeedFromStartRef = useRef<() => Promise<void>>(async () => {});
+    const reloadFeedFromStartRef = useRef<(opts?: { quiet?: boolean }) => Promise<void>>(
+        async () => {},
+    );
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
@@ -2284,10 +2363,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [],
     );
 
-    const reloadFeedFromStart = React.useCallback(async () => {
+    const reloadFeedFromStart = React.useCallback(async (opts?: { quiet?: boolean }) => {
         const gen = ++feedLoadGenRef.current;
         setEnd(false);
-        setInitialLoading(true);
+        // Pull-to-refresh keeps existing cards visible (quiet); cold load shows skeleton.
+        if (!opts?.quiet) {
+            setInitialLoading(true);
+        }
         setError(null);
         const timeoutMs = Platform.OS === 'web' ? 12000 : 25000;
 
@@ -2399,12 +2481,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, 800);
     }, []);
 
-    const onRefresh = async () => {
+    const refreshingLockRef = useRef(false);
+
+    const onRefresh = React.useCallback(async () => {
+        if (refreshingLockRef.current) return;
+        refreshingLockRef.current = true;
         setRefreshing(true);
-        setCursor(0);
-        await reloadFeedFromStartRef.current();
-        setRefreshing(false);
-    };
+        try {
+            await reloadFeedFromStartRef.current({ quiet: true });
+        } catch (err) {
+            console.error('Feed pull-to-refresh failed:', err);
+        } finally {
+            refreshingLockRef.current = false;
+            setRefreshing(false);
+        }
+    }, []);
 
     const handleTabChange = (tab: Tab) => {
         setError(null);
@@ -3259,9 +3350,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setOverflowPost(mergedPost);
                         setOverflowVisible(true);
                     }}
-                    onOpenImageFullscreen={(startIndex = 0) => {
+                    onOpenImageFullscreen={(startIndex = 0, origin = null) => {
                         if (isPendingUpload) return;
                         setImageFullscreenStartIndex(startIndex);
+                        setImageFullscreenOrigin(origin);
                         setImageFullscreenPost(mergedPost);
                     }}
                     onOpenScenes={() => {
@@ -3368,12 +3460,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         ]
     );
 
-    const syncFullscreenPost = React.useCallback(
-        (updated: Post) => {
-            setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
-        },
-        [],
-    );
+    const syncFullscreenPost = React.useCallback((updated: Post) => {
+        setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
+        setSelectedPostForComments((prev) => (prev?.id === updated.id ? updated : prev));
+    }, []);
+
+    const closeCommentsSheet = React.useCallback(() => {
+        setCommentsModalOpen(false);
+        setSelectedPostId(null);
+        setSelectedPostForComments(null);
+    }, []);
 
     return (
         <View style={styles.container}>
@@ -3405,6 +3501,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     />
                 }
             >
+            <View style={styles.feedListShell}>
             <FlatList
                 ref={flatListRef}
                 style={styles.feedList}
@@ -3428,7 +3525,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }
                     return `${item.kind}:${baseKey}:${index}`;
                 }}
-                extraData={`${activeVideoPostId}-${pendingUploadTick}`}
+                extraData={`${activeVideoPostId}-${pendingUploadTick}-${refreshing}`}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfigRef.current}
                 // Performance optimizations - Instagram-style
@@ -3457,10 +3554,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 onScroll={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
                 }}
-                scrollEventThrottle={32}
+                scrollEventThrottle={16}
                 decelerationRate="fast"            // Faster deceleration for snappier feel
                 refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={() => {
+                            void onRefresh();
+                        }}
+                        tintColor="#FFFFFF"
+                        colors={['#FFFFFF']}
+                        progressBackgroundColor="#030712"
+                        progressViewOffset={Platform.OS === 'android' ? 12 : 0}
+                    />
                 }
                 onEndReached={() => {
                     if (!initialLoading && !loadingMore && !end) {
@@ -3490,7 +3596,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 <Text style={styles.emptyFeedSecondaryBtnText}>Try again</Text>
                             </TouchableOpacity>
                         </View>
-                    ) : initialLoading && flatForRender.length === 0 && pages.flat().length === 0 ? (
+                    ) : flatForRender.length === 0 && (initialLoading || !end) ? (
                         <FeedPostSkeleton count={2} />
                     ) : end && flatForRender.length === 0 ? (
                         <View style={styles.emptyContainer}>
@@ -3629,15 +3735,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     },
                 ]}
             />
+            </View>
             </FeedPageLayout>
 
             <ImageFullscreenModal
                 post={imageFullscreenPost}
                 visible={Boolean(imageFullscreenPost)}
                 initialIndex={imageFullscreenStartIndex}
+                originRect={imageFullscreenOrigin}
                 onClose={() => {
                     setImageFullscreenPost(null);
                     setImageFullscreenStartIndex(0);
+                    setImageFullscreenOrigin(null);
                 }}
                 onLike={
                     imageFullscreenPost
@@ -3677,6 +3786,41 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                           }
                         : undefined
                 }
+                onFollow={
+                    imageFullscreenPost &&
+                    user?.handle &&
+                    imageFullscreenPost.userHandle !== user.handle
+                        ? async () => {
+                              const updated = await toggleFollowForPost(
+                                  userId,
+                                  imageFullscreenPost.id,
+                                  imageFullscreenPost.userHandle,
+                                  user.handle,
+                              );
+                              setPages((prev) =>
+                                  prev.map((page) =>
+                                      page.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)),
+                                  ),
+                              );
+                              syncFullscreenPost({ ...imageFullscreenPost, ...updated });
+                          }
+                        : undefined
+                }
+                onVisitProfile={
+                    imageFullscreenPost
+                        ? () => {
+                              const handle = imageFullscreenPost.userHandle;
+                              const sourcePostId = imageFullscreenPost.id;
+                              setImageFullscreenPost(null);
+                              setImageFullscreenStartIndex(0);
+                              setImageFullscreenOrigin(null);
+                              navigation.navigate('ViewProfile', {
+                                  handle,
+                                  sourcePostId,
+                              });
+                          }
+                        : undefined
+                }
                 onMenu={
                     imageFullscreenPost
                         ? () => {
@@ -3688,30 +3832,68 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             />
 
             {commentsModalOpen && selectedPostId ? (
-                <PostCommentsSheet
-                    postId={selectedPostId}
-                    post={selectedPostForComments}
-                    isOpen={commentsModalOpen}
-                    commentAuthorHandle={user?.handle ?? ''}
-                    currentUserHandle={user?.handle}
-                    onAfterClose={() => {
-                        const pid = selectedPostId;
-                        if (!pid) return;
-                        fetchComments(pid)
-                            .then((list) =>
-                                updatePost(pid, (p) => ({
-                                    ...p,
-                                    stats: { ...p.stats, comments: list.length },
-                                }))
-                            )
-                            .catch(() => {});
-                    }}
-                    onClose={() => {
-                        setCommentsModalOpen(false);
-                        setSelectedPostId(null);
-                        setSelectedPostForComments(null);
-                    }}
-                />
+                imageFullscreenPost ? (
+                    /* Stack above fullscreen Modal — keep viewer visible (web parity). */
+                    <Modal
+                        visible
+                        transparent
+                        animationType="slide"
+                        statusBarTranslucent
+                        onRequestClose={closeCommentsSheet}
+                    >
+                        <View style={styles.fullscreenOverlayRoot}>
+                            <Pressable
+                                style={styles.fullscreenOverlayBackdrop}
+                                onPress={closeCommentsSheet}
+                                accessibilityLabel="Dismiss comments"
+                            />
+                            <View style={styles.fullscreenCommentsSheet}>
+                                <PostCommentsSheet
+                                    variant="scenesEmbed"
+                                    postId={selectedPostId}
+                                    post={selectedPostForComments}
+                                    isOpen={commentsModalOpen}
+                                    commentAuthorHandle={user?.handle ?? ''}
+                                    currentUserHandle={user?.handle}
+                                    onAfterClose={() => {
+                                        const pid = selectedPostId;
+                                        if (!pid) return;
+                                        fetchComments(pid)
+                                            .then((list) =>
+                                                updatePost(pid, (p) => ({
+                                                    ...p,
+                                                    stats: { ...p.stats, comments: list.length },
+                                                })),
+                                            )
+                                            .catch(() => {});
+                                    }}
+                                    onClose={closeCommentsSheet}
+                                />
+                            </View>
+                        </View>
+                    </Modal>
+                ) : (
+                    <PostCommentsSheet
+                        postId={selectedPostId}
+                        post={selectedPostForComments}
+                        isOpen={commentsModalOpen}
+                        commentAuthorHandle={user?.handle ?? ''}
+                        currentUserHandle={user?.handle}
+                        onAfterClose={() => {
+                            const pid = selectedPostId;
+                            if (!pid) return;
+                            fetchComments(pid)
+                                .then((list) =>
+                                    updatePost(pid, (p) => ({
+                                        ...p,
+                                        stats: { ...p.stats, comments: list.length },
+                                    })),
+                                )
+                                .catch(() => {});
+                        }}
+                        onClose={closeCommentsSheet}
+                    />
+                )
             ) : null}
 
             {likesSheetPost && likesSheetPost.stats.likes > 0 ? (
@@ -4069,6 +4251,27 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: FEED_PAGE_BG,
+    },
+    fullscreenOverlayRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    fullscreenOverlayBackdrop: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    fullscreenCommentsSheet: {
+        height: '78%',
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: 'hidden',
+    },
+    feedListShell: {
+        flex: 1,
+        backgroundColor: FEED_PAGE_BG,
+        position: 'relative',
+        overflow: 'hidden',
     },
     feedList: {
         flex: 1,
