@@ -504,20 +504,10 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             if (cancelled) return;
             lastOpenRectByHandleRef.current[handleKey] = rect;
             setCollapsing({ payload: collapsePayload, rect });
-            void onScrollCardIntoViewRef.current?.().catch(() => {});
         };
-
-        const cached = lastOpenRectByHandleRef.current[handleKey];
-        if (cached && cached.width > 8 && cached.height > 8) {
-            startCollapse(cached);
-            return () => {
-                cancelled = true;
-            };
-        }
 
         const finishWithoutAnimation = () => {
             if (cancelled) return;
-            void onScrollCardIntoViewRef.current?.().catch(() => {});
             onCollapseHandledRef.current?.();
         };
 
@@ -525,6 +515,12 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             if (cancelled) return;
             measureAttempts += 1;
             if (measureAttempts > maxMeasureAttempts) {
+                // Last resort only — open-time rect may be wrong after feed scroll restore.
+                const cached = lastOpenRectByHandleRef.current[handleKey];
+                if (cached && cached.width > 8 && cached.height > 8) {
+                    startCollapse(cached);
+                    return;
+                }
                 finishWithoutAnimation();
                 return;
             }
@@ -543,6 +539,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             });
         };
 
+        // Always scroll the rail into view, then remeasure — never shrink to a stale open rect.
         void onScrollCardIntoViewRef.current?.()
             .catch(() => {})
             .finally(() => {

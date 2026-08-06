@@ -315,15 +315,18 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const handleLikeAt = useCallback(
         (x: number, y: number) => {
-            // Tap layer is inset from media top — map into media-local coords.
+            // Non-carousel tap layer is inset from media top — map into media-local coords.
+            // Carousel GestureDetector wraps the full media frame, so e.x/e.y are already local.
             const localX = Number.isFinite(x) ? x : width / 2;
-            const localY = Number.isFinite(y)
-                ? y + (typeof FEED_CARD_MEDIA_TAP_LAYER.top === 'number' ? FEED_CARD_MEDIA_TAP_LAYER.top : 0)
-                : height / 2;
+            const insetTop =
+                !hasCarousel && typeof FEED_CARD_MEDIA_TAP_LAYER.top === 'number'
+                    ? FEED_CARD_MEDIA_TAP_LAYER.top
+                    : 0;
+            const localY = Number.isFinite(y) ? y + insetTop : height / 2;
             // Parent renders window-level burst (Android TextureView-safe).
             onDoubleLike?.(localX, localY);
         },
-        [height, onDoubleLike, width],
+        [hasCarousel, height, onDoubleLike, width],
     );
 
     const mediaTapGesture = useMemo(() => {
