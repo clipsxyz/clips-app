@@ -250,7 +250,14 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="Stories"
             component={StoriesScreen}
-            options={{ presentation: 'fullScreenModal' }}
+            options={({ route }) => ({
+              presentation: 'fullScreenModal',
+              // From Stories 24 rail: no native transition — card morph hands off to fullscreen.
+              animation: (route.params as { fromStories24Rail?: boolean } | undefined)
+                ?.fromStories24Rail
+                ? 'none'
+                : 'default',
+            })}
           />
           <Stack.Screen
             name="Scenes"

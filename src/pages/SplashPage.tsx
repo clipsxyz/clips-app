@@ -1,33 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import { useAuth } from '../context/Auth';
-import {
-    getDayPart,
-    getSplashGreetingLine,
-} from '../utils/timeGreeting';
-import splashMorning from '../assets/splash/morning.png';
-import splashAfternoon from '../assets/splash/afternoon.png';
-import splashEvening from '../assets/splash/evening.png';
+import { getSplashGreetingLine } from '../utils/timeGreeting';
 
 const INTRO_FADE_MS = 700;
-const GREETING_HOLD_MS = 2500;
+const GREETING_HOLD_MS = 2800;
 const EXIT_FADE_MS = 500;
 
-const SPLASH_BACKDROP_WEB = {
-    morning: splashMorning,
-    afternoon: splashAfternoon,
-    evening: splashEvening,
-} as const;
-
 /**
- * IKEA-style cold-start welcome (web).
- * Lifestyle backdrop + time greeting only — no metallic logo beat.
+ * Cold-start welcome (web): passport ambient + centered brand + time greeting.
  */
 export default function SplashPage() {
     const navigate = useNavigate();
     const { user } = useAuth();
-    const dayPart = useMemo(() => getDayPart(), []);
-    const backdropUri = SPLASH_BACKDROP_WEB[dayPart];
 
     const userRef = useRef(user);
     userRef.current = user;
@@ -42,7 +28,6 @@ export default function SplashPage() {
     }, [user?.name]);
 
     useEffect(() => {
-        // Next frame: fade backdrop + greeting in
         const t0 = window.requestAnimationFrame(() => setPhase('hold'));
         const tExit = window.setTimeout(
             () => setPhase('exit'),
@@ -68,32 +53,30 @@ export default function SplashPage() {
 
     return (
         <div
-            className="relative min-h-screen min-h-[100dvh] w-full overflow-hidden bg-[#0b0711]"
+            className="relative min-h-screen min-h-[100dvh] w-full overflow-hidden bg-[#060d16]"
             style={{
                 opacity: exiting ? 0 : 1,
                 transition: `opacity ${EXIT_FADE_MS}ms ease-out`,
             }}
         >
-            <div
-                className="absolute inset-0 bg-cover bg-center"
-                style={{
-                    backgroundImage: `url(${backdropUri})`,
-                    opacity: visible || exiting ? 1 : 0,
-                    transition: `opacity ${INTRO_FADE_MS}ms ease-out`,
-                }}
-                aria-hidden
-            />
-            <div
-                className="absolute inset-0 bg-[#0b0711]/45"
-                style={{
-                    opacity: visible || exiting ? 1 : 0,
-                    transition: `opacity ${INTRO_FADE_MS}ms ease-out`,
-                }}
-                aria-hidden
-            />
+            <DiscoverAmbientCanvas variant="passport" />
 
             <div
-                className="absolute inset-x-6 bottom-[18%] flex flex-col items-center text-center"
+                className="absolute inset-0 z-[2] flex items-center justify-center pointer-events-none"
+                aria-hidden={!(visible || exiting)}
+            >
+                <h1
+                    className={`text-[44px] font-bold tracking-tight text-white text-center splash-brand-breathe ${
+                        visible || exiting ? 'splash-brand-in' : 'opacity-0'
+                    }`}
+                    style={{ textShadow: '0 2px 12px rgba(6, 13, 22, 0.55)' }}
+                >
+                    Gazetteer
+                </h1>
+            </div>
+
+            <div
+                className="absolute inset-x-6 bottom-[16%] z-[2] flex flex-col items-center text-center"
                 style={{ pointerEvents: 'none' }}
             >
                 {(visible || exiting) && (
@@ -107,6 +90,26 @@ export default function SplashPage() {
                     </>
                 )}
             </div>
+
+            <style>{`
+                @keyframes splashBrandIn {
+                    0% { opacity: 0; transform: translateY(18px) scale(0.82); }
+                    70% { opacity: 1; transform: translateY(0) scale(1.06); }
+                    100% { opacity: 1; transform: translateY(0) scale(1); }
+                }
+                @keyframes splashBrandBreathe {
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.82; transform: scale(1.045); }
+                }
+                .splash-brand-in {
+                    animation: splashBrandIn 0.56s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+                }
+                .splash-brand-breathe.splash-brand-in {
+                    animation:
+                        splashBrandIn 0.56s cubic-bezier(0.22, 1, 0.36, 1) forwards,
+                        splashBrandBreathe 2.2s ease-in-out 0.56s infinite;
+                }
+            `}</style>
         </div>
     );
 }

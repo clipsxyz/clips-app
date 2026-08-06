@@ -590,6 +590,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                 (!isVideo && mediaUrl ? mediaUrl : undefined) ||
                 undefined;
 
+            // Disable native modal dismiss — custom Apple-TV shrink runs on the feed rail.
+            navigation.setOptions({ animation: 'none' });
             void persistStories24RailReturn({
                 handle: normalizedOpenUserHandle,
                 previewThumb,
@@ -1075,7 +1077,7 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     if (showStories24HoldScreen) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="goldChrome">
+            <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="passport">
                 <StoriesPopIcon size={ox(80)} />
                 <Text style={styles.storiesOpeningText}>Opening stories…</Text>
                 <Text style={styles.stories24HoldSubtext}>Stories 24</Text>

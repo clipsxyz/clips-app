@@ -19,6 +19,7 @@ import Animated, {
     runOnJS,
     useAnimatedStyle,
     useSharedValue,
+    withSpring,
     withTiming,
     cancelAnimation,
 } from 'react-native-reanimated';
@@ -36,11 +37,26 @@ import Avatar from './Avatar.native';
 import { useAuth } from '../context/Auth';
 import { ox } from '../constants/nativeOpticalScale';
 
-/** Web ImageFullscreenViewer motion — CSS-equivalent easing; transforms only (no layout thrash). */
-const EXPAND_MS = 560;
-const COLLAPSE_MS = 720;
-const EXPAND_EASE = Easing.bezier(0.16, 1, 0.3, 1);
-const COLLAPSE_EASE = Easing.bezier(0.34, 1.28, 0.32, 1);
+/**
+ * Meta Threads–style shared-element morph: card frame → fullscreen.
+ * Uniform left/top/width/height (no stretchy scaleX/scaleY).
+ */
+const EXPAND_SPRING = {
+    damping: 26,
+    stiffness: 280,
+    mass: 0.85,
+    overshootClamping: true,
+} as const;
+const COLLAPSE_SPRING = {
+    damping: 28,
+    stiffness: 320,
+    mass: 0.9,
+    overshootClamping: true,
+} as const;
+const BACKDROP_IN_MS = 260;
+const BACKDROP_OUT_MS = 220;
+const EXPAND_FALLBACK_MS = 480;
+const COLLAPSE_FALLBACK_MS = 520;
 
 export type ImageFullscreenOrigin = {
     x: number;
@@ -92,7 +108,7 @@ function atHandle(handle: string): string {
 }
 
 /**
- * Twitter/X-style still-image viewer with web-parity card → fullscreen expand.
+ * Threads-style still-image viewer — card → fullscreen shared-element morph.
  */
 export default function ImageFullscreenModal({
     post,
@@ -208,16 +224,18 @@ export default function ImageFullscreenModal({
 
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                const motion = { duration: EXPAND_MS, easing: EXPAND_EASE };
-                backdropOp.value = withTiming(1, motion);
-                progress.value = withTiming(1, motion, (finished) => {
+                backdropOp.value = withTiming(1, {
+                    duration: BACKDROP_IN_MS,
+                    easing: Easing.out(Easing.cubic),
+                });
+                progress.value = withSpring(1, EXPAND_SPRING, (finished) => {
                     if (finished) runOnJS(markExpanded)();
                 });
-                // Reveal chrome mid-expand; also drop HW texture so overlays aren't covered.
+                // Reveal chrome once the morph has mostly settled.
                 expandFallbackTimerRef.current = setTimeout(() => {
                     expandFallbackTimerRef.current = null;
                     markExpanded();
-                }, Math.round(EXPAND_MS * 0.55));
+                }, EXPAND_FALLBACK_MS);
             });
         });
     }, [
@@ -253,15 +271,17 @@ export default function ImageFullscreenModal({
         oW.value = origin.width;
         oH.value = origin.height;
 
-        const motion = { duration: COLLAPSE_MS, easing: COLLAPSE_EASE };
-        backdropOp.value = withTiming(0.22, motion);
-        progress.value = withTiming(0, motion, (finished) => {
+        backdropOp.value = withTiming(0.18, {
+            duration: BACKDROP_OUT_MS,
+            easing: Easing.in(Easing.cubic),
+        });
+        progress.value = withSpring(0, COLLAPSE_SPRING, (finished) => {
             if (finished) runOnJS(finishClose)();
         });
         closeFallbackTimerRef.current = setTimeout(() => {
             closeFallbackTimerRef.current = null;
             finishClose();
-        }, COLLAPSE_MS + 100);
+        }, COLLAPSE_FALLBACK_MS);
     }, [
         backdropOp,
         closing,
@@ -306,22 +326,21 @@ export default function ImageFullscreenModal({
         opacity: backdropOp.value,
     }));
 
-    /** Full-screen layer scaled/translated to the feed card — GPU only, no layout. */
+    /** Threads morph: interpolate the card frame into the screen (cover crop, no stretch). */
     const shellStyle = useAnimatedStyle(() => {
         const p = progress.value;
         const ow = Math.max(1, oW.value);
         const oh = Math.max(1, oH.value);
         const sw = Math.max(1, screenW.value);
         const sh = Math.max(1, screenH.value);
-        const scaleX = interpolate(p, [0, 1], [ow / sw, 1]);
-        const scaleY = interpolate(p, [0, 1], [oh / sh, 1]);
-        const originCX = oX.value + ow / 2;
-        const originCY = oY.value + oh / 2;
-        const tx = interpolate(p, [0, 1], [originCX - sw / 2, 0]);
-        const ty = interpolate(p, [0, 1], [originCY - sh / 2, 0]);
         return {
-            transform: [{ translateX: tx }, { translateY: ty }, { scaleX }, { scaleY }],
-            borderRadius: interpolate(p, [0, 1], [16 / Math.max(scaleX, 0.01), 0]),
+            position: 'absolute' as const,
+            left: interpolate(p, [0, 1], [oX.value, 0]),
+            top: interpolate(p, [0, 1], [oY.value, 0]),
+            width: interpolate(p, [0, 1], [ow, sw]),
+            height: interpolate(p, [0, 1], [oh, sh]),
+            borderRadius: interpolate(p, [0, 1], [14, 0]),
+            overflow: 'hidden' as const,
         };
     });
 
@@ -425,14 +444,18 @@ export default function ImageFullscreenModal({
                     showsHorizontalScrollIndicator={false}
                     decelerationRate="fast"
                     onMomentumScrollEnd={onScrollEnd}
-                    style={{ width: screenWidth, height: screenHeight }}
+                    style={animating ? styles.stageFill : { width: screenWidth, height: screenHeight }}
                     scrollEnabled={shellReady && !closing}
                 >
                     {images.map((uri) => (
                         <Pressable
                             key={uri}
                             onPress={toggleChrome}
-                            style={{ width: screenWidth, height: screenHeight }}
+                            style={
+                                animating
+                                    ? styles.stageFill
+                                    : { width: screenWidth, height: screenHeight }
+                            }
                         >
                             <Image
                                 source={{ uri }}
@@ -445,7 +468,7 @@ export default function ImageFullscreenModal({
             ) : (
                 <Pressable
                     onPress={toggleChrome}
-                    style={{ width: screenWidth, height: screenHeight }}
+                    style={animating ? styles.stageFill : { width: screenWidth, height: screenHeight }}
                 >
                     <Image
                         source={{ uri: images[0] }}
@@ -695,10 +718,6 @@ const styles = StyleSheet.create({
     },
     shell: {
         position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
         overflow: 'hidden',
         backgroundColor: '#000000',
     },
@@ -749,6 +768,9 @@ const styles = StyleSheet.create({
         height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    stageFill: {
+        ...StyleSheet.absoluteFillObject,
     },
     image: {
         width: '100%',

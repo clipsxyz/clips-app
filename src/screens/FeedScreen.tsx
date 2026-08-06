@@ -57,7 +57,6 @@ import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
-import VideoCTAOverlay from '../components/VideoCTAOverlay.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
 } from '../components/ImageFullscreenModal.native';
@@ -77,8 +76,7 @@ import {
     getGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { FlatList, Gesture, GestureDetector, RefreshControl } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import { FlatList, RefreshControl } from 'react-native-gesture-handler';
 
 import FeedPageLayout, {
     FEED_CARD_BODY,
@@ -88,8 +86,6 @@ import FeedPageLayout, {
     FEED_CARD_ENGAGEMENT_LEFT,
     FEED_CARD_MEDIA_FRAME,
     FEED_CARD_MEDIA_WRAP,
-    FEED_CARD_MEDIA_TAP_LAYER,
-    FEED_CARD_MEDIA_TAP_LAYER_TOP,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
     FEED_CARD_SPONSORED_ROW,
@@ -173,6 +169,8 @@ import {
     normalizeStories24Handle,
     resolveStories24OpenTarget,
     snapshotStories24FeedScroll,
+    takeStories24RailReturnSync,
+    STORIES24_RAIL_RETURN_KEY,
     type Stories24RailItem,
     type Stories24RailReturnPayload,
 } from '../utils/stories24Rail';
@@ -1161,11 +1159,18 @@ const FeedCard = React.memo(function FeedCard({
         onOpenScenes?.();
     }, [onOpenScenes]);
 
-    const handleMediaDoubleLike = React.useCallback(() => {
-        showMediaLikeBurst(cardMediaWidth / 2, mediaFrameHeight / 2);
-        videoMediaRef.current?.showLikeBurstAt(cardMediaWidth / 2, mediaFrameHeight / 2);
-        void onLike();
-    }, [cardMediaWidth, mediaFrameHeight, onLike, showMediaLikeBurst]);
+    const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
+
+    const handleMediaDoubleLike = React.useCallback(
+        (x?: number, y?: number) => {
+            const localX = Number.isFinite(x) ? (x as number) : cardMediaWidth / 2;
+            const localY = Number.isFinite(y) ? (y as number) : mediaFrameHeight / 2;
+            // Window-level Modal burst — visible above Android TextureView / tap overlay.
+            showMediaLikeBurst(localX, localY);
+            void onLike();
+        },
+        [cardMediaWidth, mediaFrameHeight, onLike, showMediaLikeBurst],
+    );
 
     const openStillFullscreen = React.useCallback(() => {
         const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
@@ -1194,56 +1199,6 @@ const FeedCard = React.memo(function FeedCard({
         }
         openStillFullscreen();
     }, [carouselIndex, openStillFullscreen, post]);
-
-    const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
-    /**
-     * External tap layer above Image/Video — FlatList-safe on Android (native surfaces steal touches).
-     * Skip for carousels so horizontal ScrollView pans still work.
-     */
-    const useExternalMediaTap = hasFeedMedia && mediaGesturesEnabled && !isCarouselPost;
-
-    const fireMediaSingleTap = React.useCallback(() => {
-        handleMediaSingleTap();
-    }, [handleMediaSingleTap]);
-
-    const fireMediaDoubleTap = React.useCallback(
-        (x: number, y: number) => {
-            const fallbackX = cardMediaWidth / 2;
-            const fallbackY = mediaFrameHeight / 2;
-            const localX = Number.isFinite(x) ? x : fallbackX;
-            // Tap layer is inset from the media top; burst renders in media-local coords.
-            const localY = Number.isFinite(y)
-                ? y + FEED_CARD_MEDIA_TAP_LAYER_TOP
-                : fallbackY;
-            // Draw above the external tap overlay (inside FeedPostMedia is covered by it on Android).
-            showMediaLikeBurst(localX, localY);
-            void onLike();
-        },
-        [cardMediaWidth, mediaFrameHeight, onLike, showMediaLikeBurst],
-    );
-
-    /** Still + video: Exclusive taps outside native Image/Video (RNGH FlatList safe). */
-    const mediaTapGesture = React.useMemo(() => {
-        const doubleTap = Gesture.Tap()
-            .numberOfTaps(2)
-            .maxDuration(280)
-            .onEnd((e, success) => {
-                'worklet';
-                if (!success) return;
-                runOnJS(fireMediaDoubleTap)(e.x, e.y);
-            });
-        const singleTap = Gesture.Tap()
-            .numberOfTaps(1)
-            .maxDuration(280)
-            .onEnd((_e, success) => {
-                'worklet';
-                if (!success) return;
-                runOnJS(fireMediaSingleTap)();
-            });
-        singleTap.requireExternalGestureToFail(doubleTap);
-        return Gesture.Exclusive(doubleTap, singleTap);
-    }, [fireMediaDoubleTap, fireMediaSingleTap]);
-
 
     return (
         <View style={FEED_POST_CARD_STYLE}>
@@ -1289,17 +1244,8 @@ const FeedCard = React.memo(function FeedCard({
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
                                 height={mediaFrameHeight}
-                                feedTouchesHandledExternally={useExternalMediaTap}
-                                onDoubleLike={
-                                    mediaGesturesEnabled && !useExternalMediaTap
-                                        ? handleMediaDoubleLike
-                                        : undefined
-                                }
-                                onSingleTap={
-                                    mediaGesturesEnabled && !useExternalMediaTap
-                                        ? handleMediaSingleTap
-                                        : undefined
-                                }
+                                onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
+                                onSingleTap={mediaGesturesEnabled ? handleMediaSingleTap : undefined}
                                 onMediaLoad={
                                     isClientUploading
                                         ? undefined
@@ -1316,22 +1262,6 @@ const FeedCard = React.memo(function FeedCard({
                                     mediaGesturesEnabled ? handleOpenScenesPress : undefined
                                 }
                             />
-                            {useExternalMediaTap ? (
-                                <GestureDetector gesture={mediaTapGesture}>
-                                    <View
-                                        style={FEED_CARD_MEDIA_TAP_LAYER}
-                                        collapsable={false}
-                                        accessibilityRole="button"
-                                        accessibilityLabel="Double tap to like"
-                                    />
-                                </GestureDetector>
-                            ) : null}
-                            {useExternalMediaTap && showVideoMuteOnMedia && mediaGesturesEnabled ? (
-                                <VideoCTAOverlay
-                                    onPress={handleOpenScenesPress}
-                                    userHandle={post.userHandle}
-                                />
-                            ) : null}
                             <FeedPostHeader
                                 post={post}
                                 viewerHandle={viewerHandle}
@@ -1742,13 +1672,32 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useFocusEffect(
         useCallback(() => {
             let active = true;
+            // Sync first — mount shrink overlay in the same turn as Stories dismiss.
+            const sync = takeStories24RailReturnSync();
+            if (sync) {
+                pendingStories24CollapseRef.current = null;
+                setStories24CollapsePayload((prev) =>
+                    prev && normalizeStories24Handle(prev.handle) === normalizeStories24Handle(sync.handle)
+                        ? prev
+                        : sync,
+                );
+                void AsyncStorage.removeItem(STORIES24_RAIL_RETURN_KEY).catch(() => {});
+            }
             void (async () => {
                 const [payload, scrollY] = await Promise.all([
-                    consumeStories24RailReturn(),
+                    sync ? Promise.resolve(null) : consumeStories24RailReturn(),
                     consumeStories24FeedScrollRestore(),
                 ]);
                 if (!active) return;
-                if (payload) pendingStories24CollapseRef.current = payload;
+                if (payload) {
+                    pendingStories24CollapseRef.current = null;
+                    setStories24CollapsePayload((prev) =>
+                        prev &&
+                        normalizeStories24Handle(prev.handle) === normalizeStories24Handle(payload.handle)
+                            ? prev
+                            : payload,
+                    );
+                }
                 if (scrollY != null) pendingFeedScrollRestoreRef.current = scrollY;
             })();
             return () => {
@@ -2830,7 +2779,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             return;
         }
         pendingStories24CollapseRef.current = null;
-        setStories24CollapsePayload(pending);
+        setStories24CollapsePayload((prev) =>
+            prev && normalizeStories24Handle(prev.handle) === handleKey ? prev : pending,
+        );
     }, [showStories24Rail, stories24Items]);
 
     const openStoryFromRail = React.useCallback(

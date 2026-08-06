@@ -1736,7 +1736,7 @@ export default function StoriesPage() {
                 aria-live="polite"
                 aria-label="Opening stories"
             >
-                <DiscoverAmbientCanvas variant="goldChrome" />
+                <DiscoverAmbientCanvas variant="passport" />
                 <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
                     <StoriesPopIcon size={80} />
                     <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>

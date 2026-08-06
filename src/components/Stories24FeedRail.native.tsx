@@ -7,13 +7,20 @@ import {
     Image,
     StyleSheet,
     Modal,
-    Animated,
-    Easing,
     Platform,
     AppState,
     useWindowDimensions,
     type LayoutChangeEvent,
 } from 'react-native';
+import Animated, {
+    Easing,
+    cancelAnimation,
+    interpolate,
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from 'react-native-reanimated';
 import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import GoldChromeAmbientCanvas from './GoldChromeAmbientCanvas.native';
@@ -32,6 +39,11 @@ import {
 const CARD_W = 112;
 const CARD_H = 156;
 const CARD_RADIUS = 16;
+
+/** Threads/Apple-TV shared-element morph (card ↔ fullscreen). */
+const EXPAND_EASE = Easing.bezier(0.16, 1, 0.3, 1);
+const COLLAPSE_EASE = Easing.bezier(0.22, 1, 0.36, 1);
+const COLLAPSE_HOLD_MS = 32;
 
 const GOLD_BORDER_GRADIENT = ['#f6e27a', '#d4af37', '#f4f4f4', '#bfc5cc', '#ffe8a3'] as const;
 const GOLD_BORDER_LOCATIONS = [0, 0.24, 0.48, 0.72, 1] as const;
@@ -117,12 +129,15 @@ function StoryCard({
     registerCardRef,
     playPreviewVideo,
     previewVideosPaused,
+    /** Hide while the shared-element clone is flying (avoids double-image ghost). */
+    morphHidden = false,
 }: {
     item: Stories24RailItem;
     onPress: (rect: CardRect) => void;
     registerCardRef: (handle: string, node: View | null) => void;
     playPreviewVideo: boolean;
     previewVideosPaused: boolean;
+    morphHidden?: boolean;
 }) {
     const cardRef = useRef<View>(null);
     const handleKey = normalizeStories24Handle(item.handle);
@@ -144,7 +159,7 @@ function StoryCard({
 
     if (isAddYours) {
         return (
-            <View ref={setCardRef} collapsable={false}>
+            <View ref={setCardRef} collapsable={false} style={morphHidden ? styles.cardMorphHidden : undefined}>
                 <TouchableOpacity
                     style={[styles.card, styles.addYoursCard]}
                     onPress={measureAndPress}
@@ -182,7 +197,7 @@ function StoryCard({
     }
 
     return (
-        <View ref={setCardRef} collapsable={false}>
+        <View ref={setCardRef} collapsable={false} style={morphHidden ? styles.cardMorphHidden : undefined}>
             <TouchableOpacity style={styles.card} onPress={measureAndPress} activeOpacity={0.9}>
                 <LinearGradient
                     colors={[...STORY_CARD_TINT]}
@@ -226,34 +241,75 @@ function Stories24ExpandOverlay({
 }) {
     const { width: screenW, height: screenH } = useWindowDimensions();
     const { rect, item } = expanding;
-    const progress = useRef(new Animated.Value(0)).current;
+    const progress = useSharedValue(0);
+    const oX = useSharedValue(rect.x);
+    const oY = useSharedValue(rect.y);
+    const oW = useSharedValue(rect.width);
+    const oH = useSharedValue(rect.height);
+    const screenWSv = useSharedValue(screenW);
+    const screenHSv = useSharedValue(screenH);
+    const finishedRef = useRef(false);
+
+    const finish = useCallback(() => {
+        if (finishedRef.current) return;
+        finishedRef.current = true;
+        onFinished();
+    }, [onFinished]);
 
     useEffect(() => {
-        progress.setValue(0);
-        const anim = Animated.timing(progress, {
-            toValue: 1,
-            duration: STORIES24_EXPAND_MS,
-            easing: Easing.bezier(0.16, 1, 0.3, 1),
-            useNativeDriver: false,
-        });
-        anim.start(({ finished }) => {
-            if (finished) onFinished();
-        });
-        return () => anim.stop();
-    }, [expanding, onFinished, progress]);
+        finishedRef.current = false;
+        oX.value = rect.x;
+        oY.value = rect.y;
+        oW.value = Math.max(1, rect.width);
+        oH.value = Math.max(1, rect.height);
+        screenWSv.value = screenW;
+        screenHSv.value = screenH;
+        cancelAnimation(progress);
+        progress.value = 0;
+        progress.value = withTiming(
+            1,
+            { duration: STORIES24_EXPAND_MS, easing: EXPAND_EASE },
+            (ok) => {
+                if (ok) runOnJS(finish)();
+            },
+        );
+        const fallback = setTimeout(finish, STORIES24_EXPAND_MS + 100);
+        return () => {
+            clearTimeout(fallback);
+            cancelAnimation(progress);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [expanding]);
 
-    const top = progress.interpolate({ inputRange: [0, 1], outputRange: [rect.y, 0] });
-    const left = progress.interpolate({ inputRange: [0, 1], outputRange: [rect.x, 0] });
-    const width = progress.interpolate({ inputRange: [0, 1], outputRange: [rect.width, screenW] });
-    const height = progress.interpolate({ inputRange: [0, 1], outputRange: [rect.height, screenH] });
-    const borderRadius = progress.interpolate({ inputRange: [0, 1], outputRange: [CARD_RADIUS, 0] });
+    const shellStyle = useAnimatedStyle(() => {
+        const p = progress.value;
+        return {
+            position: 'absolute' as const,
+            left: interpolate(p, [0, 1], [oX.value, 0]),
+            top: interpolate(p, [0, 1], [oY.value, 0]),
+            width: interpolate(p, [0, 1], [oW.value, screenWSv.value]),
+            height: interpolate(p, [0, 1], [oH.value, screenHSv.value]),
+            borderRadius: interpolate(p, [0, 1], [CARD_RADIUS, 0]),
+            overflow: 'hidden' as const,
+            shadowOpacity: interpolate(p, [0, 0.4, 1], [0.25, 0.55, 0]),
+            shadowRadius: interpolate(p, [0, 0.4, 1], [12, 36, 0]),
+            elevation: interpolate(p, [0, 0.45, 1], [8, 28, 0]),
+        };
+    });
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(progress.value, [0, 0.15, 1], [0, 0.55, 1]),
+    }));
+
+    const veilStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(progress.value, [0, 0.65, 1], [0.22, 0.1, 0]),
+    }));
 
     return (
         <Modal visible transparent animationType="none" statusBarTranslucent>
             <View style={styles.expandModalRoot} pointerEvents="none">
-                <Animated.View
-                    style={[{ top, left, width, height, borderRadius }, styles.expandCard]}
-                >
+                <Animated.View style={[styles.expandBackdrop, backdropStyle]} />
+                <Animated.View style={[styles.expandCard, shellStyle]}>
                     <LinearGradient
                         colors={[...STORY_CARD_TINT]}
                         start={{ x: 0, y: 1 }}
@@ -263,7 +319,7 @@ function Stories24ExpandOverlay({
                     {item.thumb ? (
                         <Image source={{ uri: item.thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                     ) : null}
-                    <View style={styles.expandDim} />
+                    <Animated.View style={[styles.expandDim, veilStyle]} />
                 </Animated.View>
             </View>
         </Modal>
@@ -280,38 +336,85 @@ function Stories24CollapseOverlay({
     onFinished: () => void;
 }) {
     const { width: screenW, height: screenH } = useWindowDimensions();
-    const progress = useRef(new Animated.Value(0)).current;
+    const progress = useSharedValue(0);
+    const tX = useSharedValue(targetRect.x);
+    const tY = useSharedValue(targetRect.y);
+    const tW = useSharedValue(Math.max(1, targetRect.width));
+    const tH = useSharedValue(Math.max(1, targetRect.height));
+    const screenWSv = useSharedValue(screenW);
+    const screenHSv = useSharedValue(screenH);
+    const finishedRef = useRef(false);
+    const onFinishedRef = useRef(onFinished);
+    onFinishedRef.current = onFinished;
+
+    const finish = useCallback(() => {
+        if (finishedRef.current) return;
+        finishedRef.current = true;
+        onFinishedRef.current();
+    }, []);
 
     useEffect(() => {
-        progress.setValue(0);
-        const anim = Animated.timing(progress, {
-            toValue: 1,
-            duration: STORIES24_COLLAPSE_MS,
-            easing: Easing.bezier(0.34, 1.28, 0.32, 1),
-            useNativeDriver: false,
-        });
-        anim.start(({ finished }) => {
-            if (finished) onFinished();
-        });
-        return () => anim.stop();
-    }, [onFinished, progress]);
+        finishedRef.current = false;
+        cancelAnimation(progress);
+        progress.value = 0;
 
-    const top = progress.interpolate({ inputRange: [0, 1], outputRange: [0, targetRect.y] });
-    const left = progress.interpolate({ inputRange: [0, 1], outputRange: [0, targetRect.x] });
-    const width = progress.interpolate({ inputRange: [0, 1], outputRange: [screenW, targetRect.width] });
-    const height = progress.interpolate({ inputRange: [0, 1], outputRange: [screenH, targetRect.height] });
-    const borderRadius = progress.interpolate({ inputRange: [0, 1], outputRange: [0, CARD_RADIUS] });
+        let shrinkTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+            shrinkTimer = null;
+            progress.value = withTiming(
+                1,
+                {
+                    duration: STORIES24_COLLAPSE_MS,
+                    easing: COLLAPSE_EASE,
+                },
+                (ok) => {
+                    if (ok) runOnJS(finish)();
+                },
+            );
+        }, COLLAPSE_HOLD_MS);
+
+        const fallback = setTimeout(finish, COLLAPSE_HOLD_MS + STORIES24_COLLAPSE_MS + 120);
+        return () => {
+            if (shrinkTimer) clearTimeout(shrinkTimer);
+            clearTimeout(fallback);
+            cancelAnimation(progress);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const shellStyle = useAnimatedStyle(() => {
+        const p = progress.value;
+        return {
+            position: 'absolute' as const,
+            left: interpolate(p, [0, 1], [0, tX.value]),
+            top: interpolate(p, [0, 1], [0, tY.value]),
+            width: interpolate(p, [0, 1], [screenWSv.value, tW.value]),
+            height: interpolate(p, [0, 1], [screenHSv.value, tH.value]),
+            borderRadius: interpolate(p, [0, 1], [0, CARD_RADIUS]),
+            overflow: 'hidden' as const,
+            shadowOpacity: interpolate(p, [0, 0.55, 1], [0, 0.5, 0.2]),
+            shadowRadius: interpolate(p, [0, 0.55, 1], [0, 32, 10]),
+            elevation: interpolate(p, [0, 0.5, 1], [0, 26, 6]),
+        };
+    });
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        // Keep feed covered until the tile is almost home.
+        opacity: interpolate(progress.value, [0, 0.72, 1], [1, 0.88, 0]),
+    }));
+
+    const veilStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(progress.value, [0, 0.55, 1], [0, 0.08, 0.16]),
+    }));
 
     return (
         <Modal visible transparent animationType="none" statusBarTranslucent>
             <View style={styles.collapseModalRoot} pointerEvents="none">
-                <Animated.View
-                    style={[{ top, left, width, height, borderRadius }, styles.expandCard]}
-                >
+                <Animated.View style={[styles.expandBackdrop, backdropStyle]} />
+                <Animated.View style={[styles.expandCard, shellStyle]}>
                     <LinearGradient
-                        colors={['rgba(100,116,139,0.25)', 'rgba(56,189,248,0.2)', 'rgba(99,102,241,0.25)']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
+                        colors={[...STORY_CARD_TINT]}
+                        start={{ x: 0, y: 1 }}
+                        end={{ x: 1, y: 0 }}
                         style={StyleSheet.absoluteFill}
                     />
                     {payload.previewThumb ? (
@@ -321,7 +424,7 @@ function Stories24CollapseOverlay({
                             resizeMode="cover"
                         />
                     ) : null}
-                    <View style={styles.collapseVeil} />
+                    <Animated.View style={[styles.collapseVeil, veilStyle]} />
                 </Animated.View>
             </View>
         </Modal>
@@ -358,6 +461,14 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     }, []);
     const expandingRef = useRef<ExpandingStory | null>(null);
     const cardRefs = useRef<Record<string, View | null>>({});
+    /** Last card rect used to open a story — Android collapse fallback when measure fails. */
+    const lastOpenRectByHandleRef = useRef<Record<string, CardRect>>({});
+    /** Prevents collapse restart when feed/items refresh mid-animation. */
+    const collapseSessionRef = useRef<string | null>(null);
+    const onCollapseHandledRef = useRef(onCollapseHandled);
+    const onScrollCardIntoViewRef = useRef(onScrollCardIntoView);
+    onCollapseHandledRef.current = onCollapseHandled;
+    onScrollCardIntoViewRef.current = onScrollCardIntoView;
     expandingRef.current = expanding;
 
     const registerCardRef = React.useCallback((handle: string, node: View | null) => {
@@ -365,44 +476,56 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     }, []);
 
     useEffect(() => {
-        if (!collapsePayload) return;
-
-        const handleKey = normalizeStories24Handle(collapsePayload.handle);
-        const hasCard = items.some((item) => normalizeStories24Handle(item.handle) === handleKey);
-        if (!hasCard) {
-            onCollapseHandled?.();
+        if (!collapsePayload) {
+            collapseSessionRef.current = null;
             return;
         }
+
+        const handleKey = normalizeStories24Handle(collapsePayload.handle);
+        const sessionKey = `${handleKey}:${collapsePayload.previewThumb || ''}`;
+        if (collapseSessionRef.current === sessionKey) {
+            return;
+        }
+
+        const hasCard = items.some((item) => normalizeStories24Handle(item.handle) === handleKey);
+        if (!hasCard) {
+            onCollapseHandledRef.current?.();
+            return;
+        }
+
+        collapseSessionRef.current = sessionKey;
 
         let cancelled = false;
         let frameId = 0;
         let measureAttempts = 0;
-        const maxMeasureAttempts = 45;
-        const startedAt = Date.now();
+        const maxMeasureAttempts = 18;
 
-        const finishWithoutAnimation = async () => {
+        const startCollapse = (rect: CardRect) => {
             if (cancelled) return;
-            try {
-                await onScrollCardIntoView?.();
-            } catch {
-                /* ignore */
-            }
-            if (!cancelled) onCollapseHandled?.();
+            lastOpenRectByHandleRef.current[handleKey] = rect;
+            setCollapsing({ payload: collapsePayload, rect });
+            void onScrollCardIntoViewRef.current?.().catch(() => {});
         };
 
-        // Fullscreen shrink is fragile on Android (measure loops + Fabric); scroll rail into view only.
-        if (Platform.OS === 'android') {
-            void finishWithoutAnimation();
+        const cached = lastOpenRectByHandleRef.current[handleKey];
+        if (cached && cached.width > 8 && cached.height > 8) {
+            startCollapse(cached);
             return () => {
                 cancelled = true;
             };
         }
 
+        const finishWithoutAnimation = () => {
+            if (cancelled) return;
+            void onScrollCardIntoViewRef.current?.().catch(() => {});
+            onCollapseHandledRef.current?.();
+        };
+
         const measureCard = () => {
             if (cancelled) return;
             measureAttempts += 1;
             if (measureAttempts > maxMeasureAttempts) {
-                onCollapseHandled?.();
+                finishWithoutAnimation();
                 return;
             }
             const node = cardRefs.current[handleKey];
@@ -416,34 +539,26 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                     frameId = requestAnimationFrame(measureCard);
                     return;
                 }
-                setCollapsing({ payload: collapsePayload, rect: { x, y, width, height } });
+                startCollapse({ x, y, width, height });
             });
         };
 
-        const tryRun = async () => {
-            if (cancelled) return;
-            if (Date.now() - startedAt > 3200) {
-                onCollapseHandled?.();
-                return;
-            }
-            try {
-                await onScrollCardIntoView?.();
-            } catch {
-                /* ignore */
-            }
-            if (cancelled) return;
-            frameId = requestAnimationFrame(() => {
-                frameId = requestAnimationFrame(measureCard);
+        void onScrollCardIntoViewRef.current?.()
+            .catch(() => {})
+            .finally(() => {
+                if (cancelled) return;
+                frameId = requestAnimationFrame(() => {
+                    frameId = requestAnimationFrame(measureCard);
+                });
             });
-        };
-
-        void tryRun();
 
         return () => {
             cancelled = true;
             cancelAnimationFrame(frameId);
         };
-    }, [collapsePayload, items, onCollapseHandled, onScrollCardIntoView]);
+        // Only re-enter when a new collapse payload arrives — not when items/callbacks churn.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [collapsePayload]);
 
     useEffect(() => {
         const sub = AppState.addEventListener('change', (next) => {
@@ -473,6 +588,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         const node = cardRefs.current[handleKey];
         const startExpand = (rect: CardRect) => {
             if (expandingRef.current) return;
+            lastOpenRectByHandleRef.current[handleKey] = rect;
             setExpanding({ item: first, railHandles, rect });
         };
         if (!node) {
@@ -495,14 +611,21 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
 
     const handleStoryCardPress = (item: Stories24RailItem, rect: CardRect) => {
         if (expandingRef.current) return;
+        const handleKey = normalizeStories24Handle(item.handle);
+        lastOpenRectByHandleRef.current[handleKey] = rect;
         setExpanding({ item, railHandles, rect });
     };
 
     const finishExpand = () => {
         const current = expandingRef.current;
         if (!current) return;
-        setExpanding(null);
+        // Open Stories under the morph, then drop the overlay after paint (avoids feed flash).
         onOpenStory(current.item, current.railHandles);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setExpanding((prev) => (prev === current || prev?.item.handle === current.item.handle ? null : prev));
+            });
+        });
     };
 
     return (
@@ -556,7 +679,16 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                             onScrollEndDrag={() => setRailScrolling(false)}
                             onMomentumScrollEnd={() => setRailScrolling(false)}
                         >
-                            {items.map((item) => (
+                            {items.map((item) => {
+                                const handleKey = normalizeStories24Handle(item.handle);
+                                const morphHidden =
+                                    (!!expanding &&
+                                        normalizeStories24Handle(expanding.item.handle) ===
+                                            handleKey) ||
+                                    (!!collapsing &&
+                                        normalizeStories24Handle(collapsing.payload.handle) ===
+                                            handleKey);
+                                return (
                                 <StoryCard
                                     key={
                                         item.handle === STORIES24_ADD_YOURS_HANDLE
@@ -565,11 +697,12 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                                     }
                                     item={item}
                                     registerCardRef={registerCardRef}
+                                    morphHidden={morphHidden}
                                     playPreviewVideo={
                                         !!item.previewVideoUrl &&
                                         item.handle === firstStoryPreviewHandle
                                     }
-                                    previewVideosPaused={previewsPaused}
+                                    previewVideosPaused={previewsPaused || morphHidden}
                                     onPress={(rect) => {
                                         if (item.handle === STORIES24_ADD_YOURS_HANDLE) {
                                             onAddYours();
@@ -578,21 +711,28 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                                         }
                                     }}
                                 />
-                            ))}
+                                );
+                            })}
                         </ScrollView>
                     </View>
                 </View>
             </LinearGradient>
             {expanding ? (
-                <Stories24ExpandOverlay expanding={expanding} onFinished={finishExpand} />
+                <Stories24ExpandOverlay
+                    key={`expand-${normalizeStories24Handle(expanding.item.handle)}`}
+                    expanding={expanding}
+                    onFinished={finishExpand}
+                />
             ) : null}
             {collapsing ? (
                 <Stories24CollapseOverlay
+                    key={`collapse-${normalizeStories24Handle(collapsing.payload.handle)}-${collapsing.payload.previewThumb || 'x'}`}
                     payload={collapsing.payload}
                     targetRect={collapsing.rect}
                     onFinished={() => {
                         setCollapsing(null);
-                        onCollapseHandled?.();
+                        collapseSessionRef.current = null;
+                        onCollapseHandledRef.current?.();
                     }}
                 />
             ) : null}
@@ -734,7 +874,11 @@ const styles = StyleSheet.create({
     },
     collapseModalRoot: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.28)',
+        backgroundColor: 'transparent',
+    },
+    expandBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
     },
     collapseVeil: {
         ...StyleSheet.absoluteFillObject,
@@ -753,5 +897,8 @@ const styles = StyleSheet.create({
     expandDim: {
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0,0,0,0.2)',
+    },
+    cardMorphHidden: {
+        opacity: 0,
     },
 });

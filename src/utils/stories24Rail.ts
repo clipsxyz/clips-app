@@ -20,10 +20,10 @@ export type Stories24RailItem = {
 /** RN AsyncStorage key — keep in sync with web `clips:stories24OpenedFromRailHandle` semantics. */
 export const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:rn:stories24OpenedFromRailHandle';
 export const STORIES24_LOADING_HOLD_MS = 2600;
-/** Card → fullscreen expand before navigating to Stories (match web App.tsx). */
-export const STORIES24_EXPAND_MS = 560;
-/** Fullscreen → card shrink when returning to feed (match web App.tsx). */
-export const STORIES24_COLLAPSE_MS = 720;
+/** Card → fullscreen expand before navigating to Stories (Threads-style spring morph). */
+export const STORIES24_EXPAND_MS = 420;
+/** Fullscreen → card shrink (Apple TV decelerate into tile). */
+export const STORIES24_COLLAPSE_MS = 560;
 export const STORIES24_ADD_YOURS_HANDLE = '__add_yours__';
 
 /** RN AsyncStorage — keep in sync with web `clips:stories24RailReturn`. */
@@ -38,6 +38,19 @@ export type Stories24RailReturnPayload = {
     previewThumb?: string;
     previewVideoUrl?: string;
 };
+
+/** Sync handoff so feed can start shrink before AsyncStorage round-trip. */
+let stories24RailReturnSync: Stories24RailReturnPayload | null = null;
+
+export function setStories24RailReturnSync(payload: Stories24RailReturnPayload): void {
+    stories24RailReturnSync = payload;
+}
+
+export function takeStories24RailReturnSync(): Stories24RailReturnPayload | null {
+    const next = stories24RailReturnSync;
+    stories24RailReturnSync = null;
+    return next;
+}
 
 export function normalizeStories24Handle(handle: string): string {
     return (handle || '').trim().toLowerCase().replace(/^@/, '');
@@ -196,15 +209,14 @@ export async function clearStories24RailOpenHandle(): Promise<void> {
 export async function persistStories24RailReturn(payload: Stories24RailReturnPayload): Promise<void> {
     const handle = (payload.handle || '').trim();
     if (!handle) return;
+    const next = {
+        handle,
+        previewThumb: payload.previewThumb,
+        previewVideoUrl: payload.previewVideoUrl,
+    };
+    setStories24RailReturnSync(next);
     try {
-        await AsyncStorage.setItem(
-            STORIES24_RAIL_RETURN_KEY,
-            JSON.stringify({
-                handle,
-                previewThumb: payload.previewThumb,
-                previewVideoUrl: payload.previewVideoUrl,
-            }),
-        );
+        await AsyncStorage.setItem(STORIES24_RAIL_RETURN_KEY, JSON.stringify(next));
     } catch {
         /* ignore */
     }
@@ -244,6 +256,15 @@ export async function consumeStories24FeedScrollRestore(): Promise<number | null
 }
 
 export async function consumeStories24RailReturn(): Promise<Stories24RailReturnPayload | null> {
+    const sync = takeStories24RailReturnSync();
+    if (sync) {
+        try {
+            await AsyncStorage.removeItem(STORIES24_RAIL_RETURN_KEY);
+        } catch {
+            /* ignore */
+        }
+        return sync;
+    }
     try {
         const raw = await AsyncStorage.getItem(STORIES24_RAIL_RETURN_KEY);
         if (!raw) return null;
