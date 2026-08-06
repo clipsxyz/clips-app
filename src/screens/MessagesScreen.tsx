@@ -75,6 +75,10 @@ import {
 import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
 
+function sameDmHandle(a?: string | null, b?: string | null): boolean {
+    return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
 type VoiceDraftSegment = { audioUrl: string; durationSeconds: number };
 type VoiceDraftState = {
     audioUrl: string;
@@ -816,7 +820,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const closeMessageActions = () => setMessageActionsTarget(null);
 
     const messageActionList = (item: ChatMessage): DmMessageAction[] => {
-        const fromMe = item.senderHandle === user?.handle;
+        const fromMe = sameDmHandle(item.senderHandle, user?.handle);
         const actions: DmMessageAction[] = [
             {
                 key: 'reply',
@@ -1859,8 +1863,9 @@ export default function MessagesScreen({ route, navigation }: any) {
     }, []);
 
     const renderMessage = ({ item }: { item: ChatMessage }) => {
-        const isFromMe = item.senderHandle === user?.handle;
+        const isFromMe = sameDmHandle(item.senderHandle, user?.handle);
         const senderAvatar = getAvatarForHandle(item.senderHandle);
+        const myAvatar = user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined);
         const isStoryInteraction = Boolean(item.storyId);
         const isLegacyStoryContextText =
             !!item.isSystemMessage &&
@@ -1969,9 +1974,11 @@ export default function MessagesScreen({ route, navigation }: any) {
                 (item.storyContextText === 'Reacted to your story' ||
                     (trimmed.length > 0 && trimmed.length <= 4 && !/\s/.test(trimmed)));
             const label = reactionOnly
-                ? 'Reacted to your story'
-                : trimmed === 'Replied to your story' || !trimmed
-                  ? 'Replied to your story'
+                ? isFromMe
+                    ? 'You reacted to their story'
+                    : 'Reacted to your story'
+                : isFromMe
+                  ? 'You replied to their story'
                   : 'Replied to your story';
             const bodyText =
                 reactionOnly
@@ -1989,41 +1996,53 @@ export default function MessagesScreen({ route, navigation }: any) {
                         isFromMe ? styles.messageFromMe : styles.messageFromOther,
                     ]}
                 >
-                    <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => {
-                            if (!item.storyId) return;
-                            navigation.navigate('Stories', {
-                                openUserHandle: isFromMe
-                                    ? handle
-                                    : item.storyContextOwner || handle,
-                                openStoryId: item.storyId,
-                            });
-                        }}
-                        onLongPress={() => openMessageActions(item)}
-                    >
-                        <View style={[styles.storyStickerCard, isFromMe && styles.storyStickerCardMine]}>
-                            {item.imageUrl ? (
-                                <Image source={{ uri: item.imageUrl }} style={styles.storyStickerThumb} />
-                            ) : (
-                                <View style={[styles.storyStickerThumb, styles.storyStickerThumbFallback]}>
-                                    <Icon name="images-outline" size={22} color="#9CA3AF" />
+                    {!isFromMe ? (
+                        <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
+                    ) : null}
+                    <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
+                        <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => {
+                                if (!item.storyId) return;
+                                navigation.navigate('Stories', {
+                                    openUserHandle: isFromMe
+                                        ? handle
+                                        : item.storyContextOwner || handle,
+                                    openStoryId: item.storyId,
+                                });
+                            }}
+                            onLongPress={() => openMessageActions(item)}
+                        >
+                            <View style={[styles.storyStickerCard, isFromMe && styles.storyStickerCardMine]}>
+                                {item.imageUrl ? (
+                                    <Image source={{ uri: item.imageUrl }} style={styles.storyStickerThumb} />
+                                ) : (
+                                    <View style={[styles.storyStickerThumb, styles.storyStickerThumbFallback]}>
+                                        <Icon name="images-outline" size={22} color="#9CA3AF" />
+                                    </View>
+                                )}
+                                <View style={styles.storyStickerMeta}>
+                                    <Text style={styles.storyStickerLabel}>{label}</Text>
+                                    {bodyText ? (
+                                        <Text style={styles.storyStickerBody} numberOfLines={3}>
+                                            {bodyText}
+                                        </Text>
+                                    ) : null}
+                                    {item.storyId ? (
+                                        <Text style={styles.storyStickerHint}>Tap to view story</Text>
+                                    ) : null}
                                 </View>
-                            )}
-                            <View style={styles.storyStickerMeta}>
-                                <Text style={styles.storyStickerLabel}>{label}</Text>
-                                {bodyText ? (
-                                    <Text style={styles.storyStickerBody} numberOfLines={3}>
-                                        {bodyText}
-                                    </Text>
-                                ) : null}
-                                {item.storyId ? (
-                                    <Text style={styles.storyStickerHint}>Tap to view story</Text>
-                                ) : null}
                             </View>
-                        </View>
-                    </TouchableOpacity>
-                    {renderReactionPills()}
+                        </TouchableOpacity>
+                        {renderReactionPills()}
+                    </View>
+                    {isFromMe ? (
+                        <Avatar
+                            src={myAvatar}
+                            name={user?.name || user?.handle || 'You'}
+                            size={ox(32)}
+                        />
+                    ) : null}
                 </View>
             );
         }
@@ -2102,8 +2121,6 @@ export default function MessagesScreen({ route, navigation }: any) {
             item.imageUrl && !item.text?.trim() && !item.audioUrl && !(item as any).replyTo
         );
         const bubbleFill = isFromMe ? sentBubbleColor : DM_RECEIVED;
-
-        const myAvatar = user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined);
 
         const bubbleContent = (
             <>
@@ -3114,6 +3131,8 @@ const styles = StyleSheet.create({
         fontSize: ox(12),
     },
     messageContainer: {
+        width: '100%',
+        alignSelf: 'stretch',
         flexDirection: 'row',
         marginBottom: ox(10),
         alignItems: 'flex-end',
@@ -3128,14 +3147,15 @@ const styles = StyleSheet.create({
     messageColumn: {
         flexShrink: 1,
         minWidth: 0,
-        maxWidth: '82%',
+        maxWidth: '78%',
     },
     messageColumnMe: {
         alignItems: 'flex-end',
     },
     messageColumnOther: {
         alignItems: 'flex-start',
-        flex: 1,
+        flexGrow: 1,
+        flexShrink: 1,
     },
     sharedPostColumn: {
         maxWidth: '88%',
@@ -3255,7 +3275,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(10),
-        maxWidth: ox(280),
+        width: ox(260),
+        maxWidth: '100%',
         backgroundColor: '#111827',
         borderRadius: ox(16),
         borderWidth: 1,
@@ -3278,7 +3299,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     storyStickerMeta: {
-        flex: 1,
+        flexGrow: 1,
+        flexShrink: 1,
         minWidth: 0,
         paddingRight: ox(4),
     },

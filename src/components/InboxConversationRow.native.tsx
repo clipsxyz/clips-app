@@ -7,22 +7,41 @@ import { timeAgo } from '../utils/timeAgo';
 import type { ConversationSummary } from '../api/messages';
 import { ox } from '../constants/nativeOpticalScale';
 
+function sameDmHandle(a?: string | null, b?: string | null): boolean {
+    return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
 export function inboxConversationRowId(conv: ConversationSummary): string {
     if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
     return conv.otherHandle;
 }
 
-export function conversationPreviewText(conv: ConversationSummary): string {
+export function conversationPreviewText(conv: ConversationSummary, viewerHandle?: string | null): string {
     const last = conv.lastMessage;
     if (!last) return conv.kind === 'group' ? 'Open group' : 'Open conversation';
+    const fromMe = !!viewerHandle && sameDmHandle(last.senderHandle, viewerHandle);
     if (last.storyId) {
         const body = last.text?.trim();
         if (last.storyContextText === 'Reacted to your story' && body) {
-            return `Reacted ${body} to your story`;
+            return fromMe
+                ? `You reacted ${body} to their story`
+                : `Reacted ${body} to your story`;
+        }
+        if (last.storyContextText === 'Reacted to your story') {
+            return fromMe ? 'You reacted to their story' : 'Reacted to your story';
+        }
+        if (body === 'Replied to your story') {
+            return fromMe ? 'You replied to their story' : 'Replied to your story';
         }
         if (body && body !== 'Replied to your story') return body;
-        if (last.storyContextText?.trim()) return last.storyContextText.trim();
-        return 'Replied to your story';
+        if (last.storyContextText?.trim()) {
+            const ctx = last.storyContextText.trim();
+            if (fromMe && /your story/i.test(ctx)) {
+                return ctx.replace(/your story/i, 'their story').replace(/^Reacted/, 'You reacted').replace(/^Replied/, 'You replied');
+            }
+            return ctx;
+        }
+        return fromMe ? 'You replied to their story' : 'Replied to your story';
     }
     if (last.text?.trim()) return last.text;
     if (last.commentText?.trim()) return `Commented: ${last.commentText}`;
@@ -33,6 +52,7 @@ export function conversationPreviewText(conv: ConversationSummary): string {
 
 type Props = {
     conv: ConversationSummary;
+    viewerHandle?: string | null;
     avatarSrc?: string;
     isSwipeOpen?: boolean;
     onSwipeOpenChange?: (rowId: string | null) => void;
@@ -48,6 +68,7 @@ type Props = {
 
 export default function InboxConversationRow({
     conv,
+    viewerHandle,
     avatarSrc,
     isSwipeOpen,
     onSwipeOpenChange,
@@ -64,7 +85,7 @@ export default function InboxConversationRow({
     const rowId = inboxConversationRowId(conv);
     const isGroup = conv.kind === 'group';
     const title = isGroup ? conv.groupName || 'Group chat' : conv.otherHandle;
-    const subtitle = conversationPreviewText(conv);
+    const subtitle = conversationPreviewText(conv, viewerHandle);
     const unread = conv.unread || 0;
 
     useEffect(() => {

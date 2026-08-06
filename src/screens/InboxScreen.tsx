@@ -810,6 +810,7 @@ export default function InboxScreen({ navigation, route }: any) {
         return (
             <InboxConversationRow
                 conv={item}
+                viewerHandle={user?.handle}
                 avatarSrc={
                     isGroup
                         ? item.groupAvatarUrl || undefined
