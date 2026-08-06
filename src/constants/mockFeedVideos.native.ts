@@ -1,9 +1,8 @@
 /**
  * Demo MP4 URLs for mock feed / Scenes testing (React Native).
  *
- * Prefer the bundled `bbb.mp4` (Big Buck Bunny sample → react-native-video)
- * so cards work offline and when remote CDNs 403. Logical `/demo-videos/*`
- * slots identify which poster / post id to use.
+ * Prefer the bundled `bbb.mp4` (1080×1344 ~4:5 HD H.264 demo → react-native-video)
+ * so cards look sharp on phone screens and work offline.
  */
 import { Image, type ImageSourcePropType } from 'react-native';
 

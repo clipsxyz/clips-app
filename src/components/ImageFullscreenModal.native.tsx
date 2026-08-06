@@ -19,7 +19,6 @@ import Animated, {
     runOnJS,
     useAnimatedStyle,
     useSharedValue,
-    withSpring,
     withTiming,
     cancelAnimation,
 } from 'react-native-reanimated';
@@ -38,25 +37,17 @@ import { useAuth } from '../context/Auth';
 import { ox } from '../constants/nativeOpticalScale';
 
 /**
- * Meta Threads–style shared-element morph: card frame → fullscreen.
- * Uniform left/top/width/height (no stretchy scaleX/scaleY).
+ * Option 3 — sheet-style slide: fullscreen content slides up from the bottom,
+ * slides down on close. Avoids card-morph “shadow” ghosts over the feed.
  */
-const EXPAND_SPRING = {
-    damping: 26,
-    stiffness: 280,
-    mass: 0.85,
-    overshootClamping: true,
-} as const;
-const COLLAPSE_SPRING = {
-    damping: 28,
-    stiffness: 320,
-    mass: 0.9,
-    overshootClamping: true,
-} as const;
-const BACKDROP_IN_MS = 260;
-const BACKDROP_OUT_MS = 220;
-const EXPAND_FALLBACK_MS = 480;
-const COLLAPSE_FALLBACK_MS = 520;
+const EXPAND_MS = 380;
+const COLLAPSE_MS = 300;
+const BACKDROP_IN_MS = 280;
+const BACKDROP_OUT_MS = 280;
+const EXPAND_EASE = Easing.bezier(0.22, 1, 0.36, 1);
+const COLLAPSE_EASE = Easing.bezier(0.4, 0, 1, 1);
+const EXPAND_FALLBACK_MS = EXPAND_MS + 80;
+const COLLAPSE_FALLBACK_MS = COLLAPSE_MS + 80;
 
 export type ImageFullscreenOrigin = {
     x: number;
@@ -108,7 +99,7 @@ function atHandle(handle: string): string {
 }
 
 /**
- * Threads-style still-image viewer — card → fullscreen shared-element morph.
+ * Still-image viewer — slide-up sheet open / slide-down close.
  */
 export default function ImageFullscreenModal({
     post,
@@ -146,28 +137,11 @@ export default function ImageFullscreenModal({
 
     const progress = useSharedValue(0);
     const backdropOp = useSharedValue(0);
-    const oX = useSharedValue(0);
-    const oY = useSharedValue(0);
-    const oW = useSharedValue(screenWidth);
-    const oH = useSharedValue(screenHeight);
-    const screenW = useSharedValue(screenWidth);
     const screenH = useSharedValue(screenHeight);
 
     useEffect(() => {
-        screenW.value = screenWidth;
         screenH.value = screenHeight;
-    }, [screenHeight, screenW, screenH, screenWidth]);
-
-    const fallbackOrigin = useCallback((): ImageFullscreenOrigin => {
-        const w = Math.max(120, screenWidth * 0.72);
-        const h = Math.max(160, screenHeight * 0.38);
-        return {
-            x: (screenWidth - w) / 2,
-            y: (screenHeight - h) / 2,
-            width: w,
-            height: h,
-        };
-    }, [screenHeight, screenWidth]);
+    }, [screenH, screenHeight]);
 
     const expandFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,11 +170,9 @@ export default function ImageFullscreenModal({
     }, [onClose]);
 
     const runExpand = useCallback(() => {
-        const origin =
-            originRect && originRect.width > 8 && originRect.height > 8
-                ? originRect
-                : fallbackOrigin();
-        originRef.current = origin;
+        if (originRect && originRect.width > 8 && originRect.height > 8) {
+            originRef.current = originRect;
+        }
 
         cancelAnimation(progress);
         cancelAnimation(backdropOp);
@@ -209,17 +181,13 @@ export default function ImageFullscreenModal({
             expandFallbackTimerRef.current = null;
         }
 
-        oX.value = origin.x;
-        oY.value = origin.y;
-        oW.value = origin.width;
-        oH.value = origin.height;
         progress.value = 0;
         backdropOp.value = 0;
         setShellReady(false);
         setChromeShown(false);
         setChromeVisible(true);
         setClosing(false);
-        setImageCover(true);
+        setImageCover(false);
         closeFinishedRef.current = false;
 
         requestAnimationFrame(() => {
@@ -228,34 +196,27 @@ export default function ImageFullscreenModal({
                     duration: BACKDROP_IN_MS,
                     easing: Easing.out(Easing.cubic),
                 });
-                progress.value = withSpring(1, EXPAND_SPRING, (finished) => {
-                    if (finished) runOnJS(markExpanded)();
-                });
-                // Reveal chrome once the morph has mostly settled.
+                progress.value = withTiming(
+                    1,
+                    { duration: EXPAND_MS, easing: EXPAND_EASE },
+                    (finished) => {
+                        if (finished) runOnJS(markExpanded)();
+                    },
+                );
                 expandFallbackTimerRef.current = setTimeout(() => {
                     expandFallbackTimerRef.current = null;
                     markExpanded();
                 }, EXPAND_FALLBACK_MS);
             });
         });
-    }, [
-        backdropOp,
-        fallbackOrigin,
-        markExpanded,
-        oH,
-        oW,
-        oX,
-        oY,
-        originRect,
-        progress,
-    ]);
+    }, [backdropOp, markExpanded, originRect, progress]);
 
     const requestClose = useCallback(() => {
         if (closing) return;
         setClosing(true);
         setChromeVisible(false);
         setChromeShown(false);
-        setImageCover(true);
+        // Keep contain during slide-down — switching to cover left a card-shaped “shadow”.
         setShellReady(false);
 
         cancelAnimation(progress);
@@ -265,34 +226,23 @@ export default function ImageFullscreenModal({
             expandFallbackTimerRef.current = null;
         }
 
-        const origin = originRef.current || fallbackOrigin();
-        oX.value = origin.x;
-        oY.value = origin.y;
-        oW.value = origin.width;
-        oH.value = origin.height;
-
-        backdropOp.value = withTiming(0.18, {
+        // Fade backdrop with the slide so nothing floats over the feed.
+        backdropOp.value = withTiming(0, {
             duration: BACKDROP_OUT_MS,
             easing: Easing.in(Easing.cubic),
         });
-        progress.value = withSpring(0, COLLAPSE_SPRING, (finished) => {
-            if (finished) runOnJS(finishClose)();
-        });
+        progress.value = withTiming(
+            0,
+            { duration: COLLAPSE_MS, easing: COLLAPSE_EASE },
+            (finished) => {
+                if (finished) runOnJS(finishClose)();
+            },
+        );
         closeFallbackTimerRef.current = setTimeout(() => {
             closeFallbackTimerRef.current = null;
             finishClose();
         }, COLLAPSE_FALLBACK_MS);
-    }, [
-        backdropOp,
-        closing,
-        fallbackOrigin,
-        finishClose,
-        oH,
-        oW,
-        oX,
-        oY,
-        progress,
-    ]);
+    }, [backdropOp, closing, finishClose, progress]);
 
     useEffect(() => {
         if (!visible || !post) return;
@@ -326,21 +276,19 @@ export default function ImageFullscreenModal({
         opacity: backdropOp.value,
     }));
 
-    /** Threads morph: interpolate the card frame into the screen (cover crop, no stretch). */
+    /** Fullscreen panel slides up from below the fold. */
     const shellStyle = useAnimatedStyle(() => {
         const p = progress.value;
-        const ow = Math.max(1, oW.value);
-        const oh = Math.max(1, oH.value);
-        const sw = Math.max(1, screenW.value);
-        const sh = Math.max(1, screenH.value);
+        const h = Math.max(1, screenH.value);
         return {
             position: 'absolute' as const,
-            left: interpolate(p, [0, 1], [oX.value, 0]),
-            top: interpolate(p, [0, 1], [oY.value, 0]),
-            width: interpolate(p, [0, 1], [ow, sw]),
-            height: interpolate(p, [0, 1], [oh, sh]),
-            borderRadius: interpolate(p, [0, 1], [14, 0]),
-            overflow: 'hidden' as const,
+            left: 0,
+            top: 0,
+            width: '100%' as const,
+            height: h,
+            backgroundColor: '#000000',
+            opacity: interpolate(p, [0, 0.12, 1], [0, 1, 1]),
+            transform: [{ translateY: interpolate(p, [0, 1], [h, 0]) }],
         };
     });
 
@@ -358,7 +306,7 @@ export default function ImageFullscreenModal({
     const footerPadBottom = Math.max(insets.bottom, 12);
     /** Don't gate on chromeShown — that hid UI when HW layers ate sibling overlays. */
     const showChrome = chromeVisible && !closing;
-    const imageResizeMode = imageCover || closing || !shellReady ? 'cover' : 'contain';
+    const imageResizeMode = imageCover && !closing && !shellReady ? 'cover' : 'contain';
 
     const toggleChrome = () => {
         if (closing) return;
@@ -671,12 +619,7 @@ export default function ImageFullscreenModal({
 
                 {animating ? (
                     <>
-                        <Animated.View
-                            style={[styles.shell, shellStyle]}
-                            renderToHardwareTextureAndroid
-                            shouldRasterizeIOS
-                            collapsable={false}
-                        >
+                        <Animated.View style={[styles.shell, shellStyle]} collapsable={false}>
                             <View style={styles.shellInner} collapsable={false}>
                                 {mediaStage}
                             </View>
@@ -720,6 +663,8 @@ const styles = StyleSheet.create({
         position: 'absolute',
         overflow: 'hidden',
         backgroundColor: '#000000',
+        // No elevation/shadow — closing morphs used to leave a floating card ghost.
+        elevation: 0,
     },
     settledRoot: {
         ...StyleSheet.absoluteFill,

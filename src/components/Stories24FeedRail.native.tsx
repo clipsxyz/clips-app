@@ -21,7 +21,7 @@ import Animated, {
     useSharedValue,
     withTiming,
 } from 'react-native-reanimated';
-import Video from 'react-native-video';
+import Video, { ViewType } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import GoldChromeAmbientCanvas from './GoldChromeAmbientCanvas.native';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
@@ -35,7 +35,7 @@ import {
     normalizeStories24Handle,
     pickFirstStories24RailStory,
 } from '../utils/stories24Rail';
-
+import { storyVideoSource } from '../utils/storyMediaNative';
 const CARD_W = 112;
 const CARD_H = 156;
 const CARD_RADIUS = 16;
@@ -97,6 +97,7 @@ function StoryPreviewVideo({
 }) {
     const videoRef = useRef<React.ElementRef<typeof Video>>(null);
     const [failed, setFailed] = useState(false);
+    const source = storyVideoSource(uri) || { uri };
 
     if ((paused || failed) && posterUri) {
         return (
@@ -107,12 +108,15 @@ function StoryPreviewVideo({
     return (
         <Video
             ref={videoRef}
-            source={{ uri }}
+            source={source}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
             muted
             repeat
             paused={paused}
+            viewType={ViewType.TEXTURE}
+            useTextureView
+            ignoreSilentSwitch="ignore"
             onError={() => setFailed(true)}
             onProgress={({ currentTime }) => {
                 if (currentTime > 3) {

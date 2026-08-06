@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
-import Video from 'react-native-video';
+import Video, { ViewType } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Story } from '../../types';
 import { getStoryTextContent, getTextStoryStyle } from '../../utils/storyTextStyleNative';
 import {
     getStoryVideoPosterFallback,
+    getStoryVideoPosterSource,
     isStoryVideo,
-    resolveStoryVideoPlaybackUrl,
+    resolveStoryMediaUrl,
+    storyVideoSource,
 } from '../../utils/storyMediaNative';
 
 type Props = {
@@ -19,21 +21,22 @@ type Props = {
 /** Regular (non–shared-post) story media: video, image, or text-only template. */
 export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
     const text = getStoryTextContent(story);
-    const playbackUri = resolveStoryVideoPlaybackUrl(story.mediaUrl);
+    const videoSource = storyVideoSource(story.mediaUrl);
+    const posterSource = getStoryVideoPosterSource(story.mediaUrl);
     const posterUri = getStoryVideoPosterFallback(story.mediaUrl);
-    const imageUri = playbackUri || posterUri;
-    const hasMedia = !!imageUri;
+    const imageUri = resolveStoryMediaUrl(story.mediaUrl) || posterUri;
+    const hasMedia = !!videoSource || !!posterSource || !!imageUri;
     const isVideo = isStoryVideo(story);
     const [videoFailed, setVideoFailed] = useState(false);
 
     useEffect(() => {
         setVideoFailed(false);
-    }, [story.id, playbackUri]);
+    }, [story.id, story.mediaUrl]);
 
-    if (hasMedia && isVideo && playbackUri && !videoFailed) {
+    if (hasMedia && isVideo && videoSource && !videoFailed) {
         return (
             <Video
-                source={{ uri: playbackUri }}
+                source={videoSource}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
                 repeat
@@ -41,15 +44,26 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
                 paused={paused}
                 playInBackground={false}
                 playWhenInactive={false}
+                viewType={ViewType.TEXTURE}
+                useTextureView
+                ignoreSilentSwitch="ignore"
                 onError={() => setVideoFailed(true)}
             />
         );
     }
 
-    if (hasMedia && (posterUri || !isVideo)) {
+    if (hasMedia && (posterSource || imageUri || !isVideo)) {
+        const imageSource = posterSource || (imageUri ? { uri: imageUri } : null);
+        if (!imageSource) {
+            return (
+                <View style={[StyleSheet.absoluteFill, styles.empty]}>
+                    <ActivityIndicator color="#fff" />
+                </View>
+            );
+        }
         return (
             <Image
-                source={{ uri: posterUri || imageUri }}
+                source={imageSource}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
             />

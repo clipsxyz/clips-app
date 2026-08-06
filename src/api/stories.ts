@@ -895,7 +895,15 @@ export async function createStory(
             id: `story-${Date.now()}`,
             userId,
             userHandle,
-            mediaUrl: resolveStoryMediaUrl(mediaUrl) || undefined,
+            mediaUrl: (() => {
+                const raw = (mediaUrl || '').trim();
+                // Keep demo paths relative so native Stories can use the bundled MP4 (web serves /demo-videos from Vite).
+                if (raw.startsWith('/demo-videos/') || /\/demo-videos\//i.test(raw)) {
+                    const match = raw.match(/\/demo-videos\/[^/?#]+/i);
+                    return match ? match[0] : raw;
+                }
+                return resolveStoryMediaUrl(mediaUrl) || undefined;
+            })(),
             mediaType: mediaType || undefined,
             text,
             textColor,

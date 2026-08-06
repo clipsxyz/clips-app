@@ -7,7 +7,7 @@ import {
     StyleSheet,
     ActivityIndicator,
 } from 'react-native';
-import Video from 'react-native-video';
+import Video, { ViewType } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
@@ -19,7 +19,7 @@ import {
     isStoryVideo,
     postHasRealMedia,
     resolveStoryMediaUrl,
-    resolveStoryVideoPlaybackUrl,
+    storyVideoSource,
 } from '../../utils/storyMediaNative';
 import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
 import { getAvatarForHandle, getFlagForHandle } from '../../api/users';
@@ -45,20 +45,24 @@ function StoryVideoLayer({
     repeat?: boolean;
     paused?: boolean;
 }) {
-    const playbackUri = resolveStoryVideoPlaybackUrl(uri) || resolveStoryMediaUrl(uri) || uri;
+    const source = storyVideoSource(uri);
     const [failed, setFailed] = useState(false);
 
     useEffect(() => {
         setFailed(false);
-    }, [playbackUri]);
+    }, [uri]);
 
-    if (failed && posterUri) {
+    if ((failed || !source) && posterUri) {
         return <Image source={{ uri: posterUri }} style={style} resizeMode="cover" />;
+    }
+
+    if (!source) {
+        return <View style={style} />;
     }
 
     return (
         <Video
-            source={{ uri: playbackUri }}
+            source={source}
             style={style}
             resizeMode="cover"
             muted={muted}
@@ -66,6 +70,9 @@ function StoryVideoLayer({
             paused={paused}
             playInBackground={false}
             playWhenInactive={false}
+            viewType={ViewType.TEXTURE}
+            useTextureView
+            ignoreSilentSwitch="ignore"
             onError={() => setFailed(true)}
         />
     );
