@@ -488,10 +488,10 @@ export default function PostCommentsSheet({
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
     const postIdStr = String(postId || '');
-    // Collection / mock snapshots may not be Laravel UUIDs — still allow comments when we have a post.
+    // Mock / collection snapshot ids can load without a Laravel user id.
+    // Real backend post ids require an authenticated user before fetching comments.
     const canLoadComments =
-        Boolean(postIdStr) &&
-        (isFrontendOnlyPostId(postIdStr) || Boolean(user?.id) || Boolean(postProp?.id));
+        Boolean(postIdStr) && (isFrontendOnlyPostId(postIdStr) || Boolean(user?.id));
     const postPropRef = useRef(postProp);
     postPropRef.current = postProp;
 
@@ -507,7 +507,13 @@ export default function PostCommentsSheet({
             setSortMode('top');
             return;
         }
-        if (!postId || !canLoadComments) return;
+        if (!postId || !canLoadComments) {
+            // Still show the snapshot header when auth isn't ready / signed out.
+            setPost(postPropRef.current ?? null);
+            setComments([]);
+            setLoading(false);
+            return;
+        }
 
         let cancelled = false;
         (async () => {
