@@ -34,6 +34,8 @@ import FeedSendIcon from './FeedSendIcon.native';
 import FeedSmileIcon from './FeedSmileIcon.native';
 import { resolveAvatarDimensions } from './avatarProps';
 import { getAvatarForHandle } from '../api/users';
+import { mockFeedVideoSource } from '../constants/mockFeedVideos';
+import { isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import {
     addComment,
     addReply,
@@ -486,7 +488,12 @@ export default function PostCommentsSheet({
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
     const postIdStr = String(postId || '');
-    const canLoadComments = isFrontendOnlyPostId(postIdStr) || Boolean(user?.id);
+    // Collection / mock snapshots may not be Laravel UUIDs — still allow comments when we have a post.
+    const canLoadComments =
+        Boolean(postIdStr) &&
+        (isFrontendOnlyPostId(postIdStr) || Boolean(user?.id) || Boolean(postProp?.id));
+    const postPropRef = useRef(postProp);
+    postPropRef.current = postProp;
 
     const onMentionPress = useCallback(
         (handle: string) => {
@@ -505,7 +512,7 @@ export default function PostCommentsSheet({
         let cancelled = false;
         (async () => {
             setLoading(true);
-            setPost(postProp ?? null);
+            setPost(postPropRef.current ?? null);
             setComments([]);
             setCommentsCursor(null);
             setCommentsHasMore(false);
@@ -516,14 +523,14 @@ export default function PostCommentsSheet({
                     fetchCommentsPage(postId, null, 30, 5, user?.id),
                 ]);
                 if (cancelled) return;
-                setPost(fetchedPost ?? postProp ?? null);
+                setPost(fetchedPost ?? postPropRef.current ?? null);
                 setComments(fetchedPage.items);
                 setCommentsCursor(fetchedPage.nextCursor);
                 setCommentsHasMore(fetchedPage.hasMore);
             } catch (err) {
                 console.error('Failed to load comments sheet:', err);
                 if (!cancelled) {
-                    setPost(postProp ?? null);
+                    setPost(postPropRef.current ?? null);
                     setComments([]);
                 }
             } finally {
@@ -534,7 +541,7 @@ export default function PostCommentsSheet({
         return () => {
             cancelled = true;
         };
-    }, [isOpen, postId, canLoadComments, user?.id, postProp]);
+    }, [isOpen, postId, canLoadComments, user?.id]);
 
     const sortedComments = useMemo(() => {
         const next = [...comments];
@@ -611,7 +618,7 @@ export default function PostCommentsSheet({
         });
 
     const handleAddComment = async (text: string) => {
-        const handle = String(commentAuthorHandle || user?.handle || '').trim();
+        const handle = String(commentAuthorHandle || user?.handle || currentUserHandle || viewerHandle || '').trim();
         if (!handle) {
             Alert.alert('Sign in required', 'You need a profile handle to comment.');
             return;
@@ -848,25 +855,36 @@ export default function PostCommentsSheet({
 
     const sheetChromeHeader = (
         <>
-            {post?.mediaUrl ? (
+            {post?.mediaUrl && !isVideoPost(post) ? (
                 <View style={styles.mediaPreviewRow}>
                     <View style={styles.mediaPreviewThumb}>
-                        {post.mediaType === 'video' ? (
-                            <Video
-                                source={{ uri: post.mediaUrl }}
-                                style={styles.mediaPreviewMedia}
-                                resizeMode="cover"
-                                muted
-                                repeat
-                                paused={false}
-                            />
-                        ) : (
-                            <Image
-                                source={{ uri: post.mediaUrl }}
-                                style={styles.mediaPreviewMedia}
-                                resizeMode="cover"
-                            />
-                        )}
+                        <Image
+                            source={{ uri: post.mediaUrl }}
+                            style={styles.mediaPreviewMedia}
+                            resizeMode="cover"
+                        />
+                    </View>
+                    {authorHandle ? (
+                        <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
+                            {authorHandle}
+                        </Text>
+                    ) : null}
+                </View>
+            ) : post && isVideoPost(post) ? (
+                <View style={styles.mediaPreviewRow}>
+                    <View style={styles.mediaPreviewThumb}>
+                        <Video
+                            source={mockFeedVideoSource(post.mediaUrl || post.mediaItems?.[0]?.url)}
+                            style={styles.mediaPreviewMedia}
+                            resizeMode="cover"
+                            muted
+                            paused
+                            repeat={false}
+                            controls={false}
+                            playInBackground={false}
+                            playWhenInactive={false}
+                            pointerEvents="none"
+                        />
                     </View>
                     {authorHandle ? (
                         <Text style={styles.mediaPreviewHandle} numberOfLines={1}>

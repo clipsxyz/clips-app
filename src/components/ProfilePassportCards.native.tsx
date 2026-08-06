@@ -33,7 +33,6 @@ import {
     profilePassportCardsInset,
     profilePassportCardGap,
     profilePassportScrollInset,
-    profilePassportPageBg,
 } from '../theme/gazetteerAmbientNative';
 
 export type ProfileCardId =
@@ -994,7 +993,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: profilePassportCardsInset,
         paddingTop: 16,
         paddingBottom: 8,
-        backgroundColor: profilePassportPageBg,
+        backgroundColor: 'transparent',
     },
     editHubWrap: {
         marginBottom: 16,

@@ -13,7 +13,7 @@ import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
-import { MOCK_FEED_VIDEO_POSTERS, MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
+import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
 import {
   createFollowRequest,
   hasPendingFollowRequest,
@@ -442,7 +442,6 @@ if (!postsInitialized) {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.escapes,
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: artaneNow - 7200000, // 2 hours ago
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -460,7 +459,6 @@ if (!postsInitialized) {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.fun,
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: artaneNow - 86400000, // 1 day ago
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -942,6 +940,21 @@ export function setReclipState(userId: string, postId: string, reclipped: boolea
   else delete s.reclips[postId];
 }
 
+/**
+ * Keep a hydrated post in the in-memory store (e.g. collection snapshots) so comments/likes
+ * and getPostById keep working after navigation.
+ */
+export function upsertLocalPost(post: Post): Post {
+  if (!post?.id) return post;
+  const idx = posts.findIndex((p) => p.id === post.id);
+  if (idx >= 0) {
+    posts[idx] = { ...posts[idx], ...post, id: post.id };
+    return posts[idx];
+  }
+  posts.unshift(post);
+  return post;
+}
+
 // compute view for a user: show following if local state OR API says so (so backend signups and + taps both work)
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
@@ -1149,7 +1162,6 @@ function getMockScenesVideoPosts(): Post[] {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.escapes,
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: now - 7200000,
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -1167,7 +1179,6 @@ function getMockScenesVideoPosts(): Post[] {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.fun,
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: now - 86400000,
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -1185,7 +1196,6 @@ function getMockScenesVideoPosts(): Post[] {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.joyrides,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.joyrides,
       caption: 'Amazing sunset over Galway Bay!',
       createdAt: now - 9000000,
       stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
@@ -1203,7 +1213,6 @@ function getMockScenesVideoPosts(): Post[] {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.blazes,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.blazes,
       caption: 'Evening walk around Finglas village — golden hour hits different',
       createdAt: now - 5400000,
       stats: { likes: 41, views: 220, comments: 9, shares: 3, reclips: 1 },
@@ -1221,7 +1230,6 @@ function getMockScenesVideoPosts(): Post[] {
       tags: [],
       mediaUrl: MOCK_FEED_VIDEO_URLS.elephants,
       mediaType: 'video',
-      videoPosterUrl: MOCK_FEED_VIDEO_POSTERS.elephants,
       caption: 'Park loop before work — birds were loud today 🐦',
       createdAt: now - 43200000,
       stats: { likes: 28, views: 164, comments: 4, shares: 1, reclips: 0 },
@@ -1579,23 +1587,23 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
   // Mock implementation (fallback)
   try {
-    // React Native: hydrate user-created posts from AsyncStorage (no localStorage).
-    if (typeof localStorage === 'undefined') {
-      try {
-        const { getPostsFromStorageNative } = await import('./postsStorage.native');
-        const storedNative = (await getPostsFromStorageNative()).filter((p) => !isMockPostId(p.id));
-        if (storedNative.length > 0) {
-          const seenNative = new Set(posts.map((p) => String(p.id)));
-          for (const p of storedNative) {
-            if (!seenNative.has(String(p.id))) {
-              posts.push(p);
-              seenNative.add(String(p.id));
-            }
+    // React Native: hydrate user-created posts from AsyncStorage.
+    // Note: index.js installs an in-memory localStorage shim, so typeof localStorage
+    // is never 'undefined' on RN — always attempt the native hydrate.
+    try {
+      const { getPostsFromStorageNative } = await import('./postsStorage.native');
+      const storedNative = (await getPostsFromStorageNative()).filter((p) => !isMockPostId(p.id));
+      if (storedNative.length > 0) {
+        const seenNative = new Set(posts.map((p) => String(p.id)));
+        for (const p of storedNative) {
+          if (!seenNative.has(String(p.id))) {
+            posts.push(p);
+            seenNative.add(String(p.id));
           }
         }
-      } catch {
-        // ignore
       }
+    } catch {
+      // ignore
     }
 
     // Reload only user-created posts from localStorage (exclude mock ids to avoid duplicates)
@@ -1875,7 +1883,39 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
-    throw error;
+    const msg = error instanceof Error ? error.message : String(error ?? '');
+    const looksLikeCorruptJson =
+      error instanceof SyntaxError ||
+      /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(msg);
+    // Only wipe posts storage on corrupt JSON — never on unrelated mock errors.
+    if (looksLikeCorruptJson) {
+      try {
+        const { clearCorruptPostsStorageNative } = await import('./postsStorage.native');
+        await clearCorruptPostsStorageNative();
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(POSTS_STORAGE_KEY);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const seed = posts
+      .filter((p) => isMockPostId(p.id))
+      .slice(0, Math.max(1, limit))
+      .map((p) => decorateForUser(userId, p))
+      .map(normalizeCaptionFields);
+    if (seed.length > 0) {
+      return {
+        items: seed,
+        nextCursor: null,
+        fromMock: true,
+      };
+    }
+    return { items: [], nextCursor: null, fromMock: true };
   }
 }
 
@@ -2304,7 +2344,10 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
 }
 
 export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
-  const useLaravelAPI = isLaravelApiEnabled();
+  const useLaravelAPI =
+    isLaravelApiEnabled() &&
+    !String(originalPostId).startsWith('mock-scenes-') &&
+    !isMockPostId(originalPostId);
 
   if (useLaravelAPI) {
     try {
@@ -2349,7 +2392,30 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   }
 
   await delay(200);
-  const originalPost = posts.find(x => x.id === originalPostId);
+
+  // Demo / feed-only posts (e.g. mock-scenes-*) are often not in the in-memory `posts`
+  // store — resolve + upsert so Scenes reclip works in mock mode.
+  let originalPost = posts.find((x) => x.id === originalPostId) ?? null;
+  if (!originalPost) {
+    if (String(originalPostId).startsWith('mock-scenes-')) {
+      const mock = getMockScenesVideoPosts().find((p) => p.id === originalPostId);
+      if (mock) {
+        originalPost = { ...mock, stats: { ...mock.stats } };
+        posts.push(originalPost);
+      }
+    }
+  }
+  if (!originalPost) {
+    const resolved = await getPostById(originalPostId, userId);
+    if (resolved) {
+      originalPost = { ...resolved, stats: { ...resolved.stats } };
+      if (!posts.find((x) => x.id === originalPostId)) {
+        posts.push(originalPost);
+      } else {
+        originalPost = posts.find((x) => x.id === originalPostId)!;
+      }
+    }
+  }
   if (!originalPost) {
     console.error('Original post not found for reclipPost (mock):', originalPostId);
     throw new Error(`Original post with id ${originalPostId} not found`);

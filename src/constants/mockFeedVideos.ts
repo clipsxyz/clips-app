@@ -1,12 +1,13 @@
 /**
  * Demo MP4 URLs for mock feed / Scenes testing.
  *
- * Web (Vite): all slots resolve to `public/demo-videos/flower.mp4`.
- * React Native: each slot uses a different HTTPS sample so Sarah/Bob cards are visually distinct.
+ * Web (Vite): all slots resolve to `public/demo-videos/bbb.mp4` (Big Buck Bunny).
+ * React Native: see `mockFeedVideos.native.ts` (bundled require).
  */
-const WEB_DEMO_MP4 = '/demo-videos/flower.mp4';
+const WEB_DEMO_MP4 = '/demo-videos/bbb.mp4';
+const BBB_HTTPS = 'https://www.w3schools.com/html/mov_bbb.mp4';
 
-/** Logical slots — path identifies which remote to use on native. */
+/** Logical slots — path identifies which poster / post id to use. */
 export const MOCK_FEED_VIDEO_URLS = {
     escapes: '/demo-videos/escapes.mp4',
     fun: '/demo-videos/fun.mp4',
@@ -16,31 +17,35 @@ export const MOCK_FEED_VIDEO_URLS = {
 } as const;
 
 const NATIVE_REMOTE_BY_DEMO_PATH: Record<string, string> = {
-    [MOCK_FEED_VIDEO_URLS.escapes]:
-        'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    [MOCK_FEED_VIDEO_URLS.fun]: 'https://www.w3schools.com/html/mov_bbb.mp4',
-    // Google sample bucket often returns 403; use MDN flower like escapes.
-    [MOCK_FEED_VIDEO_URLS.joyrides]:
-        'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    [MOCK_FEED_VIDEO_URLS.blazes]:
-        'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    [MOCK_FEED_VIDEO_URLS.elephants]: 'https://www.w3schools.com/html/mov_bbb.mp4',
-    '/demo-videos/flower.mp4':
-        'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    [MOCK_FEED_VIDEO_URLS.escapes]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.fun]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.joyrides]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.blazes]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.elephants]: BBB_HTTPS,
+    '/demo-videos/bbb.mp4': BBB_HTTPS,
+    '/demo-videos/flower.mp4': BBB_HTTPS,
 };
 
 export const MOCK_FEED_VIDEO_REMOTE_FALLBACK =
     NATIVE_REMOTE_BY_DEMO_PATH[MOCK_FEED_VIDEO_URLS.escapes];
 
-/** Thumbnails for demo videos only — must not reuse URLs from mock feed image posts. */
+/** Thumbnails for demo videos — real Big Buck Bunny frame (not Unsplash). */
 export const MOCK_FEED_VIDEO_POSTERS = {
-    // Prefer live Unsplash IDs (several older photo-* links now 404).
-    escapes: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800',
-    fun: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
-    joyrides: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
-    blazes: 'https://images.unsplash.com/photo-1514931109608-ef9bcc8af3c0?w=800',
-    elephants: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800',
+    escapes: '/demo-videos/bbb-poster.jpg',
+    fun: '/demo-videos/bbb-poster.jpg',
+    joyrides: '/demo-videos/bbb-poster.jpg',
+    blazes: '/demo-videos/bbb-poster.jpg',
+    elephants: '/demo-videos/bbb-poster.jpg',
 } as const;
+
+/** @deprecated Unsplash stills — reject if found in old collection storage. */
+const LEGACY_FAKE_UNSPLASH_POSTERS = [
+    'https://images.unsplash.com/photo-1441974231531-c6227db76b6e',
+    'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3',
+    'https://images.unsplash.com/photo-1507525428034-b723cf961d3e',
+    'https://images.unsplash.com/photo-1514931109608-ef9bcc8af3c0',
+    'https://images.unsplash.com/photo-1544005313-94ddf0286df2',
+] as const;
 
 function isReactNativeRuntime(): boolean {
     try {
@@ -61,29 +66,48 @@ function nativeRemoteForDemoPath(url: string): string {
     return NATIVE_REMOTE_BY_DEMO_PATH[url] ?? MOCK_FEED_VIDEO_REMOTE_FALLBACK;
 }
 
-/** Resolve mock video URL for feed Media — local path on web/Vite; per-slot HTTPS on React Native. */
-/** Poster image for a demo feed video path (RN rail / story fallback when MP4 fails). */
+function looksLikeDemoSlotVideo(url: string): boolean {
+    return (
+        url.startsWith('/demo-videos/') ||
+        NATIVE_REMOTE_BY_DEMO_PATH[url] != null ||
+        url.includes('bbb.mp4') ||
+        url.includes('flower.mp4') ||
+        url.includes('mov_bbb') ||
+        url.includes('escapes.mp4') ||
+        url.includes('fun.mp4') ||
+        url.includes('joyrides.mp4') ||
+        url.includes('blazes.mp4') ||
+        url.includes('elephants.mp4')
+    );
+}
+
+/** Real Big Buck Bunny frame for demo MP4 collection/grid thumbs. */
+export function resolveDemoVideoPosterUri(url: string | undefined): string | undefined {
+    if (!url || !looksLikeDemoSlotVideo(url)) return undefined;
+    return '/demo-videos/bbb-poster.jpg';
+}
+
+/** Web: URI object. Native `.native.ts` returns bundled require. */
+export function resolveDemoVideoPosterSource(url: string | undefined): { uri: string } | undefined {
+    const uri = resolveDemoVideoPosterUri(url);
+    return uri ? { uri } : undefined;
+}
+
+/**
+ * @deprecated Prefer resolveDemoVideoPosterUri.
+ */
 export function resolveMockFeedVideoPosterUrl(url: string | undefined): string | undefined {
-    if (!url) return undefined;
-    if (url.includes(MOCK_FEED_VIDEO_URLS.escapes) || url.includes('escapes.mp4')) {
-        return MOCK_FEED_VIDEO_POSTERS.escapes;
-    }
-    if (url.includes(MOCK_FEED_VIDEO_URLS.fun) || url.includes('fun.mp4')) {
-        return MOCK_FEED_VIDEO_POSTERS.fun;
-    }
-    if (url.includes(MOCK_FEED_VIDEO_URLS.joyrides) || url.includes('joyrides.mp4')) {
-        return MOCK_FEED_VIDEO_POSTERS.joyrides;
-    }
-    if (url.includes(MOCK_FEED_VIDEO_URLS.blazes) || url.includes('blazes.mp4')) {
-        return MOCK_FEED_VIDEO_POSTERS.blazes;
-    }
-    if (url.includes(MOCK_FEED_VIDEO_URLS.elephants) || url.includes('elephants.mp4')) {
-        return MOCK_FEED_VIDEO_POSTERS.elephants;
-    }
-    if (url.includes('flower.mp4')) {
-        return MOCK_FEED_VIDEO_POSTERS.escapes;
-    }
-    return undefined;
+    return resolveDemoVideoPosterUri(url);
+}
+
+/** True if URL is a deprecated Unsplash “demo poster” (never show as a video thumb). */
+export function isFakeMockVideoPosterUrl(url: string | undefined | null): boolean {
+    if (!url || typeof url !== 'string') return false;
+    const trimmed = url.trim();
+    if (!trimmed) return false;
+    return LEGACY_FAKE_UNSPLASH_POSTERS.some(
+        (poster) => trimmed === poster || trimmed.startsWith(poster),
+    );
 }
 
 export function resolveMockFeedVideoUrl(url: string | undefined): string {

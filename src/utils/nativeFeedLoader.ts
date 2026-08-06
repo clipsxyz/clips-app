@@ -32,45 +32,56 @@ export async function filterVisibleFeedPosts(
     items: Post[],
     opts: FilterVisibleOpts,
 ): Promise<Post[]> {
-    let visible = items;
-    if (opts.viewerHandle) {
-        const checks = await Promise.all(
-            items.map(async (item) => ({
-                item,
-                blocked: await isUserBlocked(opts.viewerHandle!, item.userHandle),
-            })),
-        );
-        visible = checks.filter((row) => !row.blocked).map((row) => row.item);
+    try {
+        let visible = items;
+        if (opts.viewerHandle) {
+            const checks = await Promise.all(
+                items.map(async (item) => ({
+                    item,
+                    blocked: await isUserBlocked(opts.viewerHandle!, item.userHandle).catch(() => false),
+                })),
+            );
+            visible = checks.filter((row) => !row.blocked).map((row) => row.item);
+        }
+        const archivedIds =
+            opts.archivedIds ??
+            (await getArchivedFeedPostIdsMobile(opts.viewerUserId).catch(() => new Set<string>()));
+        visible = visible.filter((item) => !archivedIds.has(item.id));
+        return filterPostsByContentPrefs(visible, opts.prefs, {
+            isProtectedDevMockVideo: isDevMockFeedVideoPost,
+        });
+    } catch (err) {
+        console.warn('filterVisibleFeedPosts failed — showing unfiltered page', err);
+        return items;
     }
-    const archivedIds =
-        opts.archivedIds ?? (await getArchivedFeedPostIdsMobile(opts.viewerUserId));
-    visible = visible.filter((item) => !archivedIds.has(item.id));
-    return filterPostsByContentPrefs(visible, opts.prefs, {
-        isProtectedDevMockVideo: isDevMockFeedVideoPost,
-    });
 }
 
 export async function fetchVisibleFeedPage(
     params: NativeFeedFetchParams,
     archivedIds?: Set<string>,
 ): Promise<{ items: Post[]; nextCursor: string | number | null }> {
-    const page = await fetchPostsPage(
-        params.filter,
-        params.cursor,
-        params.limit ?? 8,
-        params.viewerUserId,
-        params.userLocal ?? '',
-        params.userRegional ?? '',
-        params.userNational ?? '',
-        params.viewerHandle ?? '',
-    );
-    const items = await filterVisibleFeedPosts(page.items, {
-        viewerUserId: params.viewerUserId,
-        viewerHandle: params.viewerHandle,
-        prefs: params.prefs,
-        archivedIds,
-    });
-    return { items, nextCursor: page.nextCursor ?? null };
+    try {
+        const page = await fetchPostsPage(
+            params.filter,
+            params.cursor,
+            params.limit ?? 8,
+            params.viewerUserId,
+            params.userLocal ?? '',
+            params.userRegional ?? '',
+            params.userNational ?? '',
+            params.viewerHandle ?? '',
+        );
+        const items = await filterVisibleFeedPosts(page.items, {
+            viewerUserId: params.viewerUserId,
+            viewerHandle: params.viewerHandle,
+            prefs: params.prefs,
+            archivedIds,
+        });
+        return { items, nextCursor: page.nextCursor ?? null };
+    } catch (err) {
+        console.error('fetchVisibleFeedPage failed:', err);
+        return { items: [], nextCursor: null };
+    }
 }
 
 const INITIAL_FEED_PAGE_WALK_MAX = isReactNativeRuntime() ? 6 : 24;

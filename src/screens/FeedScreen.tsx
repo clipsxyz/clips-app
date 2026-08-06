@@ -1613,8 +1613,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
         // Prefer the card the user is actually reading (not a sliver of the row above).
-        itemVisiblePercentThreshold: 82,
-        minimumViewTime: 380,
+        itemVisiblePercentThreshold: 68,
+        minimumViewTime: 60,
     });
     const [feedScrolling, setFeedScrolling] = React.useState(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1780,7 +1780,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setActiveFeedVideoPostId(null);
             return;
         }
-        const minGapMs = 320;
+        const minGapMs = 40;
         const sinceLast = Date.now() - lastFeedAutoplayAtMsRef.current;
         const delayMs = sinceLast >= minGapMs ? 0 : minGapMs - sinceLast;
         autoplayTimerRef.current = setTimeout(() => {
@@ -1801,10 +1801,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, [feedAutoplayAllowed, scheduleActiveFeedVideo]);
 
     useEffect(() => {
-        if (feedScrolling) {
-            scheduleActiveFeedVideo(null);
-            return;
-        }
+        // Keep the current autoplay target while flinging — clearing it forced a cold
+        // remount/unpause gap when the user landed on the next MP4.
+        if (feedScrolling) return;
         if (feedAutoplayAllowed && lastViewableVideoPostIdRef.current) {
             scheduleActiveFeedVideo(lastViewableVideoPostIdRef.current);
         }
@@ -2391,7 +2390,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setInitialLoading(true);
         }
         setError(null);
-        const timeoutMs = Platform.OS === 'web' ? 12000 : 25000;
+        const timeoutMs = Platform.OS === 'web' ? 12000 : 15000;
 
         const makeLoadTimeout = () => {
             let loadTimeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -2413,22 +2412,52 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
             console.error('Error loading feed:', err);
-            if (isLaravelApiEnabled()) {
-                markLaravelUnreachable();
-                const retryTimeout = makeLoadTimeout();
+            const errMsg = err instanceof Error ? err.message : String(err ?? '');
+            const looksLikeCorruptJson =
+                err instanceof SyntaxError ||
+                /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(errMsg);
+
+            // Only clear posts cache on corrupt JSON — never wipe collections on timeouts.
+            if (looksLikeCorruptJson) {
                 try {
-                    const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
-                    if (gen !== feedLoadGenRef.current) return;
-                    applyFeedPageResult(retryResult.items, retryResult.nextCursor);
-                    return;
-                } catch (retryErr) {
-                    console.error('Feed mock fallback failed:', retryErr);
-                } finally {
-                    retryTimeout.clear();
+                    const { clearCorruptPostsStorageNative } = await import('../api/postsStorage.native');
+                    await clearCorruptPostsStorageNative();
+                } catch {
+                    /* ignore */
+                }
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        localStorage.removeItem('clips_app_posts');
+                    }
+                } catch {
+                    /* ignore */
                 }
             }
+
+            if (isLaravelApiEnabled()) {
+                markLaravelUnreachable();
+            }
+
+            const retryTimeout = makeLoadTimeout();
+            try {
+                const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
+                if (gen !== feedLoadGenRef.current) return;
+                applyFeedPageResult(retryResult.items, retryResult.nextCursor);
+                return;
+            } catch (retryErr) {
+                console.error('Feed recover retry failed:', retryErr);
+            } finally {
+                retryTimeout.clear();
+            }
+
             const msg = err instanceof Error ? err.message : '';
-            setError(msg.includes('timed out') ? 'Feed load timed out' : 'Failed to load feed');
+            setError(
+                msg.includes('timed out')
+                    ? 'Feed load timed out — tap Retry'
+                    : msg
+                      ? `Failed to load feed (${msg.slice(0, 100)})`
+                      : 'Failed to load feed',
+            );
             // Keep just-created posts visible even when the feed fetch fails/times out.
             applyFeedPageResult([], null);
         } finally {
@@ -3552,9 +3581,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 viewabilityConfig={viewabilityConfigRef.current}
                 // Performance optimizations - Instagram-style
                 initialNumToRender={2}
-                maxToRenderPerBatch={2}
-                windowSize={5}
-                updateCellsBatchingPeriod={100}
+                maxToRenderPerBatch={4}
+                windowSize={9}
+                updateCellsBatchingPeriod={50}
                 removeClippedSubviews={false}
                 onScrollBeginDrag={() => {
                     if (feedScrollIdleTimerRef.current) {
@@ -3565,12 +3594,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }}
                 onMomentumScrollEnd={() => {
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-                    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 180);
+                    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 40);
                 }}
                 onScrollEndDrag={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-                    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 180);
+                    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 40);
                 }}
                 // Scroll performance
                 onScroll={(e) => {

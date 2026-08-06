@@ -36,7 +36,14 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
             throw error;
         }
 
-        return response.json();
+        const text = await response.text();
+        if (!text) return null;
+        try {
+            return JSON.parse(text);
+        } catch {
+            const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+            throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
+        }
     } catch (error: any) {
         clearTimeout(timeoutId);
         // Suppress connection refused errors when backend isn't running

@@ -4,11 +4,42 @@ import type { Post } from '../types';
 const POSTS_STORAGE_KEY = 'clips_app_posts';
 const PENDING_CREATED_POST_KEY = 'clips_app_pending_created_post';
 
+/** Clear only posts keys after confirmed corrupt JSON — do not touch collections. */
+export async function clearCorruptFeedCachesNative(): Promise<void> {
+    await clearCorruptPostsStorageNative();
+}
+
+export async function clearCorruptPostsStorageNative(): Promise<void> {
+    try {
+        await AsyncStorage.multiRemove([POSTS_STORAGE_KEY, PENDING_CREATED_POST_KEY]);
+    } catch {
+        /* ignore */
+    }
+}
+
+async function withStorageTimeout<T>(promise: Promise<T>, fallback: T, ms = 2500): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((resolve) => {
+                timer = setTimeout(() => resolve(fallback), ms);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
 export async function getPostsFromStorageNative(): Promise<Post[]> {
     try {
-        const raw = await AsyncStorage.getItem(POSTS_STORAGE_KEY);
-        return raw ? (JSON.parse(raw) as Post[]) : [];
-    } catch {
+        const raw = await withStorageTimeout(AsyncStorage.getItem(POSTS_STORAGE_KEY), null);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw) as unknown;
+        return Array.isArray(parsed) ? (parsed as Post[]) : [];
+    } catch (error) {
+        console.warn('Corrupt clips_app_posts storage — clearing', error);
+        await clearCorruptPostsStorageNative();
         return [];
     }
 }

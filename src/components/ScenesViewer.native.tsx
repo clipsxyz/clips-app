@@ -10,7 +10,14 @@ import {
     type GestureResponderEvent,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, {
+    Easing,
+    runOnJS,
+    useAnimatedReaction,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -39,7 +46,6 @@ import CreateGroupModal from './CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal.native';
 import ScenesMediaPlayer, { ScenesMediaProgressBar } from './ScenesMediaPlayer.native';
 import ScenesCommentsPanel from './ScenesCommentsPanel.native';
-import ScenesProfileAvatarRing from './ScenesProfileAvatarRing.native';
 import { getCollectionsForPost } from '../api/collections';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
@@ -77,6 +83,9 @@ import {
 } from '../api/privacy';
 
 const COMMENTS_PREVIEW_FRACTION = 0.4;
+/** Match web ScenesModal comments open ease (~Reels mini viewport). */
+const COMMENTS_MEDIA_MS = 640;
+const COMMENTS_MEDIA_EASE = Easing.bezier(0.16, 1, 0.3, 1);
 
 type MetadataItem = { label: string; type: 'feed' | 'location' | 'venue' | 'timestamp' };
 
@@ -131,6 +140,10 @@ export default function ScenesViewer({
     const windowHeight = Dimensions.get('window').height;
     const windowWidth = Dimensions.get('window').width;
     const commentsPreviewHeight = Math.round(windowHeight * COMMENTS_PREVIEW_FRACTION);
+    const mediaHeightSv = useSharedValue(windowHeight);
+    // Android Video surfaces ignore overflow clipping — drive the player height explicitly
+    // so the MP4 actually becomes a Reels-style mini viewport above the sheet.
+    const [mediaViewportHeight, setMediaViewportHeight] = useState(windowHeight);
     const posts = useMemo(() => postsProp.filter(postHasVideoMedia), [postsProp]);
 
     const initialIndex = Math.max(0, posts.findIndex((p) => p.id === initialPostId));
@@ -244,10 +257,45 @@ export default function ScenesViewer({
 
     useEffect(() => {
         if (commentsOpen) {
-            setSheetTop(commentsPreviewHeight);
             setPaused(false);
+            // Sheet panel drives mediaHeightSv (and the Video height) while open.
+            return;
         }
-    }, [commentsOpen, commentsPreviewHeight]);
+        mediaHeightSv.value = withTiming(windowHeight, {
+            duration: COMMENTS_MEDIA_MS,
+            easing: COMMENTS_MEDIA_EASE,
+        });
+    }, [commentsOpen, mediaHeightSv, windowHeight]);
+
+    const applyMediaViewportHeight = useCallback((h: number) => {
+        const next = Math.max(1, Math.round(h));
+        setMediaViewportHeight((prev) => (prev === next ? prev : next));
+    }, []);
+
+    useAnimatedReaction(
+        () => Math.round(mediaHeightSv.value),
+        (h, prev) => {
+            if (h !== prev) {
+                runOnJS(applyMediaViewportHeight)(h);
+            }
+        },
+        [applyMediaViewportHeight],
+    );
+
+    const handleSheetTopChange = useCallback(
+        (top: number) => {
+            setSheetTop(top);
+            // Keep mini-video docked to the sheet while dragging (Reels-style).
+            if (commentsOpen) {
+                mediaHeightSv.value = top;
+            }
+        },
+        [commentsOpen, mediaHeightSv],
+    );
+
+    const mediaLayerAnimStyle = useAnimatedStyle(() => ({
+        height: mediaHeightSv.value,
+    }));
 
     const activeMediaSlides = useMemo(
         () => (activePost ? getScenesMediaSlides(activePost) : []),
@@ -355,9 +403,10 @@ export default function ScenesViewer({
     }, []);
 
     const openComments = useCallback(() => {
-        setSheetTop(commentsPreviewHeight);
+        // Start sheet off-screen; panel + media animate up together.
+        setSheetTop(windowHeight);
         setCommentsOpen(true);
-    }, [commentsPreviewHeight]);
+    }, [windowHeight]);
 
     const handleDirectMessage = useCallback(async () => {
         if (!activePost?.userHandle || !viewerHandle || !viewerUserId) {
@@ -446,9 +495,16 @@ export default function ScenesViewer({
     }, [activePost, patchPost, viewerHandle, viewerUserId]);
 
     const handleReclip = useCallback(async () => {
-        if (!activePost || !viewerHandle) return;
+        if (!activePost) return;
+        if (!viewerHandle || !viewerUserId || viewerUserId === 'anon') {
+            Alert.alert('Sign in required', 'Log in to reclip this post.');
+            return;
+        }
         const norm = (h?: string) => String(h || '').trim().toLowerCase();
-        if (norm(activePost.userHandle) === norm(viewerHandle)) return;
+        if (norm(activePost.userHandle) === norm(viewerHandle)) {
+            Alert.alert('Cannot reclip', "You can't reclip your own post.");
+            return;
+        }
         if (activePost.userReclipped) return;
         const prevReclips = activePost.stats.reclips;
         const nextReclips = prevReclips + 1;
@@ -460,7 +516,10 @@ export default function ScenesViewer({
         try {
             const result = await reclipPost(viewerUserId, activePost.id, viewerHandle);
             if (result.originalPost) {
-                patchPost(activePost.id, result.originalPost);
+                patchPost(activePost.id, {
+                    ...result.originalPost,
+                    userReclipped: true,
+                });
             }
         } catch (err) {
             console.warn('Reclip failed in Scenes:', err);
@@ -469,6 +528,11 @@ export default function ScenesViewer({
                 userReclipped: false,
                 stats: { ...activePost.stats, reclips: prevReclips },
             });
+            const message =
+                err instanceof Error && err.message
+                    ? err.message
+                    : 'Could not reclip this post. Try again.';
+            Alert.alert('Reclip failed', message);
         }
     }, [activePost, patchPost, viewerHandle, viewerUserId]);
 
@@ -579,8 +643,6 @@ export default function ScenesViewer({
         [goToPost, handleBack, windowHeight],
     );
 
-    const pageHeight = commentsOpen ? commentsPreviewHeight : windowHeight;
-
     const mediaGestures = useMemo(
         () =>
             Gesture.Pan()
@@ -609,9 +671,6 @@ export default function ScenesViewer({
     const isOwn = viewerHandle === activePost.userHandle;
     const canReclip = Boolean(viewerHandle && !isOwn && !activePost.userReclipped);
     const dismissOpacity = Math.max(0.55, 1 - dismissPull / (windowHeight * 0.45));
-    const railBottom = commentsOpen
-        ? Math.max(insets.bottom + 16, windowHeight - sheetTop + 20)
-        : insets.bottom + 96;
     const captionLong = caption.length > 50;
 
     const renderCaptionMentions = (text: string) => {
@@ -646,7 +705,7 @@ export default function ScenesViewer({
                     },
                 ]}
             >
-                    <View style={styles.mediaLayer}>
+                    <Animated.View style={[styles.mediaLayer, mediaLayerAnimStyle]}>
                         {!commentsOpen ? (
                             <GestureDetector gesture={mediaGestures}>
                                 <View style={styles.mediaGestureHost}>
@@ -657,7 +716,7 @@ export default function ScenesViewer({
                                         paused={paused}
                                         muted={muted}
                                         width={windowWidth}
-                                        height={pageHeight}
+                                        height={mediaViewportHeight}
                                         videoRef={videoRef}
                                         onVideoLoad={onVideoLoad}
                                         onVideoProgress={onVideoProgress}
@@ -669,24 +728,26 @@ export default function ScenesViewer({
                                 </View>
                             </GestureDetector>
                         ) : (
-                            <ScenesMediaPlayer
-                                key={activePost.id}
-                                post={activePost}
-                                isActive
-                                paused={paused}
-                                muted={muted}
-                                width={windowWidth}
-                                height={pageHeight}
-                                videoRef={videoRef}
-                                onVideoLoad={onVideoLoad}
-                                onVideoProgress={onVideoProgress}
-                                onSlideProgress={setMediaSlideProgress}
-                                onSlideIndexChange={setMediaSlideIndex}
-                                showPauseOverlay
-                                onMediaPress={handleMediaPress}
-                            />
+                            <View style={styles.mediaGestureHost} pointerEvents="box-none">
+                                <ScenesMediaPlayer
+                                    key={activePost.id}
+                                    post={activePost}
+                                    isActive
+                                    paused={paused}
+                                    muted={muted}
+                                    width={windowWidth}
+                                    height={mediaViewportHeight}
+                                    videoRef={videoRef}
+                                    onVideoLoad={onVideoLoad}
+                                    onVideoProgress={onVideoProgress}
+                                    onSlideProgress={setMediaSlideProgress}
+                                    onSlideIndexChange={setMediaSlideIndex}
+                                    showPauseOverlay
+                                    onMediaPress={handleMediaPress}
+                                />
+                            </View>
                         )}
-                    </View>
+                    </Animated.View>
 
             {lastTapDebug && (
                 <View style={styles.tapDebug}>
@@ -721,7 +782,7 @@ export default function ScenesViewer({
             </Pressable>
 
             <View style={[styles.topRight, { top: insets.top + 14 }]}>
-                {topMetaVisible && metadataItems.length > 0 ? (
+                {!commentsOpen && topMetaVisible && metadataItems.length > 0 ? (
                     <View style={styles.metaPill}>
                         <Icon
                             name={metadataIcon(metadataItems[metadataIndex]?.type ?? 'feed')}
@@ -735,13 +796,16 @@ export default function ScenesViewer({
                 ) : null}
             </View>
 
-            <Pressable style={[styles.muteBtn, { top: insets.top + 14 }]} onPress={toggleMute}>
-                <View style={styles.chromeCircle}>
-                    <Icon name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#FFFFFF" />
-                </View>
-            </Pressable>
+            {!commentsOpen ? (
+                <Pressable style={[styles.muteBtn, { top: insets.top + 14 }]} onPress={toggleMute}>
+                    <View style={styles.chromeCircle}>
+                        <Icon name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#FFFFFF" />
+                    </View>
+                </Pressable>
+            ) : null}
 
-            <View style={[styles.actionRail, { bottom: railBottom }]}>
+            {!commentsOpen ? (
+            <View style={[styles.actionRail, { bottom: insets.bottom + 96 }]}>
                 <View style={styles.actionCol}>
                     <View ref={likeButtonRef} collapsable={false}>
                         <Pressable
@@ -795,14 +859,21 @@ export default function ScenesViewer({
                 <View style={styles.actionCol}>
                     <Pressable
                         style={[styles.actionBtn, !canReclip && styles.actionBtnDisabled]}
-                        onPress={() => canReclip && void handleReclip()}
-                        disabled={!canReclip}
+                        onPress={() => void handleReclip()}
+                        accessibilityLabel={
+                            activePost.userReclipped ? 'Already reclipped' : 'Reclip'
+                        }
                     >
-                        <Icon name="repeat" size={26} color="#FFFFFF" />
+                        <Icon
+                            name="repeat"
+                            size={26}
+                            color={activePost.userReclipped ? '#4ADE80' : '#FFFFFF'}
+                        />
                     </Pressable>
                     <Text style={styles.actionCount}>{activePost.stats.reclips}</Text>
                 </View>
             </View>
+            ) : null}
 
             {!commentsOpen ? (
             <LinearGradient
@@ -819,15 +890,11 @@ export default function ScenesViewer({
                         style={styles.avatarBtn}
                         onPress={() => onVisitProfile(profileHandle)}
                     >
-                        <View style={styles.avatarRing}>
-                            <ScenesProfileAvatarRing revealKey={activePost.id} size={36}>
-                                <Avatar
-                                    src={isOwn ? undefined : getAvatarForHandle(profileHandle)}
-                                    name={displayHandle.split('@')[0]}
-                                    size="sm"
-                                />
-                            </ScenesProfileAvatarRing>
-                        </View>
+                        <Avatar
+                            src={isOwn ? undefined : getAvatarForHandle(profileHandle)}
+                            name={displayHandle.split('@')[0]}
+                            size={36}
+                        />
                     </Pressable>
                     {!activePost.isFollowing && !isOwn && !hasPendingRequest ? (
                         <Pressable style={styles.followPlus} onPress={() => void handleFollow()}>
@@ -922,10 +989,10 @@ export default function ScenesViewer({
                     0.42 *
                         Math.max(
                             0,
-                            Math.min(1, (windowHeight - sheetTop) / (windowHeight - commentsPreviewHeight)),
+                            Math.min(1, (windowHeight - sheetTop) / (windowHeight - commentsPreviewHeight || 1)),
                         )
                 }
-                onSheetTopChange={setSheetTop}
+                onSheetTopChange={handleSheetTopChange}
                 onClose={() => setCommentsOpen(false)}
             >
                 <PostCommentsSheet
@@ -1095,7 +1162,6 @@ export default function ScenesViewer({
                 onClose={() => setSaveModalOpen(false)}
                 onSaved={() => {
                     setIsSaved(true);
-                    setSaveModalOpen(false);
                 }}
             />
 
@@ -1143,10 +1209,21 @@ export default function ScenesViewer({
 const styles = StyleSheet.create({
     root: { flex: 1, backgroundColor: '#000' },
     rootInner: { flex: 1, backgroundColor: '#000' },
-    mediaLayer: { flex: 1, backgroundColor: '#000' },
-    mediaGestureHost: {
-        flex: 1,
+    mediaLayer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
         backgroundColor: '#000',
+        overflow: 'hidden',
+        // Keep below the comments sheet so the sheet can dock under the mini video.
+        zIndex: 10,
+    },
+    mediaGestureHost: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#000',
+        overflow: 'hidden',
     },
     tapDebug: {
         position: 'absolute',
@@ -1302,12 +1379,7 @@ const styles = StyleSheet.create({
     },
     avatarBtn: {
         borderRadius: 999,
-    },
-    avatarRing: {
-        borderRadius: 999,
-        borderWidth: 1.5,
-        borderColor: 'rgba(255,255,255,0.95)',
-        padding: 1,
+        overflow: 'hidden',
     },
     followPlus: {
         marginLeft: -12,

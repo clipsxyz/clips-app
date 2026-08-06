@@ -32,7 +32,6 @@ import {
     gazetteerHeader,
     profilePassportDivider,
     profilePassportChipBorder,
-    profilePassportPageBg,
     profilePassportScrollInset,
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -734,14 +733,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     if (loading) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.loadingShell}>
                 <ActivityIndicator size="large" color="#f472b6" />
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+        <GazetteerScreenShell ambientVariant="passport" style={styles.passportShell}>
             <View style={styles.header}>
                 <TouchableOpacity
                     onPress={() => setShowProfilePictureModal(true)}
@@ -2021,7 +2020,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
     passportShell: {
-        backgroundColor: profilePassportPageBg,
+        backgroundColor: 'transparent',
     },
     loadingShell: {
         justifyContent: 'center',
@@ -2039,7 +2038,7 @@ const styles = StyleSheet.create({
         paddingVertical: ox(12),
         borderBottomWidth: 1,
         borderBottomColor: profilePassportDivider,
-        backgroundColor: 'rgba(2, 6, 23, 0.95)',
+        backgroundColor: 'transparent',
         gap: ox(12),
     },
     headerAvatarBtn: {
@@ -2130,15 +2129,15 @@ const styles = StyleSheet.create({
     },
     profileScroll: {
         flex: 1,
-        backgroundColor: profilePassportPageBg,
+        backgroundColor: 'transparent',
     },
     profileScrollContent: {
         flexGrow: 1,
         paddingBottom: ox(24),
-        backgroundColor: profilePassportPageBg,
+        backgroundColor: 'transparent',
     },
     postsSection: {
-        backgroundColor: profilePassportPageBg,
+        backgroundColor: 'transparent',
     },
     postsGrid: {
         flexDirection: 'row',

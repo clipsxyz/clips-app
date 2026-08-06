@@ -2,10 +2,13 @@ import React, { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+    Easing,
     runOnJS,
+    useAnimatedReaction,
     useAnimatedStyle,
     useSharedValue,
     withSpring,
+    withTiming,
 } from 'react-native-reanimated';
 
 type Props = {
@@ -20,6 +23,8 @@ type Props = {
 };
 
 const SPRING = { damping: 22, stiffness: 220 };
+const OPEN_MS = 640;
+const OPEN_EASE = Easing.bezier(0.16, 1, 0.3, 1);
 
 export default function ScenesCommentsPanel({
     visible,
@@ -31,12 +36,34 @@ export default function ScenesCommentsPanel({
     onClose,
     children,
 }: Props) {
-    const dragStartTop = useSharedValue(sheetTop);
-    const topSv = useSharedValue(sheetTop);
+    const dragStartTop = useSharedValue(maxTop);
+    // Always start off-screen so open never flashes the settled sheet.
+    const topSv = useSharedValue(maxTop);
+    const lastReported = useSharedValue(-1);
 
     useEffect(() => {
-        topSv.value = sheetTop;
-    }, [sheetTop, topSv]);
+        if (!visible) {
+            topSv.value = maxTop;
+            lastReported.value = -1;
+            return;
+        }
+        // Slide up from bottom into the Reels-style dock under the mini video.
+        topSv.value = maxTop;
+        lastReported.value = -1;
+        topSv.value = withTiming(minTop, { duration: OPEN_MS, easing: OPEN_EASE });
+    }, [visible, minTop, maxTop, topSv, lastReported]);
+
+    // Keep parent media height locked to the sheet during open + drag.
+    useAnimatedReaction(
+        () => Math.round(topSv.value),
+        (top, prev) => {
+            if (!visible) return;
+            if (top === prev || top === lastReported.value) return;
+            lastReported.value = top;
+            runOnJS(onSheetTopChange)(top);
+        },
+        [visible, onSheetTopChange],
+    );
 
     const pan = useMemo(
         () =>
@@ -48,7 +75,6 @@ export default function ScenesCommentsPanel({
                 .onUpdate((e) => {
                     const next = Math.min(maxTop, Math.max(minTop, dragStartTop.value + e.translationY));
                     topSv.value = next;
-                    runOnJS(onSheetTopChange)(next);
                 })
                 .onEnd((e) => {
                     const projected = topSv.value + e.velocityY * 0.12;
@@ -56,13 +82,11 @@ export default function ScenesCommentsPanel({
                         topSv.value = withSpring(maxTop, SPRING, (finished) => {
                             if (finished) runOnJS(onClose)();
                         });
-                        runOnJS(onSheetTopChange)(maxTop);
                         return;
                     }
                     topSv.value = withSpring(minTop, SPRING);
-                    runOnJS(onSheetTopChange)(minTop);
                 }),
-        [maxTop, minTop, onClose, onSheetTopChange, dragStartTop, topSv],
+        [maxTop, minTop, onClose, dragStartTop, topSv],
     );
 
     const sheetStyle = useAnimatedStyle(() => ({
@@ -102,6 +126,7 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 40,
+        elevation: 18,
     },
     sheet: {
         position: 'absolute',
@@ -109,6 +134,7 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 45,
+        elevation: 20,
         backgroundColor: '#FFFFFF',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
@@ -117,7 +143,6 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: -4 },
         shadowOpacity: 0.2,
         shadowRadius: 12,
-        elevation: 12,
     },
     dragHandleRow: {
         alignItems: 'center',

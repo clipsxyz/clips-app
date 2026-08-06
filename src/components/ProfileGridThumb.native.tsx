@@ -2,7 +2,18 @@ import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
-import { getTextOnlyBackgroundColor, isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import {
+    getPostBodyText,
+    getTextOnlyBackgroundColor,
+    getTextOnlyTextColor,
+    isTextOnlyPost,
+    isVideoPost,
+} from '../utils/effectiveTextPostStyleNative';
+import { resolvePostThumbnail } from '../api/collections';
+import {
+    MOCK_FEED_BUNDLED_VIDEO_POSTER,
+    resolveDemoVideoPosterSource,
+} from '../constants/mockFeedVideos';
 
 type Props = {
     post: Post;
@@ -12,6 +23,13 @@ function getPostLocationLabel(post: Post): string | undefined {
     const label = post.locationLabel || post.venue;
     const trimmed = typeof label === 'string' ? label.trim() : '';
     return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveVideoUrl(post: Post): string | undefined {
+    const firstVideo = Array.isArray(post.mediaItems)
+        ? post.mediaItems.find((item) => item?.type === 'video' && item.url)
+        : undefined;
+    return firstVideo?.url || post.mediaUrl || undefined;
 }
 
 export default function ProfileGridThumb({ post }: Props) {
@@ -25,23 +43,64 @@ export default function ProfileGridThumb({ post }: Props) {
         </View>
     ) : null;
 
-    if (isTextOnlyPost(post)) {
+    const videoOverlays = (
+        <>
+            <View style={styles.playCenter} pointerEvents="none">
+                <View style={styles.playCircle}>
+                    <Icon name="play" size={22} color="#FFFFFF" style={styles.playIconOffset} />
+                </View>
+            </View>
+            <View style={styles.videoBadge} pointerEvents="none">
+                <Icon name="videocam" size={10} color="#FFFFFF" />
+                <Text style={styles.videoBadgeText}>Video</Text>
+            </View>
+        </>
+    );
+
+    const bodyText = getPostBodyText(post);
+    const poster = resolvePostThumbnail(post);
+    if (isTextOnlyPost(post) || (bodyText && !poster && !isVideoPost(post))) {
         return (
             <View style={[styles.cell, { backgroundColor: getTextOnlyBackgroundColor(post) }]}>
                 {locationBadge}
-                <Text style={styles.textThumb} numberOfLines={4}>
-                    {post.text}
+                <Text
+                    style={[styles.textThumb, { color: getTextOnlyTextColor(post) }]}
+                    numberOfLines={4}
+                >
+                    {bodyText || 'Post'}
                 </Text>
             </View>
         );
     }
 
-    const poster = isVideoPost(post) && post.videoPosterUrl ? post.videoPosterUrl : post.mediaUrl;
+    // Image-only thumbs — never mount react-native-video in grid cells (Android steals taps).
+    if (isVideoPost(post)) {
+        const videoUrl = resolveVideoUrl(post);
+        const demoSource = resolveDemoVideoPosterSource(videoUrl);
+        // Demo feed MP4s share one real BBB frame; use it whenever we lack a captured poster.
+        const imageSource = poster
+            ? ({ uri: poster } as const)
+            : (demoSource ?? MOCK_FEED_BUNDLED_VIDEO_POSTER);
+        return (
+            <View style={styles.cell}>
+                <Image source={imageSource} style={styles.image} resizeMode="cover" />
+                {locationBadge}
+                {videoOverlays}
+            </View>
+        );
+    }
+
     if (!poster) {
         return (
             <View style={[styles.cell, styles.placeholder]}>
                 {locationBadge}
-                <Icon name="text" size={22} color="#6B7280" />
+                {bodyText ? (
+                    <Text style={[styles.textThumb, { color: '#E5E7EB' }]} numberOfLines={4}>
+                        {bodyText}
+                    </Text>
+                ) : (
+                    <Icon name="image-outline" size={22} color="#6B7280" />
+                )}
             </View>
         );
     }
@@ -50,19 +109,6 @@ export default function ProfileGridThumb({ post }: Props) {
         <View style={styles.cell}>
             <Image source={{ uri: poster }} style={styles.image} resizeMode="cover" />
             {locationBadge}
-            {isVideoPost(post) ? (
-                <>
-                    <View style={styles.playCenter} pointerEvents="none">
-                        <View style={styles.playCircle}>
-                            <Icon name="play" size={22} color="#FFFFFF" style={styles.playIconOffset} />
-                        </View>
-                    </View>
-                    <View style={styles.videoBadge} pointerEvents="none">
-                        <Icon name="videocam" size={10} color="#FFFFFF" />
-                        <Text style={styles.videoBadgeText}>Video</Text>
-                    </View>
-                </>
-            ) : null}
         </View>
     );
 }
@@ -81,12 +127,14 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
+    videoPlaceholder: {
+        backgroundColor: '#0B1220',
+    },
     placeholder: {
         alignItems: 'center',
         justifyContent: 'center',
     },
     textThumb: {
-        color: '#FFFFFF',
         fontSize: 10,
         fontWeight: '600',
         padding: 6,

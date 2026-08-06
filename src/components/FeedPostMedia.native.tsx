@@ -122,15 +122,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const maxCarouselIndex = Math.max(0, carouselItems.length - 1);
     const safeCarouselIndex = Math.min(Math.max(0, carouselIndex), maxCarouselIndex);
     const [currentIndex, setCurrentIndex] = useState(safeCarouselIndex);
-    /** Mount native Video only after this card has been active once (keeps initial feed load stable). */
-    const [feedVideoReady, setFeedVideoReady] = useState(mode !== 'feed');
-
-    useEffect(() => {
-        if (mode === 'feed' && isActive) {
-            setFeedVideoReady(true);
-        }
-    }, [mode, isActive]);
-
     const markUrlLoaded = useCallback(
         (url: string) => {
             loadedUrlsRef.current.add(url);
@@ -471,8 +462,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slidePoster =
             (item as { posterUrl?: string } | undefined)?.posterUrl || postLevelPoster;
 
-        const slideUseNativePlayer =
-            mode === 'detail' || (mode === 'feed' && feedVideoReady && slideVideo);
+        // Preload while the FlatList row is mounted (paused until autoplay). Avoids cold-start delay.
+        const slideUseNativePlayer = mode === 'detail' || (mode === 'feed' && slideVideo);
 
         const slideInner = slideVideo ? (
             slideUseNativePlayer ? (
@@ -494,9 +485,15 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     playInBackground={false}
                     playWhenInactive={false}
                     ignoreSilentSwitch="ignore"
+                    shutterColor="transparent"
                     pointerEvents={mediaPointerEvents}
                     {...feedVideoSurfaceProps}
                     onLoad={() => markUrlLoaded(slideRawUrl)}
+                    onReadyForDisplay={
+                        mode === 'feed'
+                            ? () => markUrlLoaded(slideRawUrl)
+                            : undefined
+                    }
                     onProgress={
                         slideFeedPlay
                             ? (e) => onFeedVideoProgress(e.currentTime)
@@ -515,10 +512,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     onError={() => markUrlLoaded(slideRawUrl)}
                 />
             ) : (
-                <View style={[frameStyle, styles.videoFallback]}>
-                    {showLoader ? <ActivityIndicator color="#f472b6" /> : null}
-                    <Icon name="videocam-outline" size={36} color="#6B7280" />
-                </View>
+                // Quiet black tile until this card becomes active — no videocam glyph flash.
+                <View style={[frameStyle, styles.videoFallback]} pointerEvents={mediaPointerEvents} />
             )
         ) : (
             <Image
@@ -696,8 +691,7 @@ const styles = StyleSheet.create({
         elevation: Platform.OS === 'android' ? 25 : 0,
     },
     videoFallback: {
-        alignItems: 'center',
-        justifyContent: 'center',
+        backgroundColor: '#000000',
     },
     textOnlyCard: {
         borderRadius: 16,

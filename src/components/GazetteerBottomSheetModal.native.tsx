@@ -206,10 +206,14 @@ export default function GazetteerBottomSheetModal({
 
     useEffect(() => {
         if (visible) {
-            ref.current?.present();
-        } else {
-            ref.current?.dismiss();
+            // Native-stack pushes often miss an immediate present(); defer one frame.
+            const t = setTimeout(() => {
+                ref.current?.present();
+            }, 50);
+            return () => clearTimeout(t);
         }
+        ref.current?.dismiss();
+        return undefined;
     }, [visible]);
 
     const renderBackdrop = useCallback(

@@ -142,13 +142,13 @@ export default function ScenesMediaPlayer({
                         <Video
                             ref={slideActive ? videoRef : undefined}
                             source={scenesVideoSource(rawUrl)}
-                            style={StyleSheet.absoluteFill}
+                            style={{ width, height }}
                             pointerEvents="none"
                             resizeMode="contain"
                             repeat
                             paused={paused}
                             muted={muted}
-                            poster={poster}
+                            poster={undefined}
                             posterResizeMode="cover"
                             playInBackground={false}
                             playWhenInactive={false}
@@ -161,9 +161,9 @@ export default function ScenesMediaPlayer({
                                 }
                             }}
                         />
-                    ) : poster || playbackUrl ? (
+                    ) : poster ? (
                         <Image
-                            source={{ uri: poster || playbackUrl }}
+                            source={{ uri: poster }}
                             style={StyleSheet.absoluteFill}
                             resizeMode="cover"
                             pointerEvents="none"
@@ -226,12 +226,12 @@ export default function ScenesMediaPlayer({
                                         <Video
                                             ref={videoRef}
                                             source={scenesVideoSource(slide.url)}
-                                            style={StyleSheet.absoluteFill}
+                                            style={{ width, height }}
                                             resizeMode="contain"
                                             repeat
                                             paused={paused}
                                             muted={muted}
-                                            poster={slide.posterUrl || post.videoPosterUrl}
+                                            poster={undefined}
                                             posterResizeMode="cover"
                                             playInBackground={false}
                                             playWhenInactive={false}
@@ -256,12 +256,12 @@ export default function ScenesMediaPlayer({
                         <Video
                             ref={videoRef}
                             source={scenesVideoSource(slides[0].url)}
-                            style={StyleSheet.absoluteFill}
+                            style={{ width, height }}
                             resizeMode="contain"
                             repeat
                             paused={paused}
                             muted={muted}
-                            poster={slides[0].posterUrl || post.videoPosterUrl}
+                            poster={undefined}
                             posterResizeMode="cover"
                             playInBackground={false}
                             playWhenInactive={false}
