@@ -223,17 +223,7 @@ export function hasPendingFollowRequest(fromHandle: string, toHandle: string): b
     req.status === 'pending'
   );
   const hasPending = matchingRequests.length > 0;
-  
-  // Debug logging
-  console.log('hasPendingFollowRequest: Check result', {
-    fromHandle,
-    toHandle,
-    hasPending,
-    matchingRequests: matchingRequests.length,
-    totalValidRequests: validRequests.length,
-    allRequests: validRequests.map(r => ({ from: r.fromHandle, to: r.toHandle, status: r.status, age: r.timestamp ? Math.floor((now - r.timestamp) / (1000 * 60 * 60 * 24)) + ' days' : 'unknown' }))
-  });
-  
+
   return hasPending;
 }
 

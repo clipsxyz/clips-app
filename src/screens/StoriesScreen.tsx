@@ -91,9 +91,12 @@ export default function StoriesScreen({ route, navigation }: any) {
         railHandles: railHandlesParam,
         previewThumb: routePreviewThumb,
         previewVideoUrl: routePreviewVideoUrl,
+        skipStories24RailReturn,
+        forceRefreshAt,
     } = route.params || {};
     const railHandles = Array.isArray(railHandlesParam) ? railHandlesParam : [];
     const railHandlesKey = railHandles.join('|');
+    const shouldReturnToStories24Rail = skipStories24RailReturn !== true;
     const normalizedOpenUserHandle = React.useMemo(() => {
         if (!openUserHandle || typeof openUserHandle !== 'string') return '';
         try {
@@ -340,7 +343,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         return () => {
             cancelled = true;
         };
-    }, [fromStories24Rail, normalizedOpenUserHandle]);
+    }, [forceRefreshAt, fromStories24Rail, normalizedOpenUserHandle]);
 
     useEffect(() => {
         if (!stories24OpenFromFeedRail || !normalizedOpenUserHandle) {
@@ -350,7 +353,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         setStories24HoldMinReady(false);
         const t = setTimeout(() => setStories24HoldMinReady(true), STORIES24_LOADING_HOLD_MS);
         return () => clearTimeout(t);
-    }, [stories24OpenFromFeedRail, normalizedOpenUserHandle]);
+    }, [forceRefreshAt, stories24OpenFromFeedRail, normalizedOpenUserHandle]);
 
     const stories24ContentReady = !loading && viewingStories;
     const showStories24HoldScreen =
@@ -592,11 +595,13 @@ export default function StoriesScreen({ route, navigation }: any) {
 
             // Disable native modal dismiss — custom Apple-TV shrink runs on the feed rail.
             navigation.setOptions({ animation: 'none' });
-            void persistStories24RailReturn({
-                handle: normalizedOpenUserHandle,
-                previewThumb,
-                previewVideoUrl: routePreviewVideoUrl,
-            });
+            if (shouldReturnToStories24Rail) {
+                void persistStories24RailReturn({
+                    handle: normalizedOpenUserHandle,
+                    previewThumb,
+                    previewVideoUrl: routePreviewVideoUrl,
+                });
+            }
             void clearStories24RailOpenHandle();
         }
 

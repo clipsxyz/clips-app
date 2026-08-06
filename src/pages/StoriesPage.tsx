@@ -194,6 +194,7 @@ export default function StoriesPage() {
     const openStoryId = location.state?.openStoryId;
     const fromDmViewStory = location.state?.fromDmViewStory === true;
     const fromStories24Rail = location.state?.fromStories24Rail === true;
+    const skipStories24RailReturn = location.state?.skipStories24RailReturn === true;
     const railHandles = Array.isArray(location.state?.railHandles)
         ? (location.state.railHandles as string[])
         : [];
@@ -202,7 +203,8 @@ export default function StoriesPage() {
     /** True if we opened from Stories 24 rail (state or session handle match — avoids navigate(-1) → Inbox on mobile). */
     const stories24OpenFromFeedRail =
         fromStories24Rail ||
-        (typeof openUserHandle === 'string' &&
+        (!skipStories24RailReturn &&
+            typeof openUserHandle === 'string' &&
             (() => {
                 try {
                     const stored = sessionStorage.getItem(STORIES24_FROM_RAIL_HANDLE_KEY);
@@ -218,7 +220,7 @@ export default function StoriesPage() {
     /** Signals feed rail to run the “drop back” shrink into the card (must match App.tsx `STORIES24_RAIL_RETURN_KEY`). Uses a JPEG frame for video so the overlay matches the static-image-only collapse path. */
     const persistStories24RailReturnAnimation = React.useCallback(
         async (storySnapshot: Story | undefined, navState: Stories24NavState) => {
-            if (!openUserHandle || !stories24OpenFromFeedRail) return;
+            if (!openUserHandle || !stories24OpenFromFeedRail || skipStories24RailReturn) return;
             const previewVideoUrl = navState?.previewVideoUrl;
             let previewThumb = navState?.previewThumb;
             const mediaUrl = storySnapshot?.mediaUrl;
@@ -244,7 +246,7 @@ export default function StoriesPage() {
                 /* ignore */
             }
         },
-        [openUserHandle, stories24OpenFromFeedRail]
+        [openUserHandle, skipStories24RailReturn, stories24OpenFromFeedRail]
     );
 
     function clearStories24RailSessionHandle() {
@@ -471,7 +473,11 @@ export default function StoriesPage() {
             await persistStories24RailReturnAnimation(storySnapshot, navState);
             if (cancelled) return;
             clearStories24RailSessionHandle();
-            navigate('/feed', { replace: true });
+            if (skipStories24RailReturn) {
+                navigate(-1);
+            } else {
+                navigate('/feed', { replace: true });
+            }
         })();
 
         return () => {
@@ -482,6 +488,7 @@ export default function StoriesPage() {
         viewingStories,
         navigate,
         persistStories24RailReturnAnimation,
+        skipStories24RailReturn,
         stories24OpenFromFeedRail,
         storyGroups,
         currentGroupIndex,
@@ -778,9 +785,14 @@ export default function StoriesPage() {
                 detail: { userHandle: openUserHandle }
             }));
             // Feed rail: always /feed (session handle matches if `location.state` was dropped on mobile).
+            // Inbox followed-stories rail: same open format, but return to inbox (not feed).
             if (stories24OpenFromFeedRail) {
                 clearStories24RailSessionHandle();
-                navigate('/feed', { replace: true });
+                if (skipStories24RailReturn) {
+                    navigate(-1);
+                } else {
+                    navigate('/feed', { replace: true });
+                }
             } else {
                 navigate(-1);
             }
@@ -4593,7 +4605,11 @@ export default function StoriesPage() {
                                     navState
                                 );
                                 clearStories24RailSessionHandle();
-                                navigate('/feed', { replace: true });
+                                if (skipStories24RailReturn) {
+                                    navigate(-1);
+                                } else {
+                                    navigate('/feed', { replace: true });
+                                }
                             })();
                         }}
                         className="p-1.5 rounded-full hover:bg-gray-800 transition-colors"

@@ -1285,7 +1285,29 @@ export default function InboxPage() {
                                 key={group.userId || group.userHandle}
                                 type="button"
                                 onClick={() => {
-                                    navigate('/stories', { state: { openUserHandle: group.userHandle } });
+                                    const railHandles = storyGroups
+                                        .map((g) => g.userHandle)
+                                        .filter(Boolean);
+                                    const latest = [...(group.stories || [])].sort(
+                                        (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+                                    )[0];
+                                    const mediaUrl = latest?.mediaUrl;
+                                    const isVideo =
+                                        latest?.mediaType === 'video' ||
+                                        (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+                                    navigate('/stories', {
+                                        state: {
+                                            openUserHandle: group.userHandle,
+                                            fromStories24Rail: true,
+                                            skipStories24RailReturn: true,
+                                            railHandles,
+                                            previewThumb:
+                                                (!isVideo && mediaUrl) ||
+                                                group.avatarUrl ||
+                                                undefined,
+                                            previewVideoUrl: isVideo && mediaUrl ? mediaUrl : undefined,
+                                        },
+                                    });
                                 }}
                                 className="flex flex-col items-center gap-1 flex-shrink-0"
                             >
@@ -1378,7 +1400,30 @@ export default function InboxPage() {
                 </button>
             </div>
             {loading ? (
-                <div className="text-gray-500">Loading…</div>
+                <div className="w-full" role="status" aria-label="Loading messages">
+                    <div className="pt-1">
+                        {Array.from({ length: 7 }, (_, i) => (
+                            <div
+                                key={i}
+                                className="mx-2 flex items-center gap-2.5 px-1.5 py-3 animate-pulse"
+                                style={{ animationDelay: `${i * 70}ms` }}
+                            >
+                                <div className="h-11 w-11 shrink-0 rounded-full bg-white/10" />
+                                <div className="min-w-0 flex-1 space-y-2">
+                                    <div
+                                        className="h-2.5 rounded bg-white/15"
+                                        style={{ width: `${36 + ((i * 11) % 28)}%` }}
+                                    />
+                                    <div
+                                        className="h-2 rounded bg-white/10"
+                                        style={{ width: `${48 + ((i * 9) % 26)}%` }}
+                                    />
+                                </div>
+                                <div className="mt-0.5 h-2 w-7 shrink-0 rounded bg-white/10 self-start" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
             ) : activeTab === 'messages' ? (
                 queriedItems.length === 0 ? (
                     <div className="text-gray-500 text-center py-8">

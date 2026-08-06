@@ -283,7 +283,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     onPress={() => setOverflowVisible(true)}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                    <Icon name="ellipsis-horizontal" size={ox(22)} color="#E5E7EB" />
+                    <Icon name="list-outline" size={ox(22)} color="#E5E7EB" />
                 </TouchableOpacity>
             </View>
 

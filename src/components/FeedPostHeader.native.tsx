@@ -219,7 +219,7 @@ export default function FeedPostHeader({
                         accessibilityLabel="Post options"
                     >
                         <Icon
-                            name="ellipsis-horizontal"
+                            name="list-outline"
                             size={16}
                             color={isOverlaid ? '#FFFFFF' : '#9CA3AF'}
                         />

@@ -4,7 +4,6 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    ActivityIndicator,
     Alert,
     RefreshControl,
     Image,
@@ -18,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import InboxConversationRow, { inboxConversationRowId } from '../components/InboxConversationRow.native';
 import InboxChatInfoSheet from '../components/InboxChatInfoSheet.native';
+import InboxLoadingSkeleton from '../components/InboxLoadingSkeleton.native';
 import { useAuth } from '../context/Auth';
 import {
     getNotifications,
@@ -287,7 +287,10 @@ export default function InboxScreen({ navigation, route }: any) {
     }, [notifications, conversations, dmAvatarMap, user?.id]);
 
     const loadData = async () => {
-        if (!user?.handle) return;
+        if (!user?.handle) {
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
             const [notifs, storyInsights] = await Promise.all([
@@ -388,6 +391,42 @@ export default function InboxScreen({ navigation, route }: any) {
         options.push({ text: 'Cancel', onPress: () => {} });
         Alert.alert('Story views', 'View profile', options);
     };
+
+    /** Same Stories 24 open format as the feed rail (hold screen + rail swipe chain). */
+    const openFollowedStoryFromRail = useCallback(
+        (group: StoryGroup) => {
+            const railHandles = storyGroups
+                .map((g) => g.userHandle)
+                .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
+            const latest = [...(group.stories || [])].sort(
+                (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+            )[0];
+            const mediaUrl = latest?.mediaUrl;
+            const isVideo =
+                latest?.mediaType === 'video' ||
+                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+            const params = {
+                openUserHandle: group.userHandle,
+                fromStories24Rail: true,
+                skipStories24RailReturn: true,
+                railHandles,
+                previewThumb:
+                    (!isVideo && mediaUrl) ||
+                    group.avatarUrl ||
+                    getAvatarForHandle(group.userHandle) ||
+                    undefined,
+                previewVideoUrl: isVideo && mediaUrl ? mediaUrl : undefined,
+                forceRefreshAt: Date.now(),
+            };
+            // Stories lives on the root stack — Inbox is nested under MainTabs.
+            if (rootNavigationRef.isReady()) {
+                (rootNavigationRef as any).navigate('Stories', params);
+                return;
+            }
+            navigation.navigate('Stories', params);
+        },
+        [navigation, storyGroups],
+    );
 
     const navigateToMessages = (params: { handle?: string; chatGroupId?: string; kind?: string }) => {
         if (rootNavigationRef.isReady()) {
@@ -839,7 +878,10 @@ export default function InboxScreen({ navigation, route }: any) {
     if (loading) {
         return (
             <GazetteerScreenShell ambient={false} style={styles.pageShell} contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
+                <View style={styles.header}>
+                    <Text style={styles.headerTitle}>Notifications</Text>
+                </View>
+                <InboxLoadingSkeleton />
             </GazetteerScreenShell>
         );
     }
@@ -873,9 +915,7 @@ export default function InboxScreen({ navigation, route }: any) {
                             <TouchableOpacity
                                 key={group.userId || group.userHandle}
                                 style={styles.storyRailItem}
-                                onPress={() =>
-                                    navigation.navigate('Stories', { openUserHandle: group.userHandle })
-                                }
+                                onPress={() => openFollowedStoryFromRail(group)}
                             >
                                 {hasUnviewed ? (
                                     <LinearGradient
@@ -1397,8 +1437,9 @@ const styles = StyleSheet.create({
         backgroundColor: '#070a12',
     },
     loadingShell: {
-        justifyContent: 'center',
-        alignItems: 'center',
+        flex: 1,
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
     },
     header: {
         paddingHorizontal: ox(12),
