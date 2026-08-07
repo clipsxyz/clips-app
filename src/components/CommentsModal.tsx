@@ -358,6 +358,7 @@ function CommentInput({
                 </button>
                 <div className="flex-1 rounded-lg p-[2px] bg-transparent/20 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
                     <input
+                        ref={inputRef}
                         type="text"
                         value={text}
                         onChange={(e) => setText(e.target.value)}
@@ -414,7 +415,11 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
     // Load post (author, caption) + comments when modal opens
     React.useEffect(() => {
-        if (!isOpen || !postId || !canLoadComments) return;
+        if (!isOpen) {
+            setReplyingTo(null);
+            return;
+        }
+        if (!postId || !canLoadComments) return;
         let cancelled = false;
         (async () => {
             setLoading(true);
@@ -654,8 +659,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         }
     };
 
-    const handleReplyToComment = async (parentId: string, text: string) => {
-        if (!user) return;
+    const handleReplyToComment = async (parentId: string, text: string): Promise<boolean> => {
+        if (!user) return false;
         const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
         if (moderation.level !== 'none') {
             const shouldContinue = window.confirm(
@@ -663,7 +668,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     ? 'This reply may violate safety filters and will be hidden from others. Post anyway?'
                     : 'This reply looks potentially harmful. Post anyway?'
             );
-            if (!shouldContinue) return;
+            if (!shouldContinue) return false;
         }
 
         // Always show an optimistic reply immediately
@@ -703,7 +708,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     userId: user.id,
                     text
                 });
-                return;
+                return true;
             }
 
             const newReply = await addReply(postId, parentId, user.handle || 'darraghdublin', text);
@@ -724,9 +729,11 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
             // Notify EngagementBar to update comment count
             window.dispatchEvent(new CustomEvent(`commentAdded-${postId}`));
+            return true;
         } catch (error) {
             console.error('Failed to add reply:', error);
-            // If API fails, keep optimistic reply in UI
+            // Keep optimistic reply in UI — still treat as posted locally.
+            return true;
         }
     };
 
@@ -964,8 +971,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                             if (replyingTo) {
                                 setSubmittingReply(true);
                                 try {
-                                    await handleReplyToComment(replyingTo.id, text);
-                                    setReplyingTo(null);
+                                    const ok = await handleReplyToComment(replyingTo.id, text);
+                                    if (ok) setReplyingTo(null);
                                 } finally {
                                     setSubmittingReply(false);
                                 }

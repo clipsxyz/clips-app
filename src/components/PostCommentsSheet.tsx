@@ -11,6 +11,7 @@ import {
     Alert,
     Dimensions,
     KeyboardAvoidingView,
+    Keyboard,
     Platform,
     type ListRenderItem,
     type NativeSyntheticEvent,
@@ -507,6 +508,7 @@ export default function PostCommentsSheet({
     const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
     const [replyingTo, setReplyingTo] = useState<{ id: string; handle: string } | null>(null);
     const [submittingReply, setSubmittingReply] = useState(false);
+    const [scenesKeyboardPad, setScenesKeyboardPad] = useState(0);
 
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
@@ -711,16 +713,16 @@ export default function PostCommentsSheet({
         }
     };
 
-    const handleReplyToComment = async (parentId: string, text: string) => {
+    const handleReplyToComment = async (parentId: string, text: string): Promise<boolean> => {
         const handle = String(commentAuthorHandle || user?.handle || '').trim();
         if (!handle) {
             Alert.alert('Sign in required', 'You need a profile handle to reply.');
-            return;
+            return false;
         }
         const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
         if (moderation.level !== 'none') {
             const ok = await confirmModerationPost(moderation.level);
-            if (!ok) return;
+            if (!ok) return false;
         }
 
         const optimisticReply: Comment = {
@@ -759,6 +761,7 @@ export default function PostCommentsSheet({
                     };
                 }),
             );
+            return true;
         } catch (err) {
             console.error('Failed to add reply:', err);
             throw err;
@@ -833,6 +836,25 @@ export default function PostCommentsSheet({
         if (!isOpen) setReplyingTo(null);
     }, [isOpen]);
 
+    useEffect(() => {
+        if (!isScenesEmbed || !isOpen) {
+            setScenesKeyboardPad(0);
+            return;
+        }
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const onShow = Keyboard.addListener(showEvent, (e) => {
+            setScenesKeyboardPad(Math.max(0, e.endCoordinates.height - insets.bottom));
+        });
+        const onHide = Keyboard.addListener(hideEvent, () => {
+            setScenesKeyboardPad(0);
+        });
+        return () => {
+            onShow.remove();
+            onHide.remove();
+        };
+    }, [isScenesEmbed, isOpen, insets.bottom]);
+
     const scrollReplyIntoView = useCallback(
         (commentId: string) => {
             const index = sortedComments.findIndex((c) => String(c.id) === String(commentId));
@@ -868,8 +890,8 @@ export default function PostCommentsSheet({
             if (replyingTo) {
                 setSubmittingReply(true);
                 try {
-                    await handleReplyToComment(replyingTo.id, text);
-                    setReplyingTo(null);
+                    const ok = await handleReplyToComment(replyingTo.id, text);
+                    if (ok) setReplyingTo(null);
                 } catch {
                     Alert.alert('Error', 'Failed to add reply');
                 } finally {
@@ -1123,9 +1145,9 @@ export default function PostCommentsSheet({
         if (!isOpen) return null;
         return (
             <KeyboardAvoidingView
-                style={styles.scenesEmbedRoot}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+                style={[styles.scenesEmbedRoot, { paddingBottom: scenesKeyboardPad }]}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
             >
                 {sheetBody}
             </KeyboardAvoidingView>
