@@ -21,6 +21,7 @@ import { toggleFollow } from '../api/client';
 import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import { enqueue } from '../utils/mutationQueue';
 import Avatar from './Avatar';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import type { Comment, Post } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { evaluateCommentModeration, getCommentModerationPreferences } from '../utils/commentModeration';
@@ -99,18 +100,20 @@ function CommentItem({
     comment,
     onLikeComment,
     onLikeReply,
-    onReply,
+    onStartReply,
     onModerateComment,
     isPostOwner,
+    isReplyingTo,
     userId: _userId,
     postId: _postId
 }: {
     comment: Comment;
     onLikeComment: (commentId: string) => Promise<void>;
     onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
-    onReply: (parentId: string, text: string) => Promise<void>;
+    onStartReply: (commentId: string, handle: string) => void;
     onModerateComment: (commentId: string, action: 'hide' | 'unhide' | 'delete') => Promise<void>;
     isPostOwner: boolean;
+    isReplyingTo?: boolean;
     userId: string;
     postId: string;
 }) {
@@ -120,31 +123,12 @@ function CommentItem({
     const [likes, setLikes] = React.useState(comment.likes);
     const [busy, setBusy] = React.useState(false);
     const [showReplies, setShowReplies] = React.useState(false);
-    const [showReplyInput, setShowReplyInput] = React.useState(false);
-    const [replyText, setReplyText] = React.useState('');
-    const [submittingReply, setSubmittingReply] = React.useState(false);
 
     // Sync with comment data changes
     React.useEffect(() => {
         setLiked(comment.userLiked);
         setLikes(comment.likes);
     }, [comment.userLiked, comment.likes]);
-
-
-    const handleReply = async () => {
-        if (!replyText.trim() || submittingReply) return;
-
-        setSubmittingReply(true);
-        try {
-            await onReply(comment.id, replyText.trim());
-            setReplyText('');
-            setShowReplyInput(false);
-        } catch (error) {
-            console.error('Failed to add reply:', error);
-        } finally {
-            setSubmittingReply(false);
-        }
-    };
 
     const replyCount = comment.replyCount || 0;
     const hasReplies = replyCount > 0;
@@ -165,18 +149,18 @@ function CommentItem({
                 }
                 name={comment.userHandle?.split('@')[0] || 'User'}
                 size="sm"
-                className="flex-shrink-0 ring-1 ring-gray-200"
+                className="flex-shrink-0 ring-1 ring-white/20"
             />
             <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 mb-0.5">
-                    <span className="font-semibold text-sm text-gray-900">
+                    <span className="font-semibold text-sm text-[#e8eef2]">
                         {comment.userHandle}
                     </span>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-white/55">
                         {formatTime(comment.createdAt)}
                     </span>
                 </div>
-                <p className="text-sm text-gray-900 mb-2">
+                <p className="text-sm text-[#e8eef2] mb-2">
                     {isHiddenForViewer
                         ? 'Comment hidden for safety.'
                         : renderTextWithMentions(comment.text || '', (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
@@ -189,7 +173,7 @@ function CommentItem({
                         <button
                             type="button"
                             onClick={() => onModerateComment(comment.id, comment.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide')}
-                            className="text-[11px] font-medium text-gray-600 hover:text-gray-900"
+                            className="text-[11px] font-medium text-white/60 hover:text-[#e8eef2]"
                         >
                             {comment.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
                         </button>
@@ -206,11 +190,11 @@ function CommentItem({
                 {/* Action row: Reply on left, like on right (Scenes style) */}
                 <div className="flex items-center justify-between">
                     <button
-                        onClick={() => setShowReplyInput(!showReplyInput)}
-                        className="text-xs text-gray-500 hover:text-gray-900 font-medium disabled:opacity-50"
+                        onClick={() => onStartReply(comment.id, comment.userHandle || '')}
+                        className={`text-xs font-medium disabled:opacity-50 ${isReplyingTo ? 'text-[#3d9b8f]' : 'text-white/55 hover:text-[#e8eef2]'}`}
                         disabled={isHiddenForViewer}
                     >
-                        Reply
+                        {isReplyingTo ? 'Replying…' : 'Reply'}
                     </button>
                     <button
                         onClick={async () => {
@@ -231,7 +215,7 @@ function CommentItem({
                             }
                         }}
                         disabled={busy || isHiddenForViewer}
-                        className="flex items-center gap-1 text-gray-500 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
+                        className="flex items-center gap-1 text-white/55 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                         aria-pressed={liked}
                         aria-label={liked ? 'Unlike comment' : 'Like comment'}
                     >
@@ -240,33 +224,12 @@ function CommentItem({
                     </button>
                 </div>
 
-                {/* Inline reply input under this comment */}
-                {showReplyInput && (
-                    <div className="mt-2 flex items-center gap-2">
-                        <input
-                            type="text"
-                            value={replyText}
-                            onChange={(e) => setReplyText(e.target.value)}
-                            placeholder="Write a reply..."
-                            className="flex-1 min-w-0 px-3 py-2 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300"
-                            disabled={submittingReply}
-                        />
-                        <button
-                            onClick={handleReply}
-                            disabled={!replyText.trim() || submittingReply}
-                            className="p-2 text-gray-900 hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            <FiSend size={16} />
-                        </button>
-                    </div>
-                )}
-
                 {/* Replies Section (Scenes-style: View replies toggle + indented thread) */}
                 {hasReplies && (
                     <div className="mt-2 ml-2">
                         <button
                             onClick={() => setShowReplies(!showReplies)}
-                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800"
+                            className="flex items-center gap-1 text-xs text-white/55 hover:text-[#e8eef2]"
                         >
                             {showReplies ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
                             {showReplies
@@ -275,7 +238,7 @@ function CommentItem({
                         </button>
 
                         {showReplies && visibleReplies.length > 0 && (
-                            <div className="mt-2 pl-4 border-l-2 border-gray-200 bg-gray-50/80 rounded-r-md py-2 space-y-3">
+                            <div className="mt-2 pl-4 border-l-2 border-white/15 bg-[rgba(15,36,48,0.55)] rounded-r-md py-2 space-y-3">
                                 {visibleReplies.map(reply => (
                                     <div key={reply.id} className="flex gap-2">
                                         <Avatar
@@ -286,23 +249,23 @@ function CommentItem({
                                             }
                                             name={reply.userHandle?.split('@')[0] || 'User'}
                                             size="sm"
-                                            className="flex-shrink-0 ring-1 ring-gray-200 w-6 h-6"
+                                            className="flex-shrink-0 ring-1 ring-white/20 w-6 h-6"
                                         />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-baseline gap-2 mb-0.5">
-                                                <span className="font-semibold text-xs text-gray-900">
+                                                <span className="font-semibold text-xs text-[#e8eef2]">
                                                     {reply.userHandle}
                                                 </span>
-                                                <span className="text-xs text-gray-400">
+                                                <span className="text-xs text-white/45">
                                                     {formatTime(reply.createdAt)}
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-gray-900 mb-1">
+                                            <p className="text-xs text-[#e8eef2] mb-1">
                                                 {renderTextWithMentions(reply.text, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                                             </p>
                                             <button
                                                 onClick={() => onLikeReply(comment.id, reply.id)}
-                                                className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition-colors"
+                                                className="flex items-center gap-1 text-xs text-white/55 hover:text-red-500 transition-colors"
                                             >
                                                 <FiThumbsUp className={`w-3.5 h-3.5 ${reply.userLiked ? 'text-blue-500' : ''}`} />
                                                 <span className="text-xs">{reply.likes ?? 0}</span>
@@ -324,15 +287,27 @@ const COMMENT_EMOJIS = ['😀', '😃', '😄', '😊', '🥰', '😍', '🤩', 
 function CommentInput({
     placeholder,
     onSubmit,
-    isLoading
+    isLoading,
+    replyingToHandle,
+    onCancelReply,
 }: {
     placeholder: string;
     onSubmit: (text: string) => void;
     isLoading: boolean;
+    replyingToHandle?: string | null;
+    onCancelReply?: () => void;
 }) {
     const { user } = useAuth();
     const [text, setText] = React.useState('');
     const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+    const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+    React.useEffect(() => {
+        if (!replyingToHandle) return;
+        setText('');
+        const t = window.setTimeout(() => inputRef.current?.focus(), 50);
+        return () => window.clearTimeout(t);
+    }, [replyingToHandle]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -343,15 +318,23 @@ function CommentInput({
     };
 
     return (
-        <div className="border-t border-gray-200 bg-white">
+        <div className="border-t border-white/10 bg-[rgba(6,13,22,0.55)]">
+            {replyingToHandle ? (
+                <div className="flex items-center justify-between gap-2 px-3 pt-2">
+                    <p className="text-xs text-white/55 truncate">Replying to {replyingToHandle}</p>
+                    <button type="button" onClick={onCancelReply} className="p-1 text-white/55 hover:text-white" aria-label="Cancel reply">
+                        <FiX size={14} />
+                    </button>
+                </div>
+            ) : null}
             {showEmojiPicker && (
-                <div className="p-2 border-b border-gray-100 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                <div className="p-2 border-b border-white/10 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                     {COMMENT_EMOJIS.map((emoji) => (
                         <button
                             key={emoji}
                             type="button"
                             onClick={() => setText((prev) => prev + emoji)}
-                            className="w-8 h-8 flex items-center justify-center text-lg rounded hover:bg-gray-100"
+                            className="w-8 h-8 flex items-center justify-center text-lg rounded hover:bg-transparent/10"
                             aria-label={`Add ${emoji}`}
                         >
                             {emoji}
@@ -368,18 +351,18 @@ function CommentInput({
                 <button
                     type="button"
                     onClick={() => setShowEmojiPicker((v) => !v)}
-                    className={`p-2 rounded-lg flex-shrink-0 ${showEmojiPicker ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+                    className={`p-2 rounded-lg flex-shrink-0 ${showEmojiPicker ? 'bg-transparent/15 text-white' : 'text-white/55 hover:text-white/70 hover:bg-transparent/10'}`}
                     aria-label="Add emoji"
                 >
                     <FiSmile size={20} />
                 </button>
-                <div className="flex-1 rounded-lg p-[2px] bg-gray-300 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
+                <div className="flex-1 rounded-lg p-[2px] bg-transparent/20 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
                     <input
                         type="text"
                         value={text}
                         onChange={(e) => setText(e.target.value)}
                         placeholder={placeholder}
-                        className="w-full px-3 py-2 rounded-[6px] border-0 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-0"
+                        className="w-full px-3 py-2 rounded-[6px] border-0 bg-[rgba(6,13,22,0.72)] text-[#e8eef2] placeholder-white/45 focus:outline-none focus:ring-0"
                         disabled={isLoading}
                     />
                 </div>
@@ -407,6 +390,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const [sortMode, setSortMode] = React.useState<'top' | 'newest'>('top');
     const [loading, setLoading] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
+    const [replyingTo, setReplyingTo] = React.useState<{ id: string; handle: string } | null>(null);
+    const [submittingReply, setSubmittingReply] = React.useState(false);
     const [followBusy, setFollowBusy] = React.useState(false);
     const commentsScrollRef = React.useRef<HTMLDivElement | null>(null);
     const filteredComments = React.useMemo(() => {
@@ -809,11 +794,13 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 onClick={onClose}
             />
 
-            {/* Modal - always light theme (no dark mode) */}
-            <div className="relative bg-white w-full h-[min(58dvh,520px)] md:max-w-md md:h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl flex flex-col min-h-0 overflow-hidden text-gray-900">
+            {/* Modal — View Profile passport canvas */}
+            <div className="relative w-full h-[min(58dvh,520px)] md:max-w-md md:h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl flex flex-col min-h-0 overflow-hidden border border-white/10 border-b-0 bg-[#060d16] text-[#e8eef2]">
+                <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                <div className="relative z-10 flex flex-col min-h-0 flex-1">
                 {post?.mediaUrl ? (
-                    <div className="flex items-center gap-3 px-4 pt-3 pb-2 flex-shrink-0 border-b border-gray-100">
-                        <div className="w-14 h-14 rounded-lg overflow-hidden bg-gray-900 flex-shrink-0">
+                    <div className="flex items-center gap-3 px-4 pt-3 pb-2 flex-shrink-0 border-b border-white/10">
+                        <div className="w-14 h-14 rounded-lg overflow-hidden bg-[rgba(15,36,48,0.88)] flex-shrink-0">
                             {post.mediaType === 'video' ? (
                                 <video
                                     src={post.mediaUrl}
@@ -830,40 +817,40 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                             )}
                         </div>
                         {authorHandle ? (
-                            <p className="text-sm font-semibold text-gray-900 truncate">{authorHandle}</p>
+                            <p className="text-sm font-semibold text-[#e8eef2] truncate">{authorHandle}</p>
                         ) : null}
                     </div>
                 ) : null}
                 {/* Mobile drag affordance */}
                 <div className="flex justify-center pt-2 pb-0.5 flex-shrink-0 md:hidden">
-                    <div className="w-10 h-1 bg-gray-300 rounded-full" aria-hidden />
+                    <div className="w-10 h-1 bg-transparent/20 rounded-full" aria-hidden />
                 </div>
 
                 {/* Header: comment count + close */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 flex-shrink-0">
-                    <h2 className="text-base font-semibold text-gray-900">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0">
+                    <h2 className="text-base font-semibold text-[#e8eef2]">
                         {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                     </h2>
                     <div className="flex items-center gap-2">
-                        <div className="flex items-center rounded-lg border border-gray-200 p-0.5">
+                        <div className="flex items-center rounded-lg border border-white/15 p-0.5">
                             <button
                                 type="button"
                                 onClick={() => setSortMode('top')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'top' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'top' ? 'bg-[#3d9b8f]/35 text-white' : 'text-white/60 hover:bg-transparent/10'}`}
                             >
                                 Top
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setSortMode('newest')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'newest' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'newest' ? 'bg-[#3d9b8f]/35 text-white' : 'text-white/60 hover:bg-transparent/10'}`}
                             >
                                 Newest
                             </button>
                         </div>
                         <button
                             onClick={onClose}
-                            className="p-2 -mr-1 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                            className="p-2 -mr-1 rounded-lg text-white/60 hover:text-[#e8eef2] hover:bg-transparent/10 transition-colors"
                             aria-label="Close comments"
                         >
                             <FiX size={20} />
@@ -875,24 +862,24 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 <div
                     ref={commentsScrollRef}
                     onScroll={(e) => handleCommentsScroll(e.currentTarget)}
-                    className="flex-1 overflow-y-auto min-h-0 bg-white"
+                    className="flex-1 overflow-y-auto min-h-0 bg-transparent"
                 >
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3d9b8f]" />
                         </div>
                     ) : (
                         <>
                             {/* 1 — Post author + Follow */}
-                            <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-gray-100">
+                            <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-white/10">
                                 <Avatar
                                     src={authorHandle ? getAvatarForHandle(authorHandle) : undefined}
                                     name={authorHandle.split('@')[0] || 'User'}
                                     size="md"
-                                    className="flex-shrink-0 ring-1 ring-gray-200"
+                                    className="flex-shrink-0 ring-1 ring-white/20"
                                 />
                                 <div className="flex-1 min-w-0">
-                                    <p className="font-semibold text-sm text-gray-900 truncate">
+                                    <p className="font-semibold text-sm text-[#e8eef2] truncate">
                                         {authorHandle || 'Unknown'}
                                     </p>
                                 </div>
@@ -903,8 +890,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                         disabled={followBusy}
                                         className={`flex-shrink-0 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
                                             post?.isFollowing
-                                                ? 'bg-gray-200 text-gray-800'
-                                                : 'bg-gray-900 text-white hover:bg-gray-800'
+                                                ? 'bg-transparent/15 text-white'
+                                                : 'bg-[#3d9b8f]/35 text-white hover:bg-[#3d9b8f]/45'
                                         }`}
                                     >
                                         {post?.isFollowing ? 'Following' : 'Follow'}
@@ -914,12 +901,12 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
                             {/* 2 — Story / caption */}
                             {storyText ? (
-                                <div className="px-4 py-3 border-b border-gray-100">
-                                    <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">
+                                <div className="px-4 py-3 border-b border-white/10">
+                                    <p className="text-sm text-[#e8eef2] whitespace-pre-wrap leading-relaxed">
                                         {renderTextWithMentions(storyText, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                                     </p>
                                     {post?.createdAt != null && (
-                                        <p className="text-xs text-gray-500 mt-2">
+                                        <p className="text-xs text-white/55 mt-2">
                                             {formatPostRelative(post.createdAt)}
                                         </p>
                                     )}
@@ -929,7 +916,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                             {/* 3 — Comments list */}
                             <div className="p-4">
                                 {filteredComments.length === 0 ? (
-                                    <div className="text-center py-8 text-gray-500">
+                                    <div className="text-center py-8 text-white/55">
                                         <FiMessageSquare size={48} className="mx-auto mb-4 opacity-50" />
                                         <p>No comments yet</p>
                                         <p className="text-sm">Be the first to comment!</p>
@@ -942,9 +929,10 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                                 comment={comment}
                                                 onLikeComment={handleLikeComment}
                                                 onLikeReply={handleLikeReply}
-                                                onReply={handleReplyToComment}
+                                                onStartReply={(id, handle) => setReplyingTo({ id, handle })}
                                                 onModerateComment={handleModerateComment}
                                                 isPostOwner={isPostOwner}
+                                                isReplyingTo={replyingTo?.id === comment.id}
                                                 userId={user?.id || ''}
                                                 postId={postId}
                                             />
@@ -955,7 +943,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                                     type="button"
                                                     onClick={handleLoadMoreComments}
                                                     disabled={commentsLoadingMore}
-                                                    className="w-full min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 text-sm text-gray-700 disabled:opacity-60"
+                                                    className="w-full min-h-[40px] rounded-lg border border-white/15 bg-[rgba(15,36,48,0.72)] text-sm text-white/70 disabled:opacity-60"
                                                 >
                                                     {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
                                                 </button>
@@ -969,20 +957,35 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 </div>
 
                 {/* Comment Input */}
-                <div className="flex-shrink-0 border-t border-gray-200 bg-white">
+                <div className="flex-shrink-0">
                     <CommentInput
-                        placeholder="Join the conversation..."
-                        onSubmit={handleAddComment}
-                        isLoading={submitting}
+                        placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
+                        onSubmit={async (text) => {
+                            if (replyingTo) {
+                                setSubmittingReply(true);
+                                try {
+                                    await handleReplyToComment(replyingTo.id, text);
+                                    setReplyingTo(null);
+                                } finally {
+                                    setSubmittingReply(false);
+                                }
+                                return;
+                            }
+                            await handleAddComment(text);
+                        }}
+                        isLoading={submitting || submittingReply}
+                        replyingToHandle={replyingTo?.handle}
+                        onCancelReply={() => setReplyingTo(null)}
                     />
                 </div>
 
                 {/* Offline indicator */}
                 {!online && (
-                    <div className="px-4 py-2 bg-amber-50 text-amber-900 text-xs border-t border-amber-200">
+                    <div className="px-4 py-2 bg-amber-500/15 text-amber-100 text-xs border-t border-amber-400/30">
                         You're offline. Comments will sync when back online.
                     </div>
                 )}
+                </div>
             </div>
         </div>,
         document.body

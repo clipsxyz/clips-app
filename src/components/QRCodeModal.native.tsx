@@ -13,6 +13,8 @@ import QRCode from 'qrcode';
 import { SvgXml } from 'react-native-svg';
 import type { Post } from '../types';
 import { buildShareablePostUrl } from '../utils/shareUrls';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 type Props = {
     post: Post;
@@ -65,6 +67,7 @@ export default function QRCodeModal({ post, visible, onClose }: Props) {
         <Modal visible transparent animationType="fade" onRequestClose={onClose}>
             <View style={styles.overlay}>
                 <View style={styles.card}>
+                    <PassportSheetCanvas contentStyle={styles.cardInner}>
                     <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
                         <Icon name="close" size={24} color="#FFFFFF" />
                     </TouchableOpacity>
@@ -73,7 +76,7 @@ export default function QRCodeModal({ post, visible, onClose }: Props) {
                     <Text style={styles.date}>{formatPostDate(post.createdAt)}</Text>
                     <View style={styles.qrWrap}>
                         {loading ? (
-                            <ActivityIndicator color="#8B5CF6" size="large" />
+                            <ActivityIndicator color={PASSPORT_PALETTE.wavePrimary} size="large" />
                         ) : svgXml ? (
                             <SvgXml xml={svgXml} width={240} height={240} />
                         ) : (
@@ -90,6 +93,7 @@ export default function QRCodeModal({ post, visible, onClose }: Props) {
                         <Icon name="share-outline" size={18} color="#000" />
                         <Text style={styles.shareBtnText}>Share link</Text>
                     </TouchableOpacity>
+                    </PassportSheetCanvas>
                 </View>
             </View>
         </Modal>
@@ -107,17 +111,20 @@ const styles = StyleSheet.create({
     card: {
         width: '100%',
         maxWidth: 340,
-        backgroundColor: '#111827',
+        backgroundColor: PASSPORT_ABYSS,
         borderRadius: 20,
-        padding: 20,
-        alignItems: 'center',
+        overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
+    },
+    cardInner: {
+        padding: 20,
+        alignItems: 'center',
     },
     closeBtn: { alignSelf: 'flex-end' },
     title: { color: '#FFF', fontSize: 20, fontWeight: '700', marginBottom: 4 },
     handle: { color: '#E5E7EB', fontSize: 14, fontWeight: '600' },
-    date: { color: '#9CA3AF', fontSize: 12, marginBottom: 16 },
+    date: { color: 'rgba(232,238,242,0.62)', fontSize: 12, marginBottom: 16 },
     qrWrap: {
         width: 260,
         height: 260,
@@ -127,7 +134,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginBottom: 12,
     },
-    url: { color: '#9CA3AF', fontSize: 11, textAlign: 'center', marginBottom: 16 },
+    url: { color: 'rgba(232,238,242,0.62)', fontSize: 11, textAlign: 'center', marginBottom: 16 },
     shareBtn: {
         flexDirection: 'row',
         alignItems: 'center',

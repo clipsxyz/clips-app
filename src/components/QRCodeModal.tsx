@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { Post } from '../types';
 import { FiX, FiDownload } from 'react-icons/fi';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 
 interface QRCodeModalProps {
     post: Post;
@@ -227,18 +228,19 @@ export default function QRCodeModal({ post, isOpen, onClose }: QRCodeModalProps)
             />
 
             {/* Modal */}
-            <div className="relative w-full max-w-sm mx-4 bg-[#262626] dark:bg-[#1a1a1a] rounded-3xl shadow-2xl overflow-hidden">
+            <div className="relative w-full max-w-sm mx-4 overflow-hidden rounded-3xl border border-white/10 bg-[#060d16] shadow-2xl">
+                <DiscoverAmbientCanvas fixed={false} variant="passport" />
                 {/* Close button */}
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 z-10 p-2 rounded-full hover:bg-gray-700/50 transition-colors"
+                    className="absolute top-4 right-4 z-20 p-2 rounded-full hover:bg-white/10 transition-colors"
                     aria-label="Close"
                 >
                     <FiX className="w-5 h-5 text-white" />
                 </button>
 
                 {/* Content */}
-                <div className="p-6">
+                <div className="relative z-10 p-6">
                     {/* QR Code */}
                     <div className="flex justify-center mb-6">
                         <div className="relative">
@@ -304,14 +306,14 @@ export default function QRCodeModal({ post, isOpen, onClose }: QRCodeModalProps)
                         <button
                             onClick={handleSaveQRCode}
                             disabled={!qrCodeDataUrl || isGenerating}
-                            className="w-full py-3 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            className="w-full py-3 rounded-lg bg-[#3d9b8f] hover:bg-[#348a7f] text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             <FiDownload className="w-5 h-5" />
                             Save QR code
                         </button>
                         <button
                             onClick={onClose}
-                            className="w-full py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors"
+                            className="w-full py-3 rounded-lg bg-white/10 hover:bg-white/15 text-white font-medium transition-colors"
                         >
                             Done
                         </button>

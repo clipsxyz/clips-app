@@ -2551,28 +2551,12 @@ export default function ScenesModal({
                                                                 <span className="text-xs">{comment.likes || 0}</span>
                                                             </div>
                                                         </div>
-                                                        {/* Reply input for this comment */}
-                                                        {replyingToCommentId === comment.id && (
-                                                            <div className="mt-2 flex items-center gap-2">
-                                                                <input
-                                                                    type="text"
-                                                                    value={replyInputText}
-                                                                    onChange={(e) => setReplyInputText(e.target.value)}
-                                                                    placeholder="Write a reply..."
-                                                                    className="flex-1 min-w-0 px-3 py-2 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300"
-                                                                    disabled={!!submittingReplyId}
-                                                                    autoFocus
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleReplyToComment(comment.id, replyInputText)}
-                                                                    disabled={!replyInputText.trim() || !!submittingReplyId}
-                                                                    className="p-2 text-gray-900 hover:text-black disabled:opacity-40"
-                                                                >
-                                                                    <FiSend className="w-5 h-5" />
-                                                                </button>
-                                                            </div>
-                                                        )}
+                                                        {/* Reply uses bottom composer — avoid stacking under Join/Add comment. */}
+                                                        {replyingToCommentId === comment.id ? (
+                                                            <p className="mt-1 text-[11px] font-medium text-[#3d9b8f]">
+                                                                Replying in composer below…
+                                                            </p>
+                                                        ) : null}
                                                         {/* Replies - nested under parent comment (collapsed by default) */}
                                                         {(comment.replies?.length ?? 0) > 0 && (
                                                             <div className="mt-2 ml-2">
@@ -2648,74 +2632,93 @@ export default function ScenesModal({
                                     )}
                                 </div>
 
-                                {/* Comment Input - TikTok style: avatar | Add comment... | icons.
-                                    Hidden while replying to keep only one focused input on screen. */}
-                                {replyingToCommentId === null && (
-                                    <div className="px-4 py-3 flex-shrink-0 border-t border-gray-200 bg-white safe-area-inset-bottom">
-                                        <form
-                                            onSubmit={(e) => { e.preventDefault(); handleAddComment(); }}
-                                            className="flex items-center gap-2"
-                                        >
-                                            <Avatar
-                                                src={user?.avatarUrl}
-                                                name={user?.name || user?.handle || 'User'}
-                                                size="sm"
-                                                className="flex-shrink-0 ring-1 ring-gray-200"
-                                            />
-                                            <input
-                                                ref={expandedCommentInputRef}
-                                                type="text"
-                                                value={commentText}
-                                                onChange={(e) => setCommentText(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' && !e.shiftKey && commentText.trim() && user) {
-                                                        e.preventDefault();
+                                {/* Comment / reply composer (footer). */}
+                                <div className="px-4 py-3 flex-shrink-0 border-t border-gray-200 bg-white safe-area-inset-bottom">
+                                    {replyingToCommentId ? (
+                                        <div className="mb-2 flex items-center justify-between gap-2">
+                                            <p className="text-xs text-gray-500 truncate">
+                                                Replying to{' '}
+                                                {comments.find((c) => c.id === replyingToCommentId)?.userHandle ||
+                                                    'comment'}
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setReplyingToCommentId(null);
+                                                    setReplyInputText('');
+                                                }}
+                                                className="p-1 text-gray-500 hover:text-gray-900"
+                                                aria-label="Cancel reply"
+                                            >
+                                                <FiX size={14} />
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                    <form
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+                                            if (replyingToCommentId) {
+                                                void handleReplyToComment(replyingToCommentId, replyInputText);
+                                            } else {
+                                                handleAddComment();
+                                            }
+                                        }}
+                                        className="flex items-center gap-2"
+                                    >
+                                        <Avatar
+                                            src={user?.avatarUrl}
+                                            name={user?.name || user?.handle || 'User'}
+                                            size="sm"
+                                            className="flex-shrink-0 ring-1 ring-gray-200"
+                                        />
+                                        <input
+                                            ref={expandedCommentInputRef}
+                                            type="text"
+                                            value={replyingToCommentId ? replyInputText : commentText}
+                                            onChange={(e) => {
+                                                if (replyingToCommentId) setReplyInputText(e.target.value);
+                                                else setCommentText(e.target.value);
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    if (replyingToCommentId) {
+                                                        if (replyInputText.trim()) {
+                                                            void handleReplyToComment(
+                                                                replyingToCommentId,
+                                                                replyInputText,
+                                                            );
+                                                        }
+                                                    } else if (commentText.trim() && user) {
                                                         handleAddComment(commentText.trim());
                                                     }
-                                                }}
-                                                placeholder="Add comment..."
-                                                className="flex-1 min-w-0 px-4 py-2.5 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:bg-gray-50"
-                                                disabled={isAddingComment || !user}
-                                            />
-                                            <div className="flex items-center gap-1 flex-shrink-0 relative">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setShowCommentEmojiPicker((v) => !v)}
-                                                    className={`p-2 rounded-full ${showCommentEmojiPicker ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-                                                    aria-label="Add emoji"
-                                                >
-                                                    <FiSmile className="w-5 h-5" />
-                                                </button>
-                                                {showCommentEmojiPicker && (
-                                                    <div className="absolute bottom-full left-0 mb-1 w-[min(100vw,320px)] h-[220px] min-h-[220px] p-2 rounded-xl bg-white border border-gray-200 shadow-xl z-[130] overflow-y-auto flex flex-col">
-                                                        <div className="grid grid-cols-8 gap-1 flex-none" style={{ gridAutoRows: 'minmax(36px, 36px)' }}>
-                                                            {['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😋', '😛', '😜', '🤪', '😝', '🤗', '🤔', '😐', '😑', '😏', '😒', '🙄', '😬', '😌', '😔', '😪', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '😵', '🤯', '😎', '🤓', '😕', '😟', '🙁', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😢', '😭', '😤', '😡', '🤬', '💀', '💩', '👍', '👎', '👏', '🙌', '🤝', '🙏', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '💔', '💕', '💖', '💗', '💘', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾'].map((emoji) => (
-                                                                <button
-                                                                    key={emoji}
-                                                                    type="button"
-                                                                    className="flex items-center justify-center w-full h-9 text-xl hover:bg-gray-100 rounded touch-manipulation"
-                                                                    onClick={() => {
-                                                                        setCommentText((prev) => prev + emoji);
-                                                                    }}
-                                                                >
-                                                                    {emoji}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                <button
-                                                    type="submit"
-                                                    disabled={!commentText.trim() || isAddingComment || !user}
-                                                    className="p-2 text-gray-900 hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
-                                                    aria-label="Send comment"
-                                                >
-                                                    <FiSend className="w-5 h-5" />
-                                                </button>
-                                            </div>
-                                        </form>
-                                    </div>
-                                )}
+                                                }
+                                            }}
+                                            placeholder={
+                                                replyingToCommentId ? 'Write a reply...' : 'Add comment...'
+                                            }
+                                            className="flex-1 min-w-0 px-4 py-2.5 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:bg-gray-50"
+                                            disabled={
+                                                replyingToCommentId
+                                                    ? !!submittingReplyId || !user
+                                                    : isAddingComment || !user
+                                            }
+                                            autoFocus={Boolean(replyingToCommentId)}
+                                        />
+                                        <button
+                                            type="submit"
+                                            disabled={
+                                                replyingToCommentId
+                                                    ? !replyInputText.trim() || !!submittingReplyId
+                                                    : !commentText.trim() || isAddingComment || !user
+                                            }
+                                            className="p-2 text-gray-900 disabled:opacity-40"
+                                            aria-label={replyingToCommentId ? 'Send reply' : 'Post comment'}
+                                        >
+                                            <FiSend className="w-5 h-5" />
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
                         </>,
                         document.body

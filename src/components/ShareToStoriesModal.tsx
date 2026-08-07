@@ -8,6 +8,7 @@ import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon';
 import type { Post } from '../types';
 import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
 import { generateShareTextImage } from '../utils/generateShareTextImage';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 
 interface ShareToStoriesModalProps {
   isOpen: boolean;
@@ -105,10 +106,12 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       onClick={onClose}
     >
       <div
-        className="rounded-2xl border border-white/12 bg-black p-6 max-w-sm w-full mx-4 shadow-2xl shadow-black/50"
+        className="relative max-w-sm w-full mx-4 overflow-hidden rounded-2xl border border-white/12 bg-[#060d16] p-6 shadow-2xl shadow-black/50"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Icon — white on black canvas (same glyph as feed) */}
+        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+        <div className="relative z-10">
+        {/* Icon — white on passport canvas (same glyph as feed) */}
         <div className="flex justify-center mb-5">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/10">
             <ShareToStoriesFeedIcon className="h-[52px] w-[52px] text-white" />
@@ -116,7 +119,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         </div>
 
         <div className="flex justify-center mb-2">
-          <p className="gazetteer-shimmer-chrome-gold text-xs font-semibold uppercase tracking-wider">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#3d9b8f]">
             Gazetteer says
           </p>
         </div>
@@ -142,6 +145,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
           >
             {isSharing ? 'Sharing...' : 'OK'}
           </button>
+        </div>
         </div>
       </div>
     </div>

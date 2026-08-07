@@ -10,6 +10,7 @@ import Animated, {
     withSpring,
     withTiming,
 } from 'react-native-reanimated';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
 
 type Props = {
     visible: boolean;
@@ -108,12 +109,14 @@ export default function ScenesCommentsPanel({
                 onPress={onClose}
             />
             <Animated.View style={[styles.sheet, sheetStyle]}>
-                <GestureDetector gesture={pan}>
-                    <View style={styles.dragHandleRow}>
-                        <View style={styles.dragHandle} />
-                    </View>
-                </GestureDetector>
-                {children}
+                <PassportSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+                    <GestureDetector gesture={pan}>
+                        <View style={styles.dragHandleRow}>
+                            <View style={styles.dragHandle} />
+                        </View>
+                    </GestureDetector>
+                    {children}
+                </PassportSheetCanvas>
             </Animated.View>
         </>
     );
@@ -135,14 +138,23 @@ const styles = StyleSheet.create({
         bottom: 0,
         zIndex: 45,
         elevation: 20,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#060d16',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         overflow: 'hidden',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -4 },
         shadowOpacity: 0.2,
         shadowRadius: 12,
+    },
+    canvas: {
+        flex: 1,
+    },
+    canvasContent: {
+        flex: 1,
     },
     dragHandleRow: {
         alignItems: 'center',
@@ -153,6 +165,6 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 999,
-        backgroundColor: '#D1D5DB',
+        backgroundColor: 'rgba(255,255,255,0.28)',
     },
 });

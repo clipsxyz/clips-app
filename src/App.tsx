@@ -966,8 +966,10 @@ function PillTabs(props: {
                   onClick={() => setMenuOpen(false)}
                 />
                 <div
-                  className="relative w-full max-w-[400px] overflow-hidden rounded-t-[1.5rem] border border-white/10 border-b-0 bg-[#1a1a1a] shadow-[0_-12px_40px_rgba(0,0,0,0.55)] pb-[max(1rem,env(safe-area-inset-bottom))] animate-[feedSwitchSheetUp_280ms_cubic-bezier(0.22,1,0.36,1)_both]"
+                  className="relative w-full max-w-[400px] overflow-hidden rounded-t-[1.5rem] border border-white/10 border-b-0 bg-[#060d16] shadow-[0_-12px_40px_rgba(0,0,0,0.55)] pb-[max(1rem,env(safe-area-inset-bottom))] animate-[feedSwitchSheetUp_280ms_cubic-bezier(0.22,1,0.36,1)_both]"
                 >
+                  <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                  <div className="relative z-10">
                   <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-white/30" aria-hidden />
                   <div className="relative px-4 pt-1 pb-1">
                     <button
@@ -978,7 +980,7 @@ function PillTabs(props: {
                     >
                       <FiX className="h-5 w-5" strokeWidth={2.2} />
                     </button>
-                    <p className="gazetteer-shimmer text-center text-[12px] font-semibold tracking-[0.12em] uppercase">
+                    <p className="text-center text-[12px] font-semibold tracking-[0.12em] uppercase text-[#3d9b8f]">
                       Gazetteer says
                     </p>
                     <h3
@@ -1093,6 +1095,7 @@ function PillTabs(props: {
                         <span className="truncate">{item.label}</span>
                       </button>
                     ))}
+                  </div>
                   </div>
                 </div>
               </div>,
@@ -1794,7 +1797,9 @@ function PostHeader({
           </div>
 
           {profileMenuOpen && (
-            <div className="absolute left-0 top-full z-[200] mt-1 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+            <div className="absolute left-0 top-full z-[200] mt-1 w-56 overflow-hidden rounded-2xl border border-white/20 bg-[#060d16] shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
+            <DiscoverAmbientCanvas fixed={false} variant="passport" />
+            <div className="relative z-10">
             <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
               <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
               <button
@@ -1906,6 +1911,7 @@ function PostHeader({
                 <span className="font-medium text-violet-300">View stories</span>
               </button>
             )}
+            </div>
           </div>
           )}
         </div>
@@ -2090,7 +2096,9 @@ function PostHeader({
 
       {/* Inline profile actions card (Visit profile / Follow-Unfollow / View stories) */}
       {profileMenuOpen && (
-        <div className="absolute left-4 top-full mt-2 z-40 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+        <div className="absolute left-4 top-full mt-2 z-40 w-56 overflow-hidden rounded-2xl border border-white/20 bg-[#060d16] shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
+          <DiscoverAmbientCanvas fixed={false} variant="passport" />
+          <div className="relative z-10">
           <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
             <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
             <button
@@ -2203,6 +2211,7 @@ function PostHeader({
             </button>
           )}
 
+          </div>
         </div>
       )}
     </div>

@@ -19,6 +19,8 @@ import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import ShareTextStoryCapture, {
     type ShareTextStoryCaptureHandle,
 } from './ShareTextStoryCapture.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 type Props = {
     visible: boolean;
@@ -127,6 +129,7 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
         <Modal visible transparent animationType="fade" onRequestClose={onClose}>
             <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.card} onPress={() => {}}>
+                    <PassportSheetCanvas contentStyle={styles.cardInner}>
                     <View style={styles.iconWrap}>
                         <ShareToStoriesFeedIcon size={52} color="#FFFFFF" />
                     </View>
@@ -152,6 +155,7 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                             )}
                         </TouchableOpacity>
                     </View>
+                    </PassportSheetCanvas>
                 </TouchableOpacity>
             </TouchableOpacity>
         </Modal>
@@ -173,7 +177,10 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: '#000000',
+        backgroundColor: PASSPORT_ABYSS,
+        overflow: 'hidden',
+    },
+    cardInner: {
         padding: 24,
     },
     iconWrap: {
@@ -190,7 +197,7 @@ const styles = StyleSheet.create({
     },
     kicker: {
         textAlign: 'center',
-        color: '#D4AF37',
+        color: PASSPORT_PALETTE.wavePrimary,
         fontSize: 11,
         fontWeight: '700',
         letterSpacing: 1.2,

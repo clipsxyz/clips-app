@@ -13,6 +13,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { buildShareablePostUrl } from '../utils/shareUrls';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 export type PostOverflowMenuModalProps = {
     visible: boolean;
@@ -138,10 +140,11 @@ export default function PostOverflowMenuModal({
         <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
             <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+                    <PassportSheetCanvas>
                     <View style={styles.grabber} />
                     <Text style={styles.title}>Post options</Text>
                     {busy ? (
-                        <ActivityIndicator color="#8B5CF6" style={{ marginVertical: 12 }} />
+                        <ActivityIndicator color={PASSPORT_PALETTE.wavePrimary} style={{ marginVertical: 12 }} />
                     ) : null}
                     <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
                         {isOwn && onCreateGroup ? (
@@ -349,6 +352,7 @@ export default function PostOverflowMenuModal({
                             <Text style={styles.cancelText}>Cancel</Text>
                         </TouchableOpacity>
                     </ScrollView>
+                    </PassportSheetCanvas>
                 </TouchableOpacity>
             </TouchableOpacity>
         </Modal>
@@ -362,20 +366,21 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     sheet: {
-        backgroundColor: '#030712',
+        backgroundColor: PASSPORT_ABYSS,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         paddingBottom: 28,
         maxHeight: '72%',
         borderTopWidth: 1,
-        borderColor: '#1F2937',
+        borderColor: 'rgba(255,255,255,0.1)',
+        overflow: 'hidden',
     },
     grabber: {
         alignSelf: 'center',
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: '#374151',
+        backgroundColor: 'rgba(255,255,255,0.28)',
         marginTop: 10,
         marginBottom: 8,
     },

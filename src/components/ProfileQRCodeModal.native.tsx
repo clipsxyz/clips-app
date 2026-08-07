@@ -11,7 +11,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import QRCode from 'qrcode';
 import { SvgXml } from 'react-native-svg';
 import { buildProfileShareUrl } from '../utils/profileShareUrl';
-import { glassPanel } from '../theme/gazetteerAmbientNative';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 type Props = {
     visible: boolean;
@@ -58,6 +59,7 @@ export default function ProfileQRCodeModal({ visible, onClose, handle, name }: P
             <View style={styles.overlay}>
                 <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close QR code" />
                 <View style={styles.card}>
+                    <PassportSheetCanvas contentStyle={styles.cardInner}>
                     <TouchableOpacity onPress={onClose} style={styles.closeButton} accessibilityLabel="Close">
                         <Icon name="close" size={22} color="#FFFFFF" />
                     </TouchableOpacity>
@@ -65,13 +67,14 @@ export default function ProfileQRCodeModal({ visible, onClose, handle, name }: P
                     <Text style={styles.subtitle}>Scan to view profile</Text>
                     <View style={styles.qrWrap}>
                         {loading ? (
-                            <ActivityIndicator size="large" color="#f472b6" />
+                            <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
                         ) : svgXml ? (
                             <SvgXml xml={svgXml} width={256} height={256} />
                         ) : (
                             <Text style={styles.errorText}>Could not generate QR code</Text>
                         )}
                     </View>
+                    </PassportSheetCanvas>
                 </View>
             </View>
         </Modal>
@@ -87,9 +90,14 @@ const styles = StyleSheet.create({
     },
     card: {
         borderRadius: 24,
+        overflow: 'hidden',
+        backgroundColor: PASSPORT_ABYSS,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    cardInner: {
         padding: 24,
         alignItems: 'center',
-        ...glassPanel,
     },
     closeButton: {
         alignSelf: 'flex-end',
@@ -103,7 +111,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     subtitle: {
-        color: '#9CA3AF',
+        color: 'rgba(232,238,242,0.62)',
         fontSize: 13,
         marginBottom: 20,
     },

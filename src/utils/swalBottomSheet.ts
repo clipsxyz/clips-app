@@ -22,7 +22,7 @@ const ICON_BELL_SVG = `<svg width="48" height="48" viewBox="0 0 24 24" fill="non
 const BOTTOM_SHEET_BASE: Pick<SweetAlertOptions, 'position' | 'buttonsStyling' | 'background' | 'width' | 'padding' | 'customClass'> = {
   position: 'bottom',
   buttonsStyling: false,
-  background: '#1a1a1a',
+  background: '#060d16',
   width: 'min(400px, calc(100vw - 32px))',
   padding: '0',
   customClass: {
@@ -63,7 +63,7 @@ export function bottomSheet(opts: BottomSheetOptions): SweetAlertOptions {
     inputPlaceholder,
   } = opts;
   const iconSvg = icon === 'alert' ? ICON_ALERT_SVG : icon === 'success' ? ICON_SUCCESS_SVG : icon === 'none' ? '' : icon;
-  const gazetteerBlock = showGazetteer ? '<p class="swal-bottom-sheet-gazetteer gazetteer-shimmer">Gazetteer says</p>' : '';
+  const gazetteerBlock = showGazetteer ? '<p class="swal-bottom-sheet-gazetteer">Gazetteer says</p>' : '';
   const iconBlock = iconSvg ? `<div class="swal-bottom-sheet-icon">${iconSvg}</div>` : '';
   const messageBlock = message ? `<p class="swal-bottom-sheet-message">${escapeHtml(message)}</p>` : (html || '');
   const content = `
@@ -97,7 +97,7 @@ export function saveDraftConfirmSheet(
   message = 'Would you like to save this as a draft to edit later?'
 ): SweetAlertOptions {
   const iconSvg = ICON_ALERT_SVG;
-  const gazetteerBlock = '<p class=\"swal-bottom-sheet-gazetteer gazetteer-shimmer\">Gazetteer says</p>';
+  const gazetteerBlock = '<p class=\"swal-bottom-sheet-gazetteer\">Gazetteer says</p>';
   const iconBlock = `<div class=\"swal-bottom-sheet-icon\">${iconSvg}</div>`;
   const messageBlock = `<p class=\"swal-bottom-sheet-message\">${escapeHtml(message)}</p>`;
   const content = `
@@ -163,7 +163,7 @@ export function postNotifyEnabledBottomSheet(displayName: string): SweetAlertOpt
     title: undefined,
     html: `
       <div class="swal-bottom-sheet-content">
-        <p class="swal-bottom-sheet-gazetteer gazetteer-shimmer">Gazetteer says</p>
+        <p class="swal-bottom-sheet-gazetteer">Gazetteer says</p>
         <div class="swal-bottom-sheet-icon">${ICON_BELL_SVG}</div>
         <h3 class="swal-bottom-sheet-title-text">Notifications on</h3>
         <p class="swal-bottom-sheet-message">You'll get notified when <strong>${who}</strong> posts.</p>
@@ -181,7 +181,7 @@ export function followRequestSentBottomSheet(): SweetAlertOptions {
     title: undefined,
     html: `
       <div class="swal-bottom-sheet-content">
-        <p class="swal-bottom-sheet-gazetteer gazetteer-shimmer">Gazetteer says</p>
+        <p class="swal-bottom-sheet-gazetteer">Gazetteer says</p>
         <div class="swal-bottom-sheet-icon">${FOLLOW_REQUEST_ICON_SVG}</div>
         <h3 class="swal-bottom-sheet-title-text">Follow Request Sent</h3>
         <p class="swal-bottom-sheet-message">Your follow request has been sent. You will be notified when they accept.</p>
@@ -201,7 +201,7 @@ export function accountIsPrivateBottomSheet(): SweetAlertOptions {
     title: undefined,
     html: `
       <div class="swal-bottom-sheet-content">
-        <p class="swal-bottom-sheet-gazetteer gazetteer-shimmer">Gazetteer says</p>
+        <p class="swal-bottom-sheet-gazetteer">Gazetteer says</p>
         <div class="swal-bottom-sheet-icon">${PRIVATE_ACCOUNT_ICON_SVG}</div>
         <h3 class="swal-bottom-sheet-title-text">This Account is Private</h3>
         <p class="swal-bottom-sheet-message">To view this user's profile you must be following them.</p>

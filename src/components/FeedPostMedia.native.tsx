@@ -634,7 +634,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     }}
                     hitSlop={8}
                 >
-                    <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={20} color="#FFFFFF" />
+                    <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={14} color="#FFFFFF" />
                 </Pressable>
             ) : null}
             {video && mode === 'detail' && paused ? (
@@ -681,9 +681,9 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 10,
         bottom: 10,
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.55)',

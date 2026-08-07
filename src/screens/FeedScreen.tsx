@@ -26,6 +26,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -267,6 +269,9 @@ import { fetchSuggestedPostsByPlaces, transformLaravelPost } from '../api/posts'
 import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
 import { ox } from '../constants/nativeOpticalScale';
+
+/** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
+const FEED_SWITCH_PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
 
 type Tab = string;
 
@@ -739,131 +744,162 @@ function PillTabs({
                                     },
                                 ]}
                             >
-                                <View style={styles.feedSwitchSheetHandle} />
-                                <View style={styles.feedSwitchSheetHeader}>
-                                    <View style={styles.feedSwitchSheetHeaderSpacer} />
-                                    <TouchableOpacity
-                                        onPress={() => setMenuOpen(false)}
-                                        style={styles.feedSwitchSheetClose}
-                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                        accessibilityLabel="Close"
-                                    >
-                                        <Icon name="close" size={ox(24)} color="#FFFFFF" />
-                                    </TouchableOpacity>
-                                </View>
-                                <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
-                                <Text style={styles.feedSwitchSheetTitle}>Switch feed</Text>
-                                <Text style={styles.feedSwitchSheetSub}>
-                                    Nearby, city, country, Discover, or Following
-                                </Text>
-                                <View style={styles.feedSwitchSearchWrap}>
-                                    <Icon name="search-outline" size={ox(18)} color="rgba(255,255,255,0.75)" />
-                                    <TextInput
-                                        value={locationQuery}
-                                        onChangeText={setLocationQuery}
-                                        placeholder={searchHints[searchHintIndex]}
-                                        placeholderTextColor="rgba(255,255,255,0.45)"
-                                        underlineColorAndroid="transparent"
-                                        onFocus={() => setSearchInputFocused(true)}
-                                        onBlur={() => setSearchInputFocused(false)}
-                                        onSubmitEditing={submitLocationSearch}
-                                        returnKeyType="search"
-                                        autoCapitalize="words"
-                                        style={styles.feedSwitchSearchInput}
-                                    />
-                                </View>
-                                <Text style={styles.feedSwitchSearchHint}>
-                                    Tip: use venue: or landmark:
-                                </Text>
-                                <ScrollView
-                                    style={styles.feedSwitchSheetScroll}
-                                    contentContainerStyle={styles.feedSwitchSheetScrollContent}
-                                    keyboardShouldPersistTaps="handled"
-                                    showsVerticalScrollIndicator={false}
-                                >
-                                    {locationQuery.trim().length >= 2 ? (
-                                        <View style={styles.feedSwitchSuggestionsWrap}>
-                                            {loadingSuggestions ? (
-                                                <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
-                                            ) : locationSuggestions.length > 0 ? (
-                                                locationSuggestions.map((s, idx) => {
-                                                    const suggestionName = String(s.name || '').trim();
-                                                    if (!suggestionName) return null;
-                                                    const countryLabel = s.country != null ? String(s.country) : '';
-                                                    const metaLabel =
-                                                        s.type === 'venue'
-                                                            ? ' · venue'
-                                                            : s.type === 'landmark'
-                                                                ? ' · landmark'
-                                                                : usingFallbackSuggestions
-                                                                    ? ' · quick suggestion'
-                                                                    : countryLabel
-                                                                        ? ` · ${countryLabel}`
-                                                                        : '';
-                                                    return (
-                                                    <TouchableOpacity
-                                                        key={`${suggestionName}-${idx}`}
-                                                        style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
-                                                        onPress={() => {
-                                                            const raw = locationQuery.trim();
-                                                            const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
-                                                                ? 'venue'
-                                                                : /^landmark\s*:/i.test(raw)
-                                                                    ? 'landmark'
-                                                                    : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
-                                                                        ? 'venue'
-                                                                        : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
-                                                                            ? 'landmark'
-                                                                            : 'location');
-                                                            setLocationQuery(suggestionName);
-                                                            setMenuOpen(false);
-                                                            // Defer so the feed-switch Modal unmounts before scope picker opens (Android nested Modal crash).
-                                                            setTimeout(() => {
-                                                                commitHeaderPlace(
-                                                                    headerSuggestionToLocation(s, suggestionName),
-                                                                    mode
+                                {(() => {
+                                    const sheetBody = (
+                                        <>
+                                            <View style={styles.feedSwitchSheetHandle} />
+                                            <View style={styles.feedSwitchSheetHeader}>
+                                                <View style={styles.feedSwitchSheetHeaderSpacer} />
+                                                <TouchableOpacity
+                                                    onPress={() => setMenuOpen(false)}
+                                                    style={styles.feedSwitchSheetClose}
+                                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                    accessibilityLabel="Close"
+                                                >
+                                                    <Icon name="close" size={ox(24)} color="#FFFFFF" />
+                                                </TouchableOpacity>
+                                            </View>
+                                            <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
+                                            <Text style={styles.feedSwitchSheetTitle}>Switch feed</Text>
+                                            <Text style={styles.feedSwitchSheetSub}>
+                                                Nearby, city, country, Discover, or Following
+                                            </Text>
+                                            <View style={styles.feedSwitchSearchWrap}>
+                                                <Icon name="search-outline" size={ox(18)} color="rgba(255,255,255,0.75)" />
+                                                <TextInput
+                                                    value={locationQuery}
+                                                    onChangeText={setLocationQuery}
+                                                    placeholder={searchHints[searchHintIndex]}
+                                                    placeholderTextColor="rgba(255,255,255,0.45)"
+                                                    underlineColorAndroid="transparent"
+                                                    onFocus={() => setSearchInputFocused(true)}
+                                                    onBlur={() => setSearchInputFocused(false)}
+                                                    onSubmitEditing={submitLocationSearch}
+                                                    returnKeyType="search"
+                                                    autoCapitalize="words"
+                                                    style={styles.feedSwitchSearchInput}
+                                                />
+                                            </View>
+                                            <Text style={styles.feedSwitchSearchHint}>
+                                                Tip: use venue: or landmark:
+                                            </Text>
+                                            <ScrollView
+                                                style={styles.feedSwitchSheetScroll}
+                                                contentContainerStyle={styles.feedSwitchSheetScrollContent}
+                                                keyboardShouldPersistTaps="handled"
+                                                showsVerticalScrollIndicator={false}
+                                            >
+                                                {locationQuery.trim().length >= 2 ? (
+                                                    <View style={styles.feedSwitchSuggestionsWrap}>
+                                                        {loadingSuggestions ? (
+                                                            <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
+                                                        ) : locationSuggestions.length > 0 ? (
+                                                            locationSuggestions.map((s, idx) => {
+                                                                const suggestionName = String(s.name || '').trim();
+                                                                if (!suggestionName) return null;
+                                                                const countryLabel = s.country != null ? String(s.country) : '';
+                                                                const metaLabel =
+                                                                    s.type === 'venue'
+                                                                        ? ' · venue'
+                                                                        : s.type === 'landmark'
+                                                                            ? ' · landmark'
+                                                                            : usingFallbackSuggestions
+                                                                                ? ' · quick suggestion'
+                                                                                : countryLabel
+                                                                                    ? ` · ${countryLabel}`
+                                                                                    : '';
+                                                                return (
+                                                                <TouchableOpacity
+                                                                    key={`${suggestionName}-${idx}`}
+                                                                    style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
+                                                                    onPress={() => {
+                                                                        const raw = locationQuery.trim();
+                                                                        const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
+                                                                            ? 'venue'
+                                                                            : /^landmark\s*:/i.test(raw)
+                                                                                ? 'landmark'
+                                                                                : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
+                                                                                    ? 'venue'
+                                                                                    : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
+                                                                                        ? 'landmark'
+                                                                                        : 'location');
+                                                                        setLocationQuery(suggestionName);
+                                                                        setMenuOpen(false);
+                                                                        // Defer so the feed-switch Modal unmounts before scope picker opens (Android nested Modal crash).
+                                                                        setTimeout(() => {
+                                                                            commitHeaderPlace(
+                                                                                headerSuggestionToLocation(s, suggestionName),
+                                                                                mode
+                                                                            );
+                                                                        }, 80);
+                                                                    }}
+                                                                >
+                                                                    <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
+                                                                        {suggestionName}
+                                                                        {metaLabel}
+                                                                    </Text>
+                                                                </TouchableOpacity>
                                                                 );
-                                                            }, 80);
+                                                            })
+                                                        ) : (
+                                                            <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
+                                                        )}
+                                                    </View>
+                                                ) : null}
+                                                {customLocation ? (
+                                                    <TouchableOpacity
+                                                        style={styles.feedSwitchMenuItem}
+                                                        onPress={() => {
+                                                            onClearCustom?.();
+                                                            setMenuOpen(false);
                                                         }}
                                                     >
-                                                        <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
-                                                            {suggestionName}
-                                                            {metaLabel}
-                                                        </Text>
+                                                        <Icon name="home-outline" size={ox(22)} color="rgba(255,255,255,0.8)" />
+                                                        <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
                                                     </TouchableOpacity>
-                                                    );
-                                                })
-                                            ) : (
-                                                <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
-                                            )}
-                                        </View>
-                                    ) : null}
-                                    {customLocation ? (
-                                        <TouchableOpacity
-                                            style={styles.feedSwitchMenuItem}
-                                            onPress={() => {
-                                                onClearCustom?.();
-                                                setMenuOpen(false);
-                                            }}
+                                                ) : null}
+                                                {menuItems.map((item) => (
+                                                    <TouchableOpacity
+                                                        key={item.key}
+                                                        style={styles.feedSwitchMenuItem}
+                                                        onPress={() => {
+                                                            item.onPress();
+                                                            setMenuOpen(false);
+                                                        }}
+                                                    >
+                                                        <Icon name={item.icon} size={ox(22)} color={item.iconColor} />
+                                                        <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </ScrollView>
+                                        </>
+                                    );
+                                    if (Platform.OS === 'ios') {
+                                        return (
+                                            <View style={styles.feedSwitchSheetCanvas} collapsable={false}>
+                                                <View style={styles.feedSwitchSheetAmbient} pointerEvents="none" collapsable={false}>
+                                                    <DiscoverAmbientCanvas variant="passport" fillParent />
+                                                </View>
+                                                <View style={styles.feedSwitchSheetContent} collapsable={false}>
+                                                    {sheetBody}
+                                                </View>
+                                            </View>
+                                        );
+                                    }
+                                    return (
+                                        <LinearGradient
+                                            colors={[...FEED_SWITCH_PASSPORT_WASH]}
+                                            locations={[0, 0.28, 0.55, 0.78, 1]}
+                                            start={{ x: 0.1, y: 1 }}
+                                            end={{ x: 0.9, y: 0 }}
+                                            style={styles.feedSwitchSheetCanvas}
                                         >
-                                            <Icon name="home-outline" size={ox(22)} color="rgba(255,255,255,0.8)" />
-                                            <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
-                                        </TouchableOpacity>
-                                    ) : null}
-                                    {menuItems.map((item) => (
-                                        <TouchableOpacity
-                                            key={item.key}
-                                            style={styles.feedSwitchMenuItem}
-                                            onPress={() => {
-                                                item.onPress();
-                                                setMenuOpen(false);
-                                            }}
-                                        >
-                                            <Icon name={item.icon} size={ox(22)} color={item.iconColor} />
-                                            <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
+                                            <View style={styles.feedSwitchSheetContent} collapsable={false}>
+                                                {sheetBody}
+                                            </View>
+                                        </LinearGradient>
+                                    );
+                                })()}
                             </View>
                         </View>
                     </Modal>
@@ -4402,7 +4438,7 @@ const styles = StyleSheet.create({
     },
     feedSwitchSheet: {
         alignSelf: 'center',
-        backgroundColor: '#1a1a1a',
+        backgroundColor: PASSPORT_ABYSS,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         borderWidth: 1,
@@ -4412,12 +4448,25 @@ const styles = StyleSheet.create({
         paddingTop: ox(4),
         overflow: 'hidden',
     },
+    feedSwitchSheetCanvas: {
+        backgroundColor: PASSPORT_ABYSS,
+        overflow: 'hidden',
+    },
+    feedSwitchSheetAmbient: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+    },
+    feedSwitchSheetContent: {
+        position: 'relative',
+        zIndex: 1,
+        backgroundColor: 'transparent',
+    },
     feedSwitchSheetHandle: {
         alignSelf: 'center',
         width: ox(44),
         height: 5,
         borderRadius: ox(3),
-        backgroundColor: 'rgba(255,255,255,0.3)',
+        backgroundColor: 'rgba(255,255,255,0.28)',
         marginTop: ox(8),
         marginBottom: ox(6),
     },
@@ -4441,7 +4490,7 @@ const styles = StyleSheet.create({
     },
     feedSwitchSheetGazetteer: {
         textAlign: 'center',
-        color: 'rgba(217, 27, 92, 0.95)',
+        color: PASSPORT_PALETTE.wavePrimary,
         fontSize: ox(13),
         fontWeight: '700',
         letterSpacing: ox(1.4),

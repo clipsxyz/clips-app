@@ -1158,9 +1158,30 @@ video {
 }
 
 .swal-bottom-sheet-popup {
+  position: relative !important;
+  overflow: hidden !important;
   border-radius: 24px 24px 0 0 !important;
   margin-bottom: 0 !important;
   max-width: min(400px, calc(100vw - 32px)) !important;
+  background: #060d16 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-bottom: none !important;
+}
+
+.swal-bottom-sheet-popup::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    #060d16 0%,
+    #0f3a42 22%,
+    #1f6b63 52%,
+    #164858 78%,
+    #060d16 100%
+  );
 }
 
 .swal-bottom-sheet-popup .swal2-title {
@@ -1168,11 +1189,15 @@ video {
 }
 
 .swal-bottom-sheet-html {
+  position: relative;
+  z-index: 1;
   margin: 0 !important;
   padding: 0 !important;
 }
 
 .swal-bottom-sheet-content {
+  position: relative;
+  z-index: 1;
   text-align: center;
   padding: 24px 20px 20px;
 }
@@ -1183,6 +1208,7 @@ video {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   margin: 0 0 12px 0;
+  color: #3d9b8f;
 }
 
 .swal-bottom-sheet-icon {
@@ -1227,6 +1253,8 @@ video {
 }
 
 .swal-bottom-sheet-html .swal2-actions {
+  position: relative;
+  z-index: 1;
   margin-top: 8px !important;
   gap: 12px !important;
   flex-wrap: wrap !important;

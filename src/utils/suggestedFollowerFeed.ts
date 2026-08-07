@@ -1,5 +1,9 @@
 import type { Post } from '../types';
 import type { User } from '../types';
+import {
+  isFakeMockVideoPosterUrl,
+  resolveDemoVideoPosterUri,
+} from '../constants/mockFeedVideos';
 
 export const SUGGESTED_FOLLOWER_DISMISSED_KEY = 'clips:suggestedFollowerDismissed';
 export const SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY = 'clips:suggestedFollowerHiddenHandles';
@@ -9,7 +13,10 @@ export const MIN_MEDIA_POSTS_FOR_SUGGESTED_FOLLOWER = 1;
 
 export type SuggestedFollowerPreview = {
   postId: string;
+  /** Still frame when available (poster / demo poster). May be an MP4 URL only as last resort. */
   thumbnailUrl: string;
+  /** Original video URL when `isVideo` — use for muted strip playback on web. */
+  mediaUrl?: string;
   isVideo: boolean;
   views: number;
   /** Gazetteer system-rendered clip with licensed background music baked in. */
@@ -35,22 +42,34 @@ function isVideoUrl(url: string): boolean {
   return VIDEO_URL_RE.test(url);
 }
 
-function postThumbVisual(p: Post): { url: string; isVideo: boolean } | undefined {
+function postThumbVisual(p: Post): { url: string; isVideo: boolean; posterUrl?: string } | undefined {
   const items = p.mediaItems?.filter((m) => m.url && m.type !== 'text');
   if (items && items.length > 0) {
     const videoItem =
       items.find((m) => m.type === 'video') || items.find((m) => m.url && isVideoUrl(m.url));
-    if (videoItem?.url) return { url: videoItem.url, isVideo: true };
+    if (videoItem?.url) {
+      return {
+        url: videoItem.url,
+        isVideo: true,
+        posterUrl: videoItem.posterUrl || p.videoPosterUrl || undefined,
+      };
+    }
     const imgItem = items.find((m) => m.type === 'image');
     if (imgItem?.url) return { url: imgItem.url, isVideo: isVideoUrl(imgItem.url) };
     const first = items[0];
-    if (first?.url) return { url: first.url, isVideo: isVideoUrl(first.url) };
+    if (first?.url) {
+      return {
+        url: first.url,
+        isVideo: isVideoUrl(first.url),
+        posterUrl: first.posterUrl || p.videoPosterUrl || undefined,
+      };
+    }
   }
   const url = p.mediaUrl || p.finalVideoUrl;
   if (!url) return undefined;
   const isVideo =
     p.mediaType === 'video' || isVideoUrl(url) || (!!p.finalVideoUrl && url === p.finalVideoUrl);
-  return { url, isVideo };
+  return { url, isVideo, posterUrl: p.videoPosterUrl || undefined };
 }
 
 function normalizeHandle(h: string): string {
@@ -115,9 +134,15 @@ export function buildSuggestedFollowerFromPosts(
   const previews: SuggestedFollowerPreview[] = bestPosts.slice(0, 3).map((p) => {
     const vis = postThumbVisual(p)!;
     const isVideo = vis.isVideo;
+    const poster =
+      (vis.posterUrl && !isFakeMockVideoPosterUrl(vis.posterUrl) ? vis.posterUrl : undefined) ||
+      (isVideo ? resolveDemoVideoPosterUri(vis.url) : undefined);
+    // Prefer a still for thumbs — RN Image / web <img> cannot play MP4 as a poster.
+    const thumbnailUrl = poster || vis.url;
     return {
       postId: String(p.id),
-      thumbnailUrl: vis.url,
+      thumbnailUrl,
+      mediaUrl: isVideo ? vis.url : undefined,
       isVideo,
       views: p.stats?.views ?? 0,
       gazetteerMusic: isVideo && postHasGazetteerMusic(p),
@@ -131,6 +156,7 @@ export function buildSuggestedFollowerFromPosts(
     contextLabel: contextLabelFor(viewer, rep),
     accountType: rep.userAccountType,
     previews,
+    musicPreviewUrl: '',
     representativePost: rep,
   };
 }

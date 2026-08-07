@@ -16,6 +16,8 @@ import { buildShareablePostUrl } from '../utils/shareUrls';
 import { useAuth } from '../context/Auth';
 import { getFollowedUsers, regeneratePublicShareToken } from '../api/posts';
 import Avatar from './Avatar.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 
 type Props = {
     post: Post | null;
@@ -125,7 +127,8 @@ export default function FeedShareModal({ post, isOpen, onClose }: Props) {
     return (
         <Modal visible={isOpen} animationType="slide" transparent onRequestClose={onClose}>
             <View style={styles.modalOverlay}>
-                <View style={styles.shareModalContent}>
+                <View style={styles.shareModalShell}>
+                    <PassportSheetCanvas contentStyle={styles.shareModalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Share</Text>
                         <TouchableOpacity onPress={onClose}>
@@ -251,6 +254,7 @@ export default function FeedShareModal({ post, isOpen, onClose }: Props) {
                         <Icon name="link" size={22} color="#FFFFFF" />
                         <Text style={styles.shareOptionText}>Copy link</Text>
                     </TouchableOpacity>
+                    </PassportSheetCanvas>
                 </View>
             </View>
         </Modal>
@@ -263,10 +267,17 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         justifyContent: 'flex-end',
     },
-    shareModalContent: {
-        backgroundColor: '#030712',
+    shareModalShell: {
+        backgroundColor: PASSPORT_ABYSS,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+        overflow: 'hidden',
+        maxHeight: '85%',
+    },
+    shareModalContent: {
         padding: 20,
         paddingBottom: 40,
     },

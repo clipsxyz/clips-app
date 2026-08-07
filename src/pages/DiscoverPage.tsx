@@ -339,14 +339,16 @@ export default function DiscoverPage() {
                     onClick={() => setScopePicker(null)}
                 >
                     <motion.div
-                        className="my-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#1a1524] p-5 shadow-2xl"
+                        className="relative my-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#060d16] p-5 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
+                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                        <div className="relative z-10">
                         <h2 id="discover-scope-picker-title" className="text-lg font-semibold text-white">
                             Which feed?
                         </h2>
-                        <p className="mt-1 text-sm text-gray-400">{scopePicker.name}</p>
-                        <p className="mt-2 text-xs text-gray-500">
+                        <p className="mt-1 text-sm text-white/60">{scopePicker.name}</p>
+                        <p className="mt-2 text-xs text-white/45">
                             Country is the whole nation. City is the metro area. Local area is the nearest neighbourhood when available.
                         </p>
                         <div className="mt-4 flex flex-col gap-2">
@@ -358,7 +360,7 @@ export default function DiscoverPage() {
                                         applyFeedSelection(resolvePlaceFeedSelection(scopePicker, opt.scope));
                                         setScopePicker(null);
                                     }}
-                                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-medium text-gray-100 hover:bg-white/10"
+                                    className="rounded-xl border border-white/10 bg-[rgba(15,36,48,0.55)] px-4 py-3 text-left text-sm font-medium text-gray-100 hover:bg-white/10"
                                 >
                                     {opt.label}
                                 </button>
@@ -367,10 +369,11 @@ export default function DiscoverPage() {
                         <button
                             type="button"
                             onClick={() => setScopePicker(null)}
-                            className="mt-3 w-full rounded-xl py-2.5 text-sm text-gray-400 hover:text-white"
+                            className="mt-3 w-full rounded-xl py-2.5 text-sm text-[#3d9b8f] hover:text-[#9fd4cb]"
                         >
                             Cancel
                         </button>
+                        </div>
                     </motion.div>
                 </div>
             )}

@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { GAZETTEER_SHEET_SLATE } from './GazetteerBottomSheetModal.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 type Props = {
     visible: boolean;
@@ -70,7 +71,6 @@ export default function GazetteerAlertSheet({
                 <View
                     style={[
                         styles.sheet,
-                        GAZETTEER_SHEET_SLATE.background,
                         {
                             marginHorizontal: sheetLayout.marginHorizontal,
                             width: sheetLayout.sheetWidth,
@@ -79,29 +79,31 @@ export default function GazetteerAlertSheet({
                         },
                     ]}
                 >
-                    <View style={styles.handleWrap}>
-                        <View style={[styles.handle, GAZETTEER_SHEET_SLATE.handle]} />
-                    </View>
-
-                    <Text style={styles.gazetteerLabel}>Gazetteer says</Text>
-
-                    {showIcon ? (
-                        <View style={styles.iconWrap}>
-                            <Icon name={iconName} size={44} color="#FFFFFF" />
+                    <PassportSheetCanvas contentStyle={styles.sheetInner}>
+                        <View style={styles.handleWrap}>
+                            <View style={styles.handle} />
                         </View>
-                    ) : null}
 
-                    <Text style={styles.title}>{title}</Text>
-                    {message ? <Text style={styles.message}>{message}</Text> : null}
+                        <Text style={styles.gazetteerLabel}>Gazetteer says</Text>
 
-                    <TouchableOpacity style={styles.confirmBtn} onPress={onConfirm}>
-                        <Text style={styles.confirmBtnText}>{confirmButtonText}</Text>
-                    </TouchableOpacity>
-                    {showCancelButton ? (
-                        <TouchableOpacity style={styles.cancelBtn} onPress={onDismiss}>
-                            <Text style={styles.cancelBtnText}>{cancelButtonText}</Text>
+                        {showIcon ? (
+                            <View style={styles.iconWrap}>
+                                <Icon name={iconName} size={44} color="#FFFFFF" />
+                            </View>
+                        ) : null}
+
+                        <Text style={styles.title}>{title}</Text>
+                        {message ? <Text style={styles.message}>{message}</Text> : null}
+
+                        <TouchableOpacity style={styles.confirmBtn} onPress={onConfirm}>
+                            <Text style={styles.confirmBtnText}>{confirmButtonText}</Text>
                         </TouchableOpacity>
-                    ) : null}
+                        {showCancelButton ? (
+                            <TouchableOpacity style={styles.cancelBtn} onPress={onDismiss}>
+                                <Text style={styles.cancelBtnText}>{cancelButtonText}</Text>
+                            </TouchableOpacity>
+                        ) : null}
+                    </PassportSheetCanvas>
                 </View>
             </View>
         </Modal>
@@ -120,6 +122,13 @@ const styles = StyleSheet.create({
     sheet: {
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
+        overflow: 'hidden',
+        backgroundColor: PASSPORT_ABYSS,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    sheetInner: {
         paddingHorizontal: 20,
         paddingTop: 4,
     },
@@ -128,15 +137,17 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
     },
     handle: {
+        width: 40,
         height: 4,
         borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.28)',
     },
     gazetteerLabel: {
         fontSize: 12,
         fontWeight: '600',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
-        color: 'rgba(217, 27, 92, 0.95)',
+        color: PASSPORT_PALETTE.wavePrimary,
         textAlign: 'center',
         marginBottom: 12,
     },
@@ -153,7 +164,7 @@ const styles = StyleSheet.create({
     },
     message: {
         fontSize: 15,
-        color: '#D1D5DB',
+        color: 'rgba(232,238,242,0.72)',
         textAlign: 'center',
         lineHeight: 22,
         marginBottom: 20,

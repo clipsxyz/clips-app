@@ -26,6 +26,7 @@ import {
 import SavePostModal from './SavePostModal';
 import QRCodeModal from './QRCodeModal';
 import { showToast } from '../utils/toast';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 
 interface PostMenuModalProps {
     post: Post;
@@ -228,7 +229,9 @@ export default function PostMenuModal({
                     onClick={onClose}
                 />
 
-                <div className="relative w-full max-w-[min(400px,calc(100vw-32px))] bg-black border border-white/15 border-b-0 rounded-t-[24px] shadow-[0_-8px_40px_rgba(0,0,0,0.5)] max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
+                <div className="relative w-full max-w-[min(400px,calc(100vw-32px))] overflow-hidden bg-[#060d16] border border-white/15 border-b-0 rounded-t-[24px] shadow-[0_-8px_40px_rgba(0,0,0,0.5)] max-h-[85vh] flex flex-col animate-in slide-in-from-bottom duration-300">
+                    <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                    <div className="relative z-10 flex max-h-[85vh] flex-col">
                     <div className="flex justify-center pt-2.5 pb-2">
                         <div className="w-10 h-0.5 bg-white/25 rounded-full" />
                     </div>
@@ -294,6 +297,7 @@ export default function PostMenuModal({
                                 </div>
                             </>
                         )}
+                    </div>
                     </div>
                 </div>
             </div>

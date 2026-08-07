@@ -19,9 +19,14 @@ import {
 import {
     BottomSheetFlatList,
     BottomSheetFooter,
+    BottomSheetTextInput,
     type BottomSheetFooterProps,
 } from '@gorhom/bottom-sheet';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_LIGHT } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, {
+    GAZETTEER_SHEET_PASSPORT,
+} from './GazetteerBottomSheetModal.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Video from 'react-native-video';
@@ -58,9 +63,18 @@ const COMMENT_EMOJIS = [
 ];
 const HANDLE_REGEX = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.58, 520);
-const BRAND_600 = '#155bd6';
-const COMMENT_LIKE_BLUE = '#3B82F6';
-const MENTION_COLOR = '#7A8AF0';
+const BRAND_600 = PASSPORT_PALETTE.wavePrimary;
+const COMMENT_LIKE_BLUE = '#60A5FA';
+const MENTION_COLOR = '#9fd4cb';
+/** View Profile night-atlas chrome. */
+const P = {
+    text: '#e8eef2',
+    muted: 'rgba(232, 238, 242, 0.62)',
+    border: 'rgba(255,255,255,0.12)',
+    chipBg: 'rgba(15, 36, 48, 0.72)',
+    inputBg: 'rgba(6, 13, 22, 0.72)',
+    handle: 'rgba(255,255,255,0.28)',
+};
 
 type Props = {
     postId: string;
@@ -166,27 +180,26 @@ function CommentItem({
     isPostOwner,
     onLikeComment,
     onLikeReply,
-    onReply,
+    onStartReply,
     onModerateComment,
     onMentionPress,
+    isReplyingTo,
 }: {
     comment: Comment;
     viewerHandle: string;
     isPostOwner: boolean;
     onLikeComment: (commentId: string) => Promise<void>;
     onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
-    onReply: (parentId: string, text: string) => Promise<void>;
+    onStartReply: (commentId: string, handle: string) => void;
     onModerateComment: (commentId: string, action: 'hide' | 'unhide' | 'delete') => Promise<void>;
     onMentionPress: (handle: string) => void;
+    isReplyingTo?: boolean;
 }) {
     const { user } = useAuth();
     const [liked, setLiked] = useState(comment.userLiked);
     const [likes, setLikes] = useState(comment.likes ?? 0);
     const [busy, setBusy] = useState(false);
     const [showReplies, setShowReplies] = useState(false);
-    const [showReplyInput, setShowReplyInput] = useState(false);
-    const [replyText, setReplyText] = useState('');
-    const [submittingReply, setSubmittingReply] = useState(false);
 
     useEffect(() => {
         setLiked(comment.userLiked);
@@ -203,20 +216,6 @@ function CommentItem({
         if (reply.moderationState !== 'hidden_by_filter') return true;
         return String(reply.userHandle || '').trim().toLowerCase() === normalizedViewer;
     });
-
-    const handleReply = async () => {
-        if (!replyText.trim() || submittingReply) return;
-        setSubmittingReply(true);
-        try {
-            await onReply(comment.id, replyText.trim());
-            setReplyText('');
-            setShowReplyInput(false);
-        } catch {
-            Alert.alert('Error', 'Failed to add reply');
-        } finally {
-            setSubmittingReply(false);
-        }
-    };
 
     const avatarSrc =
         comment.userHandle === user?.handle
@@ -269,9 +268,16 @@ function CommentItem({
                 <View style={styles.commentActionsRow}>
                     <TouchableOpacity
                         disabled={isHiddenForViewer}
-                        onPress={() => setShowReplyInput((v) => !v)}
+                        onPress={() => onStartReply(comment.id, comment.userHandle || '')}
                     >
-                        <Text style={styles.commentReplyText}>Reply</Text>
+                        <Text
+                            style={[
+                                styles.commentReplyText,
+                                isReplyingTo && styles.commentReplyTextActive,
+                            ]}
+                        >
+                            {isReplyingTo ? 'Replying…' : 'Reply'}
+                        </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         disabled={busy || isHiddenForViewer}
@@ -295,31 +301,11 @@ function CommentItem({
                         <FeedLikeThumbsIcon
                             size={16}
                             filled={false}
-                            color={liked ? COMMENT_LIKE_BLUE : '#6B7280'}
+                            color={liked ? COMMENT_LIKE_BLUE : P.muted}
                         />
                         <Text style={styles.commentLikeCount}>{likes}</Text>
                     </TouchableOpacity>
                 </View>
-
-                {showReplyInput ? (
-                    <View style={styles.inlineReplyContainer}>
-                        <TextInput
-                            style={styles.inlineReplyInput}
-                            placeholder="Write a reply..."
-                            placeholderTextColor="#6B7280"
-                            value={replyText}
-                            onChangeText={setReplyText}
-                            editable={!submittingReply}
-                        />
-                        <TouchableOpacity
-                            disabled={!replyText.trim() || submittingReply}
-                            style={styles.inlineReplySendButton}
-                            onPress={handleReply}
-                        >
-                            <FeedSendIcon size={16} color="#111827" />
-                        </TouchableOpacity>
-                    </View>
-                ) : null}
 
                 {hasReplies ? (
                     <View style={styles.repliesToggleWrap}>
@@ -369,7 +355,7 @@ function CommentItem({
                                                     <FeedLikeThumbsIcon
                                                         size={14}
                                                         filled={false}
-                                                        color={reply.userLiked ? COMMENT_LIKE_BLUE : '#6B7280'}
+                                                        color={reply.userLiked ? COMMENT_LIKE_BLUE : P.muted}
                                                     />
                                                     <Text style={styles.replyLikeCount}>{reply.likes ?? 0}</Text>
                                                 </TouchableOpacity>
@@ -390,14 +376,36 @@ function CommentInput({
     placeholder,
     onSubmit,
     isLoading,
+    replyingToHandle,
+    onCancelReply,
+    useSheetTextInput = false,
+    autoFocus = false,
 }: {
     placeholder: string;
     onSubmit: (text: string) => void;
     isLoading: boolean;
+    replyingToHandle?: string | null;
+    onCancelReply?: () => void;
+    useSheetTextInput?: boolean;
+    autoFocus?: boolean;
 }) {
     const { user } = useAuth();
     const [text, setText] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const inputRef = useRef<TextInput>(null);
+
+    useEffect(() => {
+        if (!replyingToHandle) return;
+        setText('');
+        const t = setTimeout(() => inputRef.current?.focus(), 80);
+        return () => clearTimeout(t);
+    }, [replyingToHandle]);
+
+    useEffect(() => {
+        if (!autoFocus) return;
+        const t = setTimeout(() => inputRef.current?.focus(), 80);
+        return () => clearTimeout(t);
+    }, [autoFocus]);
 
     const handleSubmit = () => {
         if (!text.trim() || isLoading) return;
@@ -405,8 +413,20 @@ function CommentInput({
         setText('');
     };
 
+    const InputComponent = useSheetTextInput ? BottomSheetTextInput : TextInput;
+
     return (
         <View style={styles.commentInputShell}>
+            {replyingToHandle ? (
+                <View style={styles.replyingBanner}>
+                    <Text style={styles.replyingBannerText} numberOfLines={1}>
+                        Replying to {replyingToHandle}
+                    </Text>
+                    <TouchableOpacity onPress={onCancelReply} hitSlop={8} accessibilityLabel="Cancel reply">
+                        <FeedCloseIcon size={16} color={P.muted} />
+                    </TouchableOpacity>
+                </View>
+            ) : null}
             {showEmojiPicker ? (
                 <View style={styles.emojiPickerWrap}>
                     <View style={styles.emojiPickerGrid}>
@@ -432,14 +452,15 @@ function CommentInput({
                 >
                     <FeedSmileIcon
                         size={20}
-                        color={showEmojiPicker ? '#1F2937' : '#6B7280'}
+                        color={showEmojiPicker ? P.text : P.muted}
                     />
                 </TouchableOpacity>
                 <View style={styles.commentInputGradientWrap}>
-                    <TextInput
+                    <InputComponent
+                        ref={inputRef as any}
                         style={styles.commentInput}
                         placeholder={placeholder}
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={P.muted}
                         value={text}
                         onChangeText={setText}
                         editable={!isLoading}
@@ -484,6 +505,8 @@ export default function PostCommentsSheet({
     const [submitting, setSubmitting] = useState(false);
     const [followBusy, setFollowBusy] = useState(false);
     const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
+    const [replyingTo, setReplyingTo] = useState<{ id: string; handle: string } | null>(null);
+    const [submittingReply, setSubmittingReply] = useState(false);
 
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
@@ -801,9 +824,63 @@ export default function PostCommentsSheet({
     };
 
     const handleClose = () => {
+        setReplyingTo(null);
         onAfterClose?.();
         onClose();
     };
+
+    useEffect(() => {
+        if (!isOpen) setReplyingTo(null);
+    }, [isOpen]);
+
+    const scrollReplyIntoView = useCallback(
+        (commentId: string) => {
+            const index = sortedComments.findIndex((c) => String(c.id) === String(commentId));
+            if (index < 0) return;
+            try {
+                listRef.current?.scrollToIndex({
+                    index,
+                    animated: true,
+                    viewPosition: 0.2,
+                    viewOffset: 24,
+                });
+            } catch {
+                /* layout may not be ready yet */
+            }
+        },
+        [sortedComments],
+    );
+
+    const startReply = useCallback(
+        (commentId: string, handle: string) => {
+            setReplyingTo({ id: commentId, handle });
+            scrollReplyIntoView(commentId);
+        },
+        [scrollReplyIntoView],
+    );
+
+    const cancelReply = useCallback(() => {
+        setReplyingTo(null);
+    }, []);
+
+    const handleComposerSubmit = useCallback(
+        async (text: string) => {
+            if (replyingTo) {
+                setSubmittingReply(true);
+                try {
+                    await handleReplyToComment(replyingTo.id, text);
+                    setReplyingTo(null);
+                } catch {
+                    Alert.alert('Error', 'Failed to add reply');
+                } finally {
+                    setSubmittingReply(false);
+                }
+                return;
+            }
+            await handleAddComment(text);
+        },
+        [replyingTo, handleReplyToComment, handleAddComment],
+    );
 
     const renderComment: ListRenderItem<Comment> = ({ item }) => (
         <CommentItem
@@ -812,9 +889,10 @@ export default function PostCommentsSheet({
             isPostOwner={isPostOwner}
             onLikeComment={handleLikeComment}
             onLikeReply={handleLikeReply}
-            onReply={handleReplyToComment}
+            onStartReply={startReply}
             onModerateComment={handleModerateComment}
             onMentionPress={onMentionPress}
+            isReplyingTo={replyingTo?.id === item.id}
         />
     );
 
@@ -936,7 +1014,7 @@ export default function PostCommentsSheet({
                         </TouchableOpacity>
                     </View>
                     <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                        <FeedCloseIcon size={20} color="#4B5563" />
+                        <FeedCloseIcon size={20} color={P.muted} />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -947,14 +1025,31 @@ export default function PostCommentsSheet({
     const renderCommentsFooter = useCallback(
         (props: BottomSheetFooterProps) => (
             <BottomSheetFooter {...props} bottomInset={insets.bottom}>
-                <CommentInput
-                    placeholder="Join the conversation..."
-                    onSubmit={handleAddComment}
-                    isLoading={submitting}
-                />
+                <PassportSheetCanvas contentStyle={styles.footerCanvasContent}>
+                    <CommentInput
+                        placeholder={
+                            replyingTo ? 'Write a reply...' : 'Join the conversation...'
+                        }
+                        onSubmit={(text) => {
+                            void handleComposerSubmit(text);
+                        }}
+                        isLoading={submitting || submittingReply}
+                        replyingToHandle={replyingTo?.handle}
+                        onCancelReply={cancelReply}
+                        useSheetTextInput
+                        autoFocus={Boolean(replyingTo)}
+                    />
+                </PassportSheetCanvas>
             </BottomSheetFooter>
         ),
-        [handleAddComment, insets.bottom, submitting],
+        [
+            cancelReply,
+            handleComposerSubmit,
+            insets.bottom,
+            replyingTo,
+            submitting,
+            submittingReply,
+        ],
     );
 
     const commentsListProps = {
@@ -966,7 +1061,7 @@ export default function PostCommentsSheet({
         ListHeaderComponent: sheetChromeHeader,
         ListEmptyComponent: (
             <View style={styles.emptyState}>
-                <FeedMessageSquareIcon size={48} color="#6B7280" opacity={0.5} />
+                <FeedMessageSquareIcon size={48} color={P.muted} opacity={0.5} />
                 <Text style={styles.emptyTitle}>No comments yet</Text>
                 <Text style={styles.emptySubtitle}>Be the first to comment!</Text>
             </View>
@@ -986,23 +1081,42 @@ export default function PostCommentsSheet({
         onScroll: handleScroll,
         scrollEventThrottle: 16 as const,
         keyboardShouldPersistTaps: 'handled' as const,
+        keyboardDismissMode: 'interactive' as const,
+        automaticallyAdjustKeyboardInsets: true,
+        onScrollToIndexFailed: (info: { index: number }) => {
+            setTimeout(() => {
+                listRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: true,
+                    viewPosition: 0.15,
+                    viewOffset: 24,
+                });
+            }, 160);
+        },
     };
 
     const sheetBody = (
-        <View style={[styles.sheet, { flex: 1, paddingBottom: insets.bottom }]}>
-            {loading ? (
-                <View style={styles.loadingWrap}>
-                    <ActivityIndicator size="large" color={BRAND_600} />
-                </View>
-            ) : (
-                <FlatList {...commentsListProps} />
-            )}
-            <CommentInput
-                placeholder="Join the conversation..."
-                onSubmit={handleAddComment}
-                isLoading={submitting}
-            />
-        </View>
+        <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
+            <View style={[styles.sheet, { flex: 1, paddingBottom: insets.bottom }]}>
+                {loading ? (
+                    <View style={styles.loadingWrap}>
+                        <ActivityIndicator size="large" color={BRAND_600} />
+                    </View>
+                ) : (
+                    <FlatList {...commentsListProps} />
+                )}
+                <CommentInput
+                    placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
+                    onSubmit={(text) => {
+                        void handleComposerSubmit(text);
+                    }}
+                    isLoading={submitting || submittingReply}
+                    replyingToHandle={replyingTo?.handle}
+                    onCancelReply={cancelReply}
+                    autoFocus={Boolean(replyingTo)}
+                />
+            </View>
+        </PassportSheetCanvas>
     );
 
     if (isScenesEmbed) {
@@ -1010,7 +1124,8 @@ export default function PostCommentsSheet({
         return (
             <KeyboardAvoidingView
                 style={styles.scenesEmbedRoot}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
             >
                 {sheetBody}
             </KeyboardAvoidingView>
@@ -1023,30 +1138,32 @@ export default function PostCommentsSheet({
             onDismiss={handleClose}
             snapPoints={['75%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_LIGHT.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_LIGHT.handle}
+            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
             footerComponent={renderCommentsFooter}
             keyboardBehavior="interactive"
             keyboardBlurBehavior="restore"
             android_keyboardInputMode="adjustResize"
         >
-            <BottomSheetFlatList
-                {...(loading
-                    ? {
-                          data: [] as Comment[],
-                          renderItem: () => null,
-                          ListHeaderComponent: (
-                              <>
-                                  {sheetChromeHeader}
-                                  <View style={styles.loadingWrap}>
-                                      <ActivityIndicator size="large" color={BRAND_600} />
-                                  </View>
-                              </>
-                          ),
-                      }
-                    : commentsListProps)}
-                style={[styles.commentsList, styles.sheet]}
-            />
+            <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
+                <BottomSheetFlatList
+                    {...(loading
+                        ? {
+                              data: [] as Comment[],
+                              renderItem: () => null,
+                              ListHeaderComponent: (
+                                  <>
+                                      {sheetChromeHeader}
+                                      <View style={styles.loadingWrap}>
+                                          <ActivityIndicator size="large" color={BRAND_600} />
+                                      </View>
+                                  </>
+                              ),
+                          }
+                        : commentsListProps)}
+                    style={[styles.commentsList, styles.sheet]}
+                />
+            </PassportSheetCanvas>
         </GazetteerBottomSheetModal>
     );
 }
@@ -1054,6 +1171,17 @@ export default function PostCommentsSheet({
 const styles = StyleSheet.create({
     scenesEmbedRoot: {
         flex: 1,
+    },
+    sheetCanvas: {
+        flex: 1,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+    },
+    sheetCanvasContent: {
+        flex: 1,
+    },
+    footerCanvasContent: {
+        backgroundColor: 'transparent',
     },
     modalOverlay: {
         flex: 1,
@@ -1064,7 +1192,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
     },
     sheet: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'transparent',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         overflow: 'hidden',
@@ -1076,14 +1204,14 @@ const styles = StyleSheet.create({
         paddingTop: 12,
         paddingBottom: 8,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
     },
     mediaPreviewThumb: {
         width: 56,
         height: 56,
         borderRadius: 8,
         overflow: 'hidden',
-        backgroundColor: '#111827',
+        backgroundColor: P.chipBg,
         marginRight: 12,
     },
     mediaPreviewMedia: {
@@ -1094,7 +1222,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
     },
     dragHandleRow: {
         alignItems: 'center',
@@ -1105,7 +1233,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 999,
-        backgroundColor: '#D1D5DB',
+        backgroundColor: P.handle,
     },
     modalHeader: {
         flexDirection: 'row',
@@ -1114,7 +1242,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#E5E7EB',
+        borderBottomColor: P.border,
     },
     modalHeaderRight: {
         flexDirection: 'row',
@@ -1123,13 +1251,13 @@ const styles = StyleSheet.create({
     modalTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
     },
     commentSortToggle: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: P.border,
         borderRadius: 8,
         padding: 2,
     },
@@ -1139,15 +1267,15 @@ const styles = StyleSheet.create({
         borderRadius: 6,
     },
     commentSortButtonActive: {
-        backgroundColor: '#111827',
+        backgroundColor: P.chipBg,
     },
     commentSortButtonText: {
         fontSize: 12,
-        color: '#4B5563',
+        color: P.muted,
         fontWeight: '600',
     },
     commentSortButtonTextActive: {
-        color: '#FFFFFF',
+        color: P.text,
     },
     closeButton: {
         padding: 4,
@@ -1167,7 +1295,7 @@ const styles = StyleSheet.create({
     },
     avatarRing: {
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: P.border,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1180,45 +1308,47 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         marginBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
     },
     authorHandle: {
         flex: 1,
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
     },
     followButton: {
         paddingHorizontal: 16,
         paddingVertical: 6,
         borderRadius: 8,
-        backgroundColor: '#111827',
+        backgroundColor: P.chipBg,
     },
     followButtonFollowing: {
-        backgroundColor: '#E5E7EB',
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: P.border,
     },
     followButtonText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: P.text,
     },
     followButtonTextFollowing: {
-        color: '#1F2937',
+        color: P.text,
     },
     captionBlock: {
         paddingBottom: 12,
         marginBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
     },
     captionText: {
         fontSize: 14,
-        color: '#111827',
+        color: P.text,
         lineHeight: 20,
     },
     captionTime: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
         marginTop: 8,
     },
     mentionText: {
@@ -1230,27 +1360,27 @@ const styles = StyleSheet.create({
     },
     emptyTitle: {
         fontSize: 15,
-        color: '#6B7280',
+        color: P.muted,
         marginTop: 16,
     },
     emptySubtitle: {
         fontSize: 14,
-        color: '#6B7280',
+        color: P.muted,
         marginTop: 8,
     },
     loadMoreButton: {
         minHeight: 40,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#F9FAFB',
+        borderColor: P.border,
+        backgroundColor: P.chipBg,
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 4,
     },
     loadMoreText: {
         fontSize: 14,
-        color: '#374151',
+        color: P.muted,
     },
     commentItem: {
         flexDirection: 'row',
@@ -1269,16 +1399,16 @@ const styles = StyleSheet.create({
     commentUser: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
         marginRight: 8,
     },
     commentTime: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
     },
     commentText: {
         fontSize: 14,
-        color: '#111827',
+        color: P.text,
         marginBottom: 8,
     },
     hiddenFromOthersNote: {
@@ -1293,7 +1423,7 @@ const styles = StyleSheet.create({
     },
     moderationActionText: {
         fontSize: 11,
-        color: '#4B5563',
+        color: P.muted,
         fontWeight: '500',
     },
     moderationDeleteText: {
@@ -1311,7 +1441,26 @@ const styles = StyleSheet.create({
     },
     commentReplyText: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
+        fontWeight: '500',
+    },
+    commentReplyTextActive: {
+        color: BRAND_600,
+        fontWeight: '600',
+    },
+    replyingBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 2,
+        gap: 8,
+    },
+    replyingBannerText: {
+        flex: 1,
+        fontSize: 12,
+        color: P.muted,
         fontWeight: '500',
     },
     commentLikeRow: {
@@ -1320,7 +1469,7 @@ const styles = StyleSheet.create({
     },
     commentLikeCount: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
         marginLeft: 4,
     },
     inlineReplyContainer: {
@@ -1330,11 +1479,11 @@ const styles = StyleSheet.create({
     },
     inlineReplyInput: {
         flex: 1,
-        backgroundColor: '#F3F4F6',
+        backgroundColor: P.inputBg,
         borderRadius: 999,
         paddingHorizontal: 12,
         paddingVertical: 8,
-        color: '#111827',
+        color: P.text,
         fontSize: 14,
     },
     inlineReplySendButton: {
@@ -1351,15 +1500,15 @@ const styles = StyleSheet.create({
     },
     repliesToggleText: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
         marginLeft: 4,
     },
     replyList: {
         marginTop: 8,
         paddingLeft: 16,
         borderLeftWidth: 2,
-        borderLeftColor: '#E5E7EB',
-        backgroundColor: 'rgba(249, 250, 251, 0.8)',
+        borderLeftColor: P.border,
+        backgroundColor: 'rgba(15, 36, 48, 0.45)',
         borderTopRightRadius: 6,
         borderBottomRightRadius: 6,
         paddingVertical: 8,
@@ -1381,16 +1530,16 @@ const styles = StyleSheet.create({
     replyUser: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
         marginRight: 6,
     },
     replyTime: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: P.muted,
     },
     replyText: {
         fontSize: 12,
-        color: '#111827',
+        color: P.text,
         marginBottom: 4,
     },
     replyLikeRow: {
@@ -1399,18 +1548,18 @@ const styles = StyleSheet.create({
     },
     replyLikeCount: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
         marginLeft: 4,
     },
     commentInputShell: {
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#E5E7EB',
-        backgroundColor: '#FFFFFF',
+        borderTopColor: P.border,
+        backgroundColor: 'rgba(6, 13, 22, 0.55)',
     },
     emojiPickerWrap: {
         maxHeight: 96,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
         paddingHorizontal: 8,
         paddingVertical: 8,
     },
@@ -1441,20 +1590,20 @@ const styles = StyleSheet.create({
         marginRight: 8,
     },
     emojiToggleActive: {
-        backgroundColor: '#E5E7EB',
+        backgroundColor: 'rgba(255,255,255,0.12)',
     },
     commentInputGradientWrap: {
         flex: 1,
         borderRadius: 8,
-        borderWidth: 2,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: P.border,
+        backgroundColor: P.inputBg,
         marginRight: 8,
     },
     commentInput: {
         paddingHorizontal: 12,
         paddingVertical: 8,
-        color: '#111827',
+        color: P.text,
         fontSize: 14,
     },
     sendButton: {

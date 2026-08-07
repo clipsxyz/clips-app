@@ -119,6 +119,22 @@ export const GAZETTEER_SHEET_SAVE = {
     } as ViewStyle,
 };
 
+/** View Profile night-atlas canvas (comments / pull-up cards). */
+export const GAZETTEER_SHEET_PASSPORT = {
+    background: {
+        backgroundColor: '#060d16',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+    } as ViewStyle,
+    handle: {
+        width: 40,
+        backgroundColor: 'rgba(255,255,255,0.28)',
+    } as ViewStyle,
+};
+
 /** Sticker picker (#120a1c). */
 export const GAZETTEER_SHEET_STICKER = {
     background: {
