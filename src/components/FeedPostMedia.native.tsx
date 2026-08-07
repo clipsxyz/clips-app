@@ -20,7 +20,7 @@ import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { ViewType, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
-import { subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
+import { getActiveFeedVideoPostId, subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 import {
@@ -32,9 +32,11 @@ import {
 } from '../utils/effectiveTextPostStyleNative';
 import { postHasVideoMedia } from '../utils/postMedia';
 import {
+    MOCK_FEED_BUNDLED_VIDEO_POSTER,
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
     mockFeedVideoSource,
+    resolveDemoVideoPosterSource,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
 import { FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
@@ -68,6 +70,11 @@ type Props = {
     mode?: 'feed' | 'detail';
     /** Feed only: true when this card is the active autoplay target. */
     isActive?: boolean;
+    /**
+     * Android: unmount the native Video surface (e.g. while comments sheet is open).
+     * Paused TextureViews still punch through Modals on some OEMs.
+     */
+    suspendNativeVideo?: boolean;
     /** Feed autoplay is muted by default (global mute pref). */
     muted?: boolean;
     style?: StyleProp<ViewStyle>;
@@ -89,15 +96,23 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         onMediaLoad,
         mode = 'feed',
         isActive = false,
+        suspendNativeVideo = false,
         muted = true,
         style,
         onOpenScenes,
     },
     ref,
 ) {
+    const [storeIsActiveVideo, setStoreIsActiveVideo] = useState(
+        () => mode === 'feed' && getActiveFeedVideoPostId() === String(post.id),
+    );
+    /** FeedScreen passes focus/comments gate; the active-post store picks which card plays. */
+    const playActive = mode === 'feed' ? Boolean(isActive) && storeIsActiveVideo : isActive;
+
     const [loadingByUrl, setLoadingByUrl] = useState<Record<string, boolean>>({});
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
+    const pendingSeekRef = useRef<number | null>(null);
     /** Per-raw-URL remote fallback after local/demo path fails (mirrors web Media). */
     const [videoUrlFallbackByRaw, setVideoUrlFallbackByRaw] = useState<Record<string, string>>({});
     const [soundOn, setSoundOn] = useState(!muted);
@@ -110,6 +125,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
     const [burstKey, setBurstKey] = useState(0);
+    /** Avoid Image→Video black flash: keep poster visible until first frame. */
+    const [feedSurfaceReady, setFeedSurfaceReady] = useState(false);
 
     const carouselItems = useMemo(
         () =>
@@ -202,11 +219,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         video &&
         postHasVideoMedia(post) &&
         Boolean(onOpenScenes);
-    const feedShouldPlay = mode === 'feed' && video && isActive && !playFailed;
+    const feedShouldPlay = mode === 'feed' && video && playActive && !playFailed;
     const showMuteButton = video && mode === 'feed' && (feedShouldPlay || muteFlash);
 
     const onFeedVideoProgress = (currentTime: number) => {
-        if (mode !== 'feed' || !isActive) return;
+        if (mode !== 'feed' || !playActive) return;
         setFeedVideoHandoff(post.id, { currentTime, muted: !soundOn });
     };
 
@@ -252,30 +269,60 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
         return subscribeActiveFeedVideo((activeId) => {
-            if (activeId !== post.id) {
+            const mine = activeId != null && String(activeId) === String(post.id);
+            setStoreIsActiveVideo(mine);
+            if (!mine) {
                 setPlayFailed(false);
                 setPaused(true);
+                setFeedSurfaceReady(false);
             }
         });
     }, [mode, post.id, video]);
 
     useEffect(() => {
-        if (mode !== 'feed' || !video) return;
-        setPaused(!isActive);
-    }, [isActive, mode, video]);
-
-    useEffect(() => {
-        if (mode !== 'feed' || !video || !isActive) return;
-        const handoff = consumeFeedVideoHandoff(post.id);
-        if (!handoff || handoff.currentTime <= 0) {
-            if (handoff) setSoundOn(!handoff.muted);
+        if (!playActive) {
+            setFeedSurfaceReady(false);
             return;
         }
+        // Fallback if onReadyForDisplay never fires on this OEM.
+        const t = setTimeout(() => setFeedSurfaceReady(true), 700);
+        return () => clearTimeout(t);
+    }, [playActive, post.id]);
+
+    useEffect(() => {
+        if (mode !== 'feed' || !video) return;
+        setPaused(!playActive);
+    }, [playActive, mode, video]);
+
+    // Resume after Scenes / comments: consume handoff when the native surface is allowed
+    // again. Keep pendingSeekRef until onLoad seeks — do not clear it eagerly.
+    useEffect(() => {
+        if (mode !== 'feed' || !video || !playActive || suspendNativeVideo) return;
+        const handoff = consumeFeedVideoHandoff(post.id);
+        if (!handoff) return;
         setSoundOn(!handoff.muted);
+        setPlayFailed(false);
+        if (handoff.currentTime <= 0) return;
+        pendingSeekRef.current = handoff.currentTime;
         requestAnimationFrame(() => {
-            feedVideoRef.current?.seek(handoff.currentTime);
+            const t = pendingSeekRef.current;
+            if (t != null && t > 0) feedVideoRef.current?.seek(t);
         });
-    }, [isActive, mode, post.id, video]);
+    }, [playActive, mode, post.id, suspendNativeVideo, video]);
+
+    useEffect(() => {
+        if (mode !== 'feed' || !video || !playActive || suspendNativeVideo) return;
+        const t = pendingSeekRef.current;
+        if (t == null || t <= 0) return;
+        const id = requestAnimationFrame(() => {
+            setTimeout(() => {
+                const pending = pendingSeekRef.current;
+                if (pending == null || pending <= 0) return;
+                feedVideoRef.current?.seek(pending);
+            }, 40);
+        });
+        return () => cancelAnimationFrame(id);
+    }, [playActive, mode, post.id, suspendNativeVideo, video]);
 
     useEffect(() => {
         setSoundOn(!muted);
@@ -359,6 +406,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         onOpenScenes?.();
     }, [onOpenScenes]);
 
+    // FlatList requires TextureView — SurfaceView punches through and blanks the whole screen on many OEMs.
     const feedVideoSurfaceProps =
         Platform.OS === 'android' && mode === 'feed'
             ? { viewType: ViewType.TEXTURE as const, useTextureView: true, disableFocus: true as const }
@@ -455,66 +503,94 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slideIsVideo = item?.type === 'video' || (!item && isVideoPost(post));
         const slideVideo = !textOnly && slideIsVideo;
         const slideFeedPlay =
-            mode === 'feed' && slideVideo && isActive && slideIndex === currentIndex && !playFailed;
+            mode === 'feed' && slideVideo && playActive && slideIndex === currentIndex && !playFailed;
         const showLoader =
             !slideVideo && !!loadingByUrl[slideRawUrl] && !loadedUrlsRef.current.has(slideRawUrl);
 
         const slidePoster =
             (item as { posterUrl?: string } | undefined)?.posterUrl || postLevelPoster;
+        const slidePosterSource =
+            resolveDemoVideoPosterSource(slideRawUrl) ||
+            (slidePoster ? { uri: slidePoster } : undefined) ||
+            (slideVideo ? MOCK_FEED_BUNDLED_VIDEO_POSTER : undefined);
 
-        // Preload while the FlatList row is mounted (paused until autoplay). Avoids cold-start delay.
-        const slideUseNativePlayer = mode === 'detail' || (mode === 'feed' && slideVideo);
+        // Active card: native Video. Inactive: poster Image. Fixed parent frame avoids
+        // layout jump; avoid stacking Video on top of Image (blank TextureView hid poster).
+        const slideUseNativePlayer =
+            mode === 'detail' ||
+            (mode === 'feed' &&
+                slideVideo &&
+                !suspendNativeVideo &&
+                playActive &&
+                !playFailed &&
+                slideIndex === currentIndex);
 
         const slideInner = slideVideo ? (
-            slideUseNativePlayer ? (
-                <Video
-                    ref={
-                        mode === 'feed' && slideVideo && slideIndex === currentIndex
-                            ? feedVideoRef
-                            : undefined
-                    }
-                    source={videoSource(slideUrl, slideRawUrl)}
-                    style={frameStyle}
-                    resizeMode={mode === 'detail' ? 'contain' : 'cover'}
-                    controls={mode === 'detail'}
-                    paused={mode === 'detail' ? paused : !slideFeedPlay}
-                    muted={mode === 'feed' ? !soundOn : undefined}
-                    repeat={mode === 'feed'}
-                    poster={slidePoster}
-                    posterResizeMode="cover"
-                    playInBackground={false}
-                    playWhenInactive={false}
-                    ignoreSilentSwitch="ignore"
-                    shutterColor="transparent"
-                    pointerEvents={mediaPointerEvents}
-                    {...feedVideoSurfaceProps}
-                    onLoad={() => markUrlLoaded(slideRawUrl)}
-                    onReadyForDisplay={
-                        mode === 'feed'
-                            ? () => markUrlLoaded(slideRawUrl)
-                            : undefined
-                    }
-                    onProgress={
-                        slideFeedPlay
-                            ? (e) => onFeedVideoProgress(e.currentTime)
-                            : undefined
-                    }
-                    onError={(e) => onVideoError(slideRawUrl, e)}
-                />
-            ) : slidePoster ? (
-                <Image
-                    source={{ uri: slidePoster }}
-                    style={frameStyle}
-                    resizeMode="cover"
-                    resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                    pointerEvents={mediaPointerEvents}
-                    onLoad={() => markUrlLoaded(slideRawUrl)}
-                    onError={() => markUrlLoaded(slideRawUrl)}
-                />
-            ) : (
-                // Quiet black tile until this card becomes active — no videocam glyph flash.
-                <View style={[frameStyle, styles.videoFallback]} pointerEvents={mediaPointerEvents} />
-            )
+            <View style={frameStyle} collapsable={false}>
+                {slidePosterSource ? (
+                    <Image
+                        source={slidePosterSource}
+                        style={styles.mediaFill}
+                        resizeMode="cover"
+                        resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                        pointerEvents={mediaPointerEvents}
+                        onLoad={() => markUrlLoaded(slideRawUrl)}
+                        onError={() => markUrlLoaded(slideRawUrl)}
+                    />
+                ) : (
+                    <View style={[styles.videoFallback, styles.mediaFill]} />
+                )}
+                {slideUseNativePlayer ? (
+                    <Video
+                        ref={
+                            mode === 'feed' && slideVideo && slideIndex === currentIndex
+                                ? feedVideoRef
+                                : undefined
+                        }
+                        source={videoSource(slideUrl, slideRawUrl)}
+                        style={[
+                            styles.mediaFill,
+                            // Invisible until first frame — poster underneath stays visible (no black flash).
+                            mode === 'feed' && !feedSurfaceReady ? styles.videoHidden : null,
+                        ]}
+                        resizeMode="cover"
+                        controls={mode === 'detail'}
+                        paused={mode === 'detail' ? paused : !slideFeedPlay}
+                        muted={mode === 'feed' ? !soundOn : undefined}
+                        repeat={mode === 'feed'}
+                        playInBackground={false}
+                        playWhenInactive={false}
+                        ignoreSilentSwitch="ignore"
+                        pointerEvents={mediaPointerEvents}
+                        {...feedVideoSurfaceProps}
+                        onLoad={() => {
+                            markUrlLoaded(slideRawUrl);
+                            const t = pendingSeekRef.current;
+                            if (t != null && t > 0 && mode === 'feed') {
+                                pendingSeekRef.current = null;
+                                feedVideoRef.current?.seek(t);
+                            }
+                        }}
+                        onReadyForDisplay={
+                            mode === 'feed'
+                                ? () => {
+                                      markUrlLoaded(slideRawUrl);
+                                      setFeedSurfaceReady(true);
+                                  }
+                                : undefined
+                        }
+                        onProgress={
+                            slideFeedPlay
+                                ? (e) => {
+                                      if (e.currentTime > 0.02) setFeedSurfaceReady(true);
+                                      onFeedVideoProgress(e.currentTime);
+                                  }
+                                : undefined
+                        }
+                        onError={(e) => onVideoError(slideRawUrl, e)}
+                    />
+                ) : null}
+            </View>
         ) : (
             <Image
                 source={{ uri: slideUrl }}
@@ -692,6 +768,12 @@ const styles = StyleSheet.create({
     },
     videoFallback: {
         backgroundColor: '#000000',
+    },
+    mediaFill: {
+        ...StyleSheet.absoluteFill,
+    },
+    videoHidden: {
+        opacity: 0,
     },
     textOnlyCard: {
         borderRadius: 16,

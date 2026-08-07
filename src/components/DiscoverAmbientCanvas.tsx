@@ -88,6 +88,19 @@ export default function DiscoverAmbientCanvas({
             window.visualViewport?.addEventListener('scroll', resize);
         }
 
+        // Sheet/card parents often grow after mount (e.g. likers load) without a window
+        // resize — observe the parent so absolute canvases rematch content height.
+        let parentObserver: ResizeObserver | undefined;
+        if (!fixed && typeof ResizeObserver !== 'undefined') {
+            const parent = canvas.parentElement;
+            if (parent) {
+                parentObserver = new ResizeObserver(() => {
+                    resize();
+                });
+                parentObserver.observe(parent);
+            }
+        }
+
         const onVisibility = () => {
             paused = document.hidden;
             if (paused) drawDiscoverAmbientWave(ctx, width, height, timeRef.current, palette);
@@ -95,16 +108,19 @@ export default function DiscoverAmbientCanvas({
 
         document.addEventListener('visibilitychange', onVisibility);
 
+        const cleanupListeners = () => {
+            window.removeEventListener('resize', resize);
+            if (!lockViewport) {
+                window.visualViewport?.removeEventListener('resize', resize);
+                window.visualViewport?.removeEventListener('scroll', resize);
+            }
+            document.removeEventListener('visibilitychange', onVisibility);
+            parentObserver?.disconnect();
+        };
+
         if (reducedMotion) {
             drawDiscoverAmbientWave(ctx, width, height, 0, palette);
-            return () => {
-                window.removeEventListener('resize', resize);
-                if (!lockViewport) {
-                    window.visualViewport?.removeEventListener('resize', resize);
-                    window.visualViewport?.removeEventListener('scroll', resize);
-                }
-                document.removeEventListener('visibilitychange', onVisibility);
-            };
+            return cleanupListeners;
         }
 
         const animate = () => {
@@ -118,12 +134,7 @@ export default function DiscoverAmbientCanvas({
         frameRef.current = requestAnimationFrame(animate);
 
         return () => {
-            window.removeEventListener('resize', resize);
-            if (!lockViewport) {
-                window.visualViewport?.removeEventListener('resize', resize);
-                window.visualViewport?.removeEventListener('scroll', resize);
-            }
-            document.removeEventListener('visibilitychange', onVisibility);
+            cleanupListeners();
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
         };
     }, [fixed, lockViewport, variant, palette]);

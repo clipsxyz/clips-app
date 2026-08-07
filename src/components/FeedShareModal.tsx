@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
     Alert,
     Modal,
+    Platform,
     Share,
     StyleSheet,
     Text,
@@ -14,7 +15,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import type { Post } from '../types';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import { useAuth } from '../context/Auth';
-import { getFollowedUsers, regeneratePublicShareToken } from '../api/posts';
+import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
 import Avatar from './Avatar.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
@@ -23,9 +24,11 @@ type Props = {
     post: Post | null;
     isOpen: boolean;
     onClose: () => void;
+    /** Fired after a share is recorded (system share, copy link, etc.). */
+    onShareSuccess?: (postId: string) => void;
 };
 
-export default function FeedShareModal({ post, isOpen, onClose }: Props) {
+export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }: Props) {
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
     const [followedHandles, setFollowedHandles] = useState<string[]>([]);
@@ -63,13 +66,31 @@ export default function FeedShareModal({ post, isOpen, onClose }: Props) {
         return followedHandles.filter((h) => h.toLowerCase().includes(q));
     }, [followedHandles, searchQuery]);
 
+    const recordShare = async () => {
+        if (!post?.id || !user?.id) return;
+        try {
+            await incrementShares(String(user.id), String(post.id));
+            onShareSuccess?.(String(post.id));
+        } catch (err) {
+            console.warn('incrementShares failed:', err);
+        }
+    };
+
     const handleShareSystem = async () => {
         if (!post) return;
         try {
-            await Share.share({
+            const result = await Share.share({
                 message: shareMessage,
                 url: post.mediaUrl || shareUrl,
             });
+            // iOS: sharedAction vs dismissedAction is reliable.
+            // Android: Share often resolves sharedAction even on dismiss — only count
+            // when an activityType is present (some OEMs) or skip auto-count.
+            if (result.action === Share.sharedAction) {
+                if (Platform.OS === 'ios' || result.activityType) {
+                    await recordShare();
+                }
+            }
         } catch (err: unknown) {
             console.error('Error sharing:', err);
         } finally {
@@ -81,6 +102,7 @@ export default function FeedShareModal({ post, isOpen, onClose }: Props) {
         if (!post) return;
         try {
             await Clipboard.setString(shareUrl);
+            await recordShare();
             Alert.alert('Link copied', 'Post link copied to clipboard.');
         } catch (err) {
             console.error('Clipboard failed:', err);
@@ -114,7 +136,12 @@ export default function FeedShareModal({ post, isOpen, onClose }: Props) {
         // We still match the web "Share to" row visually, and open the system share sheet.
         if (!post) return;
         try {
-            await Share.share({ message: shareMessage, url: post.mediaUrl || shareUrl });
+            const result = await Share.share({ message: shareMessage, url: post.mediaUrl || shareUrl });
+            if (result.action === Share.sharedAction) {
+                if (Platform.OS === 'ios' || result.activityType) {
+                    await recordShare();
+                }
+            }
         } catch (err) {
             console.warn(`Share to ${appLabel} failed:`, err);
         } finally {

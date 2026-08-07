@@ -136,8 +136,8 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 45,
-        elevation: 20,
+        zIndex: 80,
+        elevation: 40,
         backgroundColor: '#060d16',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
@@ -152,9 +152,11 @@ const styles = StyleSheet.create({
     },
     canvas: {
         flex: 1,
+        backgroundColor: '#060d16',
     },
     canvasContent: {
         flex: 1,
+        backgroundColor: '#060d16',
     },
     dragHandleRow: {
         alignItems: 'center',

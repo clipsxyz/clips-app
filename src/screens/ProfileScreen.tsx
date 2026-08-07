@@ -67,7 +67,6 @@ import {
     incrementViews,
     deletePost,
     reclipPost,
-    incrementShares,
 } from '../api/posts';
 import { getCollectionsForPost } from '../api/collections';
 import { updatePost as apiUpdatePost } from '../api/client';
@@ -1531,7 +1530,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 onPostPress={() =>
                                     navigation.navigate('PostDetail', { postId: item.id })
                                 }
-                                onShareSuccess={(postId) => {
+                                onShareToStoriesSuccess={(postId) => {
                                     setPosts((prev) =>
                                         prev.map((p) =>
                                             p.id === postId
@@ -1707,6 +1706,21 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 post={myFeedSharePost || ({} as Post)}
                 isOpen={!!myFeedSharePost}
                 onClose={() => setMyFeedSharePost(null)}
+                onShareSuccess={(postId) => {
+                    setPosts((prev) =>
+                        prev.map((p) =>
+                            p.id === postId
+                                ? {
+                                      ...p,
+                                      stats: {
+                                          ...p.stats,
+                                          shares: (p.stats?.shares ?? 0) + 1,
+                                      },
+                                  }
+                                : p,
+                        ),
+                    );
+                }}
             />
 
             {/* My Feed Comments Modal */}

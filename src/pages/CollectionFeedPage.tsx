@@ -224,6 +224,12 @@ export default function CollectionFeedPage() {
                         setShareModalOpen(false);
                         setSelectedPostForShare(null);
                     }}
+                    onShareSuccess={(postId) =>
+                        updateOne(postId, (p) => ({
+                            ...p,
+                            stats: { ...p.stats, shares: p.stats.shares + 1 },
+                        }))
+                    }
                 />
             )}
             {selectedPostForScenes && (

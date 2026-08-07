@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedBarChartIcon from './FeedBarChartIcon.native';
 import FeedLiveShareIcon from './FeedLiveShareIcon.native';
@@ -11,6 +11,8 @@ const ACTION_HIT = 40;
 
 type Props = {
     onShare?: () => void;
+    /** Times this post has been shared (external + stories). */
+    shares?: number;
     showMetrics?: boolean;
     metricsOpen?: boolean;
     onToggleMetrics?: () => void;
@@ -19,6 +21,7 @@ type Props = {
 /** Web EngagementBar right cluster: external share + optional boost metrics. */
 export default function FeedEngagementRightActions({
     onShare,
+    shares = 0,
     showMetrics = false,
     metricsOpen = false,
     onToggleMetrics,
@@ -28,10 +31,12 @@ export default function FeedEngagementRightActions({
             {onShare ? (
                 <TouchableOpacity
                     onPress={onShare}
-                    style={styles.button}
-                    accessibilityLabel="Share post"
+                    style={styles.shareButton}
+                    accessibilityLabel={`Share post, ${shares} shares`}
+                    accessibilityRole="button"
                 >
                     <FeedLiveShareIcon size={ACTION_ICON} color="#FFFFFF" />
+                    <Text style={styles.count}>{shares}</Text>
                 </TouchableOpacity>
             ) : null}
             {showMetrics && onToggleMetrics ? (
@@ -54,11 +59,26 @@ const styles = StyleSheet.create({
         columnGap: 8,
         flexShrink: 0,
     },
+    shareButton: {
+        minHeight: ACTION_HIT,
+        minWidth: ACTION_HIT,
+        paddingHorizontal: 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 3,
+        borderRadius: ACTION_HIT / 2,
+    },
     button: {
         width: ACTION_HIT,
         height: ACTION_HIT,
         borderRadius: ACTION_HIT / 2,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    count: {
+        fontSize: FEED_UI.type.actionCount,
+        fontWeight: '400',
+        color: '#FFFFFF',
+        fontVariant: ['tabular-nums'],
     },
 });

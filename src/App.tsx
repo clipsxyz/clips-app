@@ -4628,12 +4628,13 @@ function EngagementBar({
         <div className={`flex items-center flex-shrink-0 ${rowGap}`}>
           {/* Share â€“ VS Code Live Share style icon (VscLiveShare) */}
           <button
-            className={`flex items-center justify-center w-11 h-11 rounded-full transition-opacity hover:opacity-70 active:opacity-50`}
+            className={`flex items-center gap-1 min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50`}
             onClick={() => _onShare?.()}
-            aria-label="Share post"
+            aria-label={`Share post, ${shares} shares`}
             title="Share post"
           >
             <VscLiveShare className="w-6 h-6 text-white" />
+            <span className="text-xs text-white tabular-nums">{shares}</span>
           </button>
 
           {showBoostButton && onBoost && (
@@ -4663,52 +4664,54 @@ function EngagementBar({
         />
       </div>
 
-      {/* Likes & plays sheet */}
+      {/* Likes & plays sheet — View Profile passport canvas */}
       {showLikesSheet && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center px-3 pb-4"
           onClick={() => setShowLikesSheet(false)}
         >
           <div
-            className="w-full max-w-md bg-[#030712] rounded-3xl rounded-b-none pt-3 pb-4 px-4 shadow-xl border border-white/5 max-h-[70vh] flex flex-col"
+            className="relative w-full max-w-md overflow-hidden rounded-3xl rounded-b-none border border-white/10 border-b-0 bg-[#060d16] pt-3 pb-4 shadow-xl max-h-[70vh] flex flex-col text-[#e8eef2]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-center mb-3">
-              <div className="w-10 h-1 rounded-full bg-white/20" />
+            <DiscoverAmbientCanvas fixed={false} variant="passport" />
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col px-4">
+            <div className="flex items-center justify-center mb-3 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full bg-white/30" />
             </div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs uppercase tracking-[0.16em] text-gray-400">
+            <div className="flex items-center justify-between mb-3 flex-shrink-0">
+              <span className="text-xs uppercase tracking-[0.16em] text-white/55">
                 Likes and plays
               </span>
               <button
                 onClick={() => setShowLikesSheet(false)}
-                className="p-1.5 rounded-full hover:bg-white/10 text-gray-400"
+                className="p-1.5 rounded-full hover:bg-white/10 text-white/55"
                 aria-label="Close"
               >
                 <FiX className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex items-center justify-between mb-4 text-sm text-gray-200">
+            <div className="flex items-center justify-between mb-4 text-sm text-[#e8eef2] flex-shrink-0">
               <div className="flex items-center gap-2">
                 <FiThumbsUp className="w-4 h-4 text-pink-400" />
-                <span className="text-xs text-gray-400">Likes</span>
+                <span className="text-xs text-white/55">Likes</span>
                 <span className="font-semibold text-sm">{sheetLikes.toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-2">
                 <FiEye className="w-4 h-4 text-blue-400" />
-                <span className="text-xs text-gray-400">Views</span>
+                <span className="text-xs text-white/55">Views</span>
                 <span className="font-semibold text-sm">{sheetViews.toLocaleString()}</span>
               </div>
             </div>
 
-            <div className="border-t border-white/10 -mx-4 mb-2" />
+            <div className="border-t border-white/10 -mx-4 mb-2 flex-shrink-0" />
 
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
               {likersLoading ? (
-                <div className="py-8 text-center text-xs text-gray-500">Loading…</div>
+                <div className="py-8 text-center text-xs text-white/45">Loading…</div>
               ) : likers.length === 0 ? (
-                <div className="py-8 text-center text-xs text-gray-500">
+                <div className="py-8 text-center text-xs text-white/45">
                   No likes yet.
                 </div>
               ) : (
@@ -4733,11 +4736,11 @@ function EngagementBar({
                           size="sm"
                         />
                         <div className="min-w-0">
-                          <div className="text-sm font-medium text-gray-100 truncate">
+                          <div className="text-sm font-medium text-[#e8eef2] truncate">
                             {row.display_name || row.handle}
                           </div>
                           {row.display_name ? (
-                            <div className="text-xs text-gray-400 truncate">{row.handle}</div>
+                            <div className="text-xs text-white/55 truncate">{row.handle}</div>
                           ) : null}
                         </div>
                       </button>
@@ -4747,8 +4750,8 @@ function EngagementBar({
                           onClick={() => void handleToggleFollowFromLikes(row.handle)}
                           className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide ${
                             isFollowing
-                              ? 'bg-white/5 text-gray-200 border border-white/20'
-                              : 'bg-blue-500 text-white border border-blue-400'
+                              ? 'bg-[rgba(15,36,48,0.72)] text-white/70 border border-white/15'
+                              : 'bg-[#3d9b8f]/35 text-white border border-[#3d9b8f]/55'
                           }`}
                         >
                           {isFollowing ? 'Following' : 'Follow'}
@@ -4758,6 +4761,7 @@ function EngagementBar({
                   );
                 })
               )}
+            </div>
             </div>
           </div>
         </div>
@@ -9340,6 +9344,12 @@ function FeedPageWrapper() {
             setShareModalOpen(false);
             setSelectedPostForShare(null);
           }}
+          onShareSuccess={(postId) =>
+            updateOne(postId, (p) => ({
+              ...p,
+              stats: { ...p.stats, shares: p.stats.shares + 1 },
+            }))
+          }
         />
       )}
 
@@ -10288,6 +10298,12 @@ function BoostPageWrapper() {
             setShareModalOpen(false);
             setSelectedPostForShare(null);
           }}
+          onShareSuccess={(postId) =>
+            updateOne(postId, (p) => ({
+              ...p,
+              stats: { ...p.stats, shares: p.stats.shares + 1 },
+            }))
+          }
         />
       )}
 

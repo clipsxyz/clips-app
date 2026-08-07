@@ -1,9 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import {
-    BottomSheetFlatList,
-    BottomSheetView,
-} from '@gorhom/bottom-sheet';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {
     fetchPostLikers,
@@ -12,7 +9,19 @@ import {
 } from '../api/postLikers';
 import Avatar from './Avatar';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DARK } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, {
+    GAZETTEER_SHEET_PASSPORT,
+} from './GazetteerBottomSheetModal.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+
+const P = {
+    text: '#e8eef2',
+    muted: 'rgba(232, 238, 242, 0.62)',
+    border: 'rgba(255,255,255,0.12)',
+    chipBg: 'rgba(15, 36, 48, 0.72)',
+    accent: PASSPORT_PALETTE.wavePrimary,
+};
 
 type Props = {
     visible: boolean;
@@ -25,7 +34,7 @@ type Props = {
     onVisitProfile?: (handle: string) => void;
 };
 
-/** Web EngagementBar likes sheet — App.tsx `Likes and plays` + @gorhom/bottom-sheet. */
+/** Feed likes & plays sheet — View Profile passport canvas. */
 export default function FeedLikesSheet({
     visible,
     postId,
@@ -91,7 +100,12 @@ export default function FeedLikesSheet({
                 return copy;
             });
             try {
-                const result = await toggleFollowFromLikesSheet(userId, handle, next, viewerHandle || undefined);
+                const result = await toggleFollowFromLikesSheet(
+                    userId,
+                    handle,
+                    next,
+                    viewerHandle || undefined,
+                );
                 if (result.requested || !result.following) {
                     setFollowing((prev) => {
                         const copy = new Set(prev);
@@ -115,6 +129,40 @@ export default function FeedLikesSheet({
             }
         },
         [following, userId, viewerHandle],
+    );
+
+    const listHeader = useMemo(
+        () => (
+            <View style={styles.sheetChrome}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Likes and plays</Text>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        style={styles.closeBtn}
+                        hitSlop={8}
+                        accessibilityLabel="Close"
+                    >
+                        <Icon name="close" size={16} color={P.muted} />
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.statsRow}>
+                    <View style={styles.stat}>
+                        <FeedLikeThumbsIcon size={16} color="#F472B6" />
+                        <Text style={styles.statLabel}>Likes</Text>
+                        <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.stat}>
+                        <Icon name="eye-outline" size={16} color="#60A5FA" />
+                        <Text style={styles.statLabel}>Views</Text>
+                        <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
+                    </View>
+                </View>
+
+                <View style={styles.listDivider} />
+            </View>
+        ),
+        [onClose, sheetLikes, sheetViews],
     );
 
     const renderItem = useCallback(
@@ -175,60 +223,55 @@ export default function FeedLikesSheet({
             visible={visible}
             onDismiss={onClose}
             snapPoints={['70%']}
-            backgroundStyle={GAZETTEER_SHEET_DARK.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_DARK.handle}
+            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
         >
-            <BottomSheetView style={styles.sheetChrome}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Likes and plays</Text>
-                    <TouchableOpacity
-                        onPress={onClose}
-                        style={styles.closeBtn}
-                        hitSlop={8}
-                        accessibilityLabel="Close"
-                    >
-                        <Icon name="close" size={16} color="#9CA3AF" />
-                    </TouchableOpacity>
+            <PassportSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+                {/*
+                  Column layout (regular View, not BottomSheetView sibling) keeps chrome
+                  pinned while FlatList scrolls below — avoids FlatList painting over header.
+                */}
+                <View style={styles.body}>
+                    {listHeader}
+                    <BottomSheetFlatList
+                        style={styles.listFlex}
+                        data={loading ? [] : likers}
+                        keyExtractor={(item, index) => `${item.handle}-${index}`}
+                        renderItem={renderItem}
+                        contentContainerStyle={styles.list}
+                        showsVerticalScrollIndicator={false}
+                        ListEmptyComponent={
+                            <Text style={styles.empty}>
+                                {loading ? 'Loading…' : 'No likes yet.'}
+                            </Text>
+                        }
+                    />
                 </View>
-
-                <View style={styles.statsRow}>
-                    <View style={styles.stat}>
-                        <FeedLikeThumbsIcon size={16} color="#F472B6" />
-                        <Text style={styles.statLabel}>Likes</Text>
-                        <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.stat}>
-                        <Icon name="eye-outline" size={16} color="#60A5FA" />
-                        <Text style={styles.statLabel}>Views</Text>
-                        <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
-                    </View>
-                </View>
-
-                <View style={styles.listDivider} />
-            </BottomSheetView>
-
-            {loading ? (
-                <BottomSheetView>
-                    <Text style={styles.empty}>Loading…</Text>
-                </BottomSheetView>
-            ) : (
-                <BottomSheetFlatList
-                    data={likers}
-                    keyExtractor={(item, index) => `${item.handle}-${index}`}
-                    renderItem={renderItem}
-                    contentContainerStyle={styles.list}
-                    showsVerticalScrollIndicator={false}
-                    ListEmptyComponent={<Text style={styles.empty}>No likes yet.</Text>}
-                />
-            )}
+            </PassportSheetCanvas>
         </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
+    canvas: {
+        flex: 1,
+    },
+    canvasContent: {
+        flex: 1,
+    },
+    body: {
+        flex: 1,
+    },
     sheetChrome: {
-        paddingTop: 4,
+        zIndex: 2,
         paddingHorizontal: 16,
+        paddingTop: 4,
+        paddingBottom: 4,
+        // Slight wash so list items never read through the pinned chrome on overscroll.
+        backgroundColor: 'rgba(6, 13, 22, 0.94)',
+    },
+    listFlex: {
+        flex: 1,
     },
     header: {
         flexDirection: 'row',
@@ -239,7 +282,7 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#9CA3AF',
+        color: P.muted,
         textTransform: 'uppercase',
         letterSpacing: 2,
     },
@@ -260,23 +303,23 @@ const styles = StyleSheet.create({
     },
     statLabel: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: P.muted,
     },
     statValue: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#E5E7EB',
+        color: P.text,
     },
     listDivider: {
         marginHorizontal: -16,
-        marginBottom: 8,
+        marginBottom: 4,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(255,255,255,0.1)',
+        borderTopColor: P.border,
     },
     list: {
         paddingHorizontal: 16,
-        paddingBottom: 8,
-        paddingRight: 20,
+        paddingBottom: 24,
+        paddingTop: 4,
     },
     row: {
         flexDirection: 'row',
@@ -299,38 +342,38 @@ const styles = StyleSheet.create({
     displayName: {
         fontSize: 14,
         fontWeight: '500',
-        color: '#F3F4F6',
+        color: P.text,
     },
     subHandle: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: P.muted,
     },
     followBtn: {
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 999,
-        backgroundColor: '#3B82F6',
+        backgroundColor: 'rgba(61,155,143,0.35)',
         borderWidth: 1,
-        borderColor: '#60A5FA',
+        borderColor: 'rgba(61,155,143,0.55)',
     },
     followBtnActive: {
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: P.chipBg,
+        borderColor: P.border,
     },
     followBtnText: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: P.text,
         textTransform: 'uppercase',
         letterSpacing: 0.8,
     },
     followBtnTextActive: {
-        color: '#E5E7EB',
+        color: P.muted,
     },
     empty: {
         textAlign: 'center',
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
         paddingVertical: 32,
     },
 });

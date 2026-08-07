@@ -38,6 +38,11 @@ export const MOCK_FEED_VIDEO_POSTERS = {
     elephants: '/demo-videos/bbb-poster.jpg',
 } as const;
 
+/** Web stub — native uses bundled require via `mockFeedVideos.native.ts`. */
+export const MOCK_FEED_BUNDLED_VIDEO_POSTER = {
+    uri: '/demo-videos/bbb-poster.jpg',
+} as const;
+
 /** @deprecated Unsplash stills — reject if found in old collection storage. */
 const LEGACY_FAKE_UNSPLASH_POSTERS = [
     'https://images.unsplash.com/photo-1441974231531-c6227db76b6e',

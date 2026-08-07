@@ -28,7 +28,7 @@ import {
 } from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
-import { getPostById, getFollowedUsers, getState, toggleLike } from '../api/posts';
+import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } from '../api/posts';
 import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
@@ -577,6 +577,12 @@ export default function MessagesPage() {
                         const post = await getPostById(state.sharePostId, user?.id);
                         if (post) setSharedPosts(prev => ({ ...prev, [state.sharePostId!]: post }));
                     } catch (_) { /* ignore */ }
+                    if (user?.id) {
+                        try {
+                            await incrementShares(String(user.id), String(state.sharePostId));
+                            window.dispatchEvent(new CustomEvent(`shareAdded-${state.sharePostId}`));
+                        } catch (_) { /* ignore */ }
+                    }
                 }
                 // Clear state so placeholder doesn't show and effect won't re-run
                 navigate(location.pathname, { replace: true, state: {} });

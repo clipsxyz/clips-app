@@ -22,7 +22,6 @@ import {
     getPostById,
     toggleLike,
     incrementViews,
-    incrementShares,
     deletePost,
     reclipPost,
     setReclipState,
@@ -234,14 +233,6 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const openShare = async () => {
         if (!post) return;
         setShareModalOpen(true);
-        try {
-            await incrementShares(userId, post.id);
-            setPost((p) =>
-                p ? { ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } } : null
-            );
-        } catch (err) {
-            console.error('Error incrementing shares:', err);
-        }
     };
 
     const handleLike = async () => {
@@ -509,7 +500,18 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 </KeyboardAvoidingView>
             </Modal>
 
-            <FeedShareModal post={post} isOpen={shareModalOpen} onClose={() => setShareModalOpen(false)} />
+            <FeedShareModal
+                post={post}
+                isOpen={shareModalOpen}
+                onClose={() => setShareModalOpen(false)}
+                onShareSuccess={(postId) => {
+                    setPost((p) =>
+                        p && String(p.id) === String(postId)
+                            ? { ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }
+                            : p,
+                    );
+                }}
+            />
 
             <PostOverflowMenuModal
                 visible={overflowVisible}

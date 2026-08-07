@@ -176,6 +176,7 @@ export default function MyFeedPostCard({
                     showMetrics={Boolean(post.isBoosted)}
                     metricsOpen={boostMetricsOpen}
                     onToggleMetrics={() => setBoostMetricsOpen((v) => !v)}
+                    shares={post.stats?.shares ?? 0}
                     onShare={() => setShareModalOpen(true)}
                 />
             </View>
@@ -215,6 +216,7 @@ export default function MyFeedPostCard({
                 post={post}
                 isOpen={shareModalOpen}
                 onClose={() => setShareModalOpen(false)}
+                onShareSuccess={onShareToStoriesSuccess}
             />
         </TouchableOpacity>
     );

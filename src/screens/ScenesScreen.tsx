@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { StatusBar } from 'react-native';
+import { InteractionManager, StatusBar } from 'react-native';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import ScenesViewer from '../components/ScenesViewer.native';
@@ -15,6 +15,20 @@ type RouteParams = {
     feedLabel?: string;
 };
 
+function scenesPostNeedsFeedSync(prev: Post | undefined, next: Post): boolean {
+    if (!prev) return true;
+    return (
+        prev.isLiked !== next.isLiked ||
+        prev.isFollowing !== next.isFollowing ||
+        prev.text !== next.text ||
+        prev.stats?.likes !== next.stats?.likes ||
+        prev.stats?.comments !== next.stats?.comments ||
+        prev.stats?.shares !== next.stats?.shares ||
+        prev.stats?.views !== next.stats?.views ||
+        prev.stats?.reclips !== next.stats?.reclips
+    );
+}
+
 export default function ScenesScreen({ route, navigation }: any) {
     const { user } = useAuth();
     const params = route.params as RouteParams;
@@ -22,19 +36,29 @@ export default function ScenesScreen({ route, navigation }: any) {
 
     const handleClose = useCallback(
         (savedTime?: number, postId?: string, mutedState?: boolean) => {
+            const initialById = new Map(
+                (params.posts ?? []).map((p) => [String(p.id), p] as const),
+            );
             for (const p of posts) {
-                setScenesPostUpdate(p);
+                if (scenesPostNeedsFeedSync(initialById.get(String(p.id)), p)) {
+                    setScenesPostUpdate(p);
+                }
             }
-            flushScenesPostUpdates();
-            if (postId != null && savedTime != null) {
+            if (postId != null) {
                 setFeedVideoHandoff(postId, {
-                    currentTime: savedTime,
+                    currentTime: Math.max(0, savedTime ?? 0),
                     muted: mutedState ?? params.initialMuted ?? true,
+                    fromScenes: true,
                 });
             }
+            // Pop first, then sync feed — flushing before goBack remeasures FlatList
+            // mid-transition and makes the return scroll jump.
             navigation.goBack();
+            InteractionManager.runAfterInteractions(() => {
+                flushScenesPostUpdates();
+            });
         },
-        [navigation, params.initialMuted, posts],
+        [navigation, params.initialMuted, params.posts, posts],
     );
 
     return (

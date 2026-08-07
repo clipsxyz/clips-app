@@ -30,7 +30,6 @@ import PassportSheetCanvas from './PassportSheetCanvas.native';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import Video from 'react-native-video';
 import Avatar from './Avatar';
 import FeedChevronIcon from './FeedChevronIcon.native';
 import FeedCloseIcon from './FeedCloseIcon.native';
@@ -40,7 +39,10 @@ import FeedSendIcon from './FeedSendIcon.native';
 import FeedSmileIcon from './FeedSmileIcon.native';
 import { resolveAvatarDimensions } from './avatarProps';
 import { getAvatarForHandle } from '../api/users';
-import { mockFeedVideoSource } from '../constants/mockFeedVideos';
+import {
+    MOCK_FEED_BUNDLED_VIDEO_POSTER,
+    resolveDemoVideoPosterSource,
+} from '../constants/mockFeedVideos';
 import { isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import {
     addComment,
@@ -495,6 +497,8 @@ export default function PostCommentsSheet({
     const { user } = useAuth();
     const navigation = useNavigation<any>();
     const insets = useSafeAreaInsets();
+    const insetsBottomRef = useRef(insets.bottom);
+    insetsBottomRef.current = insets.bottom;
     const listRef = useRef<FlatList<Comment> | null>(null);
 
     const [post, setPost] = useState<Post | null>(postProp ?? null);
@@ -508,7 +512,6 @@ export default function PostCommentsSheet({
     const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
     const [replyingTo, setReplyingTo] = useState<{ id: string; handle: string } | null>(null);
     const [submittingReply, setSubmittingReply] = useState(false);
-    const [scenesKeyboardPad, setScenesKeyboardPad] = useState(0);
 
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
@@ -836,25 +839,6 @@ export default function PostCommentsSheet({
         if (!isOpen) setReplyingTo(null);
     }, [isOpen]);
 
-    useEffect(() => {
-        if (!isScenesEmbed || !isOpen) {
-            setScenesKeyboardPad(0);
-            return;
-        }
-        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-        const onShow = Keyboard.addListener(showEvent, (e) => {
-            setScenesKeyboardPad(Math.max(0, e.endCoordinates.height - insets.bottom));
-        });
-        const onHide = Keyboard.addListener(hideEvent, () => {
-            setScenesKeyboardPad(0);
-        });
-        return () => {
-            onShow.remove();
-            onHide.remove();
-        };
-    }, [isScenesEmbed, isOpen, insets.bottom]);
-
     const scrollReplyIntoView = useCallback(
         (commentId: string) => {
             const index = sortedComments.findIndex((c) => String(c.id) === String(commentId));
@@ -959,95 +943,98 @@ export default function PostCommentsSheet({
         </>
     );
 
-    const sheetChromeHeader = (
-        <>
-            {post?.mediaUrl && !isVideoPost(post) ? (
-                <View style={styles.mediaPreviewRow}>
-                    <View style={styles.mediaPreviewThumb}>
+    const sheetTitleBar = (
+        <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+                {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+            </Text>
+            <View style={styles.modalHeaderRight}>
+                <View style={styles.commentSortToggle}>
+                    <TouchableOpacity
+                        onPress={() => setSortMode('top')}
+                        style={[styles.commentSortButton, sortMode === 'top' && styles.commentSortButtonActive]}
+                    >
+                        <Text
+                            style={[
+                                styles.commentSortButtonText,
+                                sortMode === 'top' && styles.commentSortButtonTextActive,
+                            ]}
+                        >
+                            Top
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setSortMode('newest')}
+                        style={[
+                            styles.commentSortButton,
+                            sortMode === 'newest' && styles.commentSortButtonActive,
+                        ]}
+                    >
+                        <Text
+                            style={[
+                                styles.commentSortButtonText,
+                                sortMode === 'newest' && styles.commentSortButtonTextActive,
+                            ]}
+                        >
+                            Newest
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                    <FeedCloseIcon size={20} color={P.muted} />
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+
+    const sheetMediaPreview =
+        post && (post.mediaUrl || isVideoPost(post)) ? (
+            <View style={styles.mediaPreviewRow}>
+                <View style={styles.mediaPreviewThumb}>
+                    {isVideoPost(post) ? (
+                        <Image
+                            // Never mount react-native-video in the sheet — Android TextureView
+                            // punches through and blanks the comments UI under/over the thumb.
+                            source={
+                                resolveDemoVideoPosterSource(
+                                    post.mediaUrl || post.mediaItems?.[0]?.url,
+                                ) ||
+                                (post.videoPosterUrl
+                                    ? { uri: post.videoPosterUrl }
+                                    : MOCK_FEED_BUNDLED_VIDEO_POSTER)
+                            }
+                            style={styles.mediaPreviewMedia}
+                            resizeMode="cover"
+                        />
+                    ) : (
                         <Image
                             source={{ uri: post.mediaUrl }}
                             style={styles.mediaPreviewMedia}
                             resizeMode="cover"
                         />
-                    </View>
-                    {authorHandle ? (
-                        <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
-                            {authorHandle}
-                        </Text>
-                    ) : null}
+                    )}
                 </View>
-            ) : post && isVideoPost(post) ? (
-                <View style={styles.mediaPreviewRow}>
-                    <View style={styles.mediaPreviewThumb}>
-                        <Video
-                            source={mockFeedVideoSource(post.mediaUrl || post.mediaItems?.[0]?.url)}
-                            style={styles.mediaPreviewMedia}
-                            resizeMode="cover"
-                            muted
-                            paused
-                            repeat={false}
-                            controls={false}
-                            playInBackground={false}
-                            playWhenInactive={false}
-                            pointerEvents="none"
-                        />
-                    </View>
-                    {authorHandle ? (
-                        <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
-                            {authorHandle}
-                        </Text>
-                    ) : null}
-                </View>
-            ) : null}
-            <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                    {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
-                </Text>
-                <View style={styles.modalHeaderRight}>
-                    <View style={styles.commentSortToggle}>
-                        <TouchableOpacity
-                            onPress={() => setSortMode('top')}
-                            style={[styles.commentSortButton, sortMode === 'top' && styles.commentSortButtonActive]}
-                        >
-                            <Text
-                                style={[
-                                    styles.commentSortButtonText,
-                                    sortMode === 'top' && styles.commentSortButtonTextActive,
-                                ]}
-                            >
-                                Top
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => setSortMode('newest')}
-                            style={[
-                                styles.commentSortButton,
-                                sortMode === 'newest' && styles.commentSortButtonActive,
-                            ]}
-                        >
-                            <Text
-                                style={[
-                                    styles.commentSortButtonText,
-                                    sortMode === 'newest' && styles.commentSortButtonTextActive,
-                                ]}
-                            >
-                                Newest
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                    <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                        <FeedCloseIcon size={20} color={P.muted} />
-                    </TouchableOpacity>
-                </View>
+                {authorHandle ? (
+                    <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
+                        {authorHandle}
+                    </Text>
+                ) : null}
             </View>
+        ) : null;
+
+    const sheetChromeHeader = (
+        <>
+            {sheetMediaPreview}
+            {sheetTitleBar}
             {listHeader}
         </>
     );
 
     const renderCommentsFooter = useCallback(
         (props: BottomSheetFooterProps) => (
-            <BottomSheetFooter {...props} bottomInset={insets.bottom}>
-                <PassportSheetCanvas contentStyle={styles.footerCanvasContent}>
+            <BottomSheetFooter {...props} bottomInset={insetsBottomRef.current}>
+                {/* Solid footer — animated Passport canvas remounts on keyboard resize and steals focus. */}
+                <View style={styles.footerSolid}>
                     <CommentInput
                         placeholder={
                             replyingTo ? 'Write a reply...' : 'Join the conversation...'
@@ -1061,17 +1048,10 @@ export default function PostCommentsSheet({
                         useSheetTextInput
                         autoFocus={Boolean(replyingTo)}
                     />
-                </PassportSheetCanvas>
+                </View>
             </BottomSheetFooter>
         ),
-        [
-            cancelReply,
-            handleComposerSubmit,
-            insets.bottom,
-            replyingTo,
-            submitting,
-            submittingReply,
-        ],
+        [cancelReply, handleComposerSubmit, replyingTo, submitting, submittingReply],
     );
 
     const commentsListProps = {
@@ -1103,8 +1083,8 @@ export default function PostCommentsSheet({
         onScroll: handleScroll,
         scrollEventThrottle: 16 as const,
         keyboardShouldPersistTaps: 'handled' as const,
-        keyboardDismissMode: 'interactive' as const,
-        automaticallyAdjustKeyboardInsets: true,
+        keyboardDismissMode: 'on-drag' as const,
+        automaticallyAdjustKeyboardInsets: false,
         onScrollToIndexFailed: (info: { index: number }) => {
             setTimeout(() => {
                 listRef.current?.scrollToIndex({
@@ -1118,36 +1098,47 @@ export default function PostCommentsSheet({
     };
 
     const sheetBody = (
-        <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
-            <View style={[styles.sheet, { flex: 1, paddingBottom: insets.bottom }]}>
+        <PassportSheetCanvas style={[styles.sheetCanvas, styles.sheetBodyFill]} contentStyle={styles.sheetBodyFill}>
+            <View style={[styles.sheet, styles.sheetBodyFill]}>
+                {/* Pin chrome outside FlatList so Android Modal height quirks can't blank the sheet. */}
+                {sheetMediaPreview}
+                {sheetTitleBar}
                 {loading ? (
                     <View style={styles.loadingWrap}>
                         <ActivityIndicator size="large" color={BRAND_600} />
                     </View>
                 ) : (
-                    <FlatList {...commentsListProps} />
+                    <FlatList {...commentsListProps} ListHeaderComponent={listHeader} />
                 )}
-                <CommentInput
-                    placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
-                    onSubmit={(text) => {
-                        void handleComposerSubmit(text);
-                    }}
-                    isLoading={submitting || submittingReply}
-                    replyingToHandle={replyingTo?.handle}
-                    onCancelReply={cancelReply}
-                    autoFocus={Boolean(replyingTo)}
-                />
+                <View style={styles.footerSolid}>
+                    <CommentInput
+                        placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
+                        onSubmit={(text) => {
+                            void handleComposerSubmit(text);
+                        }}
+                        isLoading={submitting || submittingReply}
+                        replyingToHandle={replyingTo?.handle}
+                        onCancelReply={cancelReply}
+                        autoFocus={Boolean(replyingTo)}
+                    />
+                </View>
             </View>
         </PassportSheetCanvas>
     );
 
     if (isScenesEmbed) {
         if (!isOpen) return null;
+        // Android: rely on adjustResize / Modal resize only. KAV `height` was
+        // fighting the soft keyboard and collapsing the list (blank sheet) or
+        // bouncing focus (keyboard pop then drop).
+        if (Platform.OS === 'android') {
+            return <View style={styles.scenesEmbedRoot}>{sheetBody}</View>;
+        }
         return (
             <KeyboardAvoidingView
-                style={[styles.scenesEmbedRoot, { paddingBottom: scenesKeyboardPad }]}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+                style={styles.scenesEmbedRoot}
+                behavior="padding"
+                keyboardVerticalOffset={12}
             >
                 {sheetBody}
             </KeyboardAvoidingView>
@@ -1182,7 +1173,10 @@ export default function PostCommentsSheet({
                                   </>
                               ),
                           }
-                        : commentsListProps)}
+                        : {
+                              ...commentsListProps,
+                              automaticallyAdjustKeyboardInsets: true,
+                          })}
                     style={[styles.commentsList, styles.sheet]}
                 />
             </PassportSheetCanvas>
@@ -1202,8 +1196,17 @@ const styles = StyleSheet.create({
     sheetCanvasContent: {
         flex: 1,
     },
+    embedSolidBg: {
+        backgroundColor: '#060d16',
+    },
     footerCanvasContent: {
         backgroundColor: 'transparent',
+    },
+    footerSolid: {
+        // Keep composer on a stable strip so keyboard resize doesn't remount the ambient canvas.
+        backgroundColor: 'rgba(6, 13, 22, 0.92)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: P.border,
     },
     modalOverlay: {
         flex: 1,
@@ -1218,6 +1221,10 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         overflow: 'hidden',
+    },
+    sheetBodyFill: {
+        flex: 1,
+        minHeight: 240,
     },
     mediaPreviewRow: {
         flexDirection: 'row',

@@ -5,7 +5,7 @@
 /* eslint-disable react-refresh/only-export-components */
 // @refresh reset — FeedScreen is large; full remount on edit avoids hook-order HMR glitches.
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
     Text,
@@ -54,7 +54,6 @@ import { isUserBlocked } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
-import { isLikelyImageUri } from '../utils/imageDimensions';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
@@ -72,7 +71,8 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
-import { consumeFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
+import { peekFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
     getGlobalVideoMutedNative,
@@ -968,6 +968,7 @@ const FeedCard = React.memo(function FeedCard({
     onOverflowPress,
     isVideoActive,
     feedVideoMuted,
+    suspendNativeVideo,
     viewerHandle,
     viewerUserId,
     onOpenDM,
@@ -998,6 +999,7 @@ const FeedCard = React.memo(function FeedCard({
     onOverflowPress?: () => void;
     isVideoActive?: boolean;
     feedVideoMuted?: boolean;
+    suspendNativeVideo?: boolean;
     viewerHandle?: string | null;
     viewerUserId?: string;
     onOpenDM?: (handle: string, postId: string) => void;
@@ -1006,7 +1008,6 @@ const FeedCard = React.memo(function FeedCard({
     onOpenLikesSheet?: () => void;
     onOpenTaggedSheet?: () => void;
 }) {
-    const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
     const profileMenuAnchorRef = React.useRef<View>(null);
@@ -1063,9 +1064,18 @@ const FeedCard = React.memo(function FeedCard({
     );
     const { width: windowWidth } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
-    // Web Media: FEED_MIN_ASPECT 3/4, FEED_TARGET_ASPECT 5/4 (height/width)
-    const MEDIA_MIN_ASPECT = FEED_UI.media.minAspect;
+    // Fixed 4:5 (height/width) feed frame — measuring poster/image aspect on enter
+    // reflows the card and reads as a shake when scrolling post-to-post.
     const MEDIA_MAX_ASPECT = FEED_UI.media.maxAspect;
+    const mediaFrameHeight = cardMediaWidth * MEDIA_MAX_ASPECT;
+    const imageStyle = React.useMemo(
+        () => ({
+            width: cardMediaWidth,
+            height: mediaFrameHeight,
+            ...FEED_CARD_MEDIA_FRAME,
+        }),
+        [MEDIA_MAX_ASPECT, cardMediaWidth, mediaFrameHeight],
+    );
 
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
@@ -1112,84 +1122,6 @@ const FeedCard = React.memo(function FeedCard({
             cancelled = true;
         };
     }, [post.id, isCurrentUser, post.originalUserHandle, post.isBoosted]);
-
-    /** Lock frame size to first carousel slide so swiping does not resize the card (web parity). */
-    const mediaSizingUrl = React.useMemo(() => {
-        if (!hasFeedMedia) return null;
-        const first = carouselThumbItems[0];
-        if (first?.type === 'video' && post.videoPosterUrl) return post.videoPosterUrl;
-        if (first?.url) return first.url;
-        if (isVideoPost(post) && post.videoPosterUrl) return post.videoPosterUrl;
-        return post.mediaUrl || post.mediaItems?.[0]?.url || null;
-    }, [hasFeedMedia, post, carouselThumbItems]);
-
-    React.useEffect(() => {
-        setImageDimensions(null);
-    }, [post.id]);
-
-    const sizingIsVideoPost = hasFeedMedia && postHasVideoMedia(post);
-
-    const isCarouselPost = carouselThumbItems.length > 1;
-
-    React.useEffect(() => {
-        if (!mediaSizingUrl || imageDimensions) return;
-        // Web: still images use a fixed 4:5 frame.
-        if (!sizingIsVideoPost && !isCarouselPost) {
-            setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
-            return;
-        }
-        // Videos + carousels: lock to measured/poster aspect, clamped like web (3/4 … 5/4).
-        if (isLikelyImageUri(mediaSizingUrl)) {
-            Image.getSize(
-                mediaSizingUrl,
-                (width, height) => {
-                    const aspectRatio = height / width;
-                    const clampedAspect = Math.min(
-                        Math.max(aspectRatio, MEDIA_MIN_ASPECT),
-                        MEDIA_MAX_ASPECT,
-                    );
-                    setImageDimensions({
-                        width: cardMediaWidth,
-                        height: cardMediaWidth * clampedAspect,
-                    });
-                },
-                (error) => {
-                    console.warn('Skipping invalid image sizing URL:', mediaSizingUrl, error);
-                    setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
-                }
-            );
-        } else {
-            setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * MEDIA_MAX_ASPECT });
-        }
-    }, [
-        MEDIA_MAX_ASPECT,
-        MEDIA_MIN_ASPECT,
-        mediaSizingUrl,
-        cardMediaWidth,
-        imageDimensions,
-        sizingIsVideoPost,
-        isCarouselPost,
-    ]);
-
-    // Calculate image style with Instagram clamping
-    const imageStyle = React.useMemo(() => {
-        if (imageDimensions) {
-            return {
-                width: imageDimensions.width,
-                height: imageDimensions.height,
-                ...FEED_CARD_MEDIA_FRAME,
-            };
-        }
-        // Default while loading
-        return {
-            width: cardMediaWidth,
-            height: cardMediaWidth * MEDIA_MAX_ASPECT,
-            ...FEED_CARD_MEDIA_FRAME,
-        };
-    }, [MEDIA_MAX_ASPECT, imageDimensions, cardMediaWidth]);
-
-    const mediaFrameHeight =
-        typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth;
 
     const handleOpenScenesPress = React.useCallback(() => {
         onOpenScenes?.();
@@ -1293,6 +1225,7 @@ const FeedCard = React.memo(function FeedCard({
                                 }
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
+                                suspendNativeVideo={suspendNativeVideo}
                                 muted={feedVideoMuted}
                                 onOpenScenes={
                                     mediaGesturesEnabled ? handleOpenScenesPress : undefined
@@ -1414,6 +1347,7 @@ const FeedCard = React.memo(function FeedCard({
                     showMetrics={showBoostMetrics}
                     metricsOpen={isMetricsOpen}
                     onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
+                    shares={post.stats.shares}
                     onShare={() => { void onShare(); }}
                 />
             </View>
@@ -1503,6 +1437,7 @@ const FeedCard = React.memo(function FeedCard({
         prev.isCurrentUser === next.isCurrentUser &&
         prev.isVideoActive === next.isVideoActive &&
         prev.feedVideoMuted === next.feedVideoMuted &&
+        prev.suspendNativeVideo === next.suspendNativeVideo &&
         prev.viewerHandle === next.viewerHandle &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
@@ -1529,6 +1464,7 @@ type FeedListRow =
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
+    const isFeedFocused = useIsFocused();
     const defaultLocal = user?.local || 'Finglas';
     const defaultNational = user?.national || 'Ireland';
     const defaultRegional = user?.regional || 'Dublin';
@@ -1597,7 +1533,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [inviteGroupHandle, setInviteGroupHandle] = useState<string | null>(null);
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
-    const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
+    const activeVideoPostIdRef = useRef<string | null>(null);
     const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(true);
     const [feedVideoMuted, setFeedVideoMuted] = useState(true);
     const [pendingUploadTick, setPendingUploadTick] = useState(0);
@@ -1627,6 +1563,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
+    /** Scroll Y captured when opening Scenes — restored on return to avoid jump. */
+    const scenesReturnScrollYRef = useRef<number | null>(null);
+    const suppressFeedViewabilityRef = useRef(false);
     const pendingFeedScrollRestoreRef = useRef<number | null>(null);
     const pendingStories24CollapseRef = useRef<Stories24RailReturnPayload | null>(null);
     const feedLoadGenRef = useRef(0);
@@ -1648,11 +1587,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        // Prefer the card the user is actually reading (not a sliver of the row above).
-        itemVisiblePercentThreshold: 68,
-        minimumViewTime: 60,
+        // High enough that a peek of the next card doesn't steal autoplay.
+        itemVisiblePercentThreshold: 72,
+        minimumViewTime: 120,
     });
-    const [feedScrolling, setFeedScrolling] = React.useState(false);
+    const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastViewableVideoPostIdRef = useRef<string | null>(null);
 
@@ -1812,15 +1751,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             autoplayTimerRef.current = null;
         }
         if (!feedAutoplayAllowedRef.current || !postId) {
-            setActiveVideoPostId(null);
+            activeVideoPostIdRef.current = null;
             setActiveFeedVideoPostId(null);
+            return;
+        }
+        // Store-only updates — do not setState on FeedScreen (that re-renders FlatList
+        // and causes a settle jump on every post, image or video).
+        if (String(activeVideoPostIdRef.current) === String(postId)) {
+            setActiveFeedVideoPostId(postId);
             return;
         }
         const minGapMs = 40;
         const sinceLast = Date.now() - lastFeedAutoplayAtMsRef.current;
         const delayMs = sinceLast >= minGapMs ? 0 : minGapMs - sinceLast;
         autoplayTimerRef.current = setTimeout(() => {
-            setActiveVideoPostId(postId);
+            activeVideoPostIdRef.current = postId;
             setActiveFeedVideoPostId(postId);
             lastFeedAutoplayAtMsRef.current = Date.now();
             autoplayTimerRef.current = null;
@@ -1836,54 +1781,80 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     }, [feedAutoplayAllowed, scheduleActiveFeedVideo]);
 
-    useEffect(() => {
-        // Keep the current autoplay target while flinging — clearing it forced a cold
-        // remount/unpause gap when the user landed on the next MP4.
-        if (feedScrolling) return;
-        if (feedAutoplayAllowed && lastViewableVideoPostIdRef.current) {
-            scheduleActiveFeedVideo(lastViewableVideoPostIdRef.current);
-        }
-    }, [feedScrolling, feedAutoplayAllowed, scheduleActiveFeedVideo]);
-
     const onViewableItemsChanged = useRef(
         ({
             viewableItems,
         }: {
             viewableItems: Array<{ isViewable?: boolean; item?: FeedListRow; index?: number | null }>;
         }) => {
+            if (suppressFeedViewabilityRef.current) return;
             if (!feedAutoplayAllowedRef.current) {
                 scheduleActiveFeedVideoRef.current(null);
                 return;
             }
-            let best: Post | null = null;
-            let bestIndex = -1;
+            const visibleVideos: Array<{ post: Post; index: number }> = [];
             for (const token of viewableItems) {
                 if (!token.isViewable || !token.item) continue;
                 const row = token.item;
                 if (row.kind !== 'post') continue;
                 const candidate = row.post;
                 if (!postHasVideoMedia(candidate)) continue;
-                const idx = token.index ?? 0;
-                // Bottom-most visible video wins (matches scroll-down reading; avoids activating a peek of the row above).
-                if (idx > bestIndex) {
-                    best = candidate;
-                    bestIndex = idx;
-                }
+                visibleVideos.push({ post: candidate, index: token.index ?? 0 });
             }
-            const nextId = best?.id ?? null;
+            visibleVideos.sort((a, b) => a.index - b.index);
+
+            const currentId = activeVideoPostIdRef.current;
+            let nextId: string | null = null;
+            if (currentId && visibleVideos.some((v) => String(v.post.id) === String(currentId))) {
+                // Stick on the playing card while it remains viewable — stops the
+                // "land on a post then flick to the next" jump when the next peeks in.
+                nextId = currentId;
+            } else if (visibleVideos.length > 0) {
+                // Otherwise prefer the top-most qualifying video (reading position).
+                nextId = visibleVideos[0].post.id;
+            }
+
             lastViewableVideoPostIdRef.current = nextId;
-            scheduleActiveFeedVideoRef.current(nextId);
+            // While the user is flinging, only track the candidate — swapping the
+            // active Video mid-scroll remounts TextureViews and feels sticky.
+            if (!feedScrollingRef.current) {
+                scheduleActiveFeedVideoRef.current(nextId);
+            }
         }
     ).current;
 
     useFocusEffect(
         useCallback(() => {
+            const pinnedY = scenesReturnScrollYRef.current;
+            if (pinnedY != null) {
+                scenesReturnScrollYRef.current = null;
+                suppressFeedViewabilityRef.current = true;
+                flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
+                requestAnimationFrame(() => {
+                    flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
+                    const restoreId = lastViewableVideoPostIdRef.current;
+                    if (restoreId && feedAutoplayAllowedRef.current) {
+                        scheduleActiveFeedVideoRef.current(restoreId);
+                    }
+                    setTimeout(() => {
+                        suppressFeedViewabilityRef.current = false;
+                    }, 120);
+                });
+            } else {
+                // Resume the same autoplay target immediately — do not wait for FlatList
+                // viewability to re-fire (that caused multi-second Scenes→feed MP4 lag).
+                const restoreId = lastViewableVideoPostIdRef.current;
+                if (restoreId && feedAutoplayAllowedRef.current) {
+                    scheduleActiveFeedVideoRef.current(restoreId);
+                }
+            }
             return () => {
                 if (autoplayTimerRef.current) {
                     clearTimeout(autoplayTimerRef.current);
                     autoplayTimerRef.current = null;
                 }
-                setActiveVideoPostId(null);
+                // Pause decode while covered (Scenes / profile). Keep `activeVideoPostId`
+                // so focus restore is instant without a cold viewability wait.
                 setActiveFeedVideoPostId(null);
             };
         }, [])
@@ -2340,6 +2311,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const applyScenesPostUpdates = React.useCallback((updates: Post[]) => {
         if (!updates.length) return;
+        const pinnedY = feedScrollYRef.current;
         setPages((prev) =>
             prev.map((page) =>
                 page.map((p) => {
@@ -2353,6 +2325,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }),
             ),
         );
+        // Keep the same viewport after post patches remount/remeasure rows.
+        requestAnimationFrame(() => {
+            flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
+            requestAnimationFrame(() => {
+                flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
+            });
+        });
     }, []);
 
     useEffect(() => subscribeScenesPostUpdates(applyScenesPostUpdates), [applyScenesPostUpdates]);
@@ -3231,7 +3210,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     <Stories24FeedRail
                         ref={stories24RailRef}
                         items={stories24Items}
-                        previewVideosPaused={feedScrolling}
+                        previewVideosPaused={false}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('Clip')}
                         onScrollCardIntoView={scrollStories24RailIntoView}
@@ -3357,9 +3336,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     key={mergedPost.id}
                     post={mergedPost}
                     isVideoActive={
-                        isVideoPostRow && activeVideoPostId === mergedPost.id
+                        isFeedFocused && isVideoPostRow && !commentsModalOpen
                     }
                     feedVideoMuted={feedVideoMuted}
+                    suspendNativeVideo={commentsModalOpen}
                     onLike={async () => {
                         if (isPendingUpload) return;
                         const updated = await toggleLike(userId, mergedPost.id, mergedPost);
@@ -3445,13 +3425,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onOpenScenes={() => {
                         if (isPendingUpload) return;
-                        const handoff = consumeFeedVideoHandoff(mergedPost.id);
+                        scenesReturnScrollYRef.current = feedScrollYRef.current;
+                        const handoff = peekFeedVideoHandoff(mergedPost.id);
                         const scenesFeedLabel = showFollowingFeed
                             ? 'Following'
                             : String(active || user?.national || 'Ireland');
+                        const scenesPosts = videoPostsForScenes.some((p) => p.id === mergedPost.id)
+                            ? videoPostsForScenes
+                            : [mergedPost, ...videoPostsForScenes];
                         navigation.navigate('Scenes', {
                             initialPostId: mergedPost.id,
-                            posts: videoPostsForScenes,
+                            posts: scenesPosts,
                             initialVideoTime: handoff?.currentTime,
                             initialMuted: handoff?.muted ?? feedVideoMuted,
                             feedLabel: scenesFeedLabel,
@@ -3533,8 +3517,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             tryReclipPost,
             toggleCollectionsSaveForPost,
             hideUserFromFeed,
-            activeVideoPostId,
+            isFeedFocused,
             feedVideoMuted,
+            commentsModalOpen,
             pendingUploadTick,
             videoPostsForScenes,
             interestsDraft,
@@ -3612,37 +3597,59 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }
                     return `${item.kind}:${baseKey}:${index}`;
                 }}
-                extraData={`${activeVideoPostId}-${pendingUploadTick}-${refreshing}`}
+                extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${isFeedFocused}`}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfigRef.current}
-                // Performance optimizations - Instagram-style
-                initialNumToRender={2}
-                maxToRenderPerBatch={4}
-                windowSize={9}
-                updateCellsBatchingPeriod={50}
+                // Performance — fewer offscreen mounts; clip offscreen rows now that only
+                // the active card mounts a native Video surface.
+                initialNumToRender={3}
+                maxToRenderPerBatch={3}
+                windowSize={7}
+                updateCellsBatchingPeriod={80}
                 removeClippedSubviews={false}
                 onScrollBeginDrag={() => {
+                    feedScrollingRef.current = true;
+                    setFeedScrollBusy(true);
                     if (feedScrollIdleTimerRef.current) {
                         clearTimeout(feedScrollIdleTimerRef.current);
                         feedScrollIdleTimerRef.current = null;
                     }
-                    setFeedScrolling(true);
+                }}
+                onMomentumScrollBegin={() => {
+                    if (feedScrollIdleTimerRef.current) {
+                        clearTimeout(feedScrollIdleTimerRef.current);
+                        feedScrollIdleTimerRef.current = null;
+                    }
+                    feedScrollingRef.current = true;
+                    setFeedScrollBusy(true);
                 }}
                 onMomentumScrollEnd={() => {
+                    feedScrollingRef.current = false;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-                    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 40);
+                    feedScrollIdleTimerRef.current = setTimeout(() => {
+                        setFeedScrollBusy(false);
+                        if (feedAutoplayAllowedRef.current && lastViewableVideoPostIdRef.current) {
+                            scheduleActiveFeedVideoRef.current(lastViewableVideoPostIdRef.current);
+                        }
+                    }, 64);
                 }}
                 onScrollEndDrag={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-                    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 40);
+                    feedScrollIdleTimerRef.current = setTimeout(() => {
+                        feedScrollingRef.current = false;
+                        setFeedScrollBusy(false);
+                        if (feedAutoplayAllowedRef.current && lastViewableVideoPostIdRef.current) {
+                            scheduleActiveFeedVideoRef.current(lastViewableVideoPostIdRef.current);
+                        }
+                    }, 120);
                 }}
                 // Scroll performance
                 onScroll={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
                 }}
-                scrollEventThrottle={16}
-                decelerationRate="fast"            // Faster deceleration for snappier feel
+                scrollEventThrottle={32}
+                decelerationRate={Platform.OS === 'ios' ? 'normal' : 0.985}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
@@ -3919,68 +3926,44 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             />
 
             {commentsModalOpen && selectedPostId ? (
-                imageFullscreenPost ? (
-                    /* Stack above fullscreen Modal — keep viewer visible (web parity). */
-                    <Modal
-                        visible
-                        transparent
-                        animationType="slide"
-                        statusBarTranslucent
-                        onRequestClose={closeCommentsSheet}
-                    >
-                        <View style={styles.fullscreenOverlayRoot}>
-                            <Pressable
-                                style={styles.fullscreenOverlayBackdrop}
-                                onPress={closeCommentsSheet}
-                                accessibilityLabel="Dismiss comments"
+                <Modal
+                    visible
+                    transparent
+                    animationType="slide"
+                    statusBarTranslucent
+                    onRequestClose={closeCommentsSheet}
+                >
+                    <View style={styles.fullscreenOverlayRoot}>
+                        <Pressable
+                            style={styles.fullscreenOverlayBackdrop}
+                            onPress={closeCommentsSheet}
+                            accessibilityLabel="Dismiss comments"
+                        />
+                        <View style={styles.fullscreenCommentsSheet}>
+                            <PostCommentsSheet
+                                variant="scenesEmbed"
+                                postId={selectedPostId}
+                                post={selectedPostForComments}
+                                isOpen={commentsModalOpen}
+                                commentAuthorHandle={user?.handle ?? ''}
+                                currentUserHandle={user?.handle}
+                                onAfterClose={() => {
+                                    const pid = selectedPostId;
+                                    if (!pid) return;
+                                    fetchComments(pid)
+                                        .then((list) =>
+                                            updatePost(pid, (p) => ({
+                                                ...p,
+                                                stats: { ...p.stats, comments: list.length },
+                                            })),
+                                        )
+                                        .catch(() => {});
+                                }}
+                                onClose={closeCommentsSheet}
                             />
-                            <View style={styles.fullscreenCommentsSheet}>
-                                <PostCommentsSheet
-                                    variant="scenesEmbed"
-                                    postId={selectedPostId}
-                                    post={selectedPostForComments}
-                                    isOpen={commentsModalOpen}
-                                    commentAuthorHandle={user?.handle ?? ''}
-                                    currentUserHandle={user?.handle}
-                                    onAfterClose={() => {
-                                        const pid = selectedPostId;
-                                        if (!pid) return;
-                                        fetchComments(pid)
-                                            .then((list) =>
-                                                updatePost(pid, (p) => ({
-                                                    ...p,
-                                                    stats: { ...p.stats, comments: list.length },
-                                                })),
-                                            )
-                                            .catch(() => {});
-                                    }}
-                                    onClose={closeCommentsSheet}
-                                />
-                            </View>
                         </View>
-                    </Modal>
-                ) : (
-                    <PostCommentsSheet
-                        postId={selectedPostId}
-                        post={selectedPostForComments}
-                        isOpen={commentsModalOpen}
-                        commentAuthorHandle={user?.handle ?? ''}
-                        currentUserHandle={user?.handle}
-                        onAfterClose={() => {
-                            const pid = selectedPostId;
-                            if (!pid) return;
-                            fetchComments(pid)
-                                .then((list) =>
-                                    updatePost(pid, (p) => ({
-                                        ...p,
-                                        stats: { ...p.stats, comments: list.length },
-                                    })),
-                                )
-                                .catch(() => {});
-                        }}
-                        onClose={closeCommentsSheet}
-                    />
-                )
+                    </View>
+                </Modal>
             ) : null}
 
             {likesSheetPost && likesSheetPost.stats.likes > 0 ? (
@@ -4017,6 +4000,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setShareModalOpen(false);
                         setSelectedPostForShare(null);
                     }}
+                    onShareSuccess={handleShareToStoriesSuccess}
                 />
             ) : null}
 
@@ -4356,8 +4340,8 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.45)',
     },
     fullscreenCommentsSheet: {
-        height: '78%',
-        backgroundColor: '#FFFFFF',
+        height: Math.round(Dimensions.get('window').height * 0.78),
+        backgroundColor: 'transparent',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         overflow: 'hidden',

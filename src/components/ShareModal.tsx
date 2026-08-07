@@ -7,7 +7,7 @@ import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
-import { getFollowedUsers, regeneratePublicShareToken } from '../api/posts';
+import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
 import * as apiClient from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { showUploadOverlay } from '../utils/uploadOverlay';
@@ -20,9 +20,10 @@ interface ShareModalProps {
     isOpen: boolean;
     onClose: () => void;
     post: Post;
+    onShareSuccess?: (postId: string) => void;
 }
 
-const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
+const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
     const [copied, setCopied] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [followedHandles, setFollowedHandles] = useState<string[]>([]);
@@ -98,12 +99,24 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
 
     if (!isOpen) return null;
 
+    const recordShare = async () => {
+        if (!user?.id || !post.id) return;
+        try {
+            await incrementShares(String(user.id), String(post.id));
+            window.dispatchEvent(new CustomEvent(`shareAdded-${post.id}`));
+            onShareSuccess?.(String(post.id));
+        } catch (err) {
+            console.warn('incrementShares failed:', err);
+        }
+    };
+
     const handleCopyLink = async () => {
         try {
             await navigator.clipboard.writeText(postUrl);
             setCopied(true);
             showToast?.('Link copied!');
             setTimeout(() => setCopied(false), 2000);
+            await recordShare();
         } catch (err) {
             console.error('Failed to copy link:', err);
         }
@@ -226,6 +239,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             );
             overlay.success('Shared to Stories 24.');
             showToast?.('You shared this to Stories 24!');
+            await recordShare();
         } catch (e) {
             console.error('Failed to share to clips:', e);
             if (overlay) {
@@ -259,6 +273,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         case 'sms':
             shareUrl = `sms:?body=${encodedText}%20${encodedUrl}`;
             window.location.href = shareUrl;
+            // Do not recordShare — leaving to SMS does not confirm a send.
             return;
         case 'threads':
             shareUrl = `https://www.threads.net/intent/post?text=${encodedText}%20${encodedUrl}`;
@@ -266,6 +281,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         default:
             return;
     }
+    // Opening an intent/popup is not a completed share (blockers / cancel still fire).
     window.open(shareUrl, '_blank', 'width=600,height=400');
 };
 
@@ -275,6 +291,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             state: { sharePostUrl: postUrl, sharePostId: post.id }
         });
         showToast?.('Post link ready to send!');
+        // Count when the DM is actually sent (MessagesPage), not when the composer opens.
     };
 
     const q = searchQuery.trim().toLowerCase();

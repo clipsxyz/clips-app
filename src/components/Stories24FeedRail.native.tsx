@@ -27,6 +27,7 @@ import GoldChromeAmbientCanvas from './GoldChromeAmbientCanvas.native';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
 import type { Stories24RailItem, Stories24RailReturnPayload } from '../utils/stories24Rail';
+import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import {
     STORIES24_ADD_YOURS_HANDLE,
     STORIES24_COLLAPSE_MS,
@@ -449,6 +450,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
 ) {
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
     const [railScrolling, setRailScrolling] = useState(false);
+    const [feedListScrolling, setFeedListScrolling] = useState(() => getFeedScrollBusy());
     const [appActive, setAppActive] = useState(AppState.currentState === 'active');
     const [collapsing, setCollapsing] = useState<{
         payload: Stories24RailReturnPayload;
@@ -467,6 +469,8 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     const cardRefs = useRef<Record<string, View | null>>({});
     /** Last card rect used to open a story — Android collapse fallback when measure fails. */
     const lastOpenRectByHandleRef = useRef<Record<string, CardRect>>({});
+
+    useEffect(() => subscribeFeedScrollBusy(setFeedListScrolling), []);
     /** Prevents collapse restart when feed/items refresh mid-animation. */
     const collapseSessionRef = useRef<string | null>(null);
     const onCollapseHandledRef = useRef(onCollapseHandled);
@@ -578,7 +582,8 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         [items],
     );
 
-    const previewsPaused = previewVideosPaused || railScrolling || !appActive;
+    const previewsPaused =
+        previewVideosPaused || feedListScrolling || railScrolling || !appActive;
 
     const openFirstStoryFromRail = React.useCallback(() => {
         const first = pickFirstStories24RailStory(items);
