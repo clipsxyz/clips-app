@@ -77,7 +77,7 @@ export default function FeedEngagementRow({
                     disabled={!(onLikesPress || onLike)}
                     activeOpacity={0.7}
                 >
-                    <Text style={[styles.text, { color: countColor }]}>{likes}</Text>
+                <Text style={[styles.text, { color: countColor }, styles.likeCount]}>{likes}</Text>
                 </TouchableOpacity>
             </View>
 
@@ -164,6 +164,9 @@ const styles = StyleSheet.create({
         fontSize: FEED_UI.type.actionCount,
         fontWeight: '400',
         fontVariant: ['tabular-nums'],
+    },
+    likeCount: {
+        minWidth: 28,
     },
     itemDisabled: {
         opacity: 0.3,

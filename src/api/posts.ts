@@ -905,17 +905,26 @@ export function getFollowState(follows: Record<string, boolean>, handle: string 
   return key ? !!follows[key] : false;
 }
 
-/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates. */
+/** True when this handle has an explicit local follow entry (including unfollow → false). */
+export function hasExplicitFollowState(
+  follows: Record<string, boolean>,
+  handle: string | undefined,
+): boolean {
+  if (handle == null || typeof handle !== 'string') return false;
+  const lower = handle.toLowerCase();
+  return Object.keys(follows).some((k) => k.toLowerCase() === lower);
+}
+
+/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates.
+ *  Unfollow stores `false` (does not delete) so decorateForUser won't fall back to a stale post.isFollowing. */
 function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
   const lower = handle.toLowerCase();
   const existingKey = Object.keys(follows).find(k => k.toLowerCase() === lower);
   if (existingKey) {
-    if (isFollowing) follows[existingKey] = true;
-    else delete follows[existingKey];
+    follows[existingKey] = isFollowing;
     return;
   }
-  if (isFollowing) follows[handle] = true;
-  else delete follows[handle];
+  follows[handle] = isFollowing;
 }
 
 // Get list of user handles that the current user follows
@@ -955,12 +964,12 @@ export function upsertLocalPost(post: Post): Post {
   return post;
 }
 
-// compute view for a user: show following if local state OR API says so (so backend signups and + taps both work)
+// Local follow map wins when present (including explicit unfollow). Otherwise fall back to API flag.
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
-  const isFollowing = fromLocal || fromApi;
+  const isFollowing = hasExplicitFollowState(s.follows, p.userHandle) ? fromLocal : fromApi;
   const decorated = {
     ...p,
     userLiked: !!s.likes[p.id],
@@ -2005,7 +2014,16 @@ export async function toggleFollowForPost(
   viewerHandle?: string,
 ): Promise<Post> {
   await delay(150);
-  const p = posts.find(x => x.id === id);
+  let p = posts.find(x => x.id === id);
+  // Feed/Scenes demo videos (mock-scenes-*) often aren't in the in-memory store —
+  // upsert so callers that merge the returned post keep mediaUrl / slides.
+  if (!p && String(id).startsWith('mock-scenes-')) {
+    const mock = getMockScenesVideoPosts().find((x) => x.id === id);
+    if (mock) {
+      p = { ...mock, stats: { ...mock.stats } };
+      posts.push(p);
+    }
+  }
   const handle = p?.userHandle ?? userHandle;
   if (!handle) {
     throw new Error('Post not found');
@@ -2126,7 +2144,15 @@ export async function toggleFollowForPost(
     removeFollowRequest(viewer, handle);
   }
 
-  if (p) return decorateForUser(userId, p);
+  // Follow is per-author: keep every in-memory post for this handle aligned.
+  const handleLower = handle.toLowerCase();
+  for (const post of posts) {
+    if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
+      post.isFollowing = nextFollowing;
+    }
+  }
+
+  if (p) return { ...decorateForUser(userId, p), isFollowing: nextFollowing };
   // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
   return {
     id,

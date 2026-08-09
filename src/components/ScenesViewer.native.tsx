@@ -465,7 +465,16 @@ export default function ScenesViewer({
         });
         try {
             const updated = await toggleLike(viewerUserId, activePost.id, activePost);
-            patchPost(activePost.id, () => updated);
+            // Merge only engagement fields — never replace the whole post (mock/demo
+            // toggles can return a thin shape and drop mediaUrl → jumps to next Scene).
+            patchPost(activePost.id, (p) => ({
+                ...p,
+                userLiked: updated.userLiked ?? nextLiked,
+                stats: {
+                    ...p.stats,
+                    likes: updated.stats?.likes ?? nextLikes,
+                },
+            }));
         } catch {
             patchPost(activePost.id, {
                 userLiked: activePost.userLiked,
@@ -477,17 +486,37 @@ export default function ScenesViewer({
     const handleFollow = useCallback(async () => {
         if (!activePost || !viewerHandle) return;
         try {
-            const updated = await toggleFollowForPost(viewerUserId, activePost.id, activePost.userHandle, viewerHandle);
-            patchPost(activePost.id, () => updated);
+            const updated = await toggleFollowForPost(
+                viewerUserId,
+                activePost.id,
+                activePost.userHandle,
+                viewerHandle,
+            );
+            const nextFollowing = updated?.isFollowing === true;
+            const handleLower = String(activePost.userHandle || '')
+                .trim()
+                .toLowerCase();
+            // Author-level follow; merge flags only so video posts stay in the Scenes list.
+            const next = postsProp.map((p) => {
+                if (
+                    String(p.userHandle || '')
+                        .trim()
+                        .toLowerCase() !== handleLower
+                ) {
+                    return p;
+                }
+                return { ...p, isFollowing: nextFollowing };
+            });
+            onPostsChange?.(next);
             setHasPendingRequest(
-                !updated?.isFollowing &&
+                !nextFollowing &&
                     isProfilePrivate(activePost.userHandle) &&
                     hasPendingFollowRequest(viewerHandle, activePost.userHandle),
             );
         } catch (err) {
             console.warn('Follow failed in Scenes:', err);
         }
-    }, [activePost, patchPost, viewerHandle, viewerUserId]);
+    }, [activePost, onPostsChange, postsProp, viewerHandle, viewerUserId]);
 
     const handleReclip = useCallback(async () => {
         if (!activePost) return;

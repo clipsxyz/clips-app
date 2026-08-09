@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
-import Video, { ViewType } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Story } from '../../types';
 import { getStoryTextContent, getTextStoryStyle } from '../../utils/storyTextStyleNative';
@@ -11,6 +10,7 @@ import {
     resolveStoryMediaUrl,
     storyVideoSource,
 } from '../../utils/storyMediaNative';
+import StorySafeVideo from './StorySafeVideo.native';
 
 type Props = {
     story: Story;
@@ -35,18 +35,13 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
 
     if (hasMedia && isVideo && videoSource && !videoFailed) {
         return (
-            <Video
+            <StorySafeVideo
                 source={videoSource}
+                posterSource={posterSource || (posterUri ? { uri: posterUri } : undefined)}
                 style={StyleSheet.absoluteFill}
-                resizeMode="cover"
                 repeat
                 muted={isMuted}
                 paused={paused}
-                playInBackground={false}
-                playWhenInactive={false}
-                viewType={ViewType.TEXTURE}
-                useTextureView
-                ignoreSilentSwitch="ignore"
                 onError={() => setVideoFailed(true)}
             />
         );
@@ -89,6 +84,11 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
 }
 
 const styles = StyleSheet.create({
+    empty: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#000',
+    },
     textOnlyWrap: {
         flex: 1,
         alignItems: 'center',
@@ -96,13 +96,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 28,
     },
     textOnlyBody: {
-        fontWeight: '600',
+        fontWeight: '700',
         textAlign: 'center',
-        lineHeight: 26,
-    },
-    empty: {
-        backgroundColor: '#101b2f',
-        alignItems: 'center',
-        justifyContent: 'center',
+        lineHeight: 28,
     },
 });

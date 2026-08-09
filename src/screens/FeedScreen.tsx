@@ -57,6 +57,7 @@ import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import FeedVideoPortal from '../components/FeedVideoPortal.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
@@ -70,9 +71,9 @@ import {
     subscribeFeedAutoplayPref,
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
-import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
-import { peekFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScenesHandoffNative';
 import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
     getGlobalVideoMutedNative,
@@ -978,6 +979,7 @@ const FeedCard = React.memo(function FeedCard({
     onShareSuccess,
     onOpenLikesSheet,
     onOpenTaggedSheet,
+    onLikeBurst,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -1007,6 +1009,8 @@ const FeedCard = React.memo(function FeedCard({
     onShareSuccess?: (postId: string) => void;
     onOpenLikesSheet?: () => void;
     onOpenTaggedSheet?: () => void;
+    /** Window coords — parent keeps one Modal so Android doesn't jump the FlatList. */
+    onLikeBurst?: (windowX: number, windowY: number) => void;
 }) {
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
@@ -1031,36 +1035,24 @@ const FeedCard = React.memo(function FeedCard({
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
     const mediaWrapRef = React.useRef<View>(null);
     const postViewRecordedRef = React.useRef(false);
-    const mediaBurstClearRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [mediaBurst, setMediaBurst] = React.useState<{ x: number; y: number; key: number } | null>(
-        null,
-    );
-    /** Window-space burst — Android TextureView/Image punch through in-tree overlays. */
-    const showMediaLikeBurst = React.useCallback((localX: number, localY: number) => {
-        const place = (windowX: number, windowY: number) => {
-            setMediaBurst({ x: windowX, y: windowY, key: Date.now() });
-            if (mediaBurstClearRef.current) clearTimeout(mediaBurstClearRef.current);
-            mediaBurstClearRef.current = setTimeout(() => {
-                setMediaBurst(null);
-                mediaBurstClearRef.current = null;
-            }, 750);
-        };
-        const node = mediaWrapRef.current;
-        if (node?.measureInWindow) {
-            node.measureInWindow((wx, wy, w, h) => {
-                const x = (w > 8 ? wx : 0) + localX;
-                const y = (h > 8 ? wy : 0) + localY;
-                place(x, y);
-            });
-            return;
-        }
-        place(localX, localY);
-    }, []);
-    React.useEffect(
-        () => () => {
-            if (mediaBurstClearRef.current) clearTimeout(mediaBurstClearRef.current);
+    /** Window-space burst — parent Modal stays mounted (toggling Modal jumps FlatList on Android). */
+    const showMediaLikeBurst = React.useCallback(
+        (localX: number, localY: number) => {
+            const place = (windowX: number, windowY: number) => {
+                onLikeBurst?.(windowX, windowY);
+            };
+            const node = mediaWrapRef.current;
+            if (node?.measureInWindow) {
+                node.measureInWindow((wx, wy, w, h) => {
+                    const x = (w > 8 ? wx : 0) + localX;
+                    const y = (h > 8 ? wy : 0) + localY;
+                    place(x, y);
+                });
+                return;
+            }
+            place(localX, localY);
         },
-        [],
+        [onLikeBurst],
     );
     const { width: windowWidth } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
@@ -1390,25 +1382,6 @@ const FeedCard = React.memo(function FeedCard({
                 onBlock={onBlockUser}
                 onReport={onReportUser}
             />
-            {/* Modal sits above Android TextureView/Image punch-through layers. */}
-            <Modal
-                visible={mediaBurst != null}
-                transparent
-                animationType="none"
-                statusBarTranslucent
-                hardwareAccelerated
-                onRequestClose={() => setMediaBurst(null)}
-            >
-                <View style={styles.mediaBurstPortal} pointerEvents="none">
-                    {mediaBurst ? (
-                        <FeedDoubleTapLikeBurst
-                            key={mediaBurst.key}
-                            x={mediaBurst.x}
-                            y={mediaBurst.y}
-                        />
-                    ) : null}
-                </View>
-            </Modal>
         </View>
     );
 }, (prev, next) => {
@@ -1563,6 +1536,34 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
+    /** One feed-level burst Modal — per-card Modal show/hide jumps FlatList on Android. */
+    const [feedLikeBurst, setFeedLikeBurst] = useState<{ x: number; y: number; key: number } | null>(
+        null,
+    );
+    const feedLikeBurstClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const showFeedLikeBurst = useCallback((windowX: number, windowY: number) => {
+        const y = feedScrollYRef.current;
+        setFeedLikeBurst({ x: windowX, y: windowY, key: Date.now() });
+        requestAnimationFrame(() => {
+            flatListRef.current?.scrollToOffset({ offset: y, animated: false });
+        });
+        if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
+        feedLikeBurstClearRef.current = setTimeout(() => {
+            const pinY = feedScrollYRef.current;
+            setFeedLikeBurst(null);
+            requestAnimationFrame(() => {
+                flatListRef.current?.scrollToOffset({ offset: pinY, animated: false });
+            });
+            feedLikeBurstClearRef.current = null;
+        }, 750);
+    }, []);
+    useEffect(
+        () => () => {
+            if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
+        },
+        [],
+    );
+    const flatForRenderRef = useRef<FeedListRow[]>([]);
     /** Scroll Y captured when opening Scenes — restored on return to avoid jump. */
     const scenesReturnScrollYRef = useRef<number | null>(null);
     const suppressFeedViewabilityRef = useRef(false);
@@ -1587,9 +1588,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        // High enough that a peek of the next card doesn't steal autoplay.
-        itemVisiblePercentThreshold: 72,
-        minimumViewTime: 120,
+        // Instagram-like: only cards mostly on screen qualify to play; peeks don't steal.
+        itemVisiblePercentThreshold: 60,
+        minimumViewTime: 100,
     });
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1745,7 +1746,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const feedAutoplayAllowedRef = useRef(feedAutoplayAllowed);
     feedAutoplayAllowedRef.current = feedAutoplayAllowed;
 
-    const scheduleActiveFeedVideo = useCallback((postId: string | null) => {
+    const scheduleActiveFeedVideo = useCallback((postId: string | null, force = false) => {
         if (autoplayTimerRef.current) {
             clearTimeout(autoplayTimerRef.current);
             autoplayTimerRef.current = null;
@@ -1755,21 +1756,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setActiveFeedVideoPostId(null);
             return;
         }
-        // Store-only updates — do not setState on FeedScreen (that re-renders FlatList
-        // and causes a settle jump on every post, image or video).
-        if (String(activeVideoPostIdRef.current) === String(postId)) {
-            setActiveFeedVideoPostId(postId);
+        // Store-only updates — do not setState on FeedScreen (that re-renders FlatList).
+        if (!force && String(activeVideoPostIdRef.current) === String(postId)) {
+            forceActiveFeedVideoPostId(postId);
+            return;
+        }
+        const apply = () => {
+            activeVideoPostIdRef.current = postId;
+            forceActiveFeedVideoPostId(postId);
+            lastFeedAutoplayAtMsRef.current = Date.now();
+            autoplayTimerRef.current = null;
+        };
+        if (force) {
+            apply();
             return;
         }
         const minGapMs = 40;
         const sinceLast = Date.now() - lastFeedAutoplayAtMsRef.current;
         const delayMs = sinceLast >= minGapMs ? 0 : minGapMs - sinceLast;
-        autoplayTimerRef.current = setTimeout(() => {
-            activeVideoPostIdRef.current = postId;
-            setActiveFeedVideoPostId(postId);
-            lastFeedAutoplayAtMsRef.current = Date.now();
-            autoplayTimerRef.current = null;
-        }, delayMs);
+        autoplayTimerRef.current = setTimeout(apply, delayMs);
     }, []);
 
     const scheduleActiveFeedVideoRef = useRef(scheduleActiveFeedVideo);
@@ -1804,57 +1809,118 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             visibleVideos.sort((a, b) => a.index - b.index);
 
             const currentId = activeVideoPostIdRef.current;
+            // While scrolling, always track the top-most qualifying video (no sticky) so
+            // settle lands on what the user scrolled to. When idle, stick on the playing
+            // card while it remains viewable so a peek of the next row can't steal it.
             let nextId: string | null = null;
-            if (currentId && visibleVideos.some((v) => String(v.post.id) === String(currentId))) {
-                // Stick on the playing card while it remains viewable — stops the
-                // "land on a post then flick to the next" jump when the next peeks in.
+            if (
+                !feedScrollingRef.current &&
+                currentId &&
+                visibleVideos.some((v) => String(v.post.id) === String(currentId))
+            ) {
                 nextId = currentId;
             } else if (visibleVideos.length > 0) {
-                // Otherwise prefer the top-most qualifying video (reading position).
                 nextId = visibleVideos[0].post.id;
             }
 
             lastViewableVideoPostIdRef.current = nextId;
-            // While the user is flinging, only track the candidate — swapping the
-            // active Video mid-scroll remounts TextureViews and feels sticky.
+            // Never mount TextureView mid-fling — that shoves the row up the feed on Android.
+            // Warm + play only once settled.
             if (!feedScrollingRef.current) {
                 scheduleActiveFeedVideoRef.current(nextId);
             }
         }
     ).current;
 
+    const viewabilityConfigCallbackPairs = useRef([
+        {
+            viewabilityConfig: viewabilityConfigRef.current,
+            onViewableItemsChanged,
+        },
+    ]);
+
     useFocusEffect(
         useCallback(() => {
+            // Scroll flags can stick true across navigations on some Android OEMs.
+            feedScrollingRef.current = false;
+            setFeedScrollBusy(false);
+            suppressFeedViewabilityRef.current = false;
+
+            const scenesReturn = peekScenesReturnHandoff();
+            // Prefer the post Scenes just closed on — not sticky pre-Scenes autoplay.
+            if (scenesReturn?.postId) {
+                lastViewableVideoPostIdRef.current = scenesReturn.postId;
+                activeVideoPostIdRef.current = null; // force re-notify below
+            }
+
+            const restoreId =
+                scenesReturn?.postId ?? lastViewableVideoPostIdRef.current;
             const pinnedY = scenesReturnScrollYRef.current;
-            if (pinnedY != null) {
-                scenesReturnScrollYRef.current = null;
+            scenesReturnScrollYRef.current = null;
+
+            const finishRestore = () => {
+                if (restoreId && feedAutoplayAllowedRef.current) {
+                    // Force so blur→focus with the same post still remounts/plays.
+                    activeVideoPostIdRef.current = null;
+                    scheduleActiveFeedVideoRef.current(restoreId, true);
+                }
+                setTimeout(() => {
+                    suppressFeedViewabilityRef.current = false;
+                }, 160);
+            };
+
+            if (scenesReturn?.postId || pinnedY != null) {
                 suppressFeedViewabilityRef.current = true;
-                flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
                 requestAnimationFrame(() => {
-                    flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
-                    const restoreId = lastViewableVideoPostIdRef.current;
-                    if (restoreId && feedAutoplayAllowedRef.current) {
-                        scheduleActiveFeedVideoRef.current(restoreId);
+                    if (scenesReturn?.postId) {
+                        const rows = flatForRenderRef.current;
+                        const idx = rows.findIndex(
+                            (row) =>
+                                row.kind === 'post' &&
+                                String(row.post.id) === String(scenesReturn.postId),
+                        );
+                        if (idx >= 0) {
+                            try {
+                                flatListRef.current?.scrollToIndex({
+                                    index: idx,
+                                    animated: false,
+                                    viewPosition: 0.12,
+                                });
+                            } catch {
+                                if (pinnedY != null) {
+                                    flatListRef.current?.scrollToOffset({
+                                        offset: pinnedY,
+                                        animated: false,
+                                    });
+                                }
+                            }
+                        } else if (pinnedY != null) {
+                            flatListRef.current?.scrollToOffset({
+                                offset: pinnedY,
+                                animated: false,
+                            });
+                        }
+                    } else if (pinnedY != null) {
+                        flatListRef.current?.scrollToOffset({
+                            offset: pinnedY,
+                            animated: false,
+                        });
                     }
-                    setTimeout(() => {
-                        suppressFeedViewabilityRef.current = false;
-                    }, 120);
+                    finishRestore();
                 });
             } else {
-                // Resume the same autoplay target immediately — do not wait for FlatList
-                // viewability to re-fire (that caused multi-second Scenes→feed MP4 lag).
-                const restoreId = lastViewableVideoPostIdRef.current;
-                if (restoreId && feedAutoplayAllowedRef.current) {
-                    scheduleActiveFeedVideoRef.current(restoreId);
-                }
+                // Resume autoplay immediately — do not wait for FlatList viewability
+                // (that caused multi-second Scenes→feed MP4 lag).
+                finishRestore();
             }
             return () => {
                 if (autoplayTimerRef.current) {
                     clearTimeout(autoplayTimerRef.current);
                     autoplayTimerRef.current = null;
                 }
-                // Pause decode while covered (Scenes / profile). Keep `activeVideoPostId`
-                // so focus restore is instant without a cold viewability wait.
+                // Pause decode while covered (Scenes / profile). Keep lastViewable /
+                // scenes handoff so focus restore is instant.
+                activeVideoPostIdRef.current = null;
                 setActiveFeedVideoPostId(null);
             };
         }, [])
@@ -1965,6 +2031,28 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             page.map(p => p.id === postId ? updater(p) : p)
         ));
     };
+
+    /** Follow is per-author — keep every visible post for that handle in sync. */
+    const patchFollowForHandle = React.useCallback(
+        (handle: string | undefined, isFollowing: boolean, extras?: Partial<Post>) => {
+            const lower = String(handle || '')
+                .trim()
+                .toLowerCase();
+            if (!lower) return;
+            setPages((prev) =>
+                prev.map((page) =>
+                    page.map((p) =>
+                        String(p.userHandle || '')
+                            .trim()
+                            .toLowerCase() === lower
+                            ? ({ ...p, ...extras, isFollowing } as Post)
+                            : p,
+                    ),
+                ),
+            );
+        },
+        [],
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -2980,6 +3068,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         previewLocalBusinessPosts,
         previewSuggestedPlaces,
     ]);
+    flatForRenderRef.current = flatForRender;
+
+    // If viewability never armed a player (common on first paint), kick the first
+    // on-screen-ish video once the list has data and the tab is focused.
+    React.useEffect(() => {
+        if (!isFeedFocused || !feedAutoplayAllowed) return;
+        if (flat.length === 0) return;
+        if (activeVideoPostIdRef.current) return;
+        const preferred = lastViewableVideoPostIdRef.current;
+        const fallback = flat.find(postHasVideoMedia)?.id ?? null;
+        const nextId = preferred || fallback;
+        if (!nextId) return;
+        const t = setTimeout(() => {
+            if (activeVideoPostIdRef.current) return;
+            if (!feedAutoplayAllowedRef.current) return;
+            scheduleActiveFeedVideoRef.current(String(nextId), true);
+        }, 200);
+        return () => clearTimeout(t);
+    }, [isFeedFocused, feedAutoplayAllowed, flat]);
 
     React.useEffect(() => {
         const pendingY = pendingFeedScrollRestoreRef.current;
@@ -3132,18 +3239,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         isProfilePrivate(post.userHandle) &&
                         hasPendingFollowRequest(user.handle, post.userHandle),
                 );
-                setPages((prev) =>
-                    prev.map((page) =>
-                        page.map((p) =>
-                            p.id === post.id ? ({ ...updated, isFollowRequested } as Post) : p,
-                        ),
-                    ),
-                );
+                patchFollowForHandle(post.userHandle, updated.isFollowing === true, {
+                    isFollowRequested,
+                } as Partial<Post>);
             } catch (err) {
                 console.error('Follow from suggestion card failed:', err);
             }
         },
-        [user, userId],
+        [user, userId, patchFollowForHandle],
     );
 
     // Memoize renderItem to prevent recreation on every render
@@ -3172,15 +3275,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                         isProfilePrivate(post.userHandle) &&
                                         hasPendingFollowRequest(user.handle, post.userHandle),
                                 );
-                                setPages((prev) =>
-                                    prev.map((page) =>
-                                        page.map((p) =>
-                                            p.id === post.id
-                                                ? ({ ...updated, isFollowRequested } as Post)
-                                                : p,
-                                        ),
-                                    ),
-                                );
+                                patchFollowForHandle(post.userHandle, updated.isFollowing === true, {
+                                    isFollowRequested,
+                                } as Partial<Post>);
                             } catch (err) {
                                 console.error('Follow from suggested card failed:', err);
                             }
@@ -3342,11 +3439,62 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     suspendNativeVideo={commentsModalOpen}
                     onLike={async () => {
                         if (isPendingUpload) return;
-                        const updated = await toggleLike(userId, mergedPost.id, mergedPost);
+                        const prevLiked = mergedPost.userLiked === true;
+                        const prevLikes = mergedPost.stats?.likes ?? 0;
+                        // Optimistic like-only patch — avoid full post replace (layout churn).
                         setPages((prev) =>
-                            prev.map((page) => page.map((p) => (p.id === mergedPost.id ? updated : p)))
+                            prev.map((page) =>
+                                page.map((p) =>
+                                    p.id === mergedPost.id
+                                        ? {
+                                              ...p,
+                                              userLiked: !prevLiked,
+                                              stats: {
+                                                  ...p.stats,
+                                                  likes: Math.max(0, prevLikes + (prevLiked ? -1 : 1)),
+                                              },
+                                          }
+                                        : p,
+                                ),
+                            ),
                         );
+                        try {
+                            const updated = await toggleLike(userId, mergedPost.id, mergedPost);
+                            setPages((prev) =>
+                                prev.map((page) =>
+                                    page.map((p) =>
+                                        p.id === mergedPost.id
+                                            ? {
+                                                  ...p,
+                                                  userLiked: updated.userLiked ?? !prevLiked,
+                                                  stats: {
+                                                      ...p.stats,
+                                                      likes:
+                                                          updated.stats?.likes ??
+                                                          Math.max(0, prevLikes + (prevLiked ? -1 : 1)),
+                                                  },
+                                              }
+                                            : p,
+                                    ),
+                                ),
+                            );
+                        } catch {
+                            setPages((prev) =>
+                                prev.map((page) =>
+                                    page.map((p) =>
+                                        p.id === mergedPost.id
+                                            ? {
+                                                  ...p,
+                                                  userLiked: prevLiked,
+                                                  stats: { ...p.stats, likes: prevLikes },
+                                              }
+                                            : p,
+                                    ),
+                                ),
+                            );
+                        }
                     }}
+                    onLikeBurst={showFeedLikeBurst}
                     onFollow={async () => {
                         if (isPendingUpload || !user) return;
                         try {
@@ -3362,23 +3510,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                     isProfilePrivate(mergedPost.userHandle) &&
                                     hasPendingFollowRequest(user.handle, mergedPost.userHandle),
                             );
-                            setPages((prev) =>
-                                prev.map((page) =>
-                                    page.map((p) =>
-                                        p.id === mergedPost.id
-                                            ? ({ ...updated, isFollowRequested } as Post)
-                                            : p,
-                                    ),
-                                ),
-                            );
+                            patchFollowForHandle(mergedPost.userHandle, updated.isFollowing === true, {
+                                isFollowRequested,
+                            } as Partial<Post>);
                         } catch (err) {
                             console.error('Error toggling follow in FeedScreen:', err);
-                            setPages((prev) =>
-                                prev.map((page) =>
-                                    page.map((p) =>
-                                        p.id === mergedPost.id ? { ...p, isFollowing: !p.isFollowing } : p
-                                    )
-                                )
+                            patchFollowForHandle(
+                                mergedPost.userHandle,
+                                !(mergedPost.isFollowing === true),
                             );
                         }
                         if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
@@ -3421,7 +3560,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         if (isPendingUpload) return;
                         setImageFullscreenStartIndex(startIndex);
                         setImageFullscreenOrigin(origin);
-                        setImageFullscreenPost(mergedPost);
+                        // Re-decorate so author-level follow map wins over a stale per-post flag.
+                        setImageFullscreenPost(decorateForUser(userId, mergedPost));
                     }}
                     onOpenScenes={() => {
                         if (isPendingUpload) return;
@@ -3529,6 +3669,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             openStoryFromRail,
             scrollStories24RailIntoView,
             stories24CollapsePayload,
+            patchFollowForHandle,
+            showFeedLikeBurst,
         ]
     );
 
@@ -3598,10 +3740,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     return `${item.kind}:${baseKey}:${index}`;
                 }}
                 extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${isFeedFocused}`}
-                onViewableItemsChanged={onViewableItemsChanged}
-                viewabilityConfig={viewabilityConfigRef.current}
-                // Performance — fewer offscreen mounts; clip offscreen rows now that only
-                // the active card mounts a native Video surface.
+                viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 initialNumToRender={3}
                 maxToRenderPerBatch={3}
                 windowSize={7}
@@ -3627,22 +3766,30 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     feedScrollingRef.current = false;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
-                        setFeedScrollBusy(false);
                         if (feedAutoplayAllowedRef.current && lastViewableVideoPostIdRef.current) {
-                            scheduleActiveFeedVideoRef.current(lastViewableVideoPostIdRef.current);
+                            scheduleActiveFeedVideoRef.current(
+                                lastViewableVideoPostIdRef.current,
+                                true,
+                            );
                         }
-                    }, 64);
+                        // Reveal portal after active is armed (next frame) so TextureView
+                        // doesn't move in the same turn as FlatList settle.
+                        requestAnimationFrame(() => setFeedScrollBusy(false));
+                    }, 220);
                 }}
                 onScrollEndDrag={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
                         feedScrollingRef.current = false;
-                        setFeedScrollBusy(false);
                         if (feedAutoplayAllowedRef.current && lastViewableVideoPostIdRef.current) {
-                            scheduleActiveFeedVideoRef.current(lastViewableVideoPostIdRef.current);
+                            scheduleActiveFeedVideoRef.current(
+                                lastViewableVideoPostIdRef.current,
+                                true,
+                            );
                         }
-                    }, 120);
+                        requestAnimationFrame(() => setFeedScrollBusy(false));
+                    }, 240);
                 }}
                 // Scroll performance
                 onScroll={(e) => {
@@ -3829,6 +3976,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     },
                 ]}
             />
+            {/* IG-style: one Video outside FlatList (after list so it paints above posters). */}
+            <FeedVideoPortal suspend={commentsModalOpen || !isFeedFocused} />
             </View>
             </FeedPageLayout>
 
@@ -3891,12 +4040,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                   imageFullscreenPost.userHandle,
                                   user.handle,
                               );
-                              setPages((prev) =>
-                                  prev.map((page) =>
-                                      page.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)),
-                                  ),
+                              const nextFollowing = updated.isFollowing === true;
+                              const isFollowRequested = Boolean(
+                                  !nextFollowing &&
+                                      user.handle &&
+                                      isProfilePrivate(imageFullscreenPost.userHandle) &&
+                                      hasPendingFollowRequest(user.handle, imageFullscreenPost.userHandle),
                               );
-                              syncFullscreenPost({ ...imageFullscreenPost, ...updated });
+                              patchFollowForHandle(imageFullscreenPost.userHandle, nextFollowing, {
+                                  isFollowRequested,
+                              } as Partial<Post>);
+                              syncFullscreenPost({
+                                  ...imageFullscreenPost,
+                                  ...updated,
+                                  isFollowing: nextFollowing,
+                                  isFollowRequested,
+                              } as Post);
                           }
                         : undefined
                 }
@@ -4137,10 +4296,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         overflowPost.userHandle,
                         user?.handle,
                     );
-                    updatePost(overflowPost.id, (p) => ({
-                        ...p,
-                        isFollowing: updated?.isFollowing ?? !p.isFollowing,
-                    }));
+                    const nextFollowing = updated?.isFollowing === true;
+                    patchFollowForHandle(overflowPost.userHandle, nextFollowing);
                 }}
                 onMute={async () => {
                     if (!overflowPost) return;
@@ -4312,6 +4469,39 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             </TouchableOpacity>
                         </View>
                     </View>
+                </View>
+            </Modal>
+
+            {/* Feed-level burst (not per-card). Pin scroll when it opens/closes — Android
+                Modal visibility changes otherwise nudge FlatList content. */}
+            <Modal
+                visible={feedLikeBurst != null}
+                transparent
+                animationType="none"
+                statusBarTranslucent
+                hardwareAccelerated
+                onRequestClose={() => setFeedLikeBurst(null)}
+                onShow={() => {
+                    const y = feedScrollYRef.current;
+                    requestAnimationFrame(() => {
+                        flatListRef.current?.scrollToOffset({ offset: y, animated: false });
+                    });
+                }}
+                onDismiss={() => {
+                    const y = feedScrollYRef.current;
+                    requestAnimationFrame(() => {
+                        flatListRef.current?.scrollToOffset({ offset: y, animated: false });
+                    });
+                }}
+            >
+                <View style={styles.mediaBurstPortal} pointerEvents="none">
+                    {feedLikeBurst ? (
+                        <FeedDoubleTapLikeBurst
+                            key={feedLikeBurst.key}
+                            x={feedLikeBurst.x}
+                            y={feedLikeBurst.y}
+                        />
+                    ) : null}
                 </View>
             </Modal>
         </View>

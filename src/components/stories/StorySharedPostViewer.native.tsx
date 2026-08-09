@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
     View,
     Text,
@@ -6,16 +6,18 @@ import {
     TouchableOpacity,
     StyleSheet,
     ActivityIndicator,
+    type ImageSourcePropType,
 } from 'react-native';
-import Video, { ViewType } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
 import Flag from '../Flag.native';
+import StorySafeVideo from './StorySafeVideo.native';
 import type { Post, Story } from '../../types';
 import {
     getPostMediaUrl,
     getStoryVideoPosterFallback,
+    getStoryVideoPosterSource,
     isStoryVideo,
     postHasRealMedia,
     resolveStoryMediaUrl,
@@ -30,52 +32,93 @@ const SHARED_BACKDROP = ['#0f172a', '#111827', '#1f2937'];
 /** Soft atlas wash behind text-only shares (not IG purple/magenta). */
 const TEXT_SHARE_FALLBACK_BACKDROP = ['#0f2430', '#060d16', '#12263a'];
 
-function StoryVideoLayer({
-    uri,
-    posterUri,
-    style,
-    muted = true,
-    repeat = true,
-    paused = false,
-}: {
-    uri: string;
-    posterUri?: string;
-    style: object;
-    muted?: boolean;
-    repeat?: boolean;
-    paused?: boolean;
-}) {
-    const source = storyVideoSource(uri);
-    const [failed, setFailed] = useState(false);
-
-    useEffect(() => {
-        setFailed(false);
-    }, [uri]);
-
-    if ((failed || !source) && posterUri) {
-        return <Image source={{ uri: posterUri }} style={style} resizeMode="cover" />;
-    }
-
-    if (!source) {
-        return <View style={style} />;
-    }
-
+function resolvePosterSource(
+    mediaUrl?: string | null,
+    post?: Post | null,
+): ImageSourcePropType | undefined {
     return (
-        <Video
-            source={source}
-            style={style}
+        getStoryVideoPosterSource(mediaUrl, post) ||
+        (() => {
+            const uri = getStoryVideoPosterFallback(mediaUrl, post);
+            return uri ? { uri } : undefined;
+        })()
+    );
+}
+
+function SharedBackdrop({
+    isVideo,
+    mediaUrl,
+    posterSource,
+}: {
+    isVideo: boolean;
+    mediaUrl: string;
+    posterSource?: ImageSourcePropType;
+}) {
+    // Never mount a paused Video for the blurred backdrop — TextureView shutter is black.
+    if (isVideo && posterSource) {
+        return (
+            <Image
+                source={posterSource}
+                style={[StyleSheet.absoluteFill, styles.backdropMedia]}
+                resizeMode="cover"
+                blurRadius={18}
+            />
+        );
+    }
+    if (isVideo) {
+        const source = storyVideoSource(mediaUrl);
+        if (source) {
+            return (
+                <StorySafeVideo
+                    source={source}
+                    posterSource={posterSource}
+                    style={[StyleSheet.absoluteFill, styles.backdropMedia]}
+                    paused
+                />
+            );
+        }
+    }
+    return (
+        <Image
+            source={{ uri: mediaUrl }}
+            style={[StyleSheet.absoluteFill, styles.backdropMedia]}
             resizeMode="cover"
-            muted={muted}
-            repeat={repeat}
-            paused={paused}
-            playInBackground={false}
-            playWhenInactive={false}
-            viewType={ViewType.TEXTURE}
-            useTextureView
-            ignoreSilentSwitch="ignore"
-            onError={() => setFailed(true)}
+            blurRadius={isVideo ? 0 : 12}
         />
     );
+}
+
+function SharedCardMedia({
+    isVideo,
+    mediaUrl,
+    posterSource,
+    isMuted,
+    paused,
+}: {
+    isVideo: boolean;
+    mediaUrl: string;
+    posterSource?: ImageSourcePropType;
+    isMuted: boolean;
+    paused: boolean;
+}) {
+    if (isVideo) {
+        const source = storyVideoSource(mediaUrl);
+        if (source) {
+            return (
+                <StorySafeVideo
+                    source={source}
+                    posterSource={posterSource}
+                    style={styles.cardMedia}
+                    muted={isMuted}
+                    paused={paused}
+                />
+            );
+        }
+        if (posterSource) {
+            return <Image source={posterSource} style={styles.cardMedia} resizeMode="cover" />;
+        }
+    }
+    return <Image source={{ uri: mediaUrl }} style={styles.cardMedia} resizeMode="cover" />;
 }
 
 type Props = {
@@ -108,7 +151,7 @@ export default function StorySharedPostViewer({
     const fallbackUrl = resolveStoryMediaUrl(story.mediaUrl) || '';
     const post = originalPost;
     const mediaUrl = resolveStoryMediaUrl(getPostMediaUrl(post)) || fallbackUrl;
-    const posterUri = getStoryVideoPosterFallback(mediaUrl || story.mediaUrl, post);
+    const posterSource = resolvePosterSource(mediaUrl || story.mediaUrl, post);
     const hasRealMedia = post ? postHasRealMedia(post) : !!fallbackUrl;
     const isVideo = isStoryVideo(story, post) || (!!fallbackUrl && /\.(mp4|webm|mov|m4v)/i.test(fallbackUrl));
     const caption = (
@@ -123,30 +166,17 @@ export default function StorySharedPostViewer({
     if (story.sharedFromPost && !post && sharedPostFetchFailed && fallbackUrl) {
         return (
             <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
-                {isVideo ? (
-                    <StoryVideoLayer
-                        uri={fallbackUrl}
-                        posterUri={posterUri}
-                        style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        paused
-                    />
-                ) : (
-                    <Image source={{ uri: fallbackUrl }} style={[StyleSheet.absoluteFill, styles.backdropMedia]} />
-                )}
+                <SharedBackdrop isVideo={isVideo} mediaUrl={fallbackUrl} posterSource={posterSource} />
                 <View style={styles.backdropDim} />
                 <View style={styles.cardColumn}>
                     <TouchableOpacity style={styles.card} onPress={onOpenModal} activeOpacity={0.95}>
-                        {isVideo ? (
-                            <StoryVideoLayer
-                                uri={fallbackUrl}
-                                posterUri={posterUri}
-                                style={styles.cardMedia}
-                                muted={isMuted}
-                                paused={paused}
-                            />
-                        ) : (
-                            <Image source={{ uri: fallbackUrl }} style={styles.cardMedia} resizeMode="cover" />
-                        )}
+                        <SharedCardMedia
+                            isVideo={isVideo}
+                            mediaUrl={fallbackUrl}
+                            posterSource={posterSource}
+                            isMuted={isMuted}
+                            paused={paused}
+                        />
                     </TouchableOpacity>
                 </View>
             </LinearGradient>
@@ -164,30 +194,17 @@ export default function StorySharedPostViewer({
     if (hasRealMedia && mediaUrl) {
         return (
             <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
-                {isVideo ? (
-                    <StoryVideoLayer
-                        uri={mediaUrl}
-                        posterUri={posterUri}
-                        style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        paused
-                    />
-                ) : (
-                    <Image source={{ uri: mediaUrl }} style={[StyleSheet.absoluteFill, styles.backdropMedia]} />
-                )}
+                <SharedBackdrop isVideo={isVideo} mediaUrl={mediaUrl} posterSource={posterSource} />
                 <View style={styles.backdropDim} />
                 <View style={styles.cardColumn}>
                     <TouchableOpacity style={styles.card} onPress={onOpenModal} activeOpacity={0.95}>
-                        {isVideo ? (
-                            <StoryVideoLayer
-                                uri={mediaUrl}
-                                posterUri={posterUri}
-                                style={styles.cardMedia}
-                                muted={isMuted}
-                                paused={paused}
-                            />
-                        ) : (
-                            <Image source={{ uri: mediaUrl }} style={styles.cardMedia} resizeMode="cover" />
-                        )}
+                        <SharedCardMedia
+                            isVideo={isVideo}
+                            mediaUrl={mediaUrl}
+                            posterSource={posterSource}
+                            isMuted={isMuted}
+                            paused={paused}
+                        />
                         <View style={styles.cardChip}>
                             <Avatar
                                 src={getAvatarForHandle(post.userHandle)}

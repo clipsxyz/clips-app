@@ -21,7 +21,7 @@ import Animated, {
     useSharedValue,
     withTiming,
 } from 'react-native-reanimated';
-import Video, { ViewType } from 'react-native-video';
+import type { VideoRef } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import GoldChromeAmbientCanvas from './GoldChromeAmbientCanvas.native';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
@@ -36,7 +36,9 @@ import {
     normalizeStories24Handle,
     pickFirstStories24RailStory,
 } from '../utils/stories24Rail';
-import { storyVideoSource } from '../utils/storyMediaNative';
+import { storyVideoSource, getStoryVideoPosterSource } from '../utils/storyMediaNative';
+import { MOCK_FEED_BUNDLED_VIDEO_POSTER } from '../constants/mockFeedVideos';
+import StorySafeVideo from './stories/StorySafeVideo.native';
 const CARD_W = 112;
 const CARD_H = 156;
 const CARD_RADIUS = 16;
@@ -96,29 +98,25 @@ function StoryPreviewVideo({
     posterUri?: string;
     paused: boolean;
 }) {
-    const videoRef = useRef<React.ElementRef<typeof Video>>(null);
-    const [failed, setFailed] = useState(false);
+    const videoRef = useRef<VideoRef>(null);
     const source = storyVideoSource(uri) || { uri };
+    const posterSource =
+        getStoryVideoPosterSource(uri) ||
+        (posterUri ? { uri: posterUri } : MOCK_FEED_BUNDLED_VIDEO_POSTER);
 
-    if ((paused || failed) && posterUri) {
-        return (
-            <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        );
+    if (paused && posterSource) {
+        return <Image source={posterSource} style={StyleSheet.absoluteFill} resizeMode="cover" />;
     }
 
     return (
-        <Video
-            ref={videoRef}
+        <StorySafeVideo
+            videoRef={videoRef}
             source={source}
+            posterSource={posterSource}
             style={StyleSheet.absoluteFill}
-            resizeMode="cover"
             muted
             repeat
             paused={paused}
-            viewType={ViewType.TEXTURE}
-            useTextureView
-            ignoreSilentSwitch="ignore"
-            onError={() => setFailed(true)}
             onProgress={({ currentTime }) => {
                 if (currentTime > 3) {
                     videoRef.current?.seek(0);
@@ -450,7 +448,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
 ) {
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
     const [railScrolling, setRailScrolling] = useState(false);
-    const [feedListScrolling, setFeedListScrolling] = useState(() => getFeedScrollBusy());
+    const feedListScrollingRef = useRef(getFeedScrollBusy());
     const [appActive, setAppActive] = useState(AppState.currentState === 'active');
     const [collapsing, setCollapsing] = useState<{
         payload: Stories24RailReturnPayload;
@@ -470,7 +468,12 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     /** Last card rect used to open a story — Android collapse fallback when measure fails. */
     const lastOpenRectByHandleRef = useRef<Record<string, CardRect>>({});
 
-    useEffect(() => subscribeFeedScrollBusy(setFeedListScrolling), []);
+    useEffect(() => {
+        // Ref only — setState on every feed fling re-renders the list header and jumps scroll.
+        return subscribeFeedScrollBusy((busy) => {
+            feedListScrollingRef.current = busy;
+        });
+    }, []);
     /** Prevents collapse restart when feed/items refresh mid-animation. */
     const collapseSessionRef = useRef<string | null>(null);
     const onCollapseHandledRef = useRef(onCollapseHandled);
@@ -583,7 +586,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     );
 
     const previewsPaused =
-        previewVideosPaused || feedListScrolling || railScrolling || !appActive;
+        previewVideosPaused || feedListScrollingRef.current || railScrolling || !appActive;
 
     const openFirstStoryFromRail = React.useCallback(() => {
         const first = pickFirstStories24RailStory(items);

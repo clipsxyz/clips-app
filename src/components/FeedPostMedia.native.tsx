@@ -18,10 +18,11 @@ import { runOnJS } from 'react-native-reanimated';
 import type { StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import Video, { ViewType, type VideoRef } from 'react-native-video';
+import Video, { type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
-import { getActiveFeedVideoPostId, subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
-import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import {
+    registerFeedVideoFrame,
+} from '../utils/feedVideoFrameRegistryNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 import {
     getTextOnlyBackgroundColor,
@@ -95,7 +96,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         stickers,
         onMediaLoad,
         mode = 'feed',
-        isActive = false,
+        isActive: _isActive = false,
         suspendNativeVideo = false,
         muted = true,
         style,
@@ -103,12 +104,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     },
     ref,
 ) {
-    const [storeIsActiveVideo, setStoreIsActiveVideo] = useState(
-        () => mode === 'feed' && getActiveFeedVideoPostId() === String(post.id),
-    );
-    /** FeedScreen passes focus/comments gate; the active-post store picks which card plays. */
-    const playActive = mode === 'feed' ? Boolean(isActive) && storeIsActiveVideo : isActive;
-
     const [loadingByUrl, setLoadingByUrl] = useState<Record<string, boolean>>({});
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
@@ -121,12 +116,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const mediaLoadReportedRef = useRef(false);
     const carouselScrollRef = useRef<ScrollView>(null);
     const feedVideoRef = useRef<VideoRef>(null);
+    const portalFrameRef = useRef<View>(null);
     const lastEmittedIndexRef = useRef(0);
     const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
     const [burstKey, setBurstKey] = useState(0);
-    /** Avoid Image→Video black flash: keep poster visible until first frame. */
-    const [feedSurfaceReady, setFeedSurfaceReady] = useState(false);
 
     const carouselItems = useMemo(
         () =>
@@ -205,7 +199,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const getPlaybackUrl = (raw: string) =>
         videoUrlFallbackByRaw[raw] || resolveMockFeedVideoUrl(raw);
     const mediaUrl = rawMediaUrl;
-    const playbackUrl = rawMediaUrl ? getPlaybackUrl(rawMediaUrl) : undefined;
     const postLevelPoster = post.videoPosterUrl;
     const activeIsVideo = activeItem?.type === 'video' || (!activeItem && isVideoPost(post));
     const activeIsImage = !activeIsVideo && !!mediaUrl;
@@ -214,18 +207,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && activeIsVideo && !!mediaUrl;
+    // Portal paints Scenes CTA while that post is active; cell keeps a poster CTA always.
     const showScenesCta =
-        mode === 'feed' &&
-        video &&
-        postHasVideoMedia(post) &&
-        Boolean(onOpenScenes);
-    const feedShouldPlay = mode === 'feed' && video && playActive && !playFailed;
-    const showMuteButton = video && mode === 'feed' && (feedShouldPlay || muteFlash);
-
-    const onFeedVideoProgress = (currentTime: number) => {
-        if (mode !== 'feed' || !playActive) return;
-        setFeedVideoHandoff(post.id, { currentTime, muted: !soundOn });
-    };
+        mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
+    const showMuteButton = video && mode === 'feed' && muteFlash;
 
     const fireBurstAt = useCallback((x: number, y: number) => {
         setBurstAt({ x, y });
@@ -266,63 +251,40 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         if (mediaUrl) beginUrlLoad(mediaUrl);
     }, [mediaUrl, mode, video, beginUrlLoad]);
 
+    // Register frame for the external player — no active-id setState (avoids Alice→Sarah jump).
     useEffect(() => {
-        if (mode !== 'feed' || !video) return;
-        return subscribeActiveFeedVideo((activeId) => {
-            const mine = activeId != null && String(activeId) === String(post.id);
-            setStoreIsActiveVideo(mine);
-            if (!mine) {
-                setPlayFailed(false);
-                setPaused(true);
-                setFeedSurfaceReady(false);
-            }
-        });
-    }, [mode, post.id, video]);
-
-    useEffect(() => {
-        if (!playActive) {
-            setFeedSurfaceReady(false);
+        if (mode !== 'feed' || !video || !mediaUrl || suspendNativeVideo || playFailed) {
+            registerFeedVideoFrame(String(post.id), null);
             return;
         }
-        // Fallback if onReadyForDisplay never fires on this OEM.
-        const t = setTimeout(() => setFeedSurfaceReady(true), 700);
-        return () => clearTimeout(t);
-    }, [playActive, post.id]);
-
-    useEffect(() => {
-        if (mode !== 'feed' || !video) return;
-        setPaused(!playActive);
-    }, [playActive, mode, video]);
-
-    // Resume after Scenes / comments: consume handoff when the native surface is allowed
-    // again. Keep pendingSeekRef until onLoad seeks — do not clear it eagerly.
-    useEffect(() => {
-        if (mode !== 'feed' || !video || !playActive || suspendNativeVideo) return;
-        const handoff = consumeFeedVideoHandoff(post.id);
-        if (!handoff) return;
-        setSoundOn(!handoff.muted);
-        setPlayFailed(false);
-        if (handoff.currentTime <= 0) return;
-        pendingSeekRef.current = handoff.currentTime;
-        requestAnimationFrame(() => {
-            const t = pendingSeekRef.current;
-            if (t != null && t > 0) feedVideoRef.current?.seek(t);
+        registerFeedVideoFrame(String(post.id), {
+            ref: portalFrameRef,
+            rawUrl: mediaUrl,
+            userHandle: post.userHandle,
+            showScenesCta: Boolean(onOpenScenes),
+            onOpenScenes: onOpenScenes,
+            onToggleMute: () => {
+                setSoundOn((prev) => {
+                    const next = !prev;
+                    void setGlobalVideoMutedNative(!next);
+                    return next;
+                });
+            },
         });
-    }, [playActive, mode, post.id, suspendNativeVideo, video]);
-
-    useEffect(() => {
-        if (mode !== 'feed' || !video || !playActive || suspendNativeVideo) return;
-        const t = pendingSeekRef.current;
-        if (t == null || t <= 0) return;
-        const id = requestAnimationFrame(() => {
-            setTimeout(() => {
-                const pending = pendingSeekRef.current;
-                if (pending == null || pending <= 0) return;
-                feedVideoRef.current?.seek(pending);
-            }, 40);
-        });
-        return () => cancelAnimationFrame(id);
-    }, [playActive, mode, post.id, suspendNativeVideo, video]);
+        return () => {
+            registerFeedVideoFrame(String(post.id), null);
+        };
+    }, [
+        mode,
+        video,
+        mediaUrl,
+        suspendNativeVideo,
+        playFailed,
+        post.id,
+        post.userHandle,
+        onOpenScenes,
+        currentIndex,
+    ]);
 
     useEffect(() => {
         setSoundOn(!muted);
@@ -405,12 +367,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const handleOpenScenesPress = useCallback(() => {
         onOpenScenes?.();
     }, [onOpenScenes]);
-
-    // FlatList requires TextureView — SurfaceView punches through and blanks the whole screen on many OEMs.
-    const feedVideoSurfaceProps =
-        Platform.OS === 'android' && mode === 'feed'
-            ? { viewType: ViewType.TEXTURE as const, useTextureView: true, disableFocus: true as const }
-            : {};
 
     const renderFeedTapOverlay = () => {
         // Non-carousel: transparent overlay (Image/Video steal touches on Android).
@@ -502,8 +458,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slideUrl = getPlaybackUrl(slideRawUrl);
         const slideIsVideo = item?.type === 'video' || (!item && isVideoPost(post));
         const slideVideo = !textOnly && slideIsVideo;
-        const slideFeedPlay =
-            mode === 'feed' && slideVideo && playActive && slideIndex === currentIndex && !playFailed;
         const showLoader =
             !slideVideo && !!loadingByUrl[slideRawUrl] && !loadedUrlsRef.current.has(slideRawUrl);
 
@@ -514,26 +468,22 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             (slidePoster ? { uri: slidePoster } : undefined) ||
             (slideVideo ? MOCK_FEED_BUNDLED_VIDEO_POSTER : undefined);
 
-        // Active card: native Video. Inactive: poster Image. Fixed parent frame avoids
-        // layout jump; avoid stacking Video on top of Image (blank TextureView hid poster).
-        const slideUseNativePlayer =
-            mode === 'detail' ||
-            (mode === 'feed' &&
-                slideVideo &&
-                !suspendNativeVideo &&
-                playActive &&
-                !playFailed &&
-                slideIndex === currentIndex);
+        // Feed: poster only — TextureView lives in FeedVideoPortal (IG architecture).
+        // Detail: native Video in-place.
+        const slideUseNativePlayer = mode === 'detail' && slideVideo;
 
         const slideInner = slideVideo ? (
-            <View style={frameStyle} collapsable={false}>
+            <View
+                ref={slideIndex === currentIndex ? portalFrameRef : undefined}
+                style={[frameStyle, styles.videoClip]}
+                collapsable={false}
+            >
                 {slidePosterSource ? (
                     <Image
                         source={slidePosterSource}
                         style={styles.mediaFill}
                         resizeMode="cover"
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                        pointerEvents={mediaPointerEvents}
                         onLoad={() => markUrlLoaded(slideRawUrl)}
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />
@@ -542,51 +492,17 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 )}
                 {slideUseNativePlayer ? (
                     <Video
-                        ref={
-                            mode === 'feed' && slideVideo && slideIndex === currentIndex
-                                ? feedVideoRef
-                                : undefined
-                        }
-                        source={videoSource(slideUrl, slideRawUrl)}
-                        style={[
-                            styles.mediaFill,
-                            // Invisible until first frame — poster underneath stays visible (no black flash).
-                            mode === 'feed' && !feedSurfaceReady ? styles.videoHidden : null,
-                        ]}
+                        ref={feedVideoRef}
+                        source={videoSource(slideUrl, slideRawUrl) as object}
+                        style={styles.mediaFill}
                         resizeMode="cover"
-                        controls={mode === 'detail'}
-                        paused={mode === 'detail' ? paused : !slideFeedPlay}
-                        muted={mode === 'feed' ? !soundOn : undefined}
-                        repeat={mode === 'feed'}
+                        controls
+                        paused={paused}
                         playInBackground={false}
                         playWhenInactive={false}
                         ignoreSilentSwitch="ignore"
                         pointerEvents={mediaPointerEvents}
-                        {...feedVideoSurfaceProps}
-                        onLoad={() => {
-                            markUrlLoaded(slideRawUrl);
-                            const t = pendingSeekRef.current;
-                            if (t != null && t > 0 && mode === 'feed') {
-                                pendingSeekRef.current = null;
-                                feedVideoRef.current?.seek(t);
-                            }
-                        }}
-                        onReadyForDisplay={
-                            mode === 'feed'
-                                ? () => {
-                                      markUrlLoaded(slideRawUrl);
-                                      setFeedSurfaceReady(true);
-                                  }
-                                : undefined
-                        }
-                        onProgress={
-                            slideFeedPlay
-                                ? (e) => {
-                                      if (e.currentTime > 0.02) setFeedSurfaceReady(true);
-                                      onFeedVideoProgress(e.currentTime);
-                                  }
-                                : undefined
-                        }
+                        onLoad={() => markUrlLoaded(slideRawUrl)}
                         onError={(e) => onVideoError(slideRawUrl, e)}
                     />
                 ) : null}
@@ -689,7 +605,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     containerHeight={height}
                 />
             ) : null}
-            {video && mode === 'feed' && !feedShouldPlay && !playFailed ? (
+            {video && mode === 'feed' && !playFailed ? (
                 <View style={styles.videoTypeBadge} pointerEvents="none">
                     <Icon name="videocam" size={12} color="#FFFFFF" />
                     <Text style={styles.videoTypeBadgeText}>VIDEO</Text>
@@ -772,8 +688,8 @@ const styles = StyleSheet.create({
     mediaFill: {
         ...StyleSheet.absoluteFill,
     },
-    videoHidden: {
-        opacity: 0,
+    videoClip: {
+        overflow: 'hidden',
     },
     textOnlyCard: {
         borderRadius: 16,
@@ -820,7 +736,7 @@ const styles = StyleSheet.create({
         letterSpacing: 0.6,
     },
     videoErrorOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.55)',
@@ -828,7 +744,7 @@ const styles = StyleSheet.create({
         zIndex: 14,
     },
     burstLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 50,
         elevation: Platform.OS === 'android' ? 50 : 0,
     },

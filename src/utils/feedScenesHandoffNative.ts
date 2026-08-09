@@ -28,3 +28,16 @@ export function consumeFeedVideoHandoff(postId: string): FeedVideoHandoff | unde
 export function peekFeedVideoHandoff(postId: string): FeedVideoHandoff | undefined {
     return handoffByPostId.get(String(postId));
 }
+
+/**
+ * Post written by Scenes on close (`fromScenes: true`). Feed focus must resume this id,
+ * not the sticky pre-Scenes autoplay target.
+ */
+export function peekScenesReturnHandoff():
+    | { postId: string; handoff: FeedVideoHandoff }
+    | undefined {
+    for (const [postId, handoff] of handoffByPostId) {
+        if (handoff.fromScenes) return { postId, handoff };
+    }
+    return undefined;
+}
