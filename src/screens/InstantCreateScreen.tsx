@@ -16,11 +16,15 @@ import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
-import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import {
+    ensureCameraPermission,
+    ensureGalleryMediaPermission,
+} from '../utils/galleryMediaPermissionsNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 type PickerMode = 'feed' | 'story24';
@@ -170,6 +174,11 @@ export default function InstantCreateScreen({ navigation }: any) {
     const [centeredMode, setCenteredMode] = useState<CreateModeId>('gallery');
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [hubAlert, setHubAlert] = useState<HubAlertConfig | null>(null);
+    const [mediaSourceMenu, setMediaSourceMenu] = useState<{
+        title: string;
+        subtitle?: string;
+        options: GazetteerMenuOption[];
+    } | null>(null);
     const orbitIndexRef = useRef(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0);
     const orbitAnim = useRef(new Animated.Value(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0)).current;
     const didInit = useRef(false);
@@ -327,6 +336,77 @@ export default function InstantCreateScreen({ navigation }: any) {
         [navigateFromAssets],
     );
 
+    const pickCameraMedia = useCallback(
+        async (mode: PickerMode = 'feed') => {
+            const allowed = await ensureCameraPermission();
+            if (!allowed) {
+                setHubAlert({
+                    title: 'Camera access needed',
+                    message: 'Allow camera access in Settings to take a photo for your post.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
+            ImagePicker.launchCamera(
+                {
+                    mediaType: 'photo',
+                    quality: 0.9,
+                    saveToPhotos: true,
+                    cameraType: 'back',
+                },
+                (response) => {
+                    if (response.didCancel) return;
+                    if (response.errorCode) {
+                        setHubAlert({
+                            title: 'Camera error',
+                            message: response.errorMessage || 'Could not open the camera.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                        return;
+                    }
+                    const rawAssets = response.assets || [];
+                    const supported = rawAssets.filter(assetIsSupportedGalleryItem);
+                    if (supported.length === 0) {
+                        setHubAlert({
+                            title: 'No photo',
+                            message: 'No photo was captured. Try again.',
+                            icon: 'alert',
+                            confirmButtonText: 'OK',
+                        });
+                        return;
+                    }
+                    navigateFromAssets(supported.slice(0, 1), mode, false);
+                },
+            );
+        },
+        [navigateFromAssets],
+    );
+
+    /** System gallery has no camera tab — offer library vs camera explicitly. */
+    const openMediaSourceMenu = useCallback(
+        (mode: PickerMode = 'feed') => {
+            setMediaSourceMenu({
+                title: 'Add media',
+                subtitle: 'Choose a source',
+                options: [
+                    {
+                        label: 'Photo library',
+                        icon: 'images-outline',
+                        onPress: () => void pickGalleryMedia(mode),
+                    },
+                    {
+                        label: 'Camera',
+                        icon: 'camera-outline',
+                        onPress: () => void pickCameraMedia(mode),
+                    },
+                ],
+            });
+        },
+        [pickCameraMedia, pickGalleryMedia],
+    );
+
     const openGallerySourceExplainer = useCallback(() => {
         setHubAlert({
             title: 'Upload from your gallery',
@@ -338,6 +418,7 @@ export default function InstantCreateScreen({ navigation }: any) {
             showCancelButton: true,
             onConfirm: () => {
                 setHubAlert(null);
+                // Carousel is gallery-only — never offer Camera here.
                 setTimeout(() => void pickGalleryMedia('feed'), 100);
             },
         });
@@ -353,7 +434,7 @@ export default function InstantCreateScreen({ navigation }: any) {
             return;
         }
         if (item.id === 'gallery') {
-            void pickGalleryMedia('feed');
+            openMediaSourceMenu('feed');
             return;
         }
         if (item.id === 'text') {
@@ -472,6 +553,13 @@ export default function InstantCreateScreen({ navigation }: any) {
                     setHubAlert(null);
                 }}
                 onDismiss={() => setHubAlert(null)}
+            />
+            <GazetteerMenuSheet
+                visible={mediaSourceMenu != null}
+                title={mediaSourceMenu?.title ?? ''}
+                subtitle={mediaSourceMenu?.subtitle}
+                options={mediaSourceMenu?.options ?? []}
+                onDismiss={() => setMediaSourceMenu(null)}
             />
         </GazetteerScreenShell>
     );

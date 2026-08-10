@@ -64,7 +64,22 @@ function isReactNativeRuntime(): boolean {
 }
 
 function isRelativeDemoVideoPath(url: string): boolean {
-    return url.startsWith('/demo-videos/') || (url.startsWith('/') && /\.(mp4|webm|mov)(\?|#|$)/i.test(url));
+    // Only explicit mock slots — never treat filesystem/local paths as demos.
+    return url.startsWith('/demo-videos/') || NATIVE_REMOTE_BY_DEMO_PATH[url] != null;
+}
+
+/** Local / in-app media URIs must play as-is (never remap to flower/demo samples). */
+export function isPlayableLocalMediaUri(url: string | undefined | null): boolean {
+    if (!url || typeof url !== 'string') return false;
+    const u = url.trim();
+    return (
+        /^file:/i.test(u) ||
+        /^content:/i.test(u) ||
+        /^ph:/i.test(u) ||
+        /^assets-library:/i.test(u) ||
+        /^blob:/i.test(u) ||
+        /^data:/i.test(u)
+    );
 }
 
 function nativeRemoteForDemoPath(url: string): string {
@@ -118,18 +133,18 @@ export function isFakeMockVideoPosterUrl(url: string | undefined | null): boolea
 export function resolveMockFeedVideoUrl(url: string | undefined): string {
     if (isReactNativeRuntime()) {
         if (!url) return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+        if (isPlayableLocalMediaUri(url)) return url;
         if (NATIVE_REMOTE_BY_DEMO_PATH[url]) return NATIVE_REMOTE_BY_DEMO_PATH[url];
         if (isRelativeDemoVideoPath(url)) return nativeRemoteForDemoPath(url);
-        if (/\.(mp4|webm|mov)(\?|#|$)/i.test(url) && !/^https?:\/\//i.test(url)) {
-            return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+        if (!/^https?:\/\//i.test(url) && looksLikeDemoSlotVideo(url)) {
+            return nativeRemoteForDemoPath(url);
         }
         return url;
     }
     if (!url) return WEB_DEMO_MP4;
+    if (isPlayableLocalMediaUri(url)) return url;
     if (url.startsWith('/demo-videos/')) return WEB_DEMO_MP4;
-    if (/\.(mp4|webm|mov)(\?|#|$)/i.test(url)) {
-        return WEB_DEMO_MP4;
-    }
+    if (looksLikeDemoSlotVideo(url)) return WEB_DEMO_MP4;
     return url;
 }
 

@@ -5,7 +5,6 @@ import {
     StyleSheet,
     Dimensions,
     Pressable,
-    Image,
     Platform,
     Alert,
     Modal,
@@ -30,10 +29,6 @@ import { getScenesMediaSlides } from '../utils/scenesMediaNative';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { buildPostMetadataItems } from '../utils/feedPostMeta';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
-import {
-    MOCK_FEED_BUNDLED_VIDEO_POSTER,
-    resolveDemoVideoPosterSource,
-} from '../constants/mockFeedVideos';
 import Avatar from './Avatar';
 import Flag from './Flag.native';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
@@ -58,6 +53,8 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
+import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import { setScenesViewerActive } from '../utils/scenesViewerActiveNative';
 import {
     toggleLike,
     toggleFollowForPost,
@@ -190,6 +187,15 @@ export default function ScenesViewer({
     const currentTimeRef = useRef(0);
     const timesByPostId = useRef<Map<string, number>>(new Map());
     const didSeekInitialRef = useRef(false);
+    /** Resume play after comments only if we were playing when the sheet opened. */
+    const wasPlayingBeforeCommentsRef = useRef(true);
+    /** Pending seek+unmute after remounting Video when comments close. */
+    const commentsResumePendingRef = useRef(false);
+    /** Unmount native Video while comments sheet is open (feed suspendNativeVideo parity). */
+    const [commentsSuspendVideo, setCommentsSuspendVideo] = useState(false);
+    const [commentsAudioLocked, setCommentsAudioLocked] = useState(false);
+    const commentsAudioUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const commentsOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastMediaTapRef = useRef(0);
     const singleMediaTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -210,6 +216,15 @@ export default function ScenesViewer({
         },
         [onPostsChange, postsProp],
     );
+
+    useEffect(() => {
+        // Kill any feed ExoPlayer still under this fullScreenModal (focus blur is unreliable).
+        setActiveFeedVideoPostId(null);
+        setScenesViewerActive(true);
+        return () => {
+            setScenesViewerActive(false);
+        };
+    }, []);
 
     useEffect(() => {
         if (initialMuted !== undefined) {
@@ -266,7 +281,7 @@ export default function ScenesViewer({
 
     useEffect(() => {
         if (commentsOpen) {
-            setPaused(false);
+            // Stay paused while comments are open — do not force play (avoids audio races).
             return;
         }
         mediaHeightSv.value = withTiming(windowHeight, {
@@ -378,7 +393,36 @@ export default function ScenesViewer({
     }, [posts.length]);
 
     const onVideoLoad = useCallback(() => {
-        if (didSeekInitialRef.current || !activePost) return;
+        if (!activePost) return;
+
+        // Comments remount: seek to saved time while still muted/paused, then unlock.
+        if (commentsResumePendingRef.current) {
+            const t =
+                timesByPostId.current.get(activePost.id) ?? currentTimeRef.current ?? 0;
+            if (t > 0.05) {
+                try {
+                    videoRef.current?.seek(t);
+                } catch {
+                    /* ignore */
+                }
+                currentTimeRef.current = t;
+            }
+            commentsResumePendingRef.current = false;
+            didSeekInitialRef.current = true;
+            if (commentsAudioUnlockTimerRef.current) {
+                clearTimeout(commentsAudioUnlockTimerRef.current);
+            }
+            commentsAudioUnlockTimerRef.current = setTimeout(() => {
+                commentsAudioUnlockTimerRef.current = null;
+                setCommentsAudioLocked(false);
+                if (wasPlayingBeforeCommentsRef.current) {
+                    setPaused(false);
+                }
+            }, 60);
+            return;
+        }
+
+        if (didSeekInitialRef.current) return;
         const t =
             activeIndex === initialIndex
                 ? (initialVideoTime ?? timesByPostId.current.get(activePost.id) ?? 0)
@@ -400,7 +444,55 @@ export default function ScenesViewer({
     }, []);
 
     const openComments = useCallback(() => {
+        if (activePost) {
+            timesByPostId.current.set(activePost.id, currentTimeRef.current);
+        }
+        wasPlayingBeforeCommentsRef.current = !paused;
+        // Immediate hard stop + unmount (feed suspendNativeVideo parity). Delayed
+        // unmount left ExoPlayer audio running under the comments Modal.
+        setCommentsAudioLocked(true);
+        setPaused(true);
+        setCommentsSuspendVideo(true);
         setCommentsOpen(true);
+    }, [activePost, paused]);
+
+    const closeComments = useCallback(() => {
+        if (commentsOpenTimerRef.current) {
+            clearTimeout(commentsOpenTimerRef.current);
+            commentsOpenTimerRef.current = null;
+        }
+        if (commentsAudioUnlockTimerRef.current) {
+            clearTimeout(commentsAudioUnlockTimerRef.current);
+            commentsAudioUnlockTimerRef.current = null;
+        }
+        setCommentsOpen(false);
+        // Remount Video muted+paused; onVideoLoad seeks then unlocks playback.
+        commentsResumePendingRef.current = true;
+        setPaused(true);
+        setCommentsAudioLocked(true);
+        setCommentsSuspendVideo(false);
+        // Fallback if onLoad is skipped on some OEMs after remount.
+        commentsAudioUnlockTimerRef.current = setTimeout(() => {
+            if (!commentsResumePendingRef.current) return;
+            commentsResumePendingRef.current = false;
+            const t = currentTimeRef.current;
+            if (t > 0.05) {
+                try {
+                    videoRef.current?.seek(t);
+                } catch {
+                    /* ignore */
+                }
+            }
+            setCommentsAudioLocked(false);
+            if (wasPlayingBeforeCommentsRef.current) setPaused(false);
+        }, 700);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (commentsOpenTimerRef.current) clearTimeout(commentsOpenTimerRef.current);
+            if (commentsAudioUnlockTimerRef.current) clearTimeout(commentsAudioUnlockTimerRef.current);
+        };
     }, []);
 
     const handleDirectMessage = useCallback(async () => {
@@ -734,47 +826,44 @@ export default function ScenesViewer({
                 ]}
             >
                     <Animated.View style={[styles.mediaLayer, mediaLayerAnimStyle]}>
-                        {!commentsOpen ? (
-                            <GestureDetector gesture={mediaGestures}>
-                                <View style={styles.mediaGestureHost}>
-                                    <ScenesMediaPlayer
-                                        key={activePost.id}
-                                        post={activePost}
-                                        isActive
-                                        paused={paused}
-                                        muted={muted}
-                                        width={windowWidth}
-                                        height={mediaViewportHeight}
-                                        videoRef={videoRef}
-                                        onVideoLoad={onVideoLoad}
-                                        onVideoProgress={onVideoProgress}
-                                        onSlideProgress={setMediaSlideProgress}
-                                        onSlideIndexChange={setMediaSlideIndex}
-                                        showPauseOverlay
-                                        onMediaPress={handleMediaPress}
-                                    />
-                                </View>
-                            </GestureDetector>
-                        ) : (
-                            // Unmount Video while comments Modal is open — paused TextureView
-                            // can punch through the sheet on some Android OEMs.
-                            <View style={styles.mediaGestureHost} pointerEvents="none">
-                                <Image
-                                    source={
-                                        resolveDemoVideoPosterSource(
-                                            activePost.mediaUrl ||
-                                                activePost.mediaItems?.find((m) => m.type === 'video')
-                                                    ?.url,
-                                        ) ||
-                                        (activePost.videoPosterUrl
-                                            ? { uri: activePost.videoPosterUrl }
-                                            : MOCK_FEED_BUNDLED_VIDEO_POSTER)
+                        <GestureDetector gesture={mediaGestures}>
+                            <View style={styles.mediaGestureHost}>
+                                <ScenesMediaPlayer
+                                    key={activePost.id}
+                                    post={activePost}
+                                    isActive
+                                    suspendPlayback={commentsSuspendVideo}
+                                    paused={paused || commentsOpen || commentsAudioLocked}
+                                    muted={muted || commentsOpen || commentsAudioLocked}
+                                    volume={
+                                        muted || commentsOpen || commentsAudioLocked ? 0 : 1
                                     }
-                                    style={{ width: windowWidth, height: mediaViewportHeight }}
-                                    resizeMode="contain"
+                                    width={windowWidth}
+                                    height={mediaViewportHeight}
+                                    videoRef={videoRef}
+                                    onVideoLoad={onVideoLoad}
+                                    onVideoProgress={onVideoProgress}
+                                    onSlideProgress={setMediaSlideProgress}
+                                    onSlideIndexChange={setMediaSlideIndex}
+                                    showPauseOverlay={!commentsOpen && !commentsSuspendVideo}
+                                    onMediaPress={commentsOpen ? undefined : handleMediaPress}
                                 />
+                                {commentsOpen || commentsSuspendVideo ? (
+                                    // Opaque cover while sheet is up — blocks TextureView punch-through
+                                    // without leaving a live ExoPlayer under the Modal.
+                                    <View
+                                        style={[
+                                            styles.commentsVideoCover,
+                                            {
+                                                width: windowWidth,
+                                                height: mediaViewportHeight,
+                                            },
+                                        ]}
+                                        pointerEvents="none"
+                                    />
+                                ) : null}
                             </View>
-                        )}
+                        </GestureDetector>
                     </Animated.View>
 
             {lastTapDebug && (
@@ -1015,12 +1104,12 @@ export default function ScenesViewer({
                     transparent
                     animationType="slide"
                     statusBarTranslucent
-                    onRequestClose={() => setCommentsOpen(false)}
+                    onRequestClose={closeComments}
                 >
                     <View style={styles.commentsModalRoot}>
                         <Pressable
                             style={styles.commentsModalBackdrop}
-                            onPress={() => setCommentsOpen(false)}
+                            onPress={closeComments}
                             accessibilityLabel="Dismiss comments"
                         />
                         <View style={styles.commentsModalSheet}>
@@ -1031,7 +1120,7 @@ export default function ScenesViewer({
                                 isOpen={commentsOpen}
                                 commentAuthorHandle={viewerHandle ?? ''}
                                 currentUserHandle={viewerHandle}
-                                onClose={() => setCommentsOpen(false)}
+                                onClose={closeComments}
                             />
                         </View>
                     </View>
@@ -1264,6 +1353,13 @@ const styles = StyleSheet.create({
         height: '100%',
         backgroundColor: '#000',
         overflow: 'hidden',
+        position: 'relative',
+    },
+    commentsVideoCover: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#121212',
+        zIndex: 4,
+        elevation: Platform.OS === 'android' ? 4 : 0,
     },
     tapDebug: {
         position: 'absolute',
@@ -1384,11 +1480,14 @@ const styles = StyleSheet.create({
         zIndex: 28,
         alignItems: 'center',
         gap: 14,
+        // Only the icon buttons capture taps — gaps stay swipeable for next post / slide.
+        pointerEvents: 'box-none',
     },
     actionCol: {
         alignItems: 'center',
         gap: 3,
         minWidth: 44,
+        pointerEvents: 'box-none',
     },
     actionBtn: {
         width: 44,

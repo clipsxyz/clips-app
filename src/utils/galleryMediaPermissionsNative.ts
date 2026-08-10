@@ -39,3 +39,21 @@ export async function ensureGalleryMediaPermission(): Promise<boolean> {
         return false;
     }
 }
+
+/** Request camera access for Take Photo / launchCamera. */
+export async function ensureCameraPermission(): Promise<boolean> {
+    if (Platform.OS !== 'android') return true;
+
+    try {
+        const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA, {
+            title: 'Camera access',
+            message: 'Gazetteer needs the camera so you can take photos and videos for posts.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Not now',
+        });
+        return result === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (error) {
+        console.warn('ensureCameraPermission failed:', error);
+        return false;
+    }
+}

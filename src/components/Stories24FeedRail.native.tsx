@@ -36,12 +36,13 @@ import {
     normalizeStories24Handle,
     pickFirstStories24RailStory,
 } from '../utils/stories24Rail';
-import { storyVideoSource, getStoryVideoPosterSource } from '../utils/storyMediaNative';
-import { MOCK_FEED_BUNDLED_VIDEO_POSTER } from '../constants/mockFeedVideos';
+import { storyVideoSource } from '../utils/storyMediaNative';
 import StorySafeVideo from './stories/StorySafeVideo.native';
 const CARD_W = 112;
 const CARD_H = 156;
 const CARD_RADIUS = 16;
+/** Idle / missing poster — never the old BBB rainbow test card. */
+const PREVIEW_POSTER_FALLBACK = '#121212';
 
 /** Threads/Apple-TV shared-element morph (card ↔ fullscreen). */
 const EXPAND_EASE = Easing.bezier(0.16, 1, 0.3, 1);
@@ -99,13 +100,21 @@ function StoryPreviewVideo({
     paused: boolean;
 }) {
     const videoRef = useRef<VideoRef>(null);
-    const source = storyVideoSource(uri) || { uri };
-    const posterSource =
-        getStoryVideoPosterSource(uri) ||
-        (posterUri ? { uri: posterUri } : MOCK_FEED_BUNDLED_VIDEO_POSTER);
+    // Local scroll-busy only — do not setState on the FlatList header (jumps scroll).
+    const [feedScrolling, setFeedScrolling] = useState(getFeedScrollBusy());
+    useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
+    const effectivelyPaused = paused || feedScrolling;
 
-    if (paused && posterSource) {
-        return <Image source={posterSource} style={StyleSheet.absoluteFill} resizeMode="cover" />;
+    const source = storyVideoSource(uri) || { uri };
+    // Prefer the story/post still — never the bundled BBB rainbow test card.
+    const posterSource =
+        posterUri && !posterUri.startsWith('#') ? { uri: posterUri } : undefined;
+
+    if (effectivelyPaused) {
+        if (posterSource) {
+            return <Image source={posterSource} style={StyleSheet.absoluteFill} resizeMode="cover" />;
+        }
+        return <View style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />;
     }
 
     return (
@@ -116,7 +125,7 @@ function StoryPreviewVideo({
             style={StyleSheet.absoluteFill}
             muted
             repeat
-            paused={paused}
+            paused={effectivelyPaused}
             onProgress={({ currentTime }) => {
                 if (currentTime > 3) {
                     videoRef.current?.seek(0);
@@ -448,7 +457,6 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
 ) {
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
     const [railScrolling, setRailScrolling] = useState(false);
-    const feedListScrollingRef = useRef(getFeedScrollBusy());
     const [appActive, setAppActive] = useState(AppState.currentState === 'active');
     const [collapsing, setCollapsing] = useState<{
         payload: Stories24RailReturnPayload;
@@ -469,10 +477,10 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     const lastOpenRectByHandleRef = useRef<Record<string, CardRect>>({});
 
     useEffect(() => {
-        // Ref only — setState on every feed fling re-renders the list header and jumps scroll.
-        return subscribeFeedScrollBusy((busy) => {
-            feedListScrollingRef.current = busy;
+        const sub = AppState.addEventListener('change', (next) => {
+            setAppActive(next === 'active');
         });
+        return () => sub.remove();
     }, []);
     /** Prevents collapse restart when feed/items refresh mid-animation. */
     const collapseSessionRef = useRef<string | null>(null);
@@ -568,13 +576,6 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [collapsePayload]);
 
-    useEffect(() => {
-        const sub = AppState.addEventListener('change', (next) => {
-            setAppActive(next === 'active');
-        });
-        return () => sub.remove();
-    }, []);
-
     const railHandles = useMemo(
         () => items.map((i) => i.handle).filter((h) => h && h !== STORIES24_ADD_YOURS_HANDLE),
         [items],
@@ -585,8 +586,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         [items],
     );
 
-    const previewsPaused =
-        previewVideosPaused || feedListScrollingRef.current || railScrolling || !appActive;
+    const previewsPaused = previewVideosPaused || railScrolling || !appActive;
 
     const openFirstStoryFromRail = React.useCallback(() => {
         const first = pickFirstStories24RailStory(items);

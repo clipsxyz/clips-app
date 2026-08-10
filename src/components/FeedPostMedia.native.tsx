@@ -38,6 +38,7 @@ import { postHasVideoMedia } from '../utils/postMedia';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
+    isPlayableLocalMediaUri,
     mockFeedVideoSource,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
@@ -249,8 +250,13 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             ? carouselItems[Math.min(currentIndex, maxCarouselIndex)]
             : undefined;
     const rawMediaUrl = activeItem?.url || post.mediaUrl;
-    const getPlaybackUrl = (raw: string) =>
-        videoUrlFallbackByRaw[raw] || resolveMockFeedVideoUrl(raw);
+    const getPlaybackUrl = (raw: string) => {
+        if (videoUrlFallbackByRaw[raw]) return videoUrlFallbackByRaw[raw];
+        // Device uploads / temp storage — never run through demo remapping.
+        if (isPlayableLocalMediaUri(raw)) return raw;
+        if (/^https?:\/\//i.test(raw) && !isMockDemoVideoPath(raw)) return raw;
+        return resolveMockFeedVideoUrl(raw);
+    };
     const mediaUrl = rawMediaUrl;
     const activeIsVideo = activeItem?.type === 'video' || (!activeItem && isVideoPost(post));
     const activeIsImage = !activeIsVideo && !!mediaUrl;
@@ -438,17 +444,21 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     }
 
     const videoSource = (uri: string, rawUrl?: string) => {
-        // Demo MP4s: pass bundled require — URI from resolveAssetSource often fails on device.
+        const sourceUri = uri || rawUrl || '';
+        if (isPlayableLocalMediaUri(rawUrl) || isPlayableLocalMediaUri(uri)) {
+            return { uri: rawUrl && isPlayableLocalMediaUri(rawUrl) ? rawUrl : uri };
+        }
+        // Demo MP4s: pass bundled/mapped require — URI from resolveAssetSource often fails on device.
         if (rawUrl && isMockDemoVideoPath(rawUrl)) {
             return mockFeedVideoSource(rawUrl);
         }
         if (isMockDemoVideoPath(uri)) {
             return mockFeedVideoSource(uri);
         }
-        const lower = uri.toLowerCase();
-        if (lower.includes('.m3u8')) return { uri, type: 'm3u8' as const };
-        if (lower.includes('.webm')) return { uri, type: 'webm' as const };
-        return { uri };
+        const lower = sourceUri.toLowerCase();
+        if (lower.includes('.m3u8')) return { uri: sourceUri, type: 'm3u8' as const };
+        if (lower.includes('.webm')) return { uri: sourceUri, type: 'webm' as const };
+        return { uri: sourceUri };
     };
 
     const setFeedSoundOn = (nextSoundOn: boolean) => {
@@ -458,10 +468,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const onVideoError = (rawUrl: string, error?: unknown) => {
         const played = getPlaybackUrl(rawUrl);
+        // Only demo slot paths may fall back to the shared sample clip.
         if (
             !videoUrlFallbackByRaw[rawUrl] &&
             played !== MOCK_FEED_VIDEO_REMOTE_FALLBACK &&
-            (rawUrl.includes('/demo-videos/') || rawUrl.startsWith('/'))
+            !isPlayableLocalMediaUri(rawUrl) &&
+            (rawUrl.includes('/demo-videos/') || isMockDemoVideoPath(rawUrl))
         ) {
             setVideoUrlFallbackByRaw((prev) => ({
                 ...prev,

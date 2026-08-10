@@ -99,6 +99,7 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                 undefined,
                 undefined,
                 payload.venue,
+                payload.videoPosterUrl,
             );
 
             try {

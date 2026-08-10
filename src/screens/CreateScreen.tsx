@@ -24,6 +24,7 @@ import { publishMediaStory24 } from '../utils/publishStoryNative';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { saveDraft } from '../api/drafts.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import {
     failedToSaveSheet,
     nothingToSaveSheet,
@@ -48,6 +49,7 @@ import {
     type InstantFilterName,
 } from '../utils/instantFiltersNative';
 import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNative';
+import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
@@ -105,6 +107,11 @@ export default function CreateScreen({ navigation, route }: any) {
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
+    const [mediaSourceMenu, setMediaSourceMenu] = useState<{
+        title: string;
+        subtitle?: string;
+        options: GazetteerMenuOption[];
+    } | null>(null);
     const [videoCoverTime, setVideoCoverTime] = useState<number>(Number(route.params?.videoCoverTime || 0));
     const [isVideoPaused, setIsVideoPaused] = useState(false);
     const [videoDurationSec, setVideoDurationSec] = useState<number>(Math.max(1, Number(route.params?.videoDuration || 0) || 15));
@@ -385,9 +392,25 @@ export default function CreateScreen({ navigation, route }: any) {
         videoRef.current?.seek(Math.max(0, previewCoverTime));
     }, [previewCoverTime, previewType, previewUri, carouselActiveIndex]);
 
-    const pickCarouselMedia = useCallback(() => {
+    const handleSelectMedia = useCallback(async () => {
+        const allowed = await ensureGalleryMediaPermission();
+        if (!allowed) {
+            Alert.alert(
+                'Gallery access needed',
+                'Allow photo and video access in Settings to upload from your gallery.',
+            );
+            return;
+        }
+
+        // Web-parity: open the system gallery directly (no Photo/Video/Carousel chooser).
         ImagePicker.launchImageLibrary(
-            { mediaType: 'mixed', selectionLimit: 10, quality: 0.9, videoQuality: 'high' },
+            {
+                mediaType: 'mixed',
+                selectionLimit: isStory24Flow ? 1 : 10,
+                quality: 0.9,
+                videoQuality: 'high',
+                includeExtra: true,
+            },
             (response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
@@ -398,92 +421,26 @@ export default function CreateScreen({ navigation, route }: any) {
                     return;
                 }
                 const assets = response.assets || [];
-                if (assets.length < 2) {
-                    Alert.alert('Carousel', 'Select at least 2 photos or videos for a carousel post.');
+                if (assets.length === 0) {
+                    Alert.alert('Media error', 'No media was selected.');
                     return;
                 }
-                applyCarouselFromAssets(assets);
+                if (!isStory24Flow && assets.length >= 2) {
+                    applyCarouselFromAssets(assets);
+                    return;
+                }
+                const asset = assets[0];
+                if (!asset?.uri) {
+                    Alert.alert('Media error', 'No media was selected.');
+                    return;
+                }
+                applySingleMedia(
+                    normalizeMediaUri(asset.uri),
+                    assetIsVideo(asset) ? 'video' : 'image',
+                );
             },
         );
-    }, [applyCarouselFromAssets]);
-
-    const handleSelectMedia = () => {
-        const pickPhotoWithFallback = async () => {
-            try {
-                const image = await ImageCropPicker.openPicker({
-                    mediaType: 'photo',
-                    cropping: true,
-                    width: 1080,
-                    height: 1350,
-                    cropperToolbarTitle: 'Adjust photo',
-                    cropperChooseText: 'Use Photo',
-                    cropperCancelText: 'Cancel',
-                    compressImageQuality: 0.9,
-                });
-                applySingleMedia(normalizeMediaUri(image.path || null), 'image');
-            } catch (err: any) {
-                if (err?.code === 'E_PICKER_CANCELLED') return;
-                console.error('Photo picker error (cropper), falling back:', err);
-                ImagePicker.launchImageLibrary(
-                    { mediaType: 'photo', selectionLimit: 1, quality: 0.9 },
-                    (response) => {
-                        if (response.didCancel) return;
-                        if (response.errorCode) {
-                            Alert.alert('Photo error', response.errorMessage || 'Could not open your photo library.');
-                            return;
-                        }
-                        const asset = response.assets?.[0];
-                        if (!asset?.uri) {
-                            Alert.alert('Photo error', 'No photo was selected.');
-                            return;
-                        }
-                        applySingleMedia(normalizeMediaUri(asset.uri), 'image');
-                    },
-                );
-            }
-        };
-
-        const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
-            {
-                text: 'Photo',
-                onPress: () => {
-                    void pickPhotoWithFallback();
-                },
-            },
-            {
-                text: 'Video',
-                onPress: () => {
-                    ImagePicker.launchImageLibrary(
-                        {
-                            mediaType: 'video',
-                            quality: 0.8,
-                        },
-                        (response) => {
-                            if (response.didCancel) return;
-                            if (response.errorCode) {
-                                Alert.alert('Video error', response.errorMessage || 'Could not open your video library.');
-                                return;
-                            }
-                            const asset = response.assets?.[0];
-                            if (!asset?.uri) {
-                                Alert.alert('Video error', 'No video was selected.');
-                                return;
-                            }
-                            applySingleMedia(normalizeMediaUri(asset.uri), 'video');
-                        },
-                    );
-                },
-            },
-        ];
-        if (!isStory24Flow) {
-            buttons.splice(2, 0, {
-                text: 'Carousel (2–10 photos & videos)',
-                onPress: pickCarouselMedia,
-            });
-        }
-        buttons.push({ text: 'Cancel', style: 'cancel' });
-        Alert.alert('Choose media type', 'How would you like to add media?', buttons);
-    };
+    }, [applyCarouselFromAssets, applySingleMedia, isStory24Flow]);
 
     const handleTakePhoto = async () => {
         try {
@@ -819,9 +776,39 @@ export default function CreateScreen({ navigation, route }: any) {
                     <View style={styles.mediaSelection}>
                         <TouchableOpacity
                             onPress={() => {
-                                navigation.replace('GalleryPreview', {
-                                    autoStart: { source: 'library', kind: isStory24Flow ? 'single' : 'carousel', mediaType: 'mixed' },
-                                    story24: isStory24Flow || undefined,
+                                setMediaSourceMenu({
+                                    title: 'Add media',
+                                    subtitle: 'Choose a source',
+                                    options: [
+                                        {
+                                            label: 'Photo library',
+                                            icon: 'images-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'library',
+                                                        kind: isStory24Flow ? 'single' : 'carousel',
+                                                        mediaType: 'mixed',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        {
+                                            label: 'Camera',
+                                            icon: 'camera-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'photo',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                    ],
                                 });
                             }}
                             style={styles.mediaButton}
@@ -1163,6 +1150,13 @@ export default function CreateScreen({ navigation, route }: any) {
                     action?.();
                 }}
                 onDismiss={() => setDraftAlert(null)}
+            />
+            <GazetteerMenuSheet
+                visible={mediaSourceMenu != null}
+                title={mediaSourceMenu?.title ?? ''}
+                subtitle={mediaSourceMenu?.subtitle}
+                options={mediaSourceMenu?.options ?? []}
+                onDismiss={() => setMediaSourceMenu(null)}
             />
         </GazetteerScreenShell>
     );

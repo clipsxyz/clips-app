@@ -15,6 +15,7 @@ import Video, { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import ScenesTextPostCard from './ScenesTextPostCard.native';
+import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
 import {
     getScenesMediaSlides,
     resolveScenesVideoUrl,
@@ -26,6 +27,13 @@ type Props = {
     isActive: boolean;
     paused: boolean;
     muted: boolean;
+    /** Explicit volume (0–1). Prefer 0 while comments suppress audio — mute alone can lag on Android. */
+    volume?: number;
+    /**
+     * Fully unmount native Video (feed comments parity). Pause alone leaves ExoPlayer
+     * audio buffers that lag behind the comments Modal on Android.
+     */
+    suspendPlayback?: boolean;
     width?: number;
     height: number;
     videoRef?: React.RefObject<VideoRef | null>;
@@ -46,6 +54,8 @@ export default function ScenesMediaPlayer({
     isActive,
     paused,
     muted,
+    volume,
+    suspendPlayback = false,
     width: widthProp,
     height,
     videoRef: externalVideoRef,
@@ -59,6 +69,8 @@ export default function ScenesMediaPlayer({
     onMediaPressOut,
 }: Props) {
     const width = widthProp ?? Dimensions.get('window').width;
+    const outputVolume = typeof volume === 'number' ? volume : muted ? 0 : 1;
+    const canPlayVideo = isActive && !suspendPlayback;
     const slides = useMemo(() => getScenesMediaSlides(post), [post]);
     const hasCarousel = slides.length > 1;
     const [slideIndex, setSlideIndex] = useState(0);
@@ -94,17 +106,6 @@ export default function ScenesMediaPlayer({
         [hasCarousel, onSlideProgress, slideIndex, slides.length, width],
     );
 
-    const goToSlide = useCallback(
-        (delta: number) => {
-            const next = Math.max(0, Math.min(slides.length - 1, safeIndex + delta));
-            if (next === safeIndex) return;
-            setSlideIndex(next);
-            scrollRef.current?.scrollTo({ x: next * width, animated: true });
-            onSlideProgress?.(0);
-        },
-        [onSlideProgress, safeIndex, slides.length, width],
-    );
-
     const renderTapCapture = (enabled: boolean) =>
         enabled && onMediaPress ? (
             <Pressable
@@ -138,7 +139,7 @@ export default function ScenesMediaPlayer({
         return (
             <View key={`${post.id}-${index}-${rawUrl}`} style={[styles.slide, { width, height }]}>
                 {slide.type === 'video' ? (
-                    slideActive ? (
+                    slideActive && canPlayVideo ? (
                         <Video
                             ref={slideActive ? videoRef : undefined}
                             source={scenesVideoSource(rawUrl)}
@@ -147,13 +148,17 @@ export default function ScenesMediaPlayer({
                             resizeMode="contain"
                             repeat
                             paused={paused}
-                            muted={muted}
+                            muted={muted || outputVolume <= 0}
+                            volume={outputVolume}
                             poster={undefined}
                             posterResizeMode="cover"
                             playInBackground={false}
                             playWhenInactive={false}
                             ignoreSilentSwitch="ignore"
+                            useTextureView
+                            {...androidListSafeVideoProps()}
                             onLoad={onVideoLoad}
+                            onReadyForDisplay={onVideoLoad}
                             onProgress={(e) => {
                                 onVideoProgress?.(e);
                                 if (e.seekableDuration > 0) {
@@ -211,7 +216,8 @@ export default function ScenesMediaPlayer({
                     nestedScrollEnabled
                     directionalLockEnabled
                     showsHorizontalScrollIndicator={false}
-                    scrollEnabled={isActive && !paused}
+                    // Keep swipe available even while paused (no next/prev chevrons).
+                    scrollEnabled={isActive}
                     onMomentumScrollEnd={onCarouselScrollEnd}
                     style={{ width, height }}
                 >
@@ -220,8 +226,11 @@ export default function ScenesMediaPlayer({
                         return (
                             <View key={`${post.id}-wrap-${i}`} style={{ width, height }}>
                                 {slide.type === 'text' ? (
-                                    renderSlide(slide, i)
-                                ) : slide.type === 'video' && slideActive ? (
+                                    <>
+                                        {renderSlide(slide, i)}
+                                        {slideActive ? renderTapCapture(true) : null}
+                                    </>
+                                ) : slide.type === 'video' && slideActive && canPlayVideo ? (
                                     <View style={[styles.slide, { width, height }]}>
                                         <Video
                                             ref={videoRef}
@@ -230,19 +239,27 @@ export default function ScenesMediaPlayer({
                                             resizeMode="contain"
                                             repeat
                                             paused={paused}
-                                            muted={muted}
+                                            muted={muted || outputVolume <= 0}
+                                            volume={outputVolume}
                                             poster={undefined}
                                             posterResizeMode="cover"
                                             playInBackground={false}
                                             playWhenInactive={false}
                                             ignoreSilentSwitch="ignore"
+                                            useTextureView
+                                            {...androidListSafeVideoProps()}
                                             pointerEvents="none"
                                             onLoad={onVideoLoad}
+                                            onReadyForDisplay={onVideoLoad}
                                             onProgress={handleProgress}
                                         />
+                                        {renderTapCapture(true)}
                                     </View>
                                 ) : (
-                                    renderSlide(slide, i)
+                                    <>
+                                        {renderSlide(slide, i)}
+                                        {slideActive ? renderTapCapture(true) : null}
+                                    </>
                                 )}
                             </View>
                         );
@@ -251,7 +268,7 @@ export default function ScenesMediaPlayer({
             ) : slides.length === 1 ? (
                 slides[0].type === 'text' ? (
                     renderSlide(slides[0], 0)
-                ) : slides[0].type === 'video' && isActive ? (
+                ) : slides[0].type === 'video' && canPlayVideo ? (
                     <View style={[styles.slide, { width, height }]}>
                         <Video
                             ref={videoRef}
@@ -260,14 +277,18 @@ export default function ScenesMediaPlayer({
                             resizeMode="contain"
                             repeat
                             paused={paused}
-                            muted={muted}
+                            muted={muted || outputVolume <= 0}
+                            volume={outputVolume}
                             poster={undefined}
                             posterResizeMode="cover"
                             playInBackground={false}
                             playWhenInactive={false}
                             ignoreSilentSwitch="ignore"
+                            useTextureView
+                            {...androidListSafeVideoProps()}
                             pointerEvents="none"
                             onLoad={onVideoLoad}
+                            onReadyForDisplay={onVideoLoad}
                             onProgress={handleProgress}
                         />
                     </View>
@@ -287,34 +308,14 @@ export default function ScenesMediaPlayer({
             ) : null}
 
             {hasCarousel ? (
-                <>
-                    {safeIndex > 0 ? (
-                        <Pressable
-                            style={[styles.chevron, styles.chevronLeft]}
-                            onPress={() => goToSlide(-1)}
-                            hitSlop={12}
-                        >
-                            <Icon name="chevron-back" size={28} color="#FFFFFF" />
-                        </Pressable>
-                    ) : null}
-                    {safeIndex < slides.length - 1 ? (
-                        <Pressable
-                            style={[styles.chevron, styles.chevronRight]}
-                            onPress={() => goToSlide(1)}
-                            hitSlop={12}
-                        >
-                            <Icon name="chevron-forward" size={28} color="#FFFFFF" />
-                        </Pressable>
-                    ) : null}
-                    <View style={styles.dotsRow} pointerEvents="none">
-                        {slides.map((_, i) => (
-                            <View
-                                key={i}
-                                style={[styles.dot, i === safeIndex && styles.dotActive]}
-                            />
-                        ))}
-                    </View>
-                </>
+                <View style={styles.dotsRow} pointerEvents="none">
+                    {slides.map((_, i) => (
+                        <View
+                            key={i}
+                            style={[styles.dot, i === safeIndex && styles.dotActive]}
+                        />
+                    ))}
+                </View>
             ) : null}
 
             {showPauseOverlay && paused ? (
@@ -325,7 +326,8 @@ export default function ScenesMediaPlayer({
                 </View>
             ) : null}
 
-            {onMediaPress && isActive ? renderTapCapture(true) : null}
+            {/* Full-bleed tap only for single media — on carousels it blocked horizontal swipe. */}
+            {!hasCarousel && onMediaPress && isActive ? renderTapCapture(true) : null}
         </View>
     );
 }
@@ -380,19 +382,8 @@ const styles = StyleSheet.create({
     },
     fallback: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: '#111',
+        backgroundColor: '#121212',
     },
-    chevron: {
-        position: 'absolute',
-        top: '50%',
-        marginTop: -22,
-        zIndex: 12,
-        padding: 8,
-        backgroundColor: 'rgba(0,0,0,0.35)',
-        borderRadius: 999,
-    },
-    chevronLeft: { left: 8 },
-    chevronRight: { right: 8 },
     dotsRow: {
         position: 'absolute',
         bottom: 12,

@@ -75,6 +75,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         undefined,
         undefined,
         payload.venue,
+        payload.videoPosterUrl,
       );
 
       // Persist share count (mock storage / API) so it stays correct when user returns to feed

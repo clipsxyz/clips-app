@@ -39,10 +39,6 @@ import FeedSendIcon from './FeedSendIcon.native';
 import FeedSmileIcon from './FeedSmileIcon.native';
 import { resolveAvatarDimensions } from './avatarProps';
 import { getAvatarForHandle } from '../api/users';
-import {
-    MOCK_FEED_BUNDLED_VIDEO_POSTER,
-    resolveDemoVideoPosterSource,
-} from '../constants/mockFeedVideos';
 import { isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import {
     addComment,
@@ -67,7 +63,7 @@ const COMMENT_EMOJIS = [
 const HANDLE_REGEX = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.58, 520);
 const BRAND_600 = PASSPORT_PALETTE.wavePrimary;
-const COMMENT_LIKE_BLUE = '#60A5FA';
+const COMMENT_LIKE_ACTIVE = '#FFFFFF';
 const MENTION_COLOR = '#9fd4cb';
 /** View Profile night-atlas chrome. */
 const P = {
@@ -303,8 +299,8 @@ function CommentItem({
                     >
                         <FeedLikeThumbsIcon
                             size={16}
-                            filled={false}
-                            color={liked ? COMMENT_LIKE_BLUE : P.muted}
+                            filled={liked}
+                            color={liked ? COMMENT_LIKE_ACTIVE : P.muted}
                         />
                         <Text style={styles.commentLikeCount}>{likes}</Text>
                     </TouchableOpacity>
@@ -357,8 +353,8 @@ function CommentItem({
                                                 >
                                                     <FeedLikeThumbsIcon
                                                         size={14}
-                                                        filled={false}
-                                                        color={reply.userLiked ? COMMENT_LIKE_BLUE : P.muted}
+                                                        filled={Boolean(reply.userLiked)}
+                                                        color={reply.userLiked ? COMMENT_LIKE_ACTIVE : P.muted}
                                                     />
                                                     <Text style={styles.replyLikeCount}>{reply.likes ?? 0}</Text>
                                                 </TouchableOpacity>
@@ -988,31 +984,62 @@ export default function PostCommentsSheet({
     );
 
     const sheetMediaPreview =
-        post && (post.mediaUrl || isVideoPost(post)) ? (
+        post && (post.mediaUrl || isVideoPost(post) || authorHandle) ? (
             <View style={styles.mediaPreviewRow}>
                 <View style={styles.mediaPreviewThumb}>
-                    {isVideoPost(post) ? (
-                        <Image
-                            // Never mount react-native-video in the sheet — Android TextureView
-                            // punches through and blanks the comments UI under/over the thumb.
-                            source={
-                                resolveDemoVideoPosterSource(
-                                    post.mediaUrl || post.mediaItems?.[0]?.url,
-                                ) ||
-                                (post.videoPosterUrl
-                                    ? { uri: post.videoPosterUrl }
-                                    : MOCK_FEED_BUNDLED_VIDEO_POSTER)
-                            }
-                            style={styles.mediaPreviewMedia}
-                            resizeMode="cover"
-                        />
-                    ) : (
-                        <Image
-                            source={{ uri: post.mediaUrl }}
-                            style={styles.mediaPreviewMedia}
-                            resizeMode="cover"
-                        />
-                    )}
+                    {(() => {
+                        const postAny = post as {
+                            posterUrl?: string;
+                            thumbnailUrl?: string;
+                            avatarUrl?: string;
+                            author?: { avatarUrl?: string };
+                        };
+                        const mediaPosters = (post.mediaItems || []).flatMap((item) => {
+                            const slide = item as {
+                                posterUrl?: string;
+                                thumbnailUrl?: string;
+                                url?: string;
+                                type?: string;
+                            };
+                            return [
+                                slide.posterUrl,
+                                slide.thumbnailUrl,
+                                slide.type === 'image' ? slide.url : undefined,
+                            ];
+                        });
+                        const previewUri = [
+                            postAny.posterUrl,
+                            post.videoPosterUrl,
+                            postAny.thumbnailUrl,
+                            ...mediaPosters,
+                            !isVideoPost(post) ? post.mediaUrl : undefined,
+                            postAny.author?.avatarUrl,
+                            postAny.avatarUrl,
+                            authorHandle ? getAvatarForHandle(authorHandle) : undefined,
+                        ].find(
+                            (u): u is string => typeof u === 'string' && u.trim().length > 0,
+                        );
+
+                        if (previewUri) {
+                            return (
+                                <Image
+                                    source={{ uri: previewUri }}
+                                    style={styles.mediaPreviewMedia}
+                                    resizeMode="cover"
+                                />
+                            );
+                        }
+
+                        return (
+                            <View style={styles.mediaPreviewAvatarFallback}>
+                                <Avatar
+                                    src={undefined}
+                                    name={authorHandle.split('@')[0] || 'User'}
+                                    size="md"
+                                />
+                            </View>
+                        );
+                    })()}
                 </View>
                 {authorHandle ? (
                     <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
@@ -1246,6 +1273,18 @@ const styles = StyleSheet.create({
     mediaPreviewMedia: {
         width: '100%',
         height: '100%',
+    },
+    mediaPreviewPlaceholder: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#121212',
+    },
+    mediaPreviewAvatarFallback: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#121212',
     },
     mediaPreviewHandle: {
         flex: 1,

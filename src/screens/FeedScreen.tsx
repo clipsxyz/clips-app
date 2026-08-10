@@ -75,6 +75,11 @@ import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScenesHandoffNative';
 import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
+    isScenesViewerActive,
+    setScenesViewerActive,
+    subscribeScenesViewerActive,
+} from '../utils/scenesViewerActiveNative';
+import {
     getGlobalVideoMutedNative,
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
@@ -1438,6 +1443,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
     const isFeedFocused = useIsFocused();
+    const [scenesViewerActive, setScenesViewerActiveState] = useState(() => isScenesViewerActive());
+    useEffect(() => {
+        // Keep feed ExoPlayer dead for the whole Scenes session (focus blur is unreliable).
+        return subscribeScenesViewerActive((active) => {
+            setScenesViewerActiveState(active);
+            if (active) {
+                activeVideoPostIdRef.current = null;
+                setActiveFeedVideoPostId(null);
+            }
+        });
+    }, []);
     const defaultLocal = user?.local || 'Finglas';
     const defaultNational = user?.national || 'Ireland';
     const defaultRegional = user?.regional || 'Dublin';
@@ -1462,6 +1478,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
     const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
+    /** Feed under Scenes fullScreenModal often stays "focused" — still kill its ExoPlayer. */
+    const feedNativeVideoSuspended =
+        commentsModalOpen || !isFeedFocused || scenesViewerActive;
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
@@ -1757,10 +1776,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const feedAutoplayAllowedRef = useRef(feedAutoplayAllowed);
     feedAutoplayAllowedRef.current = feedAutoplayAllowed;
 
+    const scenesViewerActiveRef = useRef(scenesViewerActive);
+    scenesViewerActiveRef.current = scenesViewerActive;
+
+    useEffect(() => {
+        if (!scenesViewerActive) return;
+        if (autoplayTimerRef.current) {
+            clearTimeout(autoplayTimerRef.current);
+            autoplayTimerRef.current = null;
+        }
+        activeVideoPostIdRef.current = null;
+        setActiveFeedVideoPostId(null);
+    }, [scenesViewerActive]);
+
     const scheduleActiveFeedVideo = useCallback((postId: string | null, force = false) => {
         if (autoplayTimerRef.current) {
             clearTimeout(autoplayTimerRef.current);
             autoplayTimerRef.current = null;
+        }
+        // fullScreenModal often leaves Feed "focused" — never re-arm under Scenes.
+        if (scenesViewerActiveRef.current) {
+            activeVideoPostIdRef.current = null;
+            setActiveFeedVideoPostId(null);
+            return;
         }
         if (!feedAutoplayAllowedRef.current || !postId) {
             activeVideoPostIdRef.current = null;
@@ -1773,6 +1811,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             return;
         }
         const apply = () => {
+            if (scenesViewerActiveRef.current) {
+                activeVideoPostIdRef.current = null;
+                setActiveFeedVideoPostId(null);
+                autoplayTimerRef.current = null;
+                return;
+            }
             activeVideoPostIdRef.current = postId;
             forceActiveFeedVideoPostId(postId);
             lastFeedAutoplayAtMsRef.current = Date.now();
@@ -1867,6 +1911,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             scenesReturnScrollYRef.current = null;
 
             const finishRestore = () => {
+                if (scenesViewerActiveRef.current) return;
                 if (restoreId && feedAutoplayAllowedRef.current) {
                     // Force so blur→focus with the same post still remounts/plays.
                     activeVideoPostIdRef.current = null;
@@ -3081,7 +3126,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     // If viewability never armed a player (common on first paint), kick the first
     // on-screen-ish video once the list has data and the tab is focused.
     React.useEffect(() => {
-        if (!isFeedFocused || !feedAutoplayAllowed) return;
+        if (!isFeedFocused || scenesViewerActive || !feedAutoplayAllowed) return;
         if (flat.length === 0) return;
         if (activeVideoPostIdRef.current) return;
         const preferred = lastViewableVideoPostIdRef.current;
@@ -3090,11 +3135,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (!nextId) return;
         const t = setTimeout(() => {
             if (activeVideoPostIdRef.current) return;
+            if (scenesViewerActiveRef.current) return;
             if (!feedAutoplayAllowedRef.current) return;
             scheduleActiveFeedVideoRef.current(String(nextId), true);
         }, 200);
         return () => clearTimeout(t);
-    }, [isFeedFocused, feedAutoplayAllowed, flat]);
+    }, [isFeedFocused, scenesViewerActive, feedAutoplayAllowed, flat]);
 
     React.useEffect(() => {
         const pendingY = pendingFeedScrollRestoreRef.current;
@@ -3315,7 +3361,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     <Stories24FeedRail
                         ref={stories24RailRef}
                         items={stories24Items}
-                        previewVideosPaused={true}
+                        previewVideosPaused={false}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('Clip')}
                         onScrollCardIntoView={scrollStories24RailIntoView}
@@ -3442,12 +3488,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     post={mergedPost}
                     isVideoActive={
                         isFeedFocused &&
+                        !scenesViewerActive &&
                         isVideoPostRow &&
                         !commentsModalOpen &&
                         String(activeVideoPostIdRef.current) === String(mergedPost.id)
                     }
                     feedVideoMuted={feedVideoMuted}
-                    suspendNativeVideo={commentsModalOpen}
+                    suspendNativeVideo={feedNativeVideoSuspended}
                     onLike={async () => {
                         if (isPendingUpload) return;
                         const prevLiked = mergedPost.userLiked === true;
@@ -3577,6 +3624,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onOpenScenes={() => {
                         if (isPendingUpload) return;
                         scenesReturnScrollYRef.current = feedScrollYRef.current;
+                        // Mark Scenes active before navigate — Feed often stays "focused"
+                        // under fullScreenModal and would otherwise re-arm ExoPlayer.
+                        setScenesViewerActive(true);
+                        setScenesViewerActiveState(true);
+                        activeVideoPostIdRef.current = null;
+                        setActiveFeedVideoPostId(null);
                         const handoff = peekFeedVideoHandoff(mergedPost.id);
                         const scenesFeedLabel = showFollowingFeed
                             ? 'Following'
@@ -3671,6 +3724,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             isFeedFocused,
             feedVideoMuted,
             commentsModalOpen,
+            scenesViewerActive,
+            feedNativeVideoSuspended,
             pendingUploadTick,
             videoPostsForScenes,
             interestsDraft,
@@ -3750,7 +3805,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }
                     return `${item.kind}:${baseKey}:${index}`;
                 }}
-                extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${isFeedFocused}`}
+                extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${isFeedFocused}-${scenesViewerActive}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 initialNumToRender={3}
                 maxToRenderPerBatch={3}

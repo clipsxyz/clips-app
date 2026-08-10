@@ -205,6 +205,8 @@ export type Story = {
   userReaction?: string; // Current user's reaction emoji
   sharedFromPost?: string; // Original post ID if this story is shared from a post
   sharedFromUser?: string; // Original post author if this story is shared from a post
+  /** Still frame for Stories 24 rail / hold screens (shared video posts). */
+  videoPosterUrl?: string;
   poll?: {
     question: string;
     option1: string;

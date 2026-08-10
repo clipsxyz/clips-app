@@ -883,6 +883,7 @@ export async function createStory(
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
     question?: string, // Question prompt (e.g., "Ask me anything")
     venue?: string, // Venue / place name (for metadata when story is shown on feed)
+    videoPosterUrl?: string, // Still for Stories 24 rail thumbs
     audience: 'public' | 'close_friends' | 'only_me' = 'public'
 ): Promise<Story> {
     const buildMockStory = async (): Promise<Story> => {
@@ -915,6 +916,7 @@ export async function createStory(
             expiresAt,
             location,
             venue: venue || undefined,
+            videoPosterUrl: videoPosterUrl || undefined,
             audience: audience || 'public',
             views: 0,
             viewerHandles: [],
@@ -971,6 +973,7 @@ export async function createStory(
                 poll: poll || undefined,
                 question: question || undefined, // Question prompt
                 venue: venue || undefined,
+                video_poster_url: videoPosterUrl || undefined,
                 audience: audience || 'public',
             }),
         });
@@ -995,6 +998,8 @@ export async function createStory(
             expiresAt: new Date(response.expires_at).getTime() || (now + 24 * 60 * 60 * 1000),
             location: response.location || location || undefined,
             venue: response.venue || venue || undefined,
+            videoPosterUrl:
+                resolveStoryMediaUrl(response.video_poster_url || videoPosterUrl) || undefined,
             audience: response.audience || audience || 'public',
             views: response.views_count || 0,
             viewerHandles: Array.isArray((response as any).viewer_handles)
@@ -1054,6 +1059,7 @@ export async function createStory(
             expiresAt,
             location,
             venue: venue || undefined,
+            videoPosterUrl: videoPosterUrl || undefined,
             audience: audience || 'public',
             views: 0,
             viewerHandles: [],

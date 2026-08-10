@@ -76,7 +76,22 @@ export const MOCK_FEED_VIDEO_POSTERS = {
 } as const;
 
 function isRelativeDemoVideoPath(url: string): boolean {
-    return url.startsWith('/demo-videos/') || (url.startsWith('/') && /\.(mp4|webm|mov)(\?|#|$)/i.test(url));
+    // Only explicit mock slots — never treat filesystem/local paths as demos.
+    return url.startsWith('/demo-videos/') || Boolean(NATIVE_URI_BY_DEMO_PATH[url]);
+}
+
+/** Local / in-app media URIs must play as-is (never remap to flower/demo samples). */
+export function isPlayableLocalMediaUri(url: string | undefined | null): boolean {
+    if (!url || typeof url !== 'string') return false;
+    const u = url.trim();
+    return (
+        /^file:/i.test(u) ||
+        /^content:/i.test(u) ||
+        /^ph:/i.test(u) ||
+        /^assets-library:/i.test(u) ||
+        /^blob:/i.test(u) ||
+        /^data:/i.test(u)
+    );
 }
 
 export function isMockDemoVideoPath(url: string | undefined | null): boolean {
@@ -149,10 +164,13 @@ export function isFakeMockVideoPosterUrl(url: string | undefined | null): boolea
 /** Resolve mock video URL string (stories / scenes / URI fallback). */
 export function resolveMockFeedVideoUrl(url: string | undefined): string {
     if (!url) return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+    // Uploaded / device media — never substitute the red-flower demo clip.
+    if (isPlayableLocalMediaUri(url)) return url;
     if (NATIVE_URI_BY_DEMO_PATH[url]) return NATIVE_URI_BY_DEMO_PATH[url];
     if (isRelativeDemoVideoPath(url)) return nativeUriForDemoPath(url);
-    if (/\.(mp4|webm|mov)(\?|#|$)/i.test(url) && !/^https?:\/\//i.test(url)) {
-        return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+    // Known demo hosts / slot names only — not every non-http mp4.
+    if (!/^https?:\/\//i.test(url) && looksLikeDemoSlotVideo(url)) {
+        return nativeUriForDemoPath(url);
     }
     return url;
 }

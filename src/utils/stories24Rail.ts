@@ -1,10 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
-import { getFollowedUsers } from '../api/posts';
+import { getFollowedUsers, posts as localPosts } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
 import {
-    getStoryVideoPosterFallback,
     resolveStoryMediaUrl,
     resolveStoryVideoPlaybackUrl,
 } from './storyMediaNative';
@@ -134,10 +133,23 @@ export async function buildStories24RailItems(
         const firstImage = resolveStoryMediaUrl(
             sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
         );
+        const sharedPost = latest.sharedFromPost
+            ? localPosts.find((p) => String(p.id) === String(latest.sharedFromPost))
+            : undefined;
+        const sharedPoster =
+            resolveStoryMediaUrl(latest.videoPosterUrl) ||
+            resolveStoryMediaUrl(sharedPost?.videoPosterUrl) ||
+            resolveStoryMediaUrl(
+                sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
+            ) ||
+            resolveStoryMediaUrl(
+                sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url,
+            );
+        // Never use bundled BBB / rainbow demo posters as rail thumbs.
         let thumb =
             firstImage ||
+            sharedPoster ||
             (latestMediaType !== 'video' ? latestMediaUrl : undefined) ||
-            getStoryVideoPosterFallback(latest.mediaUrl) ||
             getAvatarForHandle(group.userHandle);
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||

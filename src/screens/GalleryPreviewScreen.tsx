@@ -38,7 +38,7 @@ import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
-import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { ensureCameraPermission, ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import { ox } from '../constants/nativeOpticalScale';
 import {
@@ -280,14 +280,15 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
         if (autoStart.source === 'camera') {
             void (async () => {
-                const allowed = await ensureGalleryMediaPermission();
+                const allowed = await ensureCameraPermission();
                 if (!allowed) {
+                    Alert.alert('Camera access needed', 'Allow camera access in Settings to take a photo.');
                     navigation.goBack();
                     return;
                 }
                 const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
                 ImagePicker.launchCamera(
-                    { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high' },
+                    { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high', saveToPhotos: true },
                     (response) => {
                         if (response.didCancel) {
                             navigation.goBack();
