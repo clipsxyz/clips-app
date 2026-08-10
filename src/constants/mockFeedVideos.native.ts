@@ -26,29 +26,36 @@ const BUNDLED_POSTER = Image.resolveAssetSource(MOCK_FEED_BUNDLED_VIDEO_POSTER);
 const BUNDLED_POSTER_URI = typeof BUNDLED_POSTER?.uri === 'string' ? BUNDLED_POSTER.uri : '';
 
 /**
- * Distinct public H.264 samples (one per mock slot). Needs network.
- * Google GTV bucket often 403s from devices; these were verified HTTP 206.
+ * Distinct public H.264+AAC samples (one per mock slot). Needs network.
+ * IMPORTANT: many “10s 1MB” test-videos.co.uk clips are video-only (no sound).
+ * Only use URLs verified to contain both `avc1` and `mp4a`.
  */
-const BBB_HTTPS = 'https://www.w3schools.com/html/mov_bbb.mp4';
-const FLOWER_HTTPS = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-const SINTEL_HTTPS = 'https://media.w3.org/2010/05/sintel/trailer_hd.mp4';
-const MOVIE300_HTTPS = 'https://media.w3.org/2010/05/video/movie_300.mp4';
-const SAMPLE_HTTPS = 'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4';
+const ESCAPES_HTTPS =
+    'https://github.com/mediaelement/mediaelement-files/raw/master/big_buck_bunny.mp4';
+const FUN_HTTPS = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+/** Bob */
+const JOYRIDES_HTTPS = 'https://download.samplelib.com/mp4/sample-5s.mp4';
+/** Alice 1 */
+const BLAZES_HTTPS =
+    'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4';
+/** Alice 2 */
+const ELEPHANTS_HTTPS =
+    'https://samplefile.com/samples/download/video/mp4/mp4_15s_sample_file_868KB.mp4';
 
 const HTTPS_BY_DEMO_PATH: Record<string, string> = {
-    [MOCK_FEED_VIDEO_URLS.escapes]: BBB_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.fun]: FLOWER_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.joyrides]: SINTEL_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.blazes]: MOVIE300_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.elephants]: SAMPLE_HTTPS,
-    '/demo-videos/bbb.mp4': BBB_HTTPS,
-    '/demo-videos/flower.mp4': FLOWER_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.escapes]: ESCAPES_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.fun]: FUN_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.joyrides]: JOYRIDES_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.blazes]: BLAZES_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.elephants]: ELEPHANTS_HTTPS,
+    '/demo-videos/bbb.mp4': ESCAPES_HTTPS,
+    '/demo-videos/flower.mp4': FUN_HTTPS,
 };
 
 const NATIVE_URI_BY_DEMO_PATH: Record<string, string> = { ...HTTPS_BY_DEMO_PATH };
 
 export const MOCK_FEED_VIDEO_REMOTE_FALLBACK =
-    HTTPS_BY_DEMO_PATH[MOCK_FEED_VIDEO_URLS.escapes] || BUNDLED_DEMO_URI || BBB_HTTPS;
+    HTTPS_BY_DEMO_PATH[MOCK_FEED_VIDEO_URLS.fun] || BUNDLED_DEMO_URI || FUN_HTTPS;
 
 /** @deprecated Unsplash stills — unrelated to the MP4; reject if found in storage. */
 const LEGACY_FAKE_UNSPLASH_POSTERS = [
@@ -78,10 +85,16 @@ export function isMockDemoVideoPath(url: string | undefined | null): boolean {
     if (BUNDLED_DEMO_URI && url === BUNDLED_DEMO_URI) return true;
     if (url.includes('bbb.mp4') || url.includes('flower.mp4') || url.includes('mov_bbb')) return true;
     if (
-        url.includes('sintel/trailer') ||
-        url.includes('movie_300.mp4') ||
+        url.includes('test-videos.co.uk') ||
+        url.includes('samplelib.com') ||
+        url.includes('samplefile.com') ||
         url.includes('learningcontainer.com') ||
-        url.includes('cc0-videos/flower')
+        url.includes('mediaelement-files') ||
+        url.includes('cc0-videos/flower') ||
+        url.includes('Big_Buck_Bunny') ||
+        url.includes('big_buck_bunny') ||
+        url.includes('Jellyfish') ||
+        url.includes('Sintel')
     ) {
         return true;
     }

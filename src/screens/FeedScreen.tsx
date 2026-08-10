@@ -57,7 +57,6 @@ import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
-import FeedVideoPortal from '../components/FeedVideoPortal.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
@@ -77,6 +76,7 @@ import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScen
 import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
     getGlobalVideoMutedNative,
+    setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
 import { FlatList, RefreshControl } from 'react-native-gesture-handler';
@@ -1152,9 +1152,9 @@ const FeedCard = React.memo(function FeedCard({
     }, [carouselIndex, onOpenImageFullscreen, post]);
 
     const handleMediaSingleTap = React.useCallback(() => {
-        // Mute flash only on the active video slide — stills open fullscreen (web Media parity).
+        // Active video: toggle mute (button always visible too).
         if (currentFeedSlideIsVideo(post, carouselIndex)) {
-            videoMediaRef.current?.flashMuteControl();
+            videoMediaRef.current?.toggleVideoMute();
             return;
         }
         openStillFullscreen();
@@ -1508,7 +1508,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [overflowNotify, setOverflowNotify] = useState(false);
     const activeVideoPostIdRef = useRef<string | null>(null);
     const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(true);
-    const [feedVideoMuted, setFeedVideoMuted] = useState(true);
+    const [feedVideoMuted, setFeedVideoMuted] = useState(false);
     const [pendingUploadTick, setPendingUploadTick] = useState(0);
     const [ads, setAds] = useState<Ad[]>([]);
     const [online, setOnline] = useState(true);
@@ -1588,9 +1588,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        // Instagram-like: only cards mostly on screen qualify to play; peeks don't steal.
-        itemVisiblePercentThreshold: 60,
-        minimumViewTime: 100,
+        // Play only when a post is mostly on screen (in-cell Video, no portal).
+        itemVisiblePercentThreshold: 70,
+        minimumViewTime: 80,
     });
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1610,9 +1610,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (cancelled) return;
             void syncFeedAutoplayAllowed(pref);
         });
-        void getGlobalVideoMutedNative().then((muted) => {
+        void (async () => {
+            try {
+                const migrated = await AsyncStorage.getItem('clips:feedAudioDefaultUnmuted_v1');
+                if (migrated !== '1') {
+                    await setGlobalVideoMutedNative(false);
+                    await AsyncStorage.setItem('clips:feedAudioDefaultUnmuted_v1', '1');
+                }
+            } catch {
+                /* ignore */
+            }
+            if (cancelled) return;
+            const muted = await getGlobalVideoMutedNative();
             if (!cancelled) setFeedVideoMuted(muted);
-        });
+        })();
         const unsubPref = subscribeFeedAutoplayPref((pref) => {
             void syncFeedAutoplayAllowed(pref);
         });
@@ -1824,11 +1835,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
 
             lastViewableVideoPostIdRef.current = nextId;
-            // Never mount TextureView mid-fling — that shoves the row up the feed on Android.
-            // Warm + play only once settled.
-            if (!feedScrollingRef.current) {
-                scheduleActiveFeedVideoRef.current(nextId);
-            }
+            // In-cell Video scrolls with the list — update active id immediately.
+            scheduleActiveFeedVideoRef.current(nextId);
         }
     ).current;
 
@@ -3433,7 +3441,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     key={mergedPost.id}
                     post={mergedPost}
                     isVideoActive={
-                        isFeedFocused && isVideoPostRow && !commentsModalOpen
+                        isFeedFocused &&
+                        isVideoPostRow &&
+                        !commentsModalOpen &&
+                        String(activeVideoPostIdRef.current) === String(mergedPost.id)
                     }
                     feedVideoMuted={feedVideoMuted}
                     suspendNativeVideo={commentsModalOpen}
@@ -3766,7 +3777,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     feedScrollingRef.current = false;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
-                        // Prefer latest viewability; null clears portal so it can't sit on image/text.
                         scheduleActiveFeedVideoRef.current(
                             feedAutoplayAllowedRef.current
                                 ? lastViewableVideoPostIdRef.current
@@ -3774,7 +3784,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             true,
                         );
                         requestAnimationFrame(() => setFeedScrollBusy(false));
-                    }, 120);
+                    }, 80);
                 }}
                 onScrollEndDrag={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
@@ -3792,7 +3802,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             true,
                         );
                         requestAnimationFrame(() => setFeedScrollBusy(false));
-                    }, 120);
+                    }, 80);
                 }}
                 // Scroll performance
                 onScroll={(e) => {
@@ -3979,8 +3989,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     },
                 ]}
             />
-            {/* IG-style: one Video outside FlatList (after list so it paints above posters). */}
-            <FeedVideoPortal suspend={commentsModalOpen || !isFeedFocused} />
             </View>
             </FeedPageLayout>
 
