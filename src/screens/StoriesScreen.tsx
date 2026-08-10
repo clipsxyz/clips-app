@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
 import StorySharedPostViewer from '../components/stories/StorySharedPostViewer.native';
 import StoryProfileCard from '../components/stories/StoryProfileCard.native';
@@ -1091,15 +1092,20 @@ export default function StoriesScreen({ route, navigation }: any) {
     }
 
     if (loading) {
+        const fromProfile =
+            Boolean(normalizedOpenUserHandle) && !stories24OpenFromFeedRail;
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
-                {normalizedOpenUserHandle && !stories24OpenFromFeedRail ? (
+            <GazetteerScreenShell
+                contentStyle={styles.loadingShell}
+                ambientVariant="passport"
+            >
+                {fromProfile ? (
                     <>
-                        <ActivityIndicator size="large" color="#f472b6" />
+                        <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
                         <Text style={styles.storiesOpeningText}>Opening story...</Text>
                     </>
                 ) : (
-                    <ActivityIndicator size="large" color="#f472b6" />
+                    <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
                 )}
             </GazetteerScreenShell>
         );

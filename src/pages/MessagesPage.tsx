@@ -32,6 +32,7 @@ import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } 
 import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import type { Post } from '../types';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
@@ -51,6 +52,9 @@ import {
 } from '../constants/dmImessageTheme';
 
 const DEBUG_MESSAGE_PAGING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_MESSAGE_PAGING === 'true';
+
+/** Voice notes / gold mic — off for now (text + images only). */
+const ENABLE_VOICE_NOTES = false;
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -3743,7 +3747,7 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 )}
-                {voiceDraft && (
+                {ENABLE_VOICE_NOTES && voiceDraft ? (
                     <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
                         <p className="text-[11px] font-semibold text-neutral-500 mb-2 ml-1">Review before sending</p>
                         <div className="flex items-center gap-2 min-h-[44px] px-2.5 py-2 rounded-[24px] border-2 border-white bg-[#09090b]">
@@ -3809,11 +3813,11 @@ export default function MessagesPage() {
                             </button>
                         </div>
                     </div>
-                )}
-                {!voiceDraft ? (
+                ) : null}
+                {!ENABLE_VOICE_NOTES || !voiceDraft ? (
                 <div className={`flex flex-col ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
                     <div className="flex items-end gap-2 min-w-0 pb-px">
-                        {isRecording ? (
+                        {ENABLE_VOICE_NOTES && isRecording ? (
                             <div className="flex-1 flex items-center min-h-[44px] px-3 rounded-[24px] border-2 border-white bg-[#09090b] gap-3">
                                 <button
                                     type="button"
@@ -3836,33 +3840,32 @@ export default function MessagesPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="relative flex-1 min-w-0">
-                                <button
-                                    type="button"
-                                    onClick={handleImageClick}
-                                    className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center text-white/90 hover:text-white transition-colors"
-                                    aria-label="Add photo"
-                                >
-                                    <FiPlus className="w-5 h-5" />
-                                </button>
-                                <input
-                                    type="text"
-                                    value={messageText}
-                                    onChange={(e) => {
-                                        setMessageText(e.target.value);
-                                    }}
-                                    onKeyPress={(e) => {
-                                        if (e.key === 'Enter') {
-                                            handleSend();
-                                        }
-                                    }}
-                                    placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
-                                    className={`w-full min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border-2 border-white shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white ${
-                                        compactPhone ? 'pl-11 pr-4 py-2.5 text-[15px]' : 'pl-12 pr-5 py-3 text-[15px] sm:text-base'
-                                    }`}
+                            <>
+                                <Avatar
+                                    src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
+                                    name={user?.name || user?.handle || 'You'}
+                                    size="sm"
+                                    className="h-8 w-8 shrink-0"
                                 />
-                            </div>
+                                <div className="flex min-h-10 flex-1 min-w-0 items-center rounded-full bg-[#16181C] px-3.5">
+                                    <input
+                                        type="text"
+                                        value={messageText}
+                                        onChange={(e) => {
+                                            setMessageText(e.target.value);
+                                        }}
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter') {
+                                                handleSend();
+                                            }
+                                        }}
+                                        placeholder={editingMessage ? 'Edit message…' : 'Message…'}
+                                        className="min-w-0 flex-1 bg-transparent py-2.5 text-[15px] text-white placeholder:text-[#8B98A5] focus:outline-none"
+                                    />
+                                </div>
+                            </>
                         )}
+                        {ENABLE_VOICE_NOTES ? (
                         <button
                             ref={micCaptureRef}
                             type="button"
@@ -3884,7 +3887,8 @@ export default function MessagesPage() {
                                 <FiMic className="w-5 h-5 sm:w-6 sm:h-6" />
                             )}
                         </button>
-                        {messageText.trim() && !isRecording && (
+                        ) : null}
+                        {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecording) && (
                             <button
                                 type="button"
                                 onClick={handleSend}
@@ -4280,10 +4284,11 @@ export default function MessagesPage() {
                     onClick={() => setShowChatInfo(false)}
                 >
                     <div
-                        className="bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[80vh] overflow-y-auto"
+                        className="relative w-full max-w-md max-h-[80vh] overflow-hidden rounded-t-3xl border border-white/10 border-b-0 bg-[#060d16]"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                        <div className="relative z-[2] sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between bg-[#060d16]/70 backdrop-blur-sm">
                             <h3 className="text-white font-semibold">Chat Info</h3>
                             <button
                                 onClick={() => setShowChatInfo(false)}
@@ -4293,7 +4298,7 @@ export default function MessagesPage() {
                             </button>
                         </div>
 
-                        <div className="p-4">
+                        <div className="relative z-[2] p-4 overflow-y-auto max-h-[calc(80vh-3.5rem)] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                             {isGroupThread && groupId ? (
                                 <>
                                     <div className="flex items-center gap-4 mb-6">

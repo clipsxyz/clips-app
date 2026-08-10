@@ -98,9 +98,25 @@ function persistBlockedMap(): void {
 })();
 
 /** In-memory chat groups when `VITE_USE_LARAVEL_API=false` (local / mock mode). */
-const mockChatGroups = new Map<string, { name: string; avatar_url?: string | null; creatorHandle: string; conversation_id: string }>();
+type MockChatGroupMeta = {
+    name: string;
+    avatar_url?: string | null;
+    creatorHandle: string;
+    conversation_id: string;
+    /** Handles that can see/open this group (includes creator). */
+    memberHandles: string[];
+};
+const mockChatGroups = new Map<string, MockChatGroupMeta>();
 const mockGroupMessageLists = new Map<string, ChatMessage[]>();
 const mockGroupLastReadByUser = new Map<string, number>();
+
+function sameHandle(a: string, b: string): boolean {
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function normalizeInviteHandle(raw: string): string {
+    return raw.trim().replace(/^@+/, '').split(/\s+/)[0] || '';
+}
 
 export function createMockChatGroup(
     name: string,
@@ -110,10 +126,66 @@ export function createMockChatGroup(
     const trimmed = name.trim();
     const id = `mock-cg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const conversation_id = `mock-conv-${id}`;
-    mockChatGroups.set(id, { name: trimmed, avatar_url: avatarUrl || null, creatorHandle, conversation_id });
+    const creator = creatorHandle.trim();
+    mockChatGroups.set(id, {
+        name: trimmed,
+        avatar_url: avatarUrl || null,
+        creatorHandle: creator,
+        conversation_id,
+        memberHandles: [creator],
+    });
     mockGroupMessageLists.set(id, []);
     dispatchBrowserEvent('conversationUpdated');
     return { id, name: trimmed, avatar_url: avatarUrl || null, conversation_id };
+}
+
+/**
+ * Mock invite: add the handle as a group member immediately (no Laravel notifications).
+ * Resolves common short names to known mock users (e.g. sarah → Sarah@Artane).
+ */
+export function mockInviteToChatGroup(
+    groupId: string,
+    inviteeHandleRaw: string,
+): { ok: true; inviteeHandle: string; groupName: string } {
+    const meta = mockChatGroups.get(groupId);
+    if (!meta) {
+        throw new Error('Group not found');
+    }
+    let invitee = normalizeInviteHandle(inviteeHandleRaw);
+    if (!invitee) {
+        throw new Error('Enter a username to invite');
+    }
+    // Prefer full mock handles when the user typed a short name.
+    const knownMocks = ['Sarah@Artane', 'Bob@Ireland', 'Alice@Finglas', 'Alice@Dublin'];
+    const resolved =
+        knownMocks.find((h) => sameHandle(h, invitee)) ||
+        knownMocks.find((h) => h.toLowerCase().startsWith(invitee.toLowerCase() + '@')) ||
+        knownMocks.find((h) => h.split('@')[0].toLowerCase() === invitee.toLowerCase());
+    if (resolved) invitee = resolved;
+
+    if (sameHandle(invitee, meta.creatorHandle)) {
+        throw new Error('That person is already in the group');
+    }
+    if (meta.memberHandles.some((h) => sameHandle(h, invitee))) {
+        throw new Error('That person is already in the group');
+    }
+    meta.memberHandles.push(invitee);
+    mockChatGroups.set(groupId, meta);
+
+    const list = mockGroupMessageLists.get(groupId) ?? [];
+    list.push({
+        id: `mock-gm-sys-${Date.now()}`,
+        senderHandle: 'system',
+        text: `${invitee} was added to the group`,
+        timestamp: Date.now(),
+        isSystemMessage: true,
+    });
+    mockGroupMessageLists.set(groupId, list);
+    dispatchBrowserEvent('conversationUpdated', {
+        chat_group_id: groupId,
+        chatGroupId: groupId,
+    });
+    return { ok: true, inviteeHandle: invitee, groupName: meta.name };
 }
 
 /** ChatGroupSummary-shaped rows for InviteToGroupModal / fetchMyChatGroups in mock mode. */
@@ -129,16 +201,16 @@ export function listMockChatGroupsAsSummaries(viewerHandle: string): Array<{
 }> {
     const h = viewerHandle.trim();
     return Array.from(mockChatGroups.entries())
-        .filter(([, meta]) => meta.creatorHandle === h)
+        .filter(([, meta]) => meta.memberHandles.some((m) => sameHandle(m, h)))
         .map(([id, meta]) => ({
             id,
             name: meta.name,
             avatar_url: meta.avatar_url || null,
             conversation_id: meta.conversation_id,
             creator_id: 'mock',
-            is_admin: true,
-            role: 'admin',
-            member_count: 1,
+            is_admin: sameHandle(meta.creatorHandle, h),
+            role: sameHandle(meta.creatorHandle, h) ? 'admin' : 'member',
+            member_count: meta.memberHandles.length,
         }));
 }
 
@@ -154,7 +226,7 @@ export function mockLeaveChatGroup(groupId: string): void {
 function buildMockGroupConversationSummaries(forHandle: string): ConversationSummary[] {
     const out: ConversationSummary[] = [];
     mockChatGroups.forEach((meta, id) => {
-        if (meta.creatorHandle !== forHandle) return;
+        if (!meta.memberHandles.some((m) => sameHandle(m, forHandle))) return;
         const msgs = mockGroupMessageLists.get(id) ?? [];
         const sorted = msgs.slice().sort((m1, m2) => m2.timestamp - m1.timestamp);
         const last = sorted[0];

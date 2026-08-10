@@ -463,6 +463,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
         const slidePoster =
             (item as { posterUrl?: string } | undefined)?.posterUrl || postLevelPoster;
+        // Static poster while portal is parked mid-scroll (portal cannot follow FlatList).
         const slidePosterSource =
             resolveDemoVideoPosterSource(slideRawUrl) ||
             (slidePoster ? { uri: slidePoster } : undefined) ||

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Dimensions, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { ViewType, type VideoRef } from 'react-native-video';
 import {
@@ -23,10 +23,8 @@ import {
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
 import {
-    MOCK_FEED_BUNDLED_VIDEO_POSTER,
     isMockDemoVideoPath,
     mockFeedVideoSource,
-    resolveDemoVideoPosterSource,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
 import VideoCTAOverlay from './VideoCTAOverlay.native';
@@ -35,17 +33,19 @@ type Props = {
     suspend?: boolean;
 };
 
+/** Leave room for the in-card FeedPostHeader (portal paints above the list). */
 const HEADER_BAND = 72;
-const PARK = { left: -10000, top: -10000, width: 16, height: 16 } as const;
-let heldPortalUrl: string | null = null;
+const MIN_VISIBLE_RATIO = 0.45;
 
 /**
- * Persistent Video outside FlatList. Cells only register frames — they do NOT setState
- * when active changes (that was the Alice→Sarah/Bob scroll jump with the same mock MP4).
+ * Persistent Video outside FlatList. Cells are posters only.
+ *
+ * Never try to "follow" the list while the finger is down — measureInWindow cannot
+ * keep up with FlatList, so the TextureView looks loose / slides out of the card.
+ * Park while scrolling; re-attach only after settle with a fresh measure.
  */
 export default function FeedVideoPortal({ suspend = false }: Props) {
     const hostRef = useRef<View>(null);
-    const hostOriginRef = useRef({ x: 0, y: 0 });
     const [hostOrigin, setHostOrigin] = useState({ x: 0, y: 0 });
     const [target, setTarget] = useState<FeedVideoPortalTarget | null>(() => getFeedVideoPortalTarget());
     const [chrome, setChrome] = useState<FeedVideoPortalChrome | null>(() => getFeedVideoPortalChrome());
@@ -56,6 +56,8 @@ export default function FeedVideoPortal({ suspend = false }: Props) {
     const videoRef = useRef<VideoRef>(null);
     const pendingSeekRef = useRef<number | null>(null);
     const lastSourceKeyRef = useRef<string | null>(null);
+    const activeIdRef = useRef(activeId);
+    activeIdRef.current = activeId;
 
     useEffect(() => subscribeFeedVideoPortal(setTarget), []);
     useEffect(() => subscribeFeedVideoPortalChrome(setChrome), []);
@@ -71,10 +73,9 @@ export default function FeedVideoPortal({ suspend = false }: Props) {
         const sync = () => {
             hostRef.current?.measureInWindow((x, y) => {
                 if (!alive) return;
-                const prev = hostOriginRef.current;
-                if (Math.abs(prev.x - x) < 0.5 && Math.abs(prev.y - y) < 0.5) return;
-                hostOriginRef.current = { x, y };
-                setHostOrigin({ x, y });
+                setHostOrigin((prev) =>
+                    Math.abs(prev.x - x) < 0.5 && Math.abs(prev.y - y) < 0.5 ? prev : { x, y },
+                );
             });
         };
         sync();
@@ -85,17 +86,35 @@ export default function FeedVideoPortal({ suspend = false }: Props) {
         };
     }, []);
 
-    // Pull rect + chrome from the frame registry (cells never re-render for this).
+    // Finger down / fling: detach immediately so the surface cannot drift over neighbors.
+    useEffect(() => {
+        if (scrollBusy || suspend || !activeId) {
+            setFeedVideoPortalTarget(null);
+            setFeedVideoPortalChrome(null);
+        }
+    }, [scrollBusy, suspend, activeId]);
+
+    // Attach only when idle — fresh measure after settle.
     useEffect(() => {
         if (suspend || !activeId || scrollBusy) return;
         let cancelled = false;
         const publish = () => {
             if (cancelled || getFeedScrollBusy()) return;
-            measureFeedVideoFrame(activeId, (rect) => {
-                if (cancelled) return;
+            const id = activeIdRef.current;
+            if (!id) return;
+            const winH = Dimensions.get('window').height;
+            measureFeedVideoFrame(id, (rect) => {
+                if (cancelled || getFeedScrollBusy() || activeIdRef.current !== id) return;
+                const visibleTop = Math.max(0, rect.y);
+                const visibleBottom = Math.min(winH, rect.y + rect.height);
+                const visibleH = visibleBottom - visibleTop;
+                if (visibleH < 64 || visibleH / rect.height < MIN_VISIBLE_RATIO) {
+                    setFeedVideoPortalTarget(null);
+                    return;
+                }
                 setFeedVideoPortalTarget(
                     {
-                        postId: String(activeId),
+                        postId: String(id),
                         rawUrl: rect.rawUrl,
                         x: rect.x,
                         y: rect.y,
@@ -107,33 +126,31 @@ export default function FeedVideoPortal({ suspend = false }: Props) {
                     { force: true },
                 );
                 setFeedVideoPortalChrome({
-                    postId: String(activeId),
+                    postId: String(id),
                     onOpenScenes: rect.onOpenScenes,
                     onToggleMute: rect.onToggleMute,
                 });
             });
         };
-        publish();
-        const t = setInterval(publish, 180);
-        const unsubBusy = subscribeFeedScrollBusy((busy) => {
-            if (!busy && !cancelled) requestAnimationFrame(publish);
-        });
+        // One frame after settle so FlatList layout matches the finger-up position.
+        const kick = requestAnimationFrame(() => publish());
+        const t = setInterval(publish, 160);
         return () => {
             cancelled = true;
+            cancelAnimationFrame(kick);
             clearInterval(t);
-            unsubBusy();
         };
     }, [activeId, scrollBusy, suspend]);
 
     const postId = target?.postId ?? null;
     const isMine = Boolean(postId && activeId && String(activeId) === String(postId));
-    const hasTarget = Boolean(isMine && target && !suspend && target.width > 8 && target.height > 8);
-    const onScreen = hasTarget && !scrollBusy;
-    const playing = onScreen;
+    const hasTarget = Boolean(
+        isMine && target && !suspend && !scrollBusy && target.width > 8 && target.height > 8,
+    );
+    const playing = hasTarget;
 
     useEffect(() => {
         if (!hasTarget || !target) return;
-        // URL-only key: Alice/Sarah/Bob share the same mock MP4 — do not reset surface.
         const sourceKey = target.rawUrl;
         if (lastSourceKeyRef.current === sourceKey) return;
         lastSourceKeyRef.current = sourceKey;
@@ -147,105 +164,93 @@ export default function FeedVideoPortal({ suspend = false }: Props) {
         }
     }, [hasTarget, postId, target?.rawUrl]);
 
-    const rawUrl = target?.rawUrl;
-    if (rawUrl) heldPortalUrl = rawUrl;
-    const heldUrl = rawUrl || heldPortalUrl;
+    const heldUrl = target?.rawUrl;
     const source = heldUrl
         ? isMockDemoVideoPath(heldUrl)
             ? mockFeedVideoSource(heldUrl)
             : { uri: resolveMockFeedVideoUrl(heldUrl) }
-        : mockFeedVideoSource('/demo-videos/flower.mp4');
-    const posterSource = heldUrl
-        ? resolveDemoVideoPosterSource(heldUrl) || MOCK_FEED_BUNDLED_VIDEO_POSTER
-        : MOCK_FEED_BUNDLED_VIDEO_POSTER;
+        : null;
 
-    let frame: { left: number; top: number; width: number; height: number } = { ...PARK };
-    if (hasTarget && target) {
-        const localLeft = target.x - hostOrigin.x;
-        const localTop = target.y - hostOrigin.y;
-        const next = {
-            left: localLeft,
-            top: localTop + HEADER_BAND,
-            width: target.width,
-            height: Math.max(8, target.height - HEADER_BAND),
-        };
-        frame = onScreen ? next : { ...PARK };
-    }
+    const frame =
+        hasTarget && target
+            ? {
+                  left: target.x - hostOrigin.x,
+                  top: target.y - hostOrigin.y + HEADER_BAND,
+                  width: target.width,
+                  height: Math.max(8, target.height - HEADER_BAND),
+              }
+            : null;
 
     const chromeMatches =
-        onScreen && chrome && postId && String(chrome.postId) === String(postId) ? chrome : null;
+        hasTarget && chrome && postId && String(chrome.postId) === String(postId) ? chrome : null;
 
     return (
         <View ref={hostRef} pointerEvents="box-none" collapsable={false} style={styles.host}>
-            <View
-                pointerEvents="none"
-                collapsable={false}
-                needsOffscreenAlphaCompositing
-                style={[styles.frame, frame]}
-            >
-                <Video
-                    ref={videoRef}
-                    source={source as object}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode="cover"
-                    muted={muted}
-                    repeat
-                    paused={!playing}
-                    playInBackground={false}
-                    playWhenInactive={false}
-                    ignoreSilentSwitch="ignore"
-                    hideShutterView
-                    viewType={Platform.OS === 'android' ? ViewType.TEXTURE : undefined}
-                    useTextureView={Platform.OS === 'android' ? true : undefined}
-                    disableFocus={Platform.OS === 'android' ? true : undefined}
-                    poster={{
-                        source: posterSource as number | { uri: string },
-                        resizeMode: 'cover',
-                    }}
-                    onLoad={() => {
-                        const t = pendingSeekRef.current;
-                        if (t != null && t > 0) {
-                            pendingSeekRef.current = null;
-                            videoRef.current?.seek(t);
-                        }
-                        setSurfaceReady(true);
-                    }}
-                    onReadyForDisplay={() => {
-                        requestAnimationFrame(() => setSurfaceReady(true));
-                    }}
-                    onProgress={(e) => {
-                        if (e.currentTime > 0.08) setSurfaceReady(true);
-                        if (!playing || !target) return;
-                        setFeedVideoHandoff(target.postId, {
-                            currentTime: e.currentTime,
-                            muted,
-                        });
-                    }}
-                />
-                {!surfaceReady || !onScreen ? (
-                    <View pointerEvents="none" style={styles.posterCover} collapsable={false}>
-                        <Image source={posterSource} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                    </View>
-                ) : null}
-            </View>
+            {hasTarget && source && frame ? (
+                <View
+                    pointerEvents="none"
+                    collapsable={false}
+                    needsOffscreenAlphaCompositing
+                    style={[styles.frame, frame]}
+                >
+                    <Video
+                        ref={videoRef}
+                        source={source as object}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                        muted={muted}
+                        repeat
+                        paused={!playing}
+                        playInBackground={false}
+                        playWhenInactive={false}
+                        ignoreSilentSwitch="ignore"
+                        hideShutterView
+                        viewType={Platform.OS === 'android' ? ViewType.TEXTURE : undefined}
+                        useTextureView={Platform.OS === 'android' ? true : undefined}
+                        disableFocus={Platform.OS === 'android' ? true : undefined}
+                        onLoad={() => {
+                            const t = pendingSeekRef.current;
+                            if (t != null && t > 0) {
+                                pendingSeekRef.current = null;
+                                videoRef.current?.seek(t);
+                            }
+                            setSurfaceReady(true);
+                        }}
+                        onReadyForDisplay={() => {
+                            requestAnimationFrame(() => setSurfaceReady(true));
+                        }}
+                        onProgress={(e) => {
+                            if (e.currentTime > 0.08) setSurfaceReady(true);
+                            if (!playing || !target) return;
+                            setFeedVideoHandoff(target.postId, {
+                                currentTime: e.currentTime,
+                                muted,
+                            });
+                        }}
+                    />
+                    {!surfaceReady ? (
+                        <View pointerEvents="none" style={styles.posterCover} collapsable={false} />
+                    ) : null}
+                </View>
+            ) : null}
 
-            {chromeMatches?.onOpenScenes ? (
+            {chromeMatches?.onOpenScenes && target ? (
                 <View
                     pointerEvents="box-none"
                     collapsable={false}
                     style={[
                         styles.chrome,
                         {
-                            left: target!.x - hostOrigin.x,
-                            top: target!.y - hostOrigin.y,
-                            width: target!.width,
-                            height: target!.height,
+                            left: target.x - hostOrigin.x,
+                            top: target.y - hostOrigin.y,
+                            width: target.width,
+                            height: target.height,
                         },
                     ]}
                 >
                     <VideoCTAOverlay
                         onPress={() => chromeMatches.onOpenScenes?.()}
-                        userHandle={target?.userHandle}
+                        userHandle={target.userHandle}
                     />
                     <Pressable
                         style={styles.muteButton}
@@ -282,6 +287,7 @@ const styles = StyleSheet.create({
     },
     posterCover: {
         ...StyleSheet.absoluteFill,
+        backgroundColor: '#000',
         zIndex: 2,
     },
     chrome: {

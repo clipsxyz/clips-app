@@ -1760,10 +1760,16 @@ export default function StoriesPage() {
 
     if (loading && openUserHandle && !stories24OpenFromFeedRail) {
         return (
-            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-10 h-10 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                    <p className="text-sm text-gray-300">Opening story...</p>
+            <div
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
+                role="status"
+                aria-live="polite"
+                aria-label="Opening story"
+            >
+                <DiscoverAmbientCanvas variant="passport" />
+                <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
+                    <div className="w-10 h-10 border-2 border-[#3d9b8f] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-sm font-medium text-white/70">Opening story...</p>
                 </div>
             </div>
         );

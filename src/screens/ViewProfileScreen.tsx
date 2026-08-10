@@ -1028,7 +1028,10 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                 onPress={() => setPostNotifySheetMode('menu')}
                                 accessibilityLabel="Post notifications"
                             >
-                                <ProfilePostNotifyBell active={postNotifyLevel === 'all'} />
+                                <ProfilePostNotifyBell
+                                    active={postNotifyLevel === 'all'}
+                                    activeColor={PASSPORT_PALETTE.wavePrimary}
+                                />
                             </TouchableOpacity>
                         ) : null}
                     </View>
@@ -1648,8 +1651,8 @@ const styles = StyleSheet.create({
         flexShrink: 0,
     },
     postNotifyButtonActive: {
-        borderColor: 'rgba(217,27,92,0.5)',
-        backgroundColor: 'rgba(217,27,92,0.15)',
+        borderColor: 'rgba(61,155,143,0.55)',
+        backgroundColor: 'rgba(61,155,143,0.16)',
     },
     actionButtons: {
         flexDirection: 'row',

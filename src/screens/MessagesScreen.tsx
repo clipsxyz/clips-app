@@ -24,6 +24,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { useAuth } from '../context/Auth';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     fetchConversationMessagesPage,
     fetchGroupThreadMessagesPage,
@@ -58,6 +59,8 @@ import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import DmMessageActionsSheet, { type DmMessageAction } from '../components/DmMessageActionsSheet.native';
 import DmReactionFlyOverlay, {
@@ -67,7 +70,10 @@ import DmMessagePressable from '../components/DmMessagePressable.native';
 import IMessageDmBubbleShell from '../components/IMessageDmBubbleShell.native';
 import {
     DM_RECEIVED,
+    DM_SENT_BRASS,
+    DM_SENT_PASSPORT,
     dmSentBubbleColor,
+    dmSentBubbleGradient,
     getDmSentBubblePreference,
     setDmSentBubblePreference,
     type DmSentBubbleStyle,
@@ -89,6 +95,9 @@ type VoiceDraftState = {
 
 const DEBUG_MESSAGE_PAGING =
     __DEV__ && (globalThis as { __CLIPS_DEBUG_MESSAGE_PAGING__?: boolean }).__CLIPS_DEBUG_MESSAGE_PAGING__ === true;
+
+/** Voice notes / gold mic — off for now (text + images only). */
+const ENABLE_VOICE_NOTES = false;
 
 type SheetAlertState = {
     title: string;
@@ -116,6 +125,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     } = route.params || {};
     const isGroupThread = Boolean(chatGroupId);
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
     const initialGroupName =
         (typeof routeGroupName === 'string' && routeGroupName.trim()) ||
         (typeof communityCreatedName === 'string' && communityCreatedName.trim()) ||
@@ -1232,13 +1242,18 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
         setInviteBusy(true);
         try {
-            await inviteUserToChatGroup(chatGroupId, normalized);
+            const result = (await inviteUserToChatGroup(chatGroupId, normalized)) as {
+                inviteeHandle?: string;
+            };
+            const invited = result?.inviteeHandle || normalized;
             setInviteOpen(false);
             setInviteHandle('');
             setInviteSuggestions([]);
             showAlert({
-                title: 'Invite sent',
-                message: `@${normalized} will see this invite in notifications.`,
+                title: isLaravelApiEnabled() ? 'Invite sent' : 'Member added',
+                message: isLaravelApiEnabled()
+                    ? `@${invited} will see this invite in notifications.`
+                    : `${invited} was added to this group (mock mode — no server notifications).`,
                 icon: 'success',
                 confirmButtonText: 'OK',
             });
@@ -1246,7 +1261,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             console.error('Invite failed:', error);
             showAlert({
                 title: 'Invite failed',
-                message: 'Could not send invite right now.',
+                message: error instanceof Error ? error.message : 'Could not send invite right now.',
                 icon: 'alert',
                 confirmButtonText: 'OK',
             });
@@ -1865,7 +1880,6 @@ export default function MessagesScreen({ route, navigation }: any) {
     const renderMessage = ({ item }: { item: ChatMessage }) => {
         const isFromMe = sameDmHandle(item.senderHandle, user?.handle);
         const senderAvatar = getAvatarForHandle(item.senderHandle);
-        const myAvatar = user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined);
         const isStoryInteraction = Boolean(item.storyId);
         const isLegacyStoryContextText =
             !!item.isSystemMessage &&
@@ -2036,13 +2050,6 @@ export default function MessagesScreen({ route, navigation }: any) {
                         </TouchableOpacity>
                         {renderReactionPills()}
                     </View>
-                    {isFromMe ? (
-                        <Avatar
-                            src={myAvatar}
-                            name={user?.name || user?.handle || 'You'}
-                            size={ox(32)}
-                        />
-                    ) : null}
                 </View>
             );
         }
@@ -2105,18 +2112,12 @@ export default function MessagesScreen({ route, navigation }: any) {
                             </Text>
                         </View>
                     </View>
-                    {isFromMe ? (
-                        <Avatar
-                            src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
-                            name={user?.handle?.split('@')[0] || 'Me'}
-                            size={ox(28)}
-                        />
-                    ) : null}
                 </View>
             );
         }
 
         const sentBubbleColor = dmSentBubbleColor(dmSentStyle);
+        const sentGradient = dmSentBubbleGradient(dmSentStyle);
         const isMediaOnlyMessage = Boolean(
             item.imageUrl && !item.text?.trim() && !item.audioUrl && !(item as any).replyTo
         );
@@ -2217,7 +2218,10 @@ export default function MessagesScreen({ route, navigation }: any) {
             <IMessageDmBubbleShell
                 isFromMe={isFromMe}
                 tailBackgroundColor={bubbleFill}
-                showTail={!isMediaOnlyMessage}
+                showTail={false}
+                gradientColors={
+                    isFromMe && !isMediaOnlyMessage ? [...sentGradient] : undefined
+                }
                 bubbleStyle={
                     isMediaOnlyMessage
                         ? {
@@ -2226,6 +2230,8 @@ export default function MessagesScreen({ route, navigation }: any) {
                               paddingVertical: 0,
                               shadowOpacity: 0,
                               elevation: 0,
+                              borderBottomLeftRadius: 18,
+                              borderBottomRightRadius: 18,
                           }
                         : messageReactions[item.id]?.length
                           ? { paddingBottom: ox(22) }
@@ -2284,13 +2290,6 @@ export default function MessagesScreen({ route, navigation }: any) {
                     </Animated.View>
                     {messageMeta}
                 </View>
-                {isFromMe ? (
-                    <Avatar
-                        src={myAvatar}
-                        name={user?.name || user?.handle || 'You'}
-                        size={ox(32)}
-                    />
-                ) : null}
             </View>
         );
     };
@@ -2329,8 +2328,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 style={[
                                     styles.followBadge,
                                     {
-                                        backgroundColor:
-                                            dmSentStyle === 'green' ? '#34C759' : '#0A84FF',
+                                        backgroundColor: dmSentBubbleColor(dmSentStyle),
                                     },
                                 ]}
                                 onPress={() => {
@@ -2402,9 +2400,9 @@ export default function MessagesScreen({ route, navigation }: any) {
             </View>
 
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.keyboardView}
-                keyboardVerticalOffset={90}
+                keyboardVerticalOffset={0}
             >
                 <FlatList
                     ref={flatListRef}
@@ -2561,7 +2559,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         </View>
                     </View>
                 )}
-                {voiceDraft && (
+                {ENABLE_VOICE_NOTES && voiceDraft ? (
                     <View style={styles.voiceReviewSection}>
                         <Text style={styles.voiceReviewLabel}>Review before sending</Text>
                         <View style={styles.voiceReviewBar}>
@@ -2637,11 +2635,16 @@ export default function MessagesScreen({ route, navigation }: any) {
                             </TouchableOpacity>
                         </View>
                     </View>
-                )}
-                {!voiceDraft ? (
-                <View style={styles.inputContainer}>
+                ) : null}
+                {!ENABLE_VOICE_NOTES || !voiceDraft ? (
+                <View
+                    style={[
+                        styles.inputContainer,
+                        { paddingBottom: Math.max(insets.bottom, 6) },
+                    ]}
+                >
                     <View style={styles.inputRow}>
-                        {isRecordingVoice ? (
+                        {ENABLE_VOICE_NOTES && isRecordingVoice ? (
                             <View style={styles.voiceActiveBar}>
                                 <TouchableOpacity
                                     style={styles.voiceRecordingCancelBtn}
@@ -2663,30 +2666,26 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </View>
                             </View>
                         ) : (
-                            <View style={styles.inputShell}>
-                                <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
-                                    <Icon name="add" size={ox(22)} color="#FFFFFF" />
-                                </TouchableOpacity>
-                                <TextInput
-                                    value={messageText}
-                                    onChangeText={setMessageText}
-                                    placeholder={composerPlaceholder}
-                                    placeholderTextColor="#737373"
-                                    style={styles.input}
-                                    multiline
-                                    maxLength={1000}
+                            <>
+                                <Avatar
+                                    src={user?.avatarUrl}
+                                    name={user?.name || user?.handle || 'You'}
+                                    size={32}
                                 />
-                                <TouchableOpacity
-                                    style={styles.inputIconRight}
-                                    onPress={() => {
-                                        setStickerTargetMessageId(null);
-                                        setShowStickerPicker(true);
-                                    }}
-                                >
-                                    <Icon name="happy-outline" size={ox(20)} color="#FFFFFF" />
-                                </TouchableOpacity>
-                            </View>
+                                <View style={styles.inputShell}>
+                                    <TextInput
+                                        value={messageText}
+                                        onChangeText={setMessageText}
+                                        placeholder={composerPlaceholder}
+                                        placeholderTextColor="#8B98A5"
+                                        style={styles.input}
+                                        multiline
+                                        maxLength={1000}
+                                    />
+                                </View>
+                            </>
                         )}
+                        {ENABLE_VOICE_NOTES ? (
                         <View
                             {...voiceMicPanResponder.panHandlers}
                             style={[
@@ -2708,7 +2707,8 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </LinearGradient>
                             )}
                         </View>
-                        {messageText.trim() && !isRecordingVoice ? (
+                        ) : null}
+                        {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecordingVoice) ? (
                             <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
                                 <Icon name="send" size={ox(20)} color="#000000" />
                             </TouchableOpacity>
@@ -2737,100 +2737,131 @@ export default function MessagesScreen({ route, navigation }: any) {
             </KeyboardAvoidingView>
 
             <View style={[styles.sheetOverlay, !createGroupOpen && styles.hidden]}>
-                <View style={styles.sheetCard}>
-                    <Text style={styles.sheetTitle}>Create group</Text>
-                    <Text style={styles.sheetLabel}>Group name</Text>
-                    <TextInput
-                        value={newGroupName}
-                        onChangeText={setNewGroupName}
-                        placeholder="e.g. Dublin creators"
-                        placeholderTextColor="#6B7280"
-                        style={styles.sheetInput}
-                        maxLength={80}
-                    />
-                    <Text style={styles.sheetLabel}>Group photo (optional)</Text>
-                    <View style={styles.groupPhotoRow}>
-                        <Avatar src={newGroupAvatarDataUrl} name={newGroupName || 'Group'} size={ox(42)} />
-                        <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={pickGroupAvatar}>
-                            <Text style={styles.sheetSecondaryBtnText}>{newGroupAvatarDataUrl ? 'Change photo' : 'Choose photo'}</Text>
-                        </TouchableOpacity>
-                        {!!newGroupAvatarDataUrl && (
-                            <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={() => setNewGroupAvatarDataUrl(undefined)}>
-                                <Text style={styles.sheetSecondaryBtnText}>Remove</Text>
+                <View
+                    style={[
+                        styles.sheetCard,
+                        { paddingBottom: Math.max(insets.bottom, 16) },
+                    ]}
+                >
+                    <PassportSheetCanvas contentStyle={styles.sheetCanvasInner}>
+                        <Text style={styles.sheetTitle}>Create group</Text>
+                        <Text style={styles.sheetLabel}>Group name</Text>
+                        <TextInput
+                            value={newGroupName}
+                            onChangeText={setNewGroupName}
+                            placeholder="e.g. Dublin creators"
+                            placeholderTextColor="#6B7280"
+                            style={styles.sheetInput}
+                            maxLength={80}
+                        />
+                        <Text style={styles.sheetLabel}>Group photo (optional)</Text>
+                        <View style={styles.groupPhotoRow}>
+                            <Avatar src={newGroupAvatarDataUrl} name={newGroupName || 'Group'} size={ox(42)} />
+                            <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={pickGroupAvatar}>
+                                <Text style={styles.sheetSecondaryBtnText}>
+                                    {newGroupAvatarDataUrl ? 'Change photo' : 'Choose photo'}
+                                </Text>
                             </TouchableOpacity>
-                        )}
-                    </View>
-                    <View style={styles.sheetActionsRow}>
-                        <TouchableOpacity
-                            style={styles.sheetSecondaryBtn}
-                            onPress={() => {
-                                setCreateGroupOpen(false);
-                                setNewGroupName('');
-                                setNewGroupAvatarDataUrl(undefined);
-                            }}
-                        >
-                            <Text style={styles.sheetSecondaryBtnText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.sheetPrimaryBtn, creatingGroup && styles.sheetPrimaryBtnDisabled]}
-                            onPress={handleCreateGroup}
-                            disabled={creatingGroup}
-                        >
-                            <Text style={styles.sheetPrimaryBtnText}>{creatingGroup ? 'Creating...' : 'Create'}</Text>
-                        </TouchableOpacity>
-                    </View>
+                            {!!newGroupAvatarDataUrl && (
+                                <TouchableOpacity
+                                    style={styles.sheetSecondaryBtn}
+                                    onPress={() => setNewGroupAvatarDataUrl(undefined)}
+                                >
+                                    <Text style={styles.sheetSecondaryBtnText}>Remove</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                        <View style={styles.sheetActionsRow}>
+                            <TouchableOpacity
+                                style={styles.sheetSecondaryBtn}
+                                onPress={() => {
+                                    setCreateGroupOpen(false);
+                                    setNewGroupName('');
+                                    setNewGroupAvatarDataUrl(undefined);
+                                }}
+                            >
+                                <Text style={styles.sheetSecondaryBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.sheetPrimaryBtn, creatingGroup && styles.sheetPrimaryBtnDisabled]}
+                                onPress={handleCreateGroup}
+                                disabled={creatingGroup}
+                            >
+                                <Text style={styles.sheetPrimaryBtnText}>
+                                    {creatingGroup ? 'Creating...' : 'Create'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </PassportSheetCanvas>
                 </View>
             </View>
 
             <View style={[styles.sheetOverlay, !inviteOpen && styles.hidden]}>
-                <View style={styles.sheetCard}>
-                    <Text style={styles.sheetTitle}>Invite member</Text>
-                    <Text style={styles.sheetLabel}>Handle</Text>
-                    <TextInput
-                        value={inviteHandle}
-                        onChangeText={setInviteHandle}
-                        placeholder="@username"
-                        placeholderTextColor="#6B7280"
-                        style={styles.sheetInput}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                    />
-                    {inviteSearching ? (
-                        <Text style={styles.suggestionsHint}>Searching...</Text>
-                    ) : inviteSuggestions.length > 0 ? (
-                        <View style={styles.suggestionsList}>
-                            {inviteSuggestions.map((u) => (
-                                <TouchableOpacity key={u.handle} style={styles.suggestionRow} onPress={() => setInviteHandle(u.handle)}>
-                                    <Avatar src={u.avatarUrl} name={u.handle} size={ox(28)} />
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.suggestionHandle}>{u.handle}</Text>
-                                        {!!u.displayName && <Text style={styles.suggestionName}>{u.displayName}</Text>}
-                                    </View>
-                                </TouchableOpacity>
-                            ))}
+                <View
+                    style={[
+                        styles.sheetCard,
+                        { paddingBottom: Math.max(insets.bottom, 16) },
+                    ]}
+                >
+                    <PassportSheetCanvas contentStyle={styles.sheetCanvasInner}>
+                        <Text style={styles.sheetTitle}>Invite member</Text>
+                        <Text style={styles.sheetLabel}>Handle</Text>
+                        <TextInput
+                            value={inviteHandle}
+                            onChangeText={setInviteHandle}
+                            placeholder="@username"
+                            placeholderTextColor="#6B7280"
+                            style={styles.sheetInput}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                        {inviteSearching ? (
+                            <Text style={styles.suggestionsHint}>Searching...</Text>
+                        ) : inviteSuggestions.length > 0 ? (
+                            <View style={styles.suggestionsList}>
+                                {inviteSuggestions.map((u) => (
+                                    <TouchableOpacity
+                                        key={u.handle}
+                                        style={styles.suggestionRow}
+                                        onPress={() => setInviteHandle(u.handle)}
+                                    >
+                                        <Avatar src={u.avatarUrl} name={u.handle} size={ox(28)} />
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.suggestionHandle}>{u.handle}</Text>
+                                            {!!u.displayName && (
+                                                <Text style={styles.suggestionName}>{u.displayName}</Text>
+                                            )}
+                                        </View>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        ) : (
+                            <Text style={styles.suggestionsHint}>
+                                Type at least 2 characters to see suggestions.
+                            </Text>
+                        )}
+                        <View style={styles.sheetActionsRow}>
+                            <TouchableOpacity
+                                style={styles.sheetSecondaryBtn}
+                                onPress={() => {
+                                    setInviteOpen(false);
+                                    setInviteHandle('');
+                                    setInviteSuggestions([]);
+                                }}
+                            >
+                                <Text style={styles.sheetSecondaryBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.sheetPrimaryBtn, inviteBusy && styles.sheetPrimaryBtnDisabled]}
+                                onPress={handleInviteMember}
+                                disabled={inviteBusy}
+                            >
+                                <Text style={styles.sheetPrimaryBtnText}>
+                                    {inviteBusy ? 'Sending...' : 'Send invite'}
+                                </Text>
+                            </TouchableOpacity>
                         </View>
-                    ) : (
-                        <Text style={styles.suggestionsHint}>Type at least 2 characters to see suggestions.</Text>
-                    )}
-                    <View style={styles.sheetActionsRow}>
-                        <TouchableOpacity
-                            style={styles.sheetSecondaryBtn}
-                            onPress={() => {
-                                setInviteOpen(false);
-                                setInviteHandle('');
-                                setInviteSuggestions([]);
-                            }}
-                        >
-                            <Text style={styles.sheetSecondaryBtnText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.sheetPrimaryBtn, inviteBusy && styles.sheetPrimaryBtnDisabled]}
-                            onPress={handleInviteMember}
-                            disabled={inviteBusy}
-                        >
-                            <Text style={styles.sheetPrimaryBtnText}>{inviteBusy ? 'Sending...' : 'Send invite'}</Text>
-                        </TouchableOpacity>
-                    </View>
+                    </PassportSheetCanvas>
                 </View>
             </View>
 
@@ -2840,136 +2871,154 @@ export default function MessagesScreen({ route, navigation }: any) {
                     activeOpacity={1}
                     onPress={() => setShowChatInfo(false)}
                 />
-                <View style={styles.chatInfoSheet}>
-                    <View style={styles.chatInfoHeader}>
-                        <Text style={styles.chatInfoTitle}>Chat Info</Text>
-                        <TouchableOpacity onPress={() => setShowChatInfo(false)}>
-                            <Icon name="close" size={ox(24)} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    </View>
-                    {isGroupThread ? (
-                        <ScrollView style={styles.chatInfoBody} bounces={false}>
-                            <View style={styles.chatInfoProfileRow}>
-                                <Avatar
-                                    src={groupAvatarUrl}
-                                    name={groupName || 'Group'}
-                                    size={ox(56)}
-                                />
-                                <View style={styles.chatInfoProfileText}>
-                                    <Text style={styles.chatInfoName}>{groupName}</Text>
-                                    <Text style={styles.chatInfoSubtitle}>Group chat</Text>
-                                </View>
-                            </View>
-                            <Text style={styles.chatInfoHint}>
-                                To add people, use the + button in the chat header, or open someone&apos;s profile
-                                and choose Invite to group.
-                            </Text>
-                            <TouchableOpacity
-                                style={styles.leaveGroupBtn}
-                                onPress={confirmLeaveGroup}
-                                disabled={leaveGroupBusy}
-                            >
-                                {leaveGroupBusy ? (
-                                    <ActivityIndicator color="#EF4444" />
-                                ) : (
-                                    <>
-                                        <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
-                                        <Text style={styles.leaveGroupBtnText}>Leave Group</Text>
-                                    </>
-                                )}
+                <View
+                    style={[
+                        styles.chatInfoSheet,
+                        { paddingBottom: Math.max(insets.bottom, 16) },
+                    ]}
+                >
+                    <PassportSheetCanvas style={styles.chatInfoCanvas}>
+                        <View style={styles.chatInfoHeader}>
+                            <Text style={styles.chatInfoTitle}>Chat Info</Text>
+                            <TouchableOpacity onPress={() => setShowChatInfo(false)}>
+                                <Icon name="close" size={ox(24)} color="#9CA3AF" />
                             </TouchableOpacity>
-                        </ScrollView>
-                    ) : (
-                        <ScrollView style={styles.chatInfoBody} bounces={false}>
-                            <View style={styles.chatInfoProfileRow}>
-                                <Avatar
-                                    src={getAvatarForHandle(handle)}
-                                    name={handle?.split('@')[0] || 'User'}
-                                    size={ox(56)}
-                                />
-                                <View style={styles.chatInfoProfileText}>
-                                    <Text style={styles.chatInfoName}>{handle}</Text>
-                                    <Text style={styles.chatInfoSubtitle}>Active now</Text>
+                        </View>
+                        {isGroupThread ? (
+                            <ScrollView
+                                style={styles.chatInfoBody}
+                                contentContainerStyle={styles.chatInfoBodyContent}
+                                bounces={false}
+                            >
+                                <View style={styles.chatInfoProfileRow}>
+                                    <Avatar
+                                        src={groupAvatarUrl}
+                                        name={groupName || 'Group'}
+                                        size={ox(56)}
+                                    />
+                                    <View style={styles.chatInfoProfileText}>
+                                        <Text style={styles.chatInfoName}>{groupName}</Text>
+                                        <Text style={styles.chatInfoSubtitle}>Group chat</Text>
+                                    </View>
                                 </View>
-                            </View>
-
-                            <Text style={styles.dmBubbleLabel}>Your sent messages</Text>
-                            <Text style={styles.dmBubbleHint}>
-                                iMessage blue or SMS-style green (saved on this device).
-                            </Text>
-                            <View style={styles.dmBubbleToggle}>
+                                <Text style={styles.chatInfoHint}>
+                                    To add people, use the + button in the chat header, or open someone&apos;s
+                                    profile and choose Invite to group.
+                                </Text>
                                 <TouchableOpacity
-                                    style={[
-                                        styles.dmBubbleOption,
-                                        dmSentStyle === 'blue' && styles.dmBubbleOptionBlue,
-                                    ]}
+                                    style={styles.leaveGroupBtn}
+                                    onPress={confirmLeaveGroup}
+                                    disabled={leaveGroupBusy}
+                                >
+                                    {leaveGroupBusy ? (
+                                        <ActivityIndicator color="#EF4444" />
+                                    ) : (
+                                        <>
+                                            <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
+                                            <Text style={styles.leaveGroupBtnText}>Leave Group</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </ScrollView>
+                        ) : (
+                            <ScrollView
+                                style={styles.chatInfoBody}
+                                contentContainerStyle={styles.chatInfoBodyContent}
+                                bounces={false}
+                            >
+                                <View style={styles.chatInfoProfileRow}>
+                                    <Avatar
+                                        src={getAvatarForHandle(handle)}
+                                        name={handle?.split('@')[0] || 'User'}
+                                        size={ox(56)}
+                                    />
+                                    <View style={styles.chatInfoProfileText}>
+                                        <Text style={styles.chatInfoName}>{handle}</Text>
+                                        <Text style={styles.chatInfoSubtitle}>Active now</Text>
+                                    </View>
+                                </View>
+
+                                <Text style={styles.dmBubbleLabel}>Your sent messages</Text>
+                                <Text style={styles.dmBubbleHint}>
+                                    Passport colours from View Profile (saved on this device).
+                                </Text>
+                                <View style={styles.dmBubbleToggle}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.dmBubbleOption,
+                                            dmSentStyle === 'blue' && styles.dmBubbleOptionBlue,
+                                        ]}
+                                        onPress={() => {
+                                            void handleToggleDmBubbleStyle('blue');
+                                        }}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.dmBubbleOptionText,
+                                                dmSentStyle === 'blue' && styles.dmBubbleOptionTextActive,
+                                            ]}
+                                        >
+                                            Sea glass
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.dmBubbleOption,
+                                            dmSentStyle === 'green' && styles.dmBubbleOptionGreen,
+                                        ]}
+                                        onPress={() => {
+                                            void handleToggleDmBubbleStyle('green');
+                                        }}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.dmBubbleOptionText,
+                                                dmSentStyle === 'green' && styles.dmBubbleOptionTextActive,
+                                            ]}
+                                        >
+                                            Brass
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <TouchableOpacity
+                                    style={styles.chatInfoActionRow}
                                     onPress={() => {
-                                        void handleToggleDmBubbleStyle('blue');
+                                        if (!handle) return;
+                                        setShowChatInfo(false);
+                                        navigation.navigate('ViewProfile', { handle });
                                     }}
                                 >
-                                    <Text
-                                        style={[
-                                            styles.dmBubbleOptionText,
-                                            dmSentStyle === 'blue' && styles.dmBubbleOptionTextActive,
-                                        ]}
-                                    >
-                                        Blue
+                                    <Icon name="person-outline" size={ox(20)} color="#FFFFFF" />
+                                    <Text style={styles.chatInfoActionText}>View Profile</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.chatInfoActionRow}
+                                    onPress={() => {
+                                        void handleToggleMuteFromSheet();
+                                    }}
+                                >
+                                    <Icon name="mic-outline" size={ox(20)} color="#FFFFFF" />
+                                    <Text style={styles.chatInfoActionText}>
+                                        {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.chatInfoActionRow} onPress={confirmBlockUser}>
+                                    <Icon name="alert-circle-outline" size={ox(20)} color="#EF4444" />
+                                    <Text style={styles.chatInfoActionDangerText}>
+                                        {isBlocked ? 'Unblock User' : 'Block User'}
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                    style={[
-                                        styles.dmBubbleOption,
-                                        dmSentStyle === 'green' && styles.dmBubbleOptionGreen,
-                                    ]}
-                                    onPress={() => {
-                                        void handleToggleDmBubbleStyle('green');
-                                    }}
+                                    style={styles.chatInfoActionRow}
+                                    onPress={confirmDeleteConversation}
                                 >
-                                    <Text
-                                        style={[
-                                            styles.dmBubbleOptionText,
-                                            dmSentStyle === 'green' && styles.dmBubbleOptionTextActive,
-                                        ]}
-                                    >
-                                        Green
-                                    </Text>
+                                    <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
+                                    <Text style={styles.chatInfoActionDangerText}>Delete Conversation</Text>
                                 </TouchableOpacity>
-                            </View>
-
-                            <TouchableOpacity
-                                style={styles.chatInfoActionRow}
-                                onPress={() => {
-                                    if (!handle) return;
-                                    setShowChatInfo(false);
-                                    navigation.navigate('ViewProfile', { handle });
-                                }}
-                            >
-                                <Icon name="person-outline" size={ox(20)} color="#FFFFFF" />
-                                <Text style={styles.chatInfoActionText}>View Profile</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.chatInfoActionRow}
-                                onPress={() => {
-                                    void handleToggleMuteFromSheet();
-                                }}
-                            >
-                                <Icon name="mic-outline" size={ox(20)} color="#FFFFFF" />
-                                <Text style={styles.chatInfoActionText}>
-                                    {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.chatInfoActionRow} onPress={confirmBlockUser}>
-                                <Icon name="alert-circle-outline" size={ox(20)} color="#EF4444" />
-                                <Text style={styles.chatInfoActionDangerText}>
-                                    {isBlocked ? 'Unblock User' : 'Block User'}
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.chatInfoActionRow} onPress={confirmDeleteConversation}>
-                                <Icon name="close-circle-outline" size={ox(20)} color="#EF4444" />
-                                <Text style={styles.chatInfoActionDangerText}>Delete Conversation</Text>
-                            </TouchableOpacity>
-                        </ScrollView>
-                    )}
+                            </ScrollView>
+                        )}
+                    </PassportSheetCanvas>
                 </View>
             </View>
 
@@ -3134,9 +3183,10 @@ const styles = StyleSheet.create({
         width: '100%',
         alignSelf: 'stretch',
         flexDirection: 'row',
-        marginBottom: ox(10),
+        marginBottom: ox(6),
         alignItems: 'flex-end',
-        gap: ox(7),
+        gap: ox(8),
+        paddingHorizontal: ox(4),
     },
     messageFromMe: {
         justifyContent: 'flex-end',
@@ -3322,16 +3372,17 @@ const styles = StyleSheet.create({
         marginTop: ox(4),
     },
     inputContainer: {
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(10),
+        paddingHorizontal: 14,
+        paddingTop: 6,
+        paddingBottom: 0,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+        borderTopColor: 'rgba(255,255,255,0.12)',
         backgroundColor: '#000000',
     },
     inputRow: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        gap: ox(10),
+        alignItems: 'center',
+        gap: 10,
     },
     composerContextWrap: {
         flexDirection: 'row',
@@ -3387,32 +3438,25 @@ const styles = StyleSheet.create({
     },
     inputShell: {
         flex: 1,
-        position: 'relative',
-        justifyContent: 'center',
-    },
-    inputIconInside: {
-        position: 'absolute',
-        left: 12,
-        zIndex: 2,
-    },
-    inputIconRight: {
-        position: 'absolute',
-        right: 12,
-        zIndex: 2,
-        elevation: 3,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#16181C',
+        borderRadius: 999,
+        paddingLeft: 14,
+        paddingRight: 14,
+        minHeight: 40,
     },
     input: {
-        width: '100%',
-        minHeight: ox(44),
-        backgroundColor: '#09090b',
-        borderRadius: ox(24),
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
-        paddingLeft: ox(42),
-        paddingRight: ox(42),
-        paddingVertical: ox(10),
+        flex: 1,
+        minWidth: 0,
+        minHeight: 40,
+        paddingVertical: 10,
+        paddingHorizontal: 0,
+        margin: 0,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
         color: '#FFFFFF',
-        fontSize: ox(15),
+        fontSize: 15,
         maxHeight: 100,
     },
     composerMicButton: {
@@ -3745,12 +3789,18 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     chatInfoSheet: {
-        backgroundColor: '#111827',
+        backgroundColor: PASSPORT_ABYSS,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
-        borderTopWidth: 1,
-        borderColor: '#374151',
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
         maxHeight: '80%',
+        overflow: 'hidden',
+        width: '100%',
+    },
+    chatInfoCanvas: {
+        width: '100%',
     },
     chatInfoHeader: {
         flexDirection: 'row',
@@ -3758,8 +3808,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
-        borderBottomWidth: 1,
-        borderBottomColor: '#374151',
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.12)',
     },
     chatInfoTitle: {
         color: '#FFFFFF',
@@ -3767,8 +3817,11 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     chatInfoBody: {
+        maxHeight: 480,
+    },
+    chatInfoBodyContent: {
         padding: ox(16),
-        paddingBottom: ox(24),
+        paddingBottom: ox(28),
     },
     chatInfoProfileRow: {
         flexDirection: 'row',
@@ -3836,10 +3889,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     dmBubbleOptionBlue: {
-        backgroundColor: '#0A84FF',
+        backgroundColor: DM_SENT_PASSPORT,
     },
     dmBubbleOptionGreen: {
-        backgroundColor: '#34C759',
+        backgroundColor: DM_SENT_BRASS,
     },
     dmBubbleOptionText: {
         color: '#9CA3AF',
@@ -3868,11 +3921,15 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     sheetCard: {
-        backgroundColor: '#030712',
+        backgroundColor: PASSPORT_ABYSS,
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
-        borderTopWidth: 1,
-        borderColor: '#1F2937',
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+        overflow: 'hidden',
+    },
+    sheetCanvasInner: {
         padding: ox(16),
     },
     sheetTitle: {
@@ -3882,15 +3939,15 @@ const styles = StyleSheet.create({
         marginBottom: ox(12),
     },
     sheetLabel: {
-        color: '#D1D5DB',
+        color: 'rgba(232,238,242,0.72)',
         fontSize: ox(13),
         marginBottom: ox(6),
     },
     sheetInput: {
-        backgroundColor: '#111827',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         borderRadius: ox(10),
         borderWidth: 1,
-        borderColor: '#FFFFFF',
+        borderColor: 'rgba(255,255,255,0.12)',
         color: '#FFFFFF',
         paddingHorizontal: ox(12),
         paddingVertical: ox(10),

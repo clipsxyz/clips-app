@@ -12,8 +12,6 @@ import {
   FiBookmark,
   FiBarChart2,
   FiArrowLeft,
-  FiImage,
-  FiMaximize2,
 } from 'react-icons/fi';
 import { getAvatarForHandle } from '../api/users';
 
@@ -610,13 +608,6 @@ export default function ImageFullscreenViewer({
                   className="flex min-h-10 flex-1 items-center rounded-full bg-[#16181C] px-3.5 text-left"
                 >
                   <span className="flex-1 text-[15px] text-[#8B98A5]">Post your reply</span>
-                  <span className="flex items-center gap-3 text-[#8B98A5]">
-                    <FiImage size={18} />
-                    <span className="rounded border border-[#8B98A5] px-1 text-[10px] font-extrabold leading-none">
-                      GIF
-                    </span>
-                    <FiMaximize2 size={18} />
-                  </span>
                 </button>
               </div>
             </div>

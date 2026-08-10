@@ -625,6 +625,10 @@ export async function leaveChatGroup(id: string) {
 }
 
 export async function inviteToChatGroup(groupId: string, inviteeHandle: string) {
+    if (!isLaravelApiEnabled()) {
+        const { mockInviteToChatGroup } = await import('./messages');
+        return mockInviteToChatGroup(groupId, inviteeHandle);
+    }
     return apiRequest(`/chat-groups/${encodeURIComponent(groupId)}/invites`, {
         method: 'POST',
         body: JSON.stringify({ invitee_handle: inviteeHandle }),

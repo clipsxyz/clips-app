@@ -5,6 +5,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    Pressable,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,14 +15,19 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
 import { createChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import Avatar from './Avatar.native';
-import { GAZETTEER_SHEET_DM } from './GazetteerBottomSheetModal.native';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
+
+/** Same wash as web Swal / View Profile passport sheets. */
+const PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
 
 type Props = {
     visible: boolean;
@@ -37,6 +43,7 @@ type Props = {
 /**
  * RN Modal (not gorhom) — BottomSheetModal fails to present inside navigation modals
  * such as InstantCreate fullScreenModal.
+ * Passport night-atlas canvas matches View Profile / web New group.
  */
 export default function CreateGroupModal({ visible, onClose, onCreated }: Props) {
     const { user } = useAuth();
@@ -111,6 +118,110 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
 
     if (!visible) return null;
 
+    const form = (
+        <>
+            <View style={styles.handleWrap}>
+                <View style={styles.handle} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
+                <View style={styles.header}>
+                    <Avatar
+                        src={user?.avatarUrl}
+                        name={user?.name || user?.handle || 'You'}
+                        size={36}
+                    />
+                    <View style={styles.headerTitleRow}>
+                        <Icon name="people" size={20} color="#FFF" />
+                        <Text style={styles.title}>New group</Text>
+                    </View>
+                    <TouchableOpacity onPress={onClose} disabled={busy} accessibilityLabel="Close">
+                        <Icon name="close" size={24} color="#FFF" />
+                    </TouchableOpacity>
+                </View>
+                <Text style={styles.hint}>
+                    Next you&apos;ll open the group chat. Invite people with the + button there, or open
+                    someone&apos;s profile → Invite to group.
+                </Text>
+                <Text style={styles.label}>Group name</Text>
+                <TextInput
+                    style={styles.input}
+                    value={name}
+                    onChangeText={(text) => {
+                        setName(text);
+                        if (formError) setFormError(null);
+                    }}
+                    placeholder="e.g. Dublin photographers"
+                    placeholderTextColor="#6B7280"
+                    maxLength={120}
+                    editable={!busy}
+                    returnKeyType="done"
+                    onSubmitEditing={() => void submit()}
+                />
+                {formError ? <Text style={styles.formError}>{formError}</Text> : null}
+                <Text style={styles.label}>Group photo (optional)</Text>
+                <View style={styles.photoRow}>
+                    <TouchableOpacity
+                        style={styles.photoBtn}
+                        onPress={() => void pickPhoto()}
+                        disabled={busy}
+                    >
+                        <Text style={styles.photoBtnText}>
+                            {avatarUri ? 'Change photo' : 'Choose photo'}
+                        </Text>
+                    </TouchableOpacity>
+                    {avatarUri ? (
+                        <>
+                            <TouchableOpacity
+                                style={styles.photoBtn}
+                                onPress={() => setAvatarUri(null)}
+                                disabled={busy}
+                            >
+                                <Text style={styles.photoBtnTextMuted}>Remove</Text>
+                            </TouchableOpacity>
+                            <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
+                        </>
+                    ) : null}
+                </View>
+                <TouchableOpacity
+                    style={[styles.submit, busy && styles.submitDisabled]}
+                    onPress={() => void submit()}
+                    disabled={busy}
+                >
+                    {busy ? (
+                        <ActivityIndicator color="#000" />
+                    ) : (
+                        <Text style={styles.submitText}>Create group</Text>
+                    )}
+                </TouchableOpacity>
+            </ScrollView>
+        </>
+    );
+
+    /** Match SavePostModal: iOS animated ambient, Android parent LinearGradient (OEM-safe). */
+    const sheetInner =
+        Platform.OS === 'ios' ? (
+            <View style={styles.sheetCanvas} collapsable={false}>
+                <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
+                    <DiscoverAmbientCanvas variant="passport" fillParent />
+                </View>
+                <View style={styles.sheetContent} collapsable={false}>
+                    {form}
+                </View>
+            </View>
+        ) : (
+            <LinearGradient
+                colors={[...PASSPORT_WASH]}
+                locations={[0, 0.28, 0.55, 0.78, 1]}
+                start={{ x: 0.1, y: 1 }}
+                end={{ x: 0.9, y: 0 }}
+                style={styles.sheetCanvas}
+            >
+                <View style={styles.sheetContent} collapsable={false}>
+                    {form}
+                </View>
+            </LinearGradient>
+        );
+
     return (
         <Modal
             visible
@@ -119,19 +230,15 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
             onRequestClose={() => !busy && onClose()}
             statusBarTranslucent
         >
-            <KeyboardAvoidingView
-                style={styles.overlay}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-                <TouchableOpacity
+            <View style={styles.overlay}>
+                <Pressable
                     style={styles.backdrop}
-                    activeOpacity={1}
                     onPress={() => !busy && onClose()}
                 />
-                <View
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                     style={[
                         styles.sheet,
-                        GAZETTEER_SHEET_DM.background,
                         {
                             marginHorizontal: sheetLayout.marginHorizontal,
                             width: sheetLayout.sheetWidth,
@@ -140,82 +247,9 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
                         },
                     ]}
                 >
-                    <View style={styles.handleWrap}>
-                        <View style={[styles.handle, GAZETTEER_SHEET_DM.handle]} />
-                    </View>
-                    <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
-                        <View style={styles.header}>
-                            <Avatar
-                                src={user?.avatarUrl}
-                                name={user?.name || user?.handle || 'You'}
-                                size={36}
-                            />
-                            <View style={styles.headerTitleRow}>
-                                <Icon name="people" size={20} color="#FFF" />
-                                <Text style={styles.title}>New group</Text>
-                            </View>
-                            <TouchableOpacity onPress={onClose} disabled={busy} accessibilityLabel="Close">
-                                <Icon name="close" size={24} color="#FFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <Text style={styles.hint}>
-                            Next you&apos;ll open the group chat. Invite people with the + button there, or open
-                            someone&apos;s profile → Invite to group.
-                        </Text>
-                        <Text style={styles.label}>Group name</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={name}
-                            onChangeText={(text) => {
-                                setName(text);
-                                if (formError) setFormError(null);
-                            }}
-                            placeholder="e.g. Dublin photographers"
-                            placeholderTextColor="#6B7280"
-                            maxLength={120}
-                            editable={!busy}
-                            returnKeyType="done"
-                            onSubmitEditing={() => void submit()}
-                        />
-                        {formError ? <Text style={styles.formError}>{formError}</Text> : null}
-                        <Text style={styles.label}>Group photo (optional)</Text>
-                        <View style={styles.photoRow}>
-                            <TouchableOpacity
-                                style={styles.photoBtn}
-                                onPress={() => void pickPhoto()}
-                                disabled={busy}
-                            >
-                                <Text style={styles.photoBtnText}>
-                                    {avatarUri ? 'Change photo' : 'Choose photo'}
-                                </Text>
-                            </TouchableOpacity>
-                            {avatarUri ? (
-                                <>
-                                    <TouchableOpacity
-                                        style={styles.photoBtn}
-                                        onPress={() => setAvatarUri(null)}
-                                        disabled={busy}
-                                    >
-                                        <Text style={styles.photoBtnTextMuted}>Remove</Text>
-                                    </TouchableOpacity>
-                                    <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
-                                </>
-                            ) : null}
-                        </View>
-                        <TouchableOpacity
-                            style={[styles.submit, busy && styles.submitDisabled]}
-                            onPress={() => void submit()}
-                            disabled={busy}
-                        >
-                            {busy ? (
-                                <ActivityIndicator color="#000" />
-                            ) : (
-                                <Text style={styles.submitText}>Create group</Text>
-                            )}
-                        </TouchableOpacity>
-                    </ScrollView>
-                </View>
-            </KeyboardAvoidingView>
+                    {sheetInner}
+                </KeyboardAvoidingView>
+            </View>
         </Modal>
     );
 }
@@ -227,12 +261,32 @@ const styles = StyleSheet.create({
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.85)',
+        backgroundColor: 'rgba(0,0,0,0.72)',
     },
     sheet: {
         maxHeight: '88%',
+        zIndex: 2,
+        elevation: 12,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
+        overflow: 'hidden',
+        backgroundColor: PASSPORT_ABYSS,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    sheetCanvas: {
+        backgroundColor: PASSPORT_ABYSS,
+        overflow: 'hidden',
+    },
+    ambientBack: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+    },
+    sheetContent: {
+        position: 'relative',
+        zIndex: 1,
+        backgroundColor: 'transparent',
         paddingHorizontal: 16,
         paddingTop: 4,
     },
@@ -244,6 +298,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.28)',
     },
     header: {
         flexDirection: 'row',

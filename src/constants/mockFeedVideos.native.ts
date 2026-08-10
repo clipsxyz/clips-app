@@ -1,8 +1,8 @@
 /**
  * Demo MP4 URLs for mock feed / Scenes testing (React Native).
  *
- * Prefer the bundled `bbb.mp4` (1080×1344 ~4:5 HD H.264 demo → react-native-video)
- * so cards look sharp on phone screens and work offline.
+ * Slot paths stay stable in post data; each slot maps to a *distinct* HTTPS sample
+ * so Alice / Sarah / Bob are visibly different clips (needs network).
  */
 import { Image, type ImageSourcePropType } from 'react-native';
 
@@ -14,7 +14,7 @@ export const MOCK_FEED_VIDEO_URLS = {
     elephants: '/demo-videos/elephants.mp4',
 } as const;
 
-/** Bundled asset — pass directly to react-native-video `source` (more reliable than URI). */
+/** Bundled asset — offline fallback / collection thumbs. */
 export const MOCK_FEED_BUNDLED_VIDEO = require('../assets/demo-videos/bbb.mp4');
 
 /** Real frame from bbb.mp4 — use for collection/grid Image thumbs (never mount Video in grids). */
@@ -25,28 +25,30 @@ const BUNDLED_DEMO_URI = typeof BUNDLED_DEMO_MP4?.uri === 'string' ? BUNDLED_DEM
 const BUNDLED_POSTER = Image.resolveAssetSource(MOCK_FEED_BUNDLED_VIDEO_POSTER);
 const BUNDLED_POSTER_URI = typeof BUNDLED_POSTER?.uri === 'string' ? BUNDLED_POSTER.uri : '';
 
-/** HTTPS fallbacks when bundled URI is unavailable (e.g. resolveAssetSource empty). */
+/**
+ * Distinct public H.264 samples (one per mock slot). Needs network.
+ * Google GTV bucket often 403s from devices; these were verified HTTP 206.
+ */
 const BBB_HTTPS = 'https://www.w3schools.com/html/mov_bbb.mp4';
+const FLOWER_HTTPS = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+const SINTEL_HTTPS = 'https://media.w3.org/2010/05/sintel/trailer_hd.mp4';
+const MOVIE300_HTTPS = 'https://media.w3.org/2010/05/video/movie_300.mp4';
+const SAMPLE_HTTPS = 'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4';
 
-const HTTPS_FALLBACK_BY_DEMO_PATH: Record<string, string> = {
+const HTTPS_BY_DEMO_PATH: Record<string, string> = {
     [MOCK_FEED_VIDEO_URLS.escapes]: BBB_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.fun]: BBB_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.joyrides]: BBB_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.blazes]: BBB_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.elephants]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.fun]: FLOWER_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.joyrides]: SINTEL_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.blazes]: MOVIE300_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.elephants]: SAMPLE_HTTPS,
     '/demo-videos/bbb.mp4': BBB_HTTPS,
-    '/demo-videos/flower.mp4': BBB_HTTPS,
+    '/demo-videos/flower.mp4': FLOWER_HTTPS,
 };
 
-const NATIVE_URI_BY_DEMO_PATH: Record<string, string> = Object.fromEntries(
-    Object.entries(HTTPS_FALLBACK_BY_DEMO_PATH).map(([path, https]) => [
-        path,
-        BUNDLED_DEMO_URI || https,
-    ]),
-);
+const NATIVE_URI_BY_DEMO_PATH: Record<string, string> = { ...HTTPS_BY_DEMO_PATH };
 
 export const MOCK_FEED_VIDEO_REMOTE_FALLBACK =
-    BUNDLED_DEMO_URI || HTTPS_FALLBACK_BY_DEMO_PATH[MOCK_FEED_VIDEO_URLS.escapes];
+    HTTPS_BY_DEMO_PATH[MOCK_FEED_VIDEO_URLS.escapes] || BUNDLED_DEMO_URI || BBB_HTTPS;
 
 /** @deprecated Unsplash stills — unrelated to the MP4; reject if found in storage. */
 const LEGACY_FAKE_UNSPLASH_POSTERS = [
@@ -75,6 +77,14 @@ export function isMockDemoVideoPath(url: string | undefined | null): boolean {
     if (NATIVE_URI_BY_DEMO_PATH[url]) return true;
     if (BUNDLED_DEMO_URI && url === BUNDLED_DEMO_URI) return true;
     if (url.includes('bbb.mp4') || url.includes('flower.mp4') || url.includes('mov_bbb')) return true;
+    if (
+        url.includes('sintel/trailer') ||
+        url.includes('movie_300.mp4') ||
+        url.includes('learningcontainer.com') ||
+        url.includes('cc0-videos/flower')
+    ) {
+        return true;
+    }
     return isRelativeDemoVideoPath(url);
 }
 
@@ -101,7 +111,6 @@ export function resolveDemoVideoPosterUri(url: string | undefined): string | und
 
 /** Image `source` for demo video thumbs (prefer bundled require). */
 export function resolveDemoVideoPosterSource(url: string | undefined): ImageSourcePropType | undefined {
-    // If URL is missing but caller knows it's a demo video, still allow explicit require via empty check below.
     if (url && !looksLikeDemoSlotVideo(url)) return undefined;
     if (!url) return undefined;
     return MOCK_FEED_BUNDLED_VIDEO_POSTER;
@@ -124,7 +133,7 @@ export function isFakeMockVideoPosterUrl(url: string | undefined | null): boolea
     );
 }
 
-/** Resolve mock video URL string (stories / scenes / URI fallback). Prefer bundled require via `mockFeedVideoSource`. */
+/** Resolve mock video URL string (stories / scenes / URI fallback). */
 export function resolveMockFeedVideoUrl(url: string | undefined): string {
     if (!url) return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
     if (NATIVE_URI_BY_DEMO_PATH[url]) return NATIVE_URI_BY_DEMO_PATH[url];
@@ -135,10 +144,16 @@ export function resolveMockFeedVideoUrl(url: string | undefined): string {
     return url;
 }
 
-/** Preferred Video `source` for feed/scenes — bundled require for demo paths. */
+/**
+ * Preferred Video `source` for feed/scenes.
+ * Demo slots use distinct HTTPS URIs. Bundled require only for unknown paths.
+ */
 export function mockFeedVideoSource(url: string | undefined): number | { uri: string } {
+    if (url && NATIVE_URI_BY_DEMO_PATH[url]) {
+        return { uri: NATIVE_URI_BY_DEMO_PATH[url] };
+    }
     if (isMockDemoVideoPath(url)) {
-        return MOCK_FEED_BUNDLED_VIDEO;
+        return { uri: resolveMockFeedVideoUrl(url) };
     }
     const resolved = resolveMockFeedVideoUrl(url);
     return { uri: resolved };

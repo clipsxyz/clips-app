@@ -54,6 +54,10 @@ export async function createChatGroup(
 }
 
 export async function inviteUserToChatGroup(groupId: string, inviteeHandle: string): Promise<unknown> {
+  if (!isLaravelApiEnabled()) {
+    const { mockInviteToChatGroup } = await import('./messages');
+    return mockInviteToChatGroup(groupId, inviteeHandle);
+  }
   return client.inviteToChatGroup(groupId, inviteeHandle);
 }
 

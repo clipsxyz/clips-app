@@ -3307,7 +3307,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     <Stories24FeedRail
                         ref={stories24RailRef}
                         items={stories24Items}
-                        previewVideosPaused={false}
+                        previewVideosPaused={true}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('Clip')}
                         onScrollCardIntoView={scrollStories24RailIntoView}
@@ -3766,30 +3766,33 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     feedScrollingRef.current = false;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
-                        if (feedAutoplayAllowedRef.current && lastViewableVideoPostIdRef.current) {
-                            scheduleActiveFeedVideoRef.current(
-                                lastViewableVideoPostIdRef.current,
-                                true,
-                            );
-                        }
-                        // Reveal portal after active is armed (next frame) so TextureView
-                        // doesn't move in the same turn as FlatList settle.
+                        // Prefer latest viewability; null clears portal so it can't sit on image/text.
+                        scheduleActiveFeedVideoRef.current(
+                            feedAutoplayAllowedRef.current
+                                ? lastViewableVideoPostIdRef.current
+                                : null,
+                            true,
+                        );
                         requestAnimationFrame(() => setFeedScrollBusy(false));
-                    }, 220);
+                    }, 120);
                 }}
                 onScrollEndDrag={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+                    if (e.nativeEvent.velocity && Math.abs(e.nativeEvent.velocity.y) > 0.05) {
+                        // Momentum will follow — keep busy until momentum end.
+                        return;
+                    }
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
                         feedScrollingRef.current = false;
-                        if (feedAutoplayAllowedRef.current && lastViewableVideoPostIdRef.current) {
-                            scheduleActiveFeedVideoRef.current(
-                                lastViewableVideoPostIdRef.current,
-                                true,
-                            );
-                        }
+                        scheduleActiveFeedVideoRef.current(
+                            feedAutoplayAllowedRef.current
+                                ? lastViewableVideoPostIdRef.current
+                                : null,
+                            true,
+                        );
                         requestAnimationFrame(() => setFeedScrollBusy(false));
-                    }, 240);
+                    }, 120);
                 }}
                 // Scroll performance
                 onScroll={(e) => {

@@ -20,6 +20,8 @@ import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import {
     buildProfileShareUrl,
     formatProfileDisplayHandle,
@@ -209,7 +211,7 @@ export default function ShareProfileSheet({
             label: isSharingStory ? 'Sharing…' : 'Stories',
             keepOpen: true,
             icon: (
-                <IconCircle gradient={['#d91b5c', '#201138']}>
+                <IconCircle gradient={[PASSPORT_PALETTE.wavePrimary, PASSPORT_PALETTE.waveMid, PASSPORT_ABYSS]}>
                     {isSharingStory ? (
                         <ActivityIndicator size="small" color="#fff" />
                     ) : (
@@ -322,68 +324,70 @@ export default function ShareProfileSheet({
                         },
                     ]}
                 >
-                    <View style={styles.handleWrap}>
-                        <View style={styles.handle} />
-                    </View>
-
-                    <View style={styles.headerRow}>
-                        <View style={styles.headerText}>
-                            <Text style={styles.gazetteerLabel}>Gazetteer</Text>
-                            <Text style={styles.title}>Share profile</Text>
-                        </View>
-                        <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close">
-                            <Icon name="close" size={22} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.profileSection}>
-                        <View style={styles.profileCard}>
-                            <View style={styles.avatarRing}>
-                                <Avatar src={resolvedAvatar} name={name} size="lg" />
-                            </View>
-                            <View style={styles.profileText}>
-                                <Text style={styles.profileName} numberOfLines={1}>
-                                    {name}
-                                </Text>
-                                <Text style={styles.profileHandle} numberOfLines={1}>
-                                    {displayHandle}
-                                </Text>
-                            </View>
+                    <PassportSheetCanvas contentStyle={styles.sheetInner}>
+                        <View style={styles.handleWrap}>
+                            <View style={styles.handle} />
                         </View>
 
-                        <TouchableOpacity style={styles.copyRow} onPress={() => void copyLink()}>
-                            <Icon name="link-outline" size={18} color="#D1D5DB" />
-                            <Text style={styles.copyUrl} numberOfLines={1}>
-                                {copied ? 'Link copied' : urlPreview}
-                            </Text>
-                        </TouchableOpacity>
+                        <View style={styles.headerRow}>
+                            <View style={styles.headerText}>
+                                <Text style={styles.gazetteerLabel}>Gazetteer</Text>
+                                <Text style={styles.title}>Share profile</Text>
+                            </View>
+                            <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close">
+                                <Icon name="close" size={22} color="#9CA3AF" />
+                            </TouchableOpacity>
+                        </View>
 
-                        {statusHint ? <Text style={styles.statusHint}>{statusHint}</Text> : null}
-                    </View>
+                        <View style={styles.profileSection}>
+                            <View style={styles.profileCard}>
+                                <View style={styles.avatarRing}>
+                                    <Avatar src={resolvedAvatar} name={name} size="lg" />
+                                </View>
+                                <View style={styles.profileText}>
+                                    <Text style={styles.profileName} numberOfLines={1}>
+                                        {name}
+                                    </Text>
+                                    <Text style={styles.profileHandle} numberOfLines={1}>
+                                        {displayHandle}
+                                    </Text>
+                                </View>
+                            </View>
 
-                    <Text style={styles.shareToLabel}>Share to</Text>
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.shareScroll}
-                    >
-                        {shareOptions.map((opt) => (
-                            <TouchableOpacity
-                                key={opt.id}
-                                style={styles.shareOption}
-                                disabled={opt.id === 'story' && isSharingStory}
-                                onPress={() => {
-                                    void opt.onPress();
-                                    if (!opt.keepOpen) onClose();
-                                }}
-                            >
-                                {opt.icon}
-                                <Text style={styles.shareLabel} numberOfLines={1}>
-                                    {opt.label}
+                            <TouchableOpacity style={styles.copyRow} onPress={() => void copyLink()}>
+                                <Icon name="link-outline" size={18} color="#D1D5DB" />
+                                <Text style={styles.copyUrl} numberOfLines={1}>
+                                    {copied ? 'Link copied' : urlPreview}
                                 </Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+
+                            {statusHint ? <Text style={styles.statusHint}>{statusHint}</Text> : null}
+                        </View>
+
+                        <Text style={styles.shareToLabel}>Share to</Text>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.shareScroll}
+                        >
+                            {shareOptions.map((opt) => (
+                                <TouchableOpacity
+                                    key={opt.id}
+                                    style={styles.shareOption}
+                                    disabled={opt.id === 'story' && isSharingStory}
+                                    onPress={() => {
+                                        void opt.onPress();
+                                        if (!opt.keepOpen) onClose();
+                                    }}
+                                >
+                                    {opt.icon}
+                                    <Text style={styles.shareLabel} numberOfLines={1}>
+                                        {opt.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </PassportSheetCanvas>
                 </View>
             </View>
         </Modal>
@@ -407,8 +411,11 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: '#1a1524',
+        backgroundColor: PASSPORT_ABYSS,
         overflow: 'hidden',
+    },
+    sheetInner: {
+        paddingBottom: 4,
     },
     handleWrap: {
         alignItems: 'center',
@@ -419,7 +426,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(255,255,255,0.28)',
     },
     headerRow: {
         flexDirection: 'row',
@@ -439,7 +446,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 0.8,
         textTransform: 'uppercase',
-        color: 'rgba(217, 27, 92, 0.95)',
+        color: PASSPORT_PALETTE.wavePrimary,
     },
     title: {
         fontSize: 18,
@@ -470,7 +477,7 @@ const styles = StyleSheet.create({
     avatarRing: {
         borderRadius: 999,
         borderWidth: 2,
-        borderColor: 'rgba(217, 27, 92, 0.35)',
+        borderColor: 'rgba(61,155,143,0.45)',
         padding: 2,
     },
     profileText: {
@@ -508,7 +515,7 @@ const styles = StyleSheet.create({
     statusHint: {
         marginTop: 8,
         fontSize: 12,
-        color: '#F9A8D4',
+        color: PASSPORT_PALETTE.wavePrimary,
         fontWeight: '600',
         textAlign: 'center',
     },

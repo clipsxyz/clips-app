@@ -6,6 +6,7 @@ import { showToast } from '../utils/toast';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { useAuth } from '../context/Auth';
 import Avatar from './Avatar';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import { getAvatarForHandle } from '../api/users';
 
 /**
@@ -79,17 +80,18 @@ export default function InviteMemberToGroupModal({
       showToast('Enter their username (handle)');
       return;
     }
-    if (!isLaravelApiEnabled()) {
-      showToast(
-        'Invites are sent when the API is on. In offline mode you can still chat here yourself—turn on the server to invite by username.',
-      );
-      return;
-    }
     setBusy(true);
     try {
-      await inviteUserToChatGroup(groupId, h);
-      showToast(`Invited @${h} to “${groupName}”`);
-      showToast(`@${h} will see this in Notifications`);
+      const result = (await inviteUserToChatGroup(groupId, h)) as {
+        inviteeHandle?: string;
+      };
+      const invited = result?.inviteeHandle || h;
+      if (isLaravelApiEnabled()) {
+        showToast(`Invited @${invited} to “${groupName}”`);
+        showToast(`@${invited} will see this in Notifications`);
+      } else {
+        showToast(`Added ${invited} to “${groupName}” (mock mode)`);
+      }
       onClose();
     } catch (e: any) {
       console.error(e);
@@ -102,8 +104,9 @@ export default function InviteMemberToGroupModal({
   return (
     <div className="fixed inset-0 z-[220] flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px]" onClick={() => !busy && onClose()} />
-      <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/15 bg-black shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3">
+      <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#060d16] shadow-2xl overflow-hidden">
+        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+        <div className="relative z-[2] flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <Avatar
               src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
@@ -125,7 +128,7 @@ export default function InviteMemberToGroupModal({
             <FiX className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-4 space-y-3 bg-black">
+        <div className="relative z-[2] p-4 space-y-3">
           <label className="block text-xs font-medium text-white/60 uppercase tracking-wide">Their username</label>
           <input
             value={handleInput}
@@ -140,7 +143,7 @@ export default function InviteMemberToGroupModal({
             }}
           />
           {(searching || suggestions.length > 0) && (
-            <div className="rounded-xl border border-white/10 bg-black/70 max-h-40 overflow-y-auto">
+            <div className="rounded-xl border border-white/10 bg-black/40 max-h-40 overflow-y-auto">
               {searching ? (
                 <div className="px-3 py-2 text-xs text-white/50">Searching users...</div>
               ) : (

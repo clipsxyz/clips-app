@@ -583,11 +583,6 @@ export default function ImageFullscreenModal({
                     />
                     <Pressable style={styles.replyField} onPress={onComment}>
                         <Text style={styles.replyPlaceholder}>Post your reply</Text>
-                        <View style={styles.replyIcons}>
-                            <Icon name="image-outline" size={ox(18)} color="#8B98A5" />
-                            <Text style={styles.gifLabel}>GIF</Text>
-                            <Icon name="expand-outline" size={ox(18)} color="#8B98A5" />
-                        </View>
                     </Pressable>
                 </View>
             </View>
@@ -863,29 +858,13 @@ const styles = StyleSheet.create({
         backgroundColor: '#16181C',
         borderRadius: 999,
         paddingLeft: 14,
-        paddingRight: 12,
+        paddingRight: 14,
         minHeight: 40,
     },
     replyPlaceholder: {
         flex: 1,
         color: '#8B98A5',
         fontSize: 15,
-    },
-    replyIcons: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    gifLabel: {
-        color: '#8B98A5',
-        fontSize: 11,
-        fontWeight: '800',
-        borderWidth: 1,
-        borderColor: '#8B98A5',
-        borderRadius: 4,
-        paddingHorizontal: 3,
-        paddingVertical: 1,
-        overflow: 'hidden',
     },
     emptyRoot: {
         alignItems: 'center',

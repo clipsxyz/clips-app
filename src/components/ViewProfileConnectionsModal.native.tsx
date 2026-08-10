@@ -2,8 +2,10 @@ import React from 'react';
 import {
     ActivityIndicator,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
+    StatusBar,
     StyleSheet,
     Text,
     TextInput,
@@ -12,7 +14,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
+import { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 export type ConnectionsScope = 'mutual' | 'followers' | 'following' | 'suggested';
 
@@ -87,6 +92,12 @@ export default function ViewProfileConnectionsModal({
     hasMore,
 }: Props) {
     const insets = useSafeAreaInsets();
+    // Android Modals with statusBarTranslucent often report insets.top as 0.
+    const topPad = Math.max(
+        insets.top,
+        Platform.OS === 'android' ? StatusBar.currentHeight ?? 28 : 0,
+        12,
+    ) + 8;
     const activeTabIndex = Math.max(
         0,
         TABS.findIndex((t) => t.id === scope),
@@ -98,7 +109,7 @@ export default function ViewProfileConnectionsModal({
 
     return (
         <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-            <View style={[styles.root, { paddingTop: Math.max(insets.top, 10) }]}>
+            <View style={[styles.root, { paddingTop: topPad }]}>
                 <View style={styles.header}>
                     <Text style={styles.title}>{scopeTitle(scope)}</Text>
                     <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close connections">
@@ -214,9 +225,19 @@ export default function ViewProfileConnectionsModal({
                                             ]}
                                             disabled={actionLoading}
                                             onPress={() => onToggleFollow(key)}
+                                            activeOpacity={0.85}
                                         >
+                                            {!following && !requested ? (
+                                                <LinearGradient
+                                                    colors={[...PASSPORT_SHEET_WASH]}
+                                                    locations={[0, 0.22, 0.52, 0.78, 1]}
+                                                    start={{ x: 0.1, y: 0 }}
+                                                    end={{ x: 0.9, y: 1 }}
+                                                    style={StyleSheet.absoluteFillObject}
+                                                />
+                                            ) : null}
                                             {actionLoading ? (
-                                                <ActivityIndicator size="small" color={following ? '#FFFFFF' : '#000000'} />
+                                                <ActivityIndicator size="small" color="#FFFFFF" />
                                             ) : (
                                                 <Text
                                                     style={[
@@ -447,30 +468,32 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 7,
         borderRadius: 999,
-        backgroundColor: '#06B6D4',
+        backgroundColor: PASSPORT_PALETTE.waveDeep,
         borderWidth: 1,
-        borderColor: 'rgba(34,211,238,0.35)',
+        borderColor: 'rgba(61,155,143,0.45)',
         alignItems: 'center',
         justifyContent: 'center',
+        overflow: 'hidden',
     },
     followBtnFollowing: {
         backgroundColor: '#000000',
         borderColor: 'rgba(255,255,255,0.25)',
     },
     followBtnRequested: {
-        backgroundColor: 'rgba(6,182,212,0.12)',
-        borderColor: 'rgba(34,211,238,0.45)',
+        backgroundColor: 'rgba(61,155,143,0.14)',
+        borderColor: 'rgba(61,155,143,0.5)',
     },
     followBtnText: {
-        color: '#000000',
+        color: '#FFFFFF',
         fontSize: 12,
         fontWeight: '700',
+        zIndex: 1,
     },
     followBtnTextFollowing: {
         color: '#FFFFFF',
     },
     followBtnTextRequested: {
-        color: '#A5F3FC',
+        color: '#9FE0D6',
     },
     loadMoreBtn: {
         marginTop: 8,
