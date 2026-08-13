@@ -48,6 +48,7 @@ import {
     deleteCommentById,
     setCommentModerationState,
     decorateForUser,
+    postMatchesLocationTab,
 } from '../api/posts';
 import { getUnreadTotal } from '../api/messages';
 import { blockUser } from '../api/messages';
@@ -235,6 +236,11 @@ import {
 } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { clearPendingLocationFeed, readPendingLocationFeed } from '../utils/pendingLocationNative';
+import {
+    filterPostsForLocationFeed,
+    findLocationFeedLeaks,
+    isLocationScopedFeedTab,
+} from '../utils/locationFeedGuard';
 import type { FeedScope } from '../utils/placeFeedLevels';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
@@ -2460,6 +2466,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ? 'landmark'
                     : 'location'
         );
+        // Drop previous feed cards immediately so home posts never flash under a foreign place header.
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
         setReloadTick((t) => t + 1);
     }, [
         route?.params?.location,
@@ -2557,6 +2567,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 decorated,
                 ...recentCreatedPostsRef.current.filter((p) => String(p.id) !== String(decorated.id)),
             ].slice(0, 20);
+            const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+            // Never pin a new post onto a foreign location feed (Rome/Berlin ≠ Finglas).
+            if (feedTab && feedTab.toLowerCase() !== 'discover' && !postMatchesLocationTab(decorated, feedTab)) {
+                setPendingUploadTick((tick) => tick + 1);
+                return;
+            }
             setPages((prev) => {
                 if (prev.length === 0) {
                     return [[decorated]];
@@ -2578,10 +2594,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const applyFeedPageResult = React.useCallback(
         (items: Post[], nextCursor: string | number | null) => {
-            const recent = recentCreatedPostsRef.current;
+            const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+            const recent = recentCreatedPostsRef.current.filter((p) => {
+                if (!feedTab || feedTab.toLowerCase() === 'discover') return true;
+                return postMatchesLocationTab(p, feedTab);
+            });
             const recentIds = new Set(recent.map((p) => String(p.id)));
             const withoutDupes = items.filter((p) => !recentIds.has(String(p.id)));
-            const merged = recent.length > 0 ? [...recent, ...withoutDupes] : items;
+            let merged = recent.length > 0 ? [...recent, ...withoutDupes] : items;
+            // Hard guard: never render a card on a place feed unless author location matches.
+            if (isLocationScopedFeedTab(feedTab)) {
+                const leaks = findLocationFeedLeaks(merged, feedTab);
+                if (leaks.length > 0) {
+                    console.warn(
+                        `[location-guard] blocked ${leaks.length} post(s) from "${feedTab}":`,
+                        leaks.slice(0, 8).join(', '),
+                    );
+                }
+                merged = filterPostsForLocationFeed(merged, feedTab);
+            }
             if (merged.length > 0) {
                 setPages([merged]);
                 setCursor(nextCursor);
@@ -2709,7 +2740,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             if (gen !== feedLoadGenRef.current) return;
             if (appended.length > 0) {
-                setPages((prev) => [...prev, appended]);
+                const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+                const safeAppended = isLocationScopedFeedTab(feedTab)
+                    ? filterPostsForLocationFeed(appended, feedTab)
+                    : appended;
+                if (safeAppended.length === 0) {
+                    setCursor(walkCursor);
+                    setEnd(walkCursor == null);
+                    return;
+                }
+                setPages((prev) => [...prev, safeAppended]);
                 setCursor(walkCursor);
                 setEnd(walkCursor == null);
             } else {
@@ -2798,6 +2838,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setCustomLocationPlaceId(selection.placeId?.trim() || null);
             setCustomFilterType(filterType);
             setError(null);
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
             setReloadTick((t) => t + 1);
             try {
                 navigation?.setParams?.({

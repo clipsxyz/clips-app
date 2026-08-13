@@ -7278,11 +7278,17 @@ function FeedPageWrapper() {
           seenInChunk.add(x.id);
           return true;
         });
-        // Keep very recent locally-injected posts if a concurrent first-page fetch omitted them.
+        // Keep very recent locally-injected posts if a concurrent first-page fetch omitted them —
+        // but only when they belong on THIS location feed (never leak Finglas → Rome/Berlin).
         const recentInjected = isFirstPageCursor
           ? prev.flat().filter((p) => {
               const ageMs = Date.now() - (Number(p.createdAt) || 0);
-              return ageMs >= 0 && ageMs < 120_000 && !dedupedChunk.some((x) => String(x.id) === String(p.id));
+              if (!(ageMs >= 0 && ageMs < 120_000 && !dedupedChunk.some((x) => String(x.id) === String(p.id)))) {
+                return false;
+              }
+              const tab = String(filterForRequest || currentFilterRef.current || '').trim();
+              if (!tab || tab.toLowerCase() === 'discover') return true;
+              return postMatchesLocationTab(p, tab);
             })
           : [];
         const mergedFirst = recentInjected.length > 0 ? [...recentInjected, ...dedupedChunk] : dedupedChunk;
@@ -7581,6 +7587,15 @@ function FeedPageWrapper() {
     if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
       postsStore.unshift(createdPost);
     }
+    // Only pin onto the feed when the author location matches the open tab.
+    if (
+      currentFilter &&
+      String(currentFilter).toLowerCase() !== 'discover' &&
+      !postMatchesLocationTab(createdPost, currentFilter)
+    ) {
+      navigate('/feed', { replace: true, state: {} });
+      return;
+    }
     const decorated = decorateForUser(userId, createdPost);
     pagesLoadedForFilterRef.current = currentFilter;
     setPages((prev) => {
@@ -7603,8 +7618,15 @@ function FeedPageWrapper() {
         postsStore.unshift(createdPost);
       }
 
-      // If we're currently on feed, inject at top immediately.
+      // If we're currently on feed, inject at top immediately — only for matching location.
       if (routerLocation.pathname === '/feed') {
+        if (
+          currentFilter &&
+          String(currentFilter).toLowerCase() !== 'discover' &&
+          !postMatchesLocationTab(createdPost, currentFilter)
+        ) {
+          return;
+        }
         const decorated = decorateForUser(userId, createdPost);
         // Mark this filter as loaded so the flat memo does not hide injected posts.
         pagesLoadedForFilterRef.current = currentFilter;
@@ -7627,6 +7649,13 @@ function FeedPageWrapper() {
     if (!pending) return;
     if (!postsStore.some((p) => String(p.id) === String(pending.id))) {
       postsStore.unshift(pending);
+    }
+    if (
+      currentFilter &&
+      String(currentFilter).toLowerCase() !== 'discover' &&
+      !postMatchesLocationTab(pending, currentFilter)
+    ) {
+      return;
     }
     const decorated = decorateForUser(userId, pending);
     pagesLoadedForFilterRef.current = currentFilter;

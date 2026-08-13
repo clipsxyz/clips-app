@@ -1419,13 +1419,16 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const venueQuery = isVenueFeed ? t.slice('venue:'.length).trim() : '';
   if (isVenueFeed) {
     const venue = normalize((p as any).venue);
-    return !!venue && (venue === venueQuery || venue.includes(venueQuery) || venueQuery.includes(venue));
+    // Exact / contains only when the query is specific enough (avoid "a" matching everything).
+    if (!venue || venueQuery.length < 2) return false;
+    return venue === venueQuery || venue.includes(venueQuery);
   }
   const isLandmarkFeed = t.startsWith('landmark:');
   const landmarkQuery = isLandmarkFeed ? t.slice('landmark:'.length).trim() : '';
   if (isLandmarkFeed) {
     const lm = normalize((p as any).landmark);
-    return !!lm && (lm === landmarkQuery || lm.includes(landmarkQuery) || landmarkQuery.includes(lm));
+    if (!lm || landmarkQuery.length < 2) return false;
+    return lm === landmarkQuery || lm.includes(landmarkQuery);
   }
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
@@ -1444,23 +1447,24 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
     return false;
   }
   const query = t.trim().toLowerCase();
+  if (!query) return false;
   const local = normalize(p.userLocal);
   const regional = normalize(p.userRegional);
   const national = normalize(p.userNational);
   const locationLabel = normalize((p as any).locationLabel);
+
+  // Author tiers are exact — never substring-match "rome" inside unrelated labels.
+  if (local === query || regional === query || national === query) return true;
   if (LOCATION_COUNTRIES.has(query)) {
-    return (
-      national === query ||
-      (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
-      (query === 'usa' && (national === 'usa' || national === 'united states')) ||
-      locationLabel === query ||
-      locationLabel.includes(query)
-    );
+    if (query === 'uk' && (national === 'united kingdom' || national === 'uk')) return true;
+    if (query === 'usa' && (national === 'usa' || national === 'united states')) return true;
+    return national === query;
   }
   if (LOCATION_CITIES.has(query)) {
-    return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
+    return regional === query || local === query;
   }
-  return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
+  // Custom neighbourhood / place name: allow label equality only (no fuzzy includes).
+  return locationLabel === query;
 }
 
 export async function fetchPostsPage(tab: string, cursor: string | number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
@@ -1708,39 +1712,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        const normalize = (v?: string) => (v || '').trim().toLowerCase();
-        const isVenueQuery = t.startsWith('venue:');
-        const isLandmarkQuery = t.startsWith('landmark:');
-        const query = isVenueQuery
-          ? t.slice('venue:'.length).trim().toLowerCase()
-          : isLandmarkQuery
-            ? t.slice('landmark:'.length).trim().toLowerCase()
-            : t.trim().toLowerCase();
-        const venue = normalize((p as any).venue);
-        const landmark = normalize((p as any).landmark);
-        // Venue feeds: if tab matches a venue, keep posts tagged with that venue.
-        if (isVenueQuery) {
-          return !!venue && (venue === query || venue.includes(query) || query.includes(venue));
-        }
-        if (isLandmarkQuery) {
-          return !!landmark && (landmark === query || landmark.includes(query) || query.includes(landmark));
-        }
-        if (venue && (venue === query || venue.includes(query) || query.includes(venue))) return true;
-        if (landmark && (landmark === query || landmark.includes(query) || query.includes(landmark))) return true;
-        const local = normalize(p.userLocal);
-        const regional = normalize(p.userRegional);
-        const national = normalize(p.userNational);
-        const locationLabel = normalize((p as any).locationLabel);
-        if (LOCATION_COUNTRIES.has(query))
-          return (
-            national === query ||
-            (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
-            (query === 'usa' && (national === 'usa' || national === 'united states')) ||
-            locationLabel === query ||
-            locationLabel.includes(query)
-          );
-        if (LOCATION_CITIES.has(query)) return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
-        return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
+        // Custom location / venue / landmark — one strict matcher, no substring leaks.
+        return postMatchesLocationTab(p, t);
       }
 
       const tabLower = t.toLowerCase();
@@ -1852,18 +1825,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     if (feedType) {
       const existingIds = new Set(slice.map(p => p.id));
       const boostedPosts: Post[] = [];
-      const tabLower = tab.toLowerCase();
       for (const id of Array.from(boostedIdsSet)) {
         if (existingIds.has(id)) continue;
         const p = await getPostById(id);
         if (!p) continue;
         // Only inject into this tab if the post author's location matches the tab
-        const authorRegional = (p.userRegional || '').toLowerCase();
-        const authorNational = (p.userNational || '').toLowerCase();
-        const authorLocal = (p.userLocal || '').toLowerCase();
-        const matchesTab =
-          tabLower === authorRegional || tabLower === authorNational || tabLower === authorLocal;
-        if (!matchesTab) continue;
+        if (!postMatchesLocationTab(p, tab)) continue;
         const decorated = decorateForUser(userId, { ...p, isBoosted: true, boostFeedType: feedType });
         boostedPosts.push(decorated);
       }
@@ -1911,6 +1878,17 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       }
     }
     items = dedupeItemsById(items);
+
+    // Final mock-path guard: location feeds never return foreign author cards.
+    if (isCustomLocationFeed || t === 'finglas' || t === 'dublin' || t === 'ireland') {
+      const before = items.length;
+      items = items.filter((p) => postMatchesLocationTab(p, tab));
+      if (items.length < before && typeof console !== 'undefined') {
+        console.warn(
+          `[location-guard] fetchPostsPage dropped ${before - items.length} leak(s) from "${tab}"`,
+        );
+      }
+    }
 
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
