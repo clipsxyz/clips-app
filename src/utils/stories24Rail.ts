@@ -145,12 +145,25 @@ export async function buildStories24RailItems(
             resolveStoryMediaUrl(
                 sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url,
             );
-        // Never use bundled BBB / rainbow demo posters as rail thumbs.
+        const previewVideoUrl =
+            latestMediaType === 'video'
+                ? resolveStoryVideoPlaybackUrl(latest.mediaUrl)
+                : sharedPost?.mediaType === 'video'
+                  ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
+                  : undefined;
+        const avatarUrl = getAvatarForHandle(group.userHandle);
+        // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
+        // the rail pauses previews and would flash the avatar instead of the shared clip.
         let thumb =
             firstImage ||
             sharedPoster ||
-            (latestMediaType !== 'video' ? latestMediaUrl : undefined) ||
-            getAvatarForHandle(group.userHandle);
+            (latestMediaType !== 'video' && !previewVideoUrl ? latestMediaUrl : undefined);
+        if (thumb && avatarUrl && thumb === avatarUrl) {
+            thumb = undefined;
+        }
+        if (!thumb && !previewVideoUrl) {
+            thumb = avatarUrl;
+        }
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.poll?.question || '').trim() ||
@@ -163,10 +176,7 @@ export async function buildStories24RailItems(
             title,
             subtitle,
             thumb,
-            previewVideoUrl:
-                latestMediaType === 'video'
-                    ? resolveStoryVideoPlaybackUrl(latest.mediaUrl)
-                    : undefined,
+            previewVideoUrl,
         });
         if (nextItems.length >= 12) break;
     }

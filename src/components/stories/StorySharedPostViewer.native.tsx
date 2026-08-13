@@ -54,8 +54,8 @@ function SharedBackdrop({
     mediaUrl: string;
     posterSource?: ImageSourcePropType;
 }) {
-    // Never mount a paused Video for the blurred backdrop — TextureView shutter is black.
-    // pointerEvents none — Android TextureView steals taps meant for the card / modal.
+    // Never mount a second ExoPlayer for backdrop — it fights the card player on Android.
+    // pointerEvents none — TextureView would steal taps meant for the card / modal.
     if (isVideo && posterSource) {
         return (
             <Image
@@ -68,26 +68,14 @@ function SharedBackdrop({
         );
     }
     if (isVideo) {
-        const source = storyVideoSource(mediaUrl);
-        if (source) {
-            return (
-                <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                    <StorySafeVideo
-                        source={source}
-                        posterSource={posterSource}
-                        style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        paused
-                    />
-                </View>
-            );
-        }
+        return <View style={[StyleSheet.absoluteFill, styles.backdropMedia]} pointerEvents="none" />;
     }
     return (
         <Image
             source={{ uri: mediaUrl }}
             style={[StyleSheet.absoluteFill, styles.backdropMedia]}
             resizeMode="cover"
-            blurRadius={isVideo ? 0 : 12}
+            blurRadius={12}
             pointerEvents="none"
         />
     );

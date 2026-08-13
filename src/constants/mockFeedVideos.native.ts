@@ -28,20 +28,20 @@ const BUNDLED_DEMO_URI = typeof BUNDLED_DEMO_MP4?.uri === 'string' ? BUNDLED_DEM
 
 /**
  * Distinct public H.264+AAC samples (one per mock slot). Needs network.
- * IMPORTANT: many “10s 1MB” test-videos.co.uk clips are video-only (no sound).
- * Only use URLs verified to contain both `avc1` and `mp4a`.
+ * Prefer hosts that ExoPlayer on mid-range Androids reliably opens
+ * (samplelib has been flaky on Oppo — Sarah shared Stories looked “dead”).
  * Do NOT use Big Buck Bunny here.
  */
-const ESCAPES_HTTPS = 'https://download.samplelib.com/mp4/sample-10s.mp4';
+const ESCAPES_HTTPS = 'https://filesamples.com/samples/video/mp4/sample_640x360.mp4';
 const FUN_HTTPS = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 /** Bob */
-const JOYRIDES_HTTPS = 'https://download.samplelib.com/mp4/sample-5s.mp4';
+const JOYRIDES_HTTPS = 'https://filesamples.com/samples/video/mp4/sample_960x540.mp4';
 /** Alice 1 */
 const BLAZES_HTTPS =
     'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4';
 /** Alice 2 */
 const ELEPHANTS_HTTPS =
-    'https://samplefile.com/samples/download/video/mp4/mp4_15s_sample_file_868KB.mp4';
+    'https://filesamples.com/samples/video/mp4/sample_960x400_ocean_with_audio.mp4';
 
 const HTTPS_BY_DEMO_PATH: Record<string, string> = {
     [MOCK_FEED_VIDEO_URLS.escapes]: ESCAPES_HTTPS,
@@ -172,6 +172,13 @@ export function resolveMockFeedVideoUrl(url: string | undefined): string {
     // Legacy BBB hosts → non-rainbow fallback.
     if (/big_buck_bunny|mov_bbb|bbb\.mp4|mediaelement-files/i.test(url)) {
         return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+    }
+    // Remap flaky sample hosts already written into shared stories / storage.
+    if (/samplelib\.com/i.test(url)) {
+        return /sample-5s/i.test(url) ? JOYRIDES_HTTPS : ESCAPES_HTTPS;
+    }
+    if (/samplefile\.com/i.test(url)) {
+        return ELEPHANTS_HTTPS;
     }
     // Known demo hosts / slot names only — not every non-http mp4.
     if (!/^https?:\/\//i.test(url) && looksLikeDemoSlotVideo(url)) {

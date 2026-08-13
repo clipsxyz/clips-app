@@ -75,6 +75,17 @@ type ExpandingStory = {
     rect: CardRect;
 };
 
+function hasMorphStill(uri?: string | null): boolean {
+    return typeof uri === 'string' && uri.trim().length > 0 && !uri.startsWith('#');
+}
+
+/** MP4s skip card morph — open goes straight to Stories splash; close uses scale+fade. */
+function shouldScaleFadeCloseForVideo(thumb?: string | null, previewVideoUrl?: string | null): boolean {
+    return !!previewVideoUrl && !hasMorphStill(thumb);
+}
+
+const VIDEO_SCALE_FADE_CLOSE_MS = 320;
+
 export type Stories24FeedRailHandle = {
     openFirstStory: () => boolean;
 };
@@ -111,21 +122,14 @@ function StoryPreviewVideo({
         posterUri && !posterUri.startsWith('#') ? { uri: posterUri } : undefined;
 
     // Android TextureView steals touches — keep preview non-interactive so the card press works.
-    if (effectivelyPaused) {
-        if (posterSource) {
-            return (
-                <Image
-                    source={posterSource}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode="cover"
-                    pointerEvents="none"
-                />
-            );
-        }
+    // When paused without a real still, keep a paused video frame (not profile avatar / empty).
+    if (effectivelyPaused && posterSource) {
         return (
-            <View
+            <Image
+                source={posterSource}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
                 pointerEvents="none"
-                style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
             />
         );
     }
@@ -248,11 +252,11 @@ function StoryCard({
                     end={{ x: 1, y: 0 }}
                     style={StyleSheet.absoluteFill}
                 />
-                {item.previewVideoUrl && playPreviewVideo ? (
+                {item.previewVideoUrl ? (
                     <StoryPreviewVideo
                         uri={item.previewVideoUrl}
                         posterUri={item.thumb}
-                        paused={previewVideosPaused}
+                        paused={previewVideosPaused || !playPreviewVideo}
                     />
                 ) : item.thumb ? (
                     <Image
@@ -261,7 +265,12 @@ function StoryCard({
                         resizeMode="cover"
                         pointerEvents="none"
                     />
-                ) : null}
+                ) : (
+                    <View
+                        pointerEvents="none"
+                        style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
+                    />
+                )}
                 <LinearGradient
                     colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.85)']}
                     locations={[0, 0.45, 1]}
@@ -283,9 +292,11 @@ function StoryCard({
 function Stories24ExpandOverlay({
     expanding,
     onFinished,
+    onMorphStarted,
 }: {
     expanding: ExpandingStory;
     onFinished: () => void;
+    onMorphStarted: () => void;
 }) {
     const { width: screenW, height: screenH } = useWindowDimensions();
     const { rect, item } = expanding;
@@ -314,11 +325,11 @@ function Stories24ExpandOverlay({
         screenHSv.value = screenH;
         cancelAnimation(progress);
         progress.value = 0;
+        onMorphStarted();
         progress.value = withTiming(
             1,
             { duration: STORIES24_EXPAND_MS, easing: EXPAND_EASE },
             (ok) => {
-                // Finish even when cancelled mid-flight so taps aren't stuck behind expand state.
                 runOnJS(finish)();
                 void ok;
             },
@@ -327,7 +338,6 @@ function Stories24ExpandOverlay({
         return () => {
             clearTimeout(fallback);
             cancelAnimation(progress);
-            // If feed refresh tears down the morph, still open Stories.
             finish();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,6 +367,8 @@ function Stories24ExpandOverlay({
         opacity: interpolate(progress.value, [0, 0.65, 1], [0.22, 0.1, 0]),
     }));
 
+    const stillUri = hasMorphStill(item.thumb) ? item.thumb : undefined;
+
     return (
         <Modal visible transparent animationType="none" statusBarTranslucent>
             <View style={styles.expandModalRoot} pointerEvents="none">
@@ -368,9 +380,11 @@ function Stories24ExpandOverlay({
                         end={{ x: 1, y: 0 }}
                         style={StyleSheet.absoluteFill}
                     />
-                    {item.thumb ? (
-                        <Image source={{ uri: item.thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                    ) : null}
+                    {stillUri ? (
+                        <Image source={{ uri: stillUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    ) : (
+                        <View style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />
+                    )}
                     <Animated.View style={[styles.expandDim, veilStyle]} />
                 </Animated.View>
             </View>
@@ -382,12 +396,16 @@ function Stories24CollapseOverlay({
     payload,
     targetRect,
     onFinished,
+    onMorphStarted,
 }: {
     payload: Stories24RailReturnPayload;
     targetRect: CardRect;
     onFinished: () => void;
+    onMorphStarted: () => void;
 }) {
     const { width: screenW, height: screenH } = useWindowDimensions();
+    const fadeMode = shouldScaleFadeCloseForVideo(payload.previewThumb, payload.previewVideoUrl);
+    const fadeModeSv = useSharedValue(fadeMode ? 1 : 0);
     const progress = useSharedValue(0);
     const tX = useSharedValue(targetRect.x);
     const tY = useSharedValue(targetRect.y);
@@ -398,6 +416,7 @@ function Stories24CollapseOverlay({
     const finishedRef = useRef(false);
     const onFinishedRef = useRef(onFinished);
     onFinishedRef.current = onFinished;
+    const duration = fadeMode ? VIDEO_SCALE_FADE_CLOSE_MS : STORIES24_COLLAPSE_MS;
 
     const finish = useCallback(() => {
         if (finishedRef.current) return;
@@ -407,24 +426,23 @@ function Stories24CollapseOverlay({
 
     useEffect(() => {
         finishedRef.current = false;
+        fadeModeSv.value = fadeMode ? 1 : 0;
         cancelAnimation(progress);
         progress.value = 0;
+        onMorphStarted();
 
         let shrinkTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
             shrinkTimer = null;
             progress.value = withTiming(
                 1,
-                {
-                    duration: STORIES24_COLLAPSE_MS,
-                    easing: COLLAPSE_EASE,
-                },
+                { duration, easing: COLLAPSE_EASE },
                 (ok) => {
                     if (ok) runOnJS(finish)();
                 },
             );
         }, COLLAPSE_HOLD_MS);
 
-        const fallback = setTimeout(finish, COLLAPSE_HOLD_MS + STORIES24_COLLAPSE_MS + 120);
+        const fallback = setTimeout(finish, COLLAPSE_HOLD_MS + duration + 120);
         return () => {
             if (shrinkTimer) clearTimeout(shrinkTimer);
             clearTimeout(fallback);
@@ -435,6 +453,21 @@ function Stories24CollapseOverlay({
 
     const shellStyle = useAnimatedStyle(() => {
         const p = progress.value;
+        if (fadeModeSv.value === 1) {
+            // Scale + fade toward center (Instagram-style dismiss) — no stretch into the rail tile.
+            const scale = interpolate(p, [0, 1], [1, 0.86]);
+            return {
+                position: 'absolute' as const,
+                left: 0,
+                top: 0,
+                width: screenWSv.value,
+                height: screenHSv.value,
+                borderRadius: interpolate(p, [0, 1], [0, 28]),
+                overflow: 'hidden' as const,
+                opacity: interpolate(p, [0, 0.45, 1], [1, 0.75, 0]),
+                transform: [{ scale }],
+            };
+        }
         return {
             position: 'absolute' as const,
             left: interpolate(p, [0, 1], [0, tX.value]),
@@ -450,33 +483,53 @@ function Stories24CollapseOverlay({
     });
 
     const backdropStyle = useAnimatedStyle(() => ({
-        // Keep feed covered until the tile is almost home.
-        opacity: interpolate(progress.value, [0, 0.72, 1], [1, 0.88, 0]),
+        opacity:
+            fadeModeSv.value === 1
+                ? interpolate(progress.value, [0, 0.35, 1], [1, 0.55, 0])
+                : interpolate(progress.value, [0, 0.72, 1], [1, 0.88, 0]),
     }));
 
     const veilStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(progress.value, [0, 0.55, 1], [0, 0.08, 0.16]),
+        opacity:
+            fadeModeSv.value === 1
+                ? 0
+                : interpolate(progress.value, [0, 0.55, 1], [0, 0.08, 0.16]),
     }));
+
+    const stillUri = hasMorphStill(payload.previewThumb) ? payload.previewThumb : undefined;
 
     return (
         <Modal visible transparent animationType="none" statusBarTranslucent>
             <View style={styles.collapseModalRoot} pointerEvents="none">
                 <Animated.View style={[styles.expandBackdrop, backdropStyle]} />
                 <Animated.View style={[styles.expandCard, shellStyle]}>
-                    <LinearGradient
-                        colors={[...STORY_CARD_TINT]}
-                        start={{ x: 0, y: 1 }}
-                        end={{ x: 1, y: 0 }}
-                        style={StyleSheet.absoluteFill}
-                    />
-                    {payload.previewThumb ? (
-                        <Image
-                            source={{ uri: payload.previewThumb }}
-                            style={StyleSheet.absoluteFill}
-                            resizeMode="cover"
-                        />
-                    ) : null}
-                    <Animated.View style={[styles.collapseVeil, veilStyle]} />
+                    {fadeMode ? (
+                        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} />
+                    ) : (
+                        <>
+                            <LinearGradient
+                                colors={[...STORY_CARD_TINT]}
+                                start={{ x: 0, y: 1 }}
+                                end={{ x: 1, y: 0 }}
+                                style={StyleSheet.absoluteFill}
+                            />
+                            {stillUri ? (
+                                <Image
+                                    source={{ uri: stillUri }}
+                                    style={StyleSheet.absoluteFill}
+                                    resizeMode="cover"
+                                />
+                            ) : (
+                                <View
+                                    style={[
+                                        StyleSheet.absoluteFill,
+                                        { backgroundColor: PREVIEW_POSTER_FALLBACK },
+                                    ]}
+                                />
+                            )}
+                            <Animated.View style={[styles.collapseVeil, veilStyle]} />
+                        </>
+                    )}
                 </Animated.View>
             </View>
         </Modal>
@@ -496,6 +549,8 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     ref,
 ) {
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
+    const [expandHideSource, setExpandHideSource] = useState(false);
+    const [collapseHideSource, setCollapseHideSource] = useState(false);
     const [railScrolling, setRailScrolling] = useState(false);
     const [appActive, setAppActive] = useState(AppState.currentState === 'active');
     const [collapsing, setCollapsing] = useState<{
@@ -541,13 +596,19 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         }
 
         const handleKey = normalizeStories24Handle(collapsePayload.handle);
-        const sessionKey = `${handleKey}:${collapsePayload.previewThumb || ''}`;
+        const sessionKey = `${handleKey}:${collapsePayload.previewThumb || ''}:${collapsePayload.previewVideoUrl || ''}`;
         if (collapseSessionRef.current === sessionKey) {
             return;
         }
 
         const hasCard = items.some((item) => normalizeStories24Handle(item.handle) === handleKey);
         if (!hasCard) {
+            onCollapseHandledRef.current?.();
+            return;
+        }
+
+        // MP4 closes animate on StoriesScreen itself — don't run a second feed morph.
+        if (shouldScaleFadeCloseForVideo(collapsePayload.previewThumb, collapsePayload.previewVideoUrl)) {
             onCollapseHandledRef.current?.();
             return;
         }
@@ -562,6 +623,12 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         const startCollapse = (rect: CardRect) => {
             if (cancelled) return;
             lastOpenRectByHandleRef.current[handleKey] = rect;
+            // Fade close keeps the card visible under the dim; still morph hides the source tile.
+            const fadeClose = shouldScaleFadeCloseForVideo(
+                collapsePayload.previewThumb,
+                collapsePayload.previewVideoUrl,
+            );
+            setCollapseHideSource(!fadeClose);
             setCollapsing({ payload: collapsePayload, rect });
         };
 
@@ -639,9 +706,17 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
             if (expandingRef.current) {
                 onOpenStory(first, railHandles);
                 setExpanding(null);
+                setExpandHideSource(false);
+                return;
+            }
+            // MP4 → straight to Stories splash (no card→fullscreen video morph).
+            if (first.previewVideoUrl) {
+                lastOpenRectByHandleRef.current[handleKey] = rect;
+                onOpenStory(first, railHandles);
                 return;
             }
             lastOpenRectByHandleRef.current[handleKey] = rect;
+            setExpandHideSource(false);
             setExpanding({ item: first, railHandles, rect });
         };
         if (!node) {
@@ -669,8 +744,15 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         if (expandingRef.current) {
             onOpenStory(item, railHandles);
             setExpanding(null);
+            setExpandHideSource(false);
             return;
         }
+        // MP4 → Stories splash only (skip expanding video before the loading hold).
+        if (item.previewVideoUrl) {
+            onOpenStory(item, railHandles);
+            return;
+        }
+        setExpandHideSource(false);
         setExpanding({ item, railHandles, rect });
     };
 
@@ -682,6 +764,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 setExpanding((prev) => (prev === current || prev?.item.handle === current.item.handle ? null : prev));
+                setExpandHideSource(false);
             });
         });
     };
@@ -739,11 +822,14 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                         >
                             {items.map((item) => {
                                 const handleKey = normalizeStories24Handle(item.handle);
+                                // Keep the source card visible until the morph clone has a paintable frame.
                                 const morphHidden =
                                     (!!expanding &&
+                                        expandHideSource &&
                                         normalizeStories24Handle(expanding.item.handle) ===
                                             handleKey) ||
                                     (!!collapsing &&
+                                        collapseHideSource &&
                                         normalizeStories24Handle(collapsing.payload.handle) ===
                                             handleKey);
                                 return (
@@ -779,16 +865,19 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                 <Stories24ExpandOverlay
                     key={`expand-${normalizeStories24Handle(expanding.item.handle)}`}
                     expanding={expanding}
+                    onMorphStarted={() => setExpandHideSource(true)}
                     onFinished={finishExpand}
                 />
             ) : null}
             {collapsing ? (
                 <Stories24CollapseOverlay
-                    key={`collapse-${normalizeStories24Handle(collapsing.payload.handle)}-${collapsing.payload.previewThumb || 'x'}`}
+                    key={`collapse-${normalizeStories24Handle(collapsing.payload.handle)}-${collapsing.payload.previewThumb || collapsing.payload.previewVideoUrl || 'x'}`}
                     payload={collapsing.payload}
                     targetRect={collapsing.rect}
+                    onMorphStarted={() => setCollapseHideSource(true)}
                     onFinished={() => {
                         setCollapsing(null);
+                        setCollapseHideSource(false);
                         collapseSessionRef.current = null;
                         onCollapseHandledRef.current?.();
                     }}

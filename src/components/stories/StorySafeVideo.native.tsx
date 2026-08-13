@@ -21,6 +21,8 @@ type Props = {
     videoRef?: React.Ref<VideoRef>;
     onProgress?: (e: OnProgressData) => void;
     onError?: () => void;
+    /** Fires once the first frame is paintable (TextureView ready). */
+    onReadyForDisplay?: () => void;
 };
 
 /**
@@ -38,13 +40,16 @@ export default function StorySafeVideo({
     videoRef,
     onProgress,
     onError,
+    onReadyForDisplay,
 }: Props) {
     const [failed, setFailed] = useState(false);
     const [ready, setReady] = useState(false);
+    const notifiedReadyRef = React.useRef(false);
 
     useEffect(() => {
         setFailed(false);
         setReady(false);
+        notifiedReadyRef.current = false;
     }, [source]);
 
     if (failed && posterSource) {
@@ -55,7 +60,13 @@ export default function StorySafeVideo({
         return <View style={style} />;
     }
 
-    const markReady = () => setReady(true);
+    const markReady = () => {
+        if (!notifiedReadyRef.current) {
+            notifiedReadyRef.current = true;
+            onReadyForDisplay?.();
+        }
+        setReady(true);
+    };
 
     return (
         <View style={[style, styles.clip]} collapsable={false}>

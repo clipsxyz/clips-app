@@ -12,6 +12,15 @@ import {
     Alert,
     Pressable,
 } from 'react-native';
+import Animated, {
+    Easing,
+    cancelAnimation,
+    interpolate,
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -49,7 +58,7 @@ import {
     readStories24RailOpenHandle,
 } from '../utils/stories24Rail';
 import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
-import { isStoryVideo } from '../utils/storyMediaNative';
+import { isStoryVideo, resolveStoryVideoPlaybackUrl } from '../utils/storyMediaNative';
 import {
     deliverStoryReactionToInbox,
     deliverStoryReplyToInbox,
@@ -84,6 +93,10 @@ const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
 const STORY_SAFE_ZONE_TOP = 18;
 const STORY_SAFE_ZONE_BOTTOM = 82;
+/** Clean fade-out for MP4 close — no half-slide that looks like a stuck nudge. */
+const STORY_DISMISS_MS = 280;
+const STORY_DISMISS_EASE = Easing.out(Easing.cubic);
+
 export default function StoriesScreen({ route, navigation }: any) {
     const {
         openUserHandle,
@@ -153,6 +166,20 @@ export default function StoriesScreen({ route, navigation }: any) {
     const showInlineReplyComposerRef = useRef(false);
     const isSendingReplyRef = useRef(false);
     const pausedRef = useRef(false);
+    const dismissingRef = useRef(false);
+    const dismissProgress = useSharedValue(0);
+    const screenHSv = useSharedValue(Dimensions.get('window').height);
+
+    const dismissShellStyle = useAnimatedStyle(() => {
+        const p = dismissProgress.value;
+        return {
+            flex: 1,
+            opacity: interpolate(p, [0, 1], [1, 0]),
+        };
+    });
+    const dismissBackdropStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(dismissProgress.value, [0, 1], [1, 0]),
+    }));
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const currentStoryIndexRef = useRef(0);
@@ -580,21 +607,48 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
     };
 
+    const finalizeCloseNavigation = useCallback(() => {
+        setViewingStories(false);
+        setProgress(0);
+        setPaused(false);
+        progressRef.current = 0;
+        dismissingRef.current = false;
+        dismissProgress.value = 0;
+        navigation.goBack();
+    }, [dismissProgress, navigation]);
+
     const closeStories = () => {
+        if (dismissingRef.current) return;
         if (timerRef.current) {
             clearInterval(timerRef.current);
         }
 
+        const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+        const mediaUrl = currentStory?.mediaUrl;
+        const isVideo =
+            currentStory?.mediaType === 'video' ||
+            (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+
+        // MP4 from Stories 24 rail: cut straight back to feed (no fade-to-black gap).
+        if (stories24OpenFromFeedRail && isVideo && viewingStories) {
+            navigation.setOptions({ animation: 'none' });
+            void clearStories24RailOpenHandle();
+            finalizeCloseNavigation();
+            return;
+        }
+
         if (stories24OpenFromFeedRail && normalizedOpenUserHandle) {
-            const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
-            const mediaUrl = currentStory?.mediaUrl;
-            const isVideo =
-                currentStory?.mediaType === 'video' ||
-                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
-            const previewThumb =
+            const avatarUrl = getAvatarForHandle(normalizedOpenUserHandle);
+            const rawThumb =
                 routePreviewThumb ||
                 (!isVideo && mediaUrl ? mediaUrl : undefined) ||
                 undefined;
+            // Don't shrink back onto a profile pic for shared/video stories.
+            const previewThumb =
+                rawThumb && avatarUrl && rawThumb === avatarUrl ? undefined : rawThumb;
+            const previewVideoUrl =
+                routePreviewVideoUrl ||
+                (isVideo ? resolveStoryVideoPlaybackUrl(mediaUrl) : undefined);
 
             // Disable native modal dismiss — custom Apple-TV shrink runs on the feed rail.
             navigation.setOptions({ animation: 'none' });
@@ -602,17 +656,13 @@ export default function StoriesScreen({ route, navigation }: any) {
                 void persistStories24RailReturn({
                     handle: normalizedOpenUserHandle,
                     previewThumb,
-                    previewVideoUrl: routePreviewVideoUrl,
+                    previewVideoUrl,
                 });
             }
             void clearStories24RailOpenHandle();
         }
 
-        setViewingStories(false);
-        setProgress(0);
-        setPaused(false);
-        progressRef.current = 0;
-        navigation.goBack();
+        finalizeCloseNavigation();
     };
 
     const openStoryLink = async (rawUrl?: string) => {
@@ -1177,7 +1227,12 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     // Story viewer
     return (
-        <View style={styles.storyViewer}>
+        <View style={styles.storyViewerRoot}>
+            <Animated.View
+                pointerEvents="none"
+                style={[styles.storyDismissBackdrop, dismissBackdropStyle]}
+            />
+            <Animated.View style={[styles.storyViewer, dismissShellStyle]}>
             {/* Progress bars */}
             <View style={styles.progressContainer}>
                 {currentGroup?.stories.map((_, index) => (
@@ -1596,6 +1651,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     onBeforeNavigate={closeStories}
                 />
             ) : null}
+        </Animated.View>
         </View>
     );
 }
@@ -1643,6 +1699,14 @@ const styles = StyleSheet.create({
         fontSize: ox(16),
         color: '#FFFFFF',
         fontWeight: '500',
+    },
+    storyViewerRoot: {
+        flex: 1,
+        backgroundColor: 'transparent',
+    },
+    storyDismissBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
     },
     storyViewer: {
         flex: 1,
