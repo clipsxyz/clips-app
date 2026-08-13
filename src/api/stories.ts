@@ -898,7 +898,8 @@ export async function createStory(
             userHandle,
             mediaUrl: (() => {
                 const raw = (mediaUrl || '').trim();
-                // Keep demo paths relative so native Stories can use the bundled MP4 (web serves /demo-videos from Vite).
+                // Keep demo slot paths relative; RN maps each slot to its HTTPS sample
+                // (never bundled BBB). Absolute URLs pass through resolveStoryMediaUrl.
                 if (raw.startsWith('/demo-videos/') || /\/demo-videos\//i.test(raw)) {
                     const match = raw.match(/\/demo-videos\/[^/?#]+/i);
                     return match ? match[0] : raw;

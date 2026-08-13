@@ -58,6 +58,20 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
         try {
             let payload = buildSharePostToStoriesPayload(post);
 
+            // Resolve mock slot paths to the same HTTPS clip the newsfeed plays —
+            // never leave `/demo-videos/*` to be remapped to bundled BBB in Stories.
+            if (payload.mediaUrl && payload.mediaType === 'video') {
+                const { isMockDemoVideoPath, resolveMockFeedVideoUrl } = await import(
+                    '../constants/mockFeedVideos'
+                );
+                if (isMockDemoVideoPath(payload.mediaUrl)) {
+                    payload = {
+                        ...payload,
+                        mediaUrl: resolveMockFeedVideoUrl(payload.mediaUrl),
+                    };
+                }
+            }
+
             if (!payload.mediaUrl && !payload.isTextOnlyShare) {
                 const generated = await textCaptureRef.current?.capture(payload.shareText || '');
                 if (!generated) {

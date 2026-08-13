@@ -89,7 +89,7 @@ export function resolveStoryVideoPlaybackUrl(url?: string | null): string | unde
 
 /**
  * Preferred react-native-video `source` for story playback.
- * Demo MP4s use the same bundled require() as the newsfeed (not a broken API URI).
+ * Demo MP4s use the same HTTPS slot map as the newsfeed (never bundled BBB).
  */
 export function storyVideoSource(url?: string | null): number | { uri: string } | null {
     const raw = (url || '').trim();
@@ -97,6 +97,10 @@ export function storyVideoSource(url?: string | null): number | { uri: string } 
     const demoPath = demoVideoPathFromUrl(raw);
     if (demoPath || isMockDemoVideoPath(raw)) {
         return mockFeedVideoSource(demoPath || raw);
+    }
+    // Legacy BBB / rainbow hosts — remap so shared stories never play the old clip.
+    if (/big_buck_bunny|mov_bbb|bbb\.mp4|mediaelement-files/i.test(raw)) {
+        return mockFeedVideoSource(undefined);
     }
     const playback = resolveStoryVideoPlaybackUrl(raw);
     return playback ? { uri: playback } : null;
