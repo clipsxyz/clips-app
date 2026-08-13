@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
 import { apiRequest } from '../api/client';
 
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
@@ -61,24 +62,11 @@ let unsubscribeOpened: (() => void) | null = null;
 let unsubscribeTokenRefresh: (() => void) | null = null;
 let currentFcmToken: string | null = null;
 
-function getDynamicRequire(): ((name: string) => any) | null {
+function getMessagingInstance(): any | null {
   try {
-    // Avoid static bundler resolution when package is not installed.
-    const req = Function('return typeof require !== "undefined" ? require : null')();
-    return typeof req === 'function' ? req : null;
-  } catch {
-    return null;
-  }
-}
-
-async function getMessagingInstance(): Promise<any | null> {
-  const req = getDynamicRequire();
-  if (!req) return null;
-  try {
-    const messagingModule = req('@react-native-firebase/messaging');
-    const factory = messagingModule?.default ?? messagingModule;
-    return typeof factory === 'function' ? factory() : null;
-  } catch {
+    return typeof messaging === 'function' ? messaging() : messaging;
+  } catch (error) {
+    console.warn('[FCM] messaging() unavailable:', error);
     return null;
   }
 }
@@ -217,12 +205,19 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 
 export async function getFCMToken(): Promise<string | null> {
   const messaging = await getMessagingInstance();
-  if (!messaging) return null;
+  if (!messaging) {
+    console.warn('[FCM] messaging module unavailable');
+    return null;
+  }
   try {
     const token = await messaging.getToken();
     if (token) {
+      // Explicit log so `adb logcat` / `npx react-native log-android` can copy the device token.
+      console.log('[FCM] device token:', token);
       await saveTokenToBackend(token);
       currentFcmToken = token;
+    } else {
+      console.warn('[FCM] getToken returned empty');
     }
     return token || null;
   } catch (error) {
@@ -255,17 +250,30 @@ export function showBrowserNotification(title: string, options?: any): void {
 export async function initializeNotifications(options?: NotificationInitOptions): Promise<void> {
   await hydratePreferencesOnce();
   const prefs = getNotificationPreferences();
+
+  const messaging = await getMessagingInstance();
+  if (!messaging) {
+    console.log('Native Firebase messaging not installed; notification transport unavailable.');
+    return;
+  }
+
+  // Always attempt token fetch so Firebase console / log-android can capture the device token.
+  // Full push listeners still respect prefs + permission below.
+  try {
+    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
+      await messaging.requestPermission();
+    }
+    await requestNotificationPermission();
+    await getFCMToken();
+  } catch (error) {
+    console.warn('Native FCM token fetch failed:', error);
+  }
+
   if (!prefs.enabled) {
     return;
   }
   const permission = await requestNotificationPermission();
   if (permission !== 'granted') {
-    return;
-  }
-
-  const messaging = await getMessagingInstance();
-  if (!messaging) {
-    console.log('Native Firebase messaging not installed; notification transport unavailable.');
     return;
   }
 
@@ -276,8 +284,6 @@ export async function initializeNotifications(options?: NotificationInitOptions)
   } catch (error) {
     console.warn('Native notification permission request failed:', error);
   }
-
-  await getFCMToken();
 
   if (unsubscribeForeground) {
     unsubscribeForeground();
@@ -315,6 +321,7 @@ export async function initializeNotifications(options?: NotificationInitOptions)
 
   if (typeof messaging.onTokenRefresh === 'function') {
     unsubscribeTokenRefresh = messaging.onTokenRefresh((token: string) => {
+      console.log('[FCM] device token (refresh):', token);
       currentFcmToken = token;
       void saveTokenToBackend(token);
     });

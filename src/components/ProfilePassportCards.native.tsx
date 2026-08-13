@@ -505,18 +505,17 @@ export default function ProfilePassportCards({
         setSaving(true);
         const places = preferredLocations.slice(0, 12);
         try {
-            const ok = await persistLaravelProfile({
+            await persistLaravelProfile({
                 places_traveled: places,
                 account_type: accountType,
                 is_business: accountType === 'business',
             });
-            if (!ok) {
-                login({
-                    ...user,
-                    placesTraveled: places.length ? places : undefined,
-                    accountType,
-                });
-            }
+            // Always refresh local session so Business/Personal badge updates immediately.
+            login({
+                ...user,
+                placesTraveled: places.length ? places : undefined,
+                accountType,
+            });
         } catch {
             login({
                 ...user,
@@ -950,7 +949,7 @@ export default function ProfilePassportCards({
                 <View style={styles.cardRow}>
                     <ProfileCardButton
                         cardId="personal"
-                        icon="person-outline"
+                        icon={accountType === 'business' ? 'storefront-outline' : 'person-outline'}
                         title="Preferences"
                         subtitle={accountType === 'business' ? 'Business account' : 'Personal account'}
                         cardWidth={cardWidth}

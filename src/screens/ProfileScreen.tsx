@@ -21,6 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import {
     chipActiveMagenta,
@@ -35,6 +36,7 @@ import {
     profilePassportScrollInset,
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -184,6 +186,29 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         loadData();
     }, [user?.handle]);
+
+    // Repair sessions created before Auth.login persisted accountType.
+    useEffect(() => {
+        if (!user?.email || user.accountType === 'business' || user.accountType === 'personal') return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                const raw = await AsyncStorage.getItem('gazetteer_local_registrations_rn');
+                if (!raw || cancelled) return;
+                const reg = JSON.parse(raw) as Record<string, { userData?: { accountType?: string } }>;
+                const rec = reg[String(user.email).trim().toLowerCase()];
+                const t = rec?.userData?.accountType;
+                if (t !== 'business' && t !== 'personal') return;
+                if (cancelled) return;
+                login({ ...user, accountType: t });
+            } catch {
+                // ignore repair failures
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.email, user?.accountType, login, user]);
 
     useEffect(() => {
         setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
@@ -966,6 +991,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <View style={styles.userInfo}>
                         <Text style={styles.userName}>{user?.name || user?.handle}</Text>
                         <Text style={styles.userHandle}>{user?.handle}</Text>
+                        {user?.accountType === 'business' ? (
+                            <View style={styles.accountBadgeWrap}>
+                                <AccountTypeBadge accountType="business" compact />
+                            </View>
+                        ) : null}
                         {user?.bio && (
                             <Text style={styles.userBio}>{user.bio}</Text>
                         )}
@@ -2103,6 +2133,10 @@ const styles = StyleSheet.create({
         fontSize: ox(15),
         color: '#9CA3AF',
         marginTop: ox(2),
+    },
+    accountBadgeWrap: {
+        marginTop: ox(8),
+        alignSelf: 'flex-start',
     },
     userBio: {
         fontSize: ox(13),

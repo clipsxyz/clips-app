@@ -139,6 +139,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             bio: parsed.bio || undefined,
             socialLinks: parsed.socialLinks || undefined,
             placesTraveled: parsed.placesTraveled || undefined,
+            accountType:
+              parsed.accountType === 'business' || parsed.account_type === 'business' || parsed.is_business === true
+                ? 'business'
+                : parsed.accountType === 'personal' || parsed.account_type === 'personal'
+                  ? 'personal'
+                  : undefined,
             is_private: migratedPrivate,
           };
           if (cancelled) return;
@@ -262,6 +268,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = (userData: any) => {
+    const resolvedAccountType =
+      userData.accountType === 'business' ||
+      userData.account_type === 'business' ||
+      userData.isBusiness === true ||
+      userData.is_business === true
+        ? 'business'
+        : userData.accountType === 'personal' || userData.account_type === 'personal'
+          ? 'personal'
+          : undefined;
     const u: User = {
       id:
         userData.id != null && String(userData.id).trim() !== ''
@@ -283,6 +298,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
       placesTraveled: userData.placesTraveled || undefined,
+      accountType: resolvedAccountType,
       is_private:
         typeof userData.is_private === 'boolean'
           ? userData.is_private

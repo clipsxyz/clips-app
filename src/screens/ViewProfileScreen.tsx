@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import {
     glassSearch,
     glassSurface,
@@ -118,6 +119,14 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const socialLinks = (profileUser?.socialLinks || profileUser?.social_links || {}) as Record<string, string | undefined>;
     const decodedHandle = decodeURIComponent(handle || '');
     const isOwnProfile = Boolean(user?.handle && decodedHandle === user.handle);
+    const profileAccountType = (() => {
+        const raw =
+            profileUser?.accountType ||
+            profileUser?.account_type ||
+            (profileUser?.is_business || profileUser?.isBusiness ? 'business' : undefined) ||
+            (isOwnProfile ? user?.accountType : undefined);
+        return String(raw || '').toLowerCase() === 'business' ? 'business' : String(raw || '').toLowerCase() === 'personal' ? 'personal' : undefined;
+    })();
 
     useEffect(() => {
         if (!user?.id || !decodedHandle || isOwnProfile) {
@@ -237,6 +246,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     followingCount = Math.max(followingCount, mockCounts.following);
                 }
 
+                const resolvedAccountType =
+                    apiData?.accountType === 'business' ||
+                    apiData?.account_type === 'business' ||
+                    apiData?.is_business === true ||
+                    apiData?.isBusiness === true
+                        ? 'business'
+                        : apiData?.accountType === 'personal' || apiData?.account_type === 'personal'
+                          ? 'personal'
+                          : isOwn
+                            ? user?.accountType
+                            : undefined;
+
                 setProfileUser({
                     handle: decodedHandle,
                     name:
@@ -254,6 +275,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     placesTraveled:
                         placesTraveled && placesTraveled.length > 0 ? placesTraveled : undefined,
                     ...(apiData || {}),
+                    accountType: resolvedAccountType,
                 });
                 setPosts(userPosts);
                 setStats({
@@ -940,7 +962,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             <ScrollView style={styles.content} stickyHeaderIndices={[6]}>
                 <View style={styles.passportTitleBlock}>
                     <Text style={styles.passportTitle}>Passport</Text>
-                    <Text style={styles.passportEyebrow}>Profile</Text>
+                    <Text style={styles.passportEyebrow}>
+                        {profileAccountType === 'business' ? 'Business profile' : 'Profile'}
+                    </Text>
                 </View>
 
                 <ProfileCoverHero
@@ -972,6 +996,11 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                 size={ox(16)}
                             />
                         </View>
+                        {profileAccountType === 'business' ? (
+                            <View style={styles.coverBadgeWrap}>
+                                <AccountTypeBadge accountType="business" compact />
+                            </View>
+                        ) : null}
                     </View>
                 </ProfileCoverHero>
 
@@ -1579,6 +1608,11 @@ const styles = StyleSheet.create({
         color: 'rgba(229,231,235,0.92)',
         textAlign: 'center',
         flexShrink: 1,
+    },
+    coverBadgeWrap: {
+        marginTop: ox(8),
+        alignItems: 'center',
+        alignSelf: 'center',
     },
     displayName: {
         fontSize: ox(18),
