@@ -26,6 +26,7 @@ import type { Story, StoryGroup, Post } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 
 /** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
 const STORIES24_LOADING_HOLD_MS = 2600;
@@ -1893,6 +1894,9 @@ export default function StoriesPage() {
                                     // Fallback: shared post but fetch failed or post not found – show story's own media (video/image we stored when creating the story)
                                     if (currentStory?.sharedFromPost && !originalPost && sharedPostFetchFailed && currentStory.mediaUrl) {
                                         const isVideo = currentStory.mediaType === 'video';
+                                        const fallbackMediaUrl = isVideo
+                                            ? resolveMockFeedVideoUrl(currentStory.mediaUrl)
+                                            : currentStory.mediaUrl;
                                         return (
                                             <div
                                                 className="w-full h-full flex flex-col items-center justify-center relative p-6"
@@ -1902,7 +1906,7 @@ export default function StoriesPage() {
                                             >
                                                 {isVideo ? (
                                                     <video
-                                                        src={currentStory.mediaUrl}
+                                                        src={fallbackMediaUrl}
                                                         className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
                                                         autoPlay
                                                         muted
@@ -1922,7 +1926,7 @@ export default function StoriesPage() {
                                                     {isVideo ? (
                                                         <video
                                                             ref={videoRef}
-                                                            src={currentStory.mediaUrl}
+                                                            src={fallbackMediaUrl}
                                                             className="w-full h-auto object-cover"
                                                             autoPlay
                                                             loop
@@ -1957,7 +1961,18 @@ export default function StoriesPage() {
                                         if (hasRealMedia) {
                                             // Shared post with media - centered post card with dimmed backdrop
                                             const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video';
-                                            const mediaUrl = originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url;
+                                            // Prefer story.mediaUrl when share already stored HTTPS; always remap /demo-videos/* (only bbb.mp4 exists in public/)
+                                            const rawPostMedia =
+                                                originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url || '';
+                                            const mediaUrl = mediaIsVideo
+                                                ? resolveMockFeedVideoUrl(
+                                                      (currentStory.mediaUrl &&
+                                                      /^https?:\/\//i.test(currentStory.mediaUrl)
+                                                          ? currentStory.mediaUrl
+                                                          : null) ||
+                                                          rawPostMedia,
+                                                  )
+                                                : rawPostMedia;
                                             const sharedCaptionSnippet = (
                                                 originalPost.caption ||
                                                 originalPost.text ||
@@ -2256,10 +2271,14 @@ export default function StoriesPage() {
                                     // Not a shared post - show regular story content
                                     // Poll story with media - show media (poll overlay will be shown separately)
                                     if (currentStory?.mediaUrl) {
+                                        const regularStoryMediaUrl =
+                                            currentStory.mediaType === 'video'
+                                                ? resolveMockFeedVideoUrl(currentStory.mediaUrl)
+                                                : currentStory.mediaUrl;
                                         return currentStory.mediaType === 'video' ? (
                                             <video
                                                 ref={videoRef}
-                                                src={currentStory.mediaUrl}
+                                                src={regularStoryMediaUrl}
                                                 className="w-full h-full object-cover"
                                                 autoPlay
                                                 loop
@@ -2304,7 +2323,7 @@ export default function StoriesPage() {
                                             />
                                         ) : (
                                             <img
-                                                src={currentStory.mediaUrl}
+                                                src={regularStoryMediaUrl}
                                                 alt=""
                                                 className="w-full h-full object-cover select-none"
                                                 draggable={false}
@@ -4973,9 +4992,17 @@ export default function StoriesPage() {
                                 
                                 if (hasRealMedia) {
                                     // Shared post with media
-                                    return originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' ? (
+                                    const thumbIsVideo =
+                                        originalPost.mediaType === 'video' ||
+                                        originalPost.mediaItems?.[0]?.type === 'video';
+                                    const thumbRaw =
+                                        originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url || '';
+                                    const thumbUrl = thumbIsVideo
+                                        ? resolveMockFeedVideoUrl(thumbRaw)
+                                        : thumbRaw;
+                                    return thumbIsVideo ? (
                                         <video
-                                            src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                            src={thumbUrl}
                                             className="w-full h-full object-cover"
                                             muted
                                             playsInline
@@ -4983,7 +5010,7 @@ export default function StoriesPage() {
                                         />
                                     ) : (
                                         <img
-                                            src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                            src={thumbUrl}
                                             alt="Shared post"
                                             className="w-full h-full object-cover"
                                             loading="lazy"

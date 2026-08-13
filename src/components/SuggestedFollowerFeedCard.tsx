@@ -9,7 +9,7 @@ import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
 
-const STRIP_VIDEO_LOOP_SEC = 3;
+const STRIP_VIDEO_LOOP_SEC = 1;
 const VIDEO_SRC_RE = /\.(mp4|webm|mov|m4v|ogg)(\?|#|$)/i;
 
 function PreviewVideo({
@@ -124,7 +124,11 @@ export default function SuggestedFollowerFeedCard({
                 ? resolveMockFeedVideoUrl(preview.thumbnailUrl)
                 : undefined;
           const stillSrc =
-            preview.thumbnailUrl && !VIDEO_SRC_RE.test(preview.thumbnailUrl)
+            preview.thumbnailUrl &&
+            !VIDEO_SRC_RE.test(preview.thumbnailUrl) &&
+            !preview.thumbnailUrl.startsWith('/demo-videos/') &&
+            !preview.thumbnailUrl.includes('bbb-poster') &&
+            !preview.thumbnailUrl.startsWith('#')
               ? preview.thumbnailUrl
               : undefined;
           return (
@@ -132,7 +136,7 @@ export default function SuggestedFollowerFeedCard({
             key={preview.postId}
             type="button"
             onClick={openProfile}
-            className="relative flex-1 overflow-hidden rounded-lg border border-white/10 bg-black/30 aspect-[3/4] min-w-0 backdrop-blur-sm"
+            className="relative flex-1 overflow-hidden rounded-lg border border-white/10 bg-[#121212] aspect-[3/4] min-w-0 backdrop-blur-sm"
           >
             {videoSrc ? (
               <PreviewVideo
@@ -140,8 +144,10 @@ export default function SuggestedFollowerFeedCard({
                 poster={stillSrc}
                 className="h-full w-full object-cover"
               />
+            ) : stillSrc ? (
+              <img src={stillSrc} alt="" className="h-full w-full object-cover" />
             ) : (
-              <img src={stillSrc || preview.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+              <div className="h-full w-full bg-[#121212]" aria-hidden />
             )}
             <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5">
               <FiPlay className="h-2.5 w-2.5 text-white" aria-hidden />

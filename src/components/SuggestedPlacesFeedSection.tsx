@@ -36,7 +36,7 @@ function postThumbVisual(p: PlaceMatchedPost['post']): { url: string; isVideo: b
   return { url, isVideo };
 }
 
-const STRIP_VIDEO_LOOP_SEC = 3;
+const STRIP_VIDEO_LOOP_SEC = 1;
 
 function SuggestedStripPreviewVideo({
   src,
