@@ -1,11 +1,12 @@
 /**
- * Demo MP4 URLs for mock feed / Scenes testing (web).
+ * Demo MP4 URLs for mock feed / Scenes testing.
  *
- * Slot paths stay stable in post data; each slot maps to a *distinct* HTTPS sample
- * so Alice / Sarah / Bob are visibly different (parity with `mockFeedVideos.native.ts`).
- *
- * Never map slots to Big Buck Bunny — that rainbow clip was the old shared fallback.
+ * Web (Vite): all slots resolve to `public/demo-videos/bbb.mp4` (Big Buck Bunny).
+ * React Native: see `mockFeedVideos.native.ts` (bundled require).
  */
+const WEB_DEMO_MP4 = '/demo-videos/bbb.mp4';
+const BBB_HTTPS = 'https://www.w3schools.com/html/mov_bbb.mp4';
+
 /** Logical slots — path identifies which poster / post id to use. */
 export const MOCK_FEED_VIDEO_URLS = {
     escapes: '/demo-videos/escapes.mp4',
@@ -15,39 +16,31 @@ export const MOCK_FEED_VIDEO_URLS = {
     elephants: '/demo-videos/elephants.mp4',
 } as const;
 
-const ESCAPES_HTTPS = 'https://download.samplelib.com/mp4/sample-10s.mp4';
-const FUN_HTTPS = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-const JOYRIDES_HTTPS = 'https://download.samplelib.com/mp4/sample-5s.mp4';
-const BLAZES_HTTPS =
-    'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4';
-const ELEPHANTS_HTTPS =
-    'https://samplefile.com/samples/download/video/mp4/mp4_15s_sample_file_868KB.mp4';
-
-const HTTPS_BY_DEMO_PATH: Record<string, string> = {
-    [MOCK_FEED_VIDEO_URLS.escapes]: ESCAPES_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.fun]: FUN_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.joyrides]: JOYRIDES_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.blazes]: BLAZES_HTTPS,
-    [MOCK_FEED_VIDEO_URLS.elephants]: ELEPHANTS_HTTPS,
-    // Legacy BBB paths → non-rainbow sample
-    '/demo-videos/bbb.mp4': FUN_HTTPS,
-    '/demo-videos/flower.mp4': FUN_HTTPS,
+const NATIVE_REMOTE_BY_DEMO_PATH: Record<string, string> = {
+    [MOCK_FEED_VIDEO_URLS.escapes]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.fun]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.joyrides]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.blazes]: BBB_HTTPS,
+    [MOCK_FEED_VIDEO_URLS.elephants]: BBB_HTTPS,
+    '/demo-videos/bbb.mp4': BBB_HTTPS,
+    '/demo-videos/flower.mp4': BBB_HTTPS,
 };
 
-export const MOCK_FEED_VIDEO_REMOTE_FALLBACK = FUN_HTTPS;
+export const MOCK_FEED_VIDEO_REMOTE_FALLBACK =
+    NATIVE_REMOTE_BY_DEMO_PATH[MOCK_FEED_VIDEO_URLS.escapes];
 
-/** Dark placeholders — never BBB rainbow poster. */
+/** Thumbnails for demo videos — real Big Buck Bunny frame (not Unsplash). */
 export const MOCK_FEED_VIDEO_POSTERS = {
-    escapes: '#121212',
-    fun: '#121212',
-    joyrides: '#121212',
-    blazes: '#121212',
-    elephants: '#121212',
+    escapes: '/demo-videos/bbb-poster.jpg',
+    fun: '/demo-videos/bbb-poster.jpg',
+    joyrides: '/demo-videos/bbb-poster.jpg',
+    blazes: '/demo-videos/bbb-poster.jpg',
+    elephants: '/demo-videos/bbb-poster.jpg',
 } as const;
 
-/** @deprecated Kept for type parity with native; do not render as a thumb. */
+/** Web stub — native uses bundled require via `mockFeedVideos.native.ts`. */
 export const MOCK_FEED_BUNDLED_VIDEO_POSTER = {
-    uri: '',
+    uri: '/demo-videos/bbb-poster.jpg',
 } as const;
 
 /** @deprecated Unsplash stills — reject if found in old collection storage. */
@@ -59,11 +52,23 @@ const LEGACY_FAKE_UNSPLASH_POSTERS = [
     'https://images.unsplash.com/photo-1544005313-94ddf0286df2',
 ] as const;
 
-function isRelativeDemoVideoPath(url: string): boolean {
-    return url.startsWith('/demo-videos/') || HTTPS_BY_DEMO_PATH[url] != null;
+function isReactNativeRuntime(): boolean {
+    try {
+        if (typeof navigator !== 'undefined' && (navigator as { product?: string }).product === 'ReactNative') {
+            return true;
+        }
+    } catch {
+        /* ignore */
+    }
+    return false;
 }
 
-/** Local / in-app media URIs must play as-is (never remap to demo samples). */
+function isRelativeDemoVideoPath(url: string): boolean {
+    // Only explicit mock slots — never treat filesystem/local paths as demos.
+    return url.startsWith('/demo-videos/') || NATIVE_REMOTE_BY_DEMO_PATH[url] != null;
+}
+
+/** Local / in-app media URIs must play as-is (never remap to flower/demo samples). */
 export function isPlayableLocalMediaUri(url: string | undefined | null): boolean {
     if (!url || typeof url !== 'string') return false;
     const u = url.trim();
@@ -77,18 +82,17 @@ export function isPlayableLocalMediaUri(url: string | undefined | null): boolean
     );
 }
 
-function httpsForDemoPath(url: string): string {
-    return HTTPS_BY_DEMO_PATH[url] ?? MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+function nativeRemoteForDemoPath(url: string): string {
+    return NATIVE_REMOTE_BY_DEMO_PATH[url] ?? MOCK_FEED_VIDEO_REMOTE_FALLBACK;
 }
 
 function looksLikeDemoSlotVideo(url: string): boolean {
     return (
         url.startsWith('/demo-videos/') ||
-        HTTPS_BY_DEMO_PATH[url] != null ||
+        NATIVE_REMOTE_BY_DEMO_PATH[url] != null ||
         url.includes('bbb.mp4') ||
         url.includes('flower.mp4') ||
         url.includes('mov_bbb') ||
-        url.includes('big_buck_bunny') ||
         url.includes('escapes.mp4') ||
         url.includes('fun.mp4') ||
         url.includes('joyrides.mp4') ||
@@ -97,13 +101,13 @@ function looksLikeDemoSlotVideo(url: string): boolean {
     );
 }
 
-/** No BBB frame — callers should use video preview or a dark cell. */
+/** Real Big Buck Bunny frame for demo MP4 collection/grid thumbs. */
 export function resolveDemoVideoPosterUri(url: string | undefined): string | undefined {
     if (!url || !looksLikeDemoSlotVideo(url)) return undefined;
-    return undefined;
+    return '/demo-videos/bbb-poster.jpg';
 }
 
-/** Web: no poster image for demos (avoid rainbow still). */
+/** Web: URI object. Native `.native.ts` returns bundled require. */
 export function resolveDemoVideoPosterSource(url: string | undefined): { uri: string } | undefined {
     const uri = resolveDemoVideoPosterUri(url);
     return uri ? { uri } : undefined;
@@ -127,26 +131,27 @@ export function isFakeMockVideoPosterUrl(url: string | undefined | null): boolea
 }
 
 export function resolveMockFeedVideoUrl(url: string | undefined): string {
-    if (!url) return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+    if (isReactNativeRuntime()) {
+        if (!url) return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+        if (isPlayableLocalMediaUri(url)) return url;
+        if (NATIVE_REMOTE_BY_DEMO_PATH[url]) return NATIVE_REMOTE_BY_DEMO_PATH[url];
+        if (isRelativeDemoVideoPath(url)) return nativeRemoteForDemoPath(url);
+        if (!/^https?:\/\//i.test(url) && looksLikeDemoSlotVideo(url)) {
+            return nativeRemoteForDemoPath(url);
+        }
+        return url;
+    }
+    if (!url) return WEB_DEMO_MP4;
     if (isPlayableLocalMediaUri(url)) return url;
-    if (HTTPS_BY_DEMO_PATH[url]) return HTTPS_BY_DEMO_PATH[url];
-    if (isRelativeDemoVideoPath(url)) return httpsForDemoPath(url);
-    if (/big_buck_bunny|mov_bbb|bbb\.mp4|mediaelement-files/i.test(url)) {
-        return MOCK_FEED_VIDEO_REMOTE_FALLBACK;
-    }
-    if (!/^https?:\/\//i.test(url) && looksLikeDemoSlotVideo(url)) {
-        return httpsForDemoPath(url);
-    }
+    if (url.startsWith('/demo-videos/')) return WEB_DEMO_MP4;
+    if (looksLikeDemoSlotVideo(url)) return WEB_DEMO_MP4;
     return url;
 }
 
+/** Web: always a URI object. Native `.native.ts` returns bundled require for demo paths. */
 export function isMockDemoVideoPath(url: string | undefined | null): boolean {
     if (!url) return false;
-    return (
-        url.startsWith('/demo-videos/') ||
-        HTTPS_BY_DEMO_PATH[url] != null ||
-        /bbb\.mp4|mov_bbb|big_buck_bunny/i.test(url)
-    );
+    return url.startsWith('/demo-videos/') || NATIVE_REMOTE_BY_DEMO_PATH[url] != null;
 }
 
 export function mockFeedVideoSource(url: string | undefined): number | { uri: string } {

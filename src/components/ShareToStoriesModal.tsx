@@ -9,7 +9,6 @@ import type { Post } from '../types';
 import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
 import { generateShareTextImage } from '../utils/generateShareTextImage';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
-import { isMockDemoVideoPath, resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 
 interface ShareToStoriesModalProps {
   isOpen: boolean;
@@ -39,14 +38,6 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
 
     try {
       let payload = buildSharePostToStoriesPayload(post);
-
-      // Resolve mock slot paths to the same HTTPS clip the feed plays (never BBB).
-      if (payload.mediaUrl && payload.mediaType === 'video' && isMockDemoVideoPath(payload.mediaUrl)) {
-        payload = {
-          ...payload,
-          mediaUrl: resolveMockFeedVideoUrl(payload.mediaUrl),
-        };
-      }
 
       // Canvas fallback for posts with text but no media (non text-only bubble layout).
       if (!payload.mediaUrl && !payload.isTextOnlyShare) {
