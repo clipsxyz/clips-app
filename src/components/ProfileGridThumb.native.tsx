@@ -10,10 +10,6 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import { resolvePostThumbnail } from '../api/collections';
-import {
-    MOCK_FEED_BUNDLED_VIDEO_POSTER,
-    resolveDemoVideoPosterSource,
-} from '../constants/mockFeedVideos';
 
 type Props = {
     post: Post;
@@ -23,13 +19,6 @@ function getPostLocationLabel(post: Post): string | undefined {
     const label = post.locationLabel || post.venue;
     const trimmed = typeof label === 'string' ? label.trim() : '';
     return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function resolveVideoUrl(post: Post): string | undefined {
-    const firstVideo = Array.isArray(post.mediaItems)
-        ? post.mediaItems.find((item) => item?.type === 'video' && item.url)
-        : undefined;
-    return firstVideo?.url || post.mediaUrl || undefined;
 }
 
 export default function ProfileGridThumb({ post }: Props) {
@@ -68,16 +57,24 @@ export default function ProfileGridThumb({ post }: Props) {
     }
 
     // Image-only thumbs — never mount react-native-video in grid cells (Android steals taps).
+    // Never use BBB rainbow poster for demos — dark cell + play affordance instead.
     if (isVideoPost(post)) {
-        const videoUrl = resolveVideoUrl(post);
-        const demoSource = resolveDemoVideoPosterSource(videoUrl);
-        // Demo feed MP4s share one real BBB frame; use it whenever we lack a captured poster.
-        const imageSource = poster
-            ? ({ uri: poster } as const)
-            : (demoSource ?? MOCK_FEED_BUNDLED_VIDEO_POSTER);
+        const posterLooksLikeImage =
+            !!poster &&
+            !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(poster) &&
+            !poster.startsWith('/demo-videos/') &&
+            !poster.includes('bbb-poster');
+        if (posterLooksLikeImage) {
+            return (
+                <View style={styles.cell}>
+                    <Image source={{ uri: poster }} style={styles.image} resizeMode="cover" />
+                    {locationBadge}
+                    {videoOverlays}
+                </View>
+            );
+        }
         return (
-            <View style={styles.cell}>
-                <Image source={imageSource} style={styles.image} resizeMode="cover" />
+            <View style={[styles.cell, styles.placeholder]}>
                 {locationBadge}
                 {videoOverlays}
             </View>

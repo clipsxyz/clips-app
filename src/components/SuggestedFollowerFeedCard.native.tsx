@@ -16,12 +16,13 @@ import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
 import PassportSheetCanvas, { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
-import Video from 'react-native-video';
+import Video, { type VideoRef } from 'react-native-video';
 import {
+    isMockDemoVideoPath,
     mockFeedVideoSource,
-    resolveDemoVideoPosterSource,
-    MOCK_FEED_BUNDLED_VIDEO_POSTER,
 } from '../constants/mockFeedVideos.native';
+import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 
 type Props = {
   suggestion: SuggestedFollowerSuggestion;
@@ -37,7 +38,37 @@ function formatViews(n: number): string {
 }
 
 function looksLikeVideoUrl(url: string): boolean {
-  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url) || isMockDemoVideoPath(url);
+}
+
+/** Muted 1s looping preview — motion so the thumb is clearly a video, not a still. */
+function SuggestedThumbPreviewVideo({ url }: { url: string }) {
+  const videoRef = React.useRef<VideoRef>(null);
+  const [feedScrolling, setFeedScrolling] = React.useState(getFeedScrollBusy());
+  React.useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
+
+  return (
+    <Video
+      ref={videoRef}
+      source={mockFeedVideoSource(url)}
+      style={styles.thumbImage}
+      resizeMode="cover"
+      paused={feedScrolling}
+      muted
+      repeat
+      controls={false}
+      playInBackground={false}
+      playWhenInactive={false}
+      ignoreSilentSwitch="obey"
+      {...androidListSafeVideoProps()}
+      pointerEvents="none"
+      onProgress={({ currentTime }) => {
+        if (currentTime > 1) {
+          videoRef.current?.seek(0);
+        }
+      }}
+    />
+  );
 }
 
 export default function SuggestedFollowerFeedCard({
@@ -100,19 +131,16 @@ export default function SuggestedFollowerFeedCard({
         >
           {suggestion.previews.map((preview) => {
             const videoUrl = preview.mediaUrl || preview.thumbnailUrl;
-            // Prefer bundled demo poster — never feed relative `/demo-videos/*.jpg` into Image.uri.
-            const demoPoster =
-              resolveDemoVideoPosterSource(preview.mediaUrl) ||
-              resolveDemoVideoPosterSource(videoUrl) ||
-              (preview.isVideo && videoUrl.includes('/demo-videos/')
-                ? MOCK_FEED_BUNDLED_VIDEO_POSTER
-                : undefined);
             const stillIsImage =
               Boolean(preview.thumbnailUrl) &&
               !looksLikeVideoUrl(preview.thumbnailUrl) &&
-              !preview.thumbnailUrl.startsWith('/demo-videos/');
+              !preview.thumbnailUrl.startsWith('/demo-videos/') &&
+              !preview.thumbnailUrl.startsWith('#');
             const needsVideoFrame =
-              preview.isVideo && !demoPoster && !stillIsImage && looksLikeVideoUrl(videoUrl);
+              preview.isVideo &&
+              Boolean(videoUrl) &&
+              (isMockDemoVideoPath(videoUrl) || looksLikeVideoUrl(videoUrl)) &&
+              !stillIsImage;
             return (
             <TouchableOpacity
               key={preview.postId}
@@ -125,31 +153,15 @@ export default function SuggestedFollowerFeedCard({
               ]}
             >
               {needsVideoFrame ? (
-                <Video
-                  source={mockFeedVideoSource(videoUrl)}
+                <SuggestedThumbPreviewVideo url={videoUrl} />
+              ) : stillIsImage ? (
+                <Image
+                  source={{ uri: preview.thumbnailUrl }}
                   style={styles.thumbImage}
                   resizeMode="cover"
-                  paused
-                  muted
-                  repeat={false}
-                  controls={false}
-                  playInBackground={false}
-                  playWhenInactive={false}
-                  ignoreSilentSwitch="obey"
-                  disableFocus
-                  pointerEvents="none"
                 />
               ) : (
-                <Image
-                  source={
-                    demoPoster ||
-                    (stillIsImage
-                      ? { uri: preview.thumbnailUrl }
-                      : MOCK_FEED_BUNDLED_VIDEO_POSTER)
-                  }
-                  style={styles.thumbImage}
-                  resizeMode="cover"
-                />
+                <View style={[styles.thumbImage, styles.thumbPlaceholder]} />
               )}
               <View style={styles.viewsOverlay}>
                 <Icon name="play" size={10} color="#fff" />
@@ -273,6 +285,9 @@ const styles = StyleSheet.create({
   thumbImage: {
     width: '100%',
     height: '100%',
+  },
+  thumbPlaceholder: {
+    backgroundColor: '#121212',
   },
   viewsOverlay: {
     position: 'absolute',
