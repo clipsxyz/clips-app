@@ -32,6 +32,10 @@ type FeedEngagementRowProps = {
     /** Own-post reclip: visible but dimmed (web EngagementBar opacity-30). */
     reclipDisabled?: boolean;
     showSave?: boolean;
+    /** Hide Save/Saved text — needed when boost analytics sits on the far right. */
+    showSaveLabel?: boolean;
+    /** Tighter gaps when the right cluster includes boost metrics / share. */
+    compact?: boolean;
     likeButtonRef?: React.RefObject<View | null>;
     /** White icons for feed bar (web EngagementBar); gray for profile cards. */
     tone?: 'feed' | 'muted';
@@ -57,6 +61,8 @@ export default function FeedEngagementRow({
     showReclip = true,
     reclipDisabled = false,
     showSave = true,
+    showSaveLabel = true,
+    compact = false,
     likeButtonRef,
     tone = 'feed',
 }: FeedEngagementRowProps) {
@@ -67,8 +73,12 @@ export default function FeedEngagementRow({
     const saveColor = isSaved ? '#7A8AF0' : iconColor;
 
     return (
-        <View style={styles.row}>
-            <View ref={likeButtonRef} collapsable={false} style={styles.item}>
+        <View style={[styles.row, compact && styles.rowCompact]}>
+            <View
+                ref={likeButtonRef}
+                collapsable={false}
+                style={[styles.item, compact && styles.itemCompact]}
+            >
                 <TouchableOpacity onPress={onLike} disabled={!onLike} activeOpacity={0.7}>
                     <FeedLikeThumbsIcon size={ACTION_ICON} filled={userLiked} color={iconColor} />
                 </TouchableOpacity>
@@ -77,11 +87,17 @@ export default function FeedEngagementRow({
                     disabled={!(onLikesPress || onLike)}
                     activeOpacity={0.7}
                 >
-                <Text style={[styles.text, { color: countColor }, styles.likeCount]}>{likes}</Text>
+                    <Text style={[styles.text, { color: countColor }, styles.likeCount]}>{likes}</Text>
                 </TouchableOpacity>
             </View>
 
-            <TouchableOpacity onPress={onComment} style={styles.item} disabled={!onComment} activeOpacity={0.7}>
+            <TouchableOpacity
+                onPress={onComment}
+                style={[styles.item, compact && styles.itemCompact]}
+                disabled={!onComment}
+                activeOpacity={0.7}
+                accessibilityLabel={`Comments, ${comments}`}
+            >
                 <FeedMessageSquareIcon size={ACTION_ICON} color={iconColor} />
                 <Text style={[styles.text, { color: countColor }]}>{comments}</Text>
             </TouchableOpacity>
@@ -89,7 +105,7 @@ export default function FeedEngagementRow({
             {showShareToStories ? (
                 <TouchableOpacity
                     onPress={onShareToStories}
-                    style={styles.item}
+                    style={[styles.item, compact && styles.itemCompact]}
                     disabled={!onShareToStories}
                     activeOpacity={0.7}
                 >
@@ -101,7 +117,11 @@ export default function FeedEngagementRow({
             {showReclip ? (
                 <TouchableOpacity
                     onPress={onReclip}
-                    style={[styles.item, reclipDisabled && styles.itemDisabled]}
+                    style={[
+                        styles.item,
+                        compact && styles.itemCompact,
+                        reclipDisabled && styles.itemDisabled,
+                    ]}
                     disabled={!onReclip || reclipDisabled}
                     activeOpacity={0.7}
                 >
@@ -124,16 +144,25 @@ export default function FeedEngagementRow({
             ) : null}
 
             {showSave ? (
-                <TouchableOpacity onPress={onSave} style={styles.item} disabled={!onSave} activeOpacity={0.7}>
+                <TouchableOpacity
+                    onPress={onSave}
+                    style={[styles.item, compact && styles.itemCompact]}
+                    disabled={!onSave}
+                    activeOpacity={0.7}
+                    accessibilityLabel={isSaved ? 'Saved' : 'Save post'}
+                    accessibilityState={{ selected: isSaved }}
+                >
                     <FeedBookmarkIcon size={ACTION_ICON} color={saveColor} filled={isSaved} />
-                    <Text style={[styles.text, { color: countColor }]}>
-                        {isSaved ? 'Saved' : 'Save'}
-                    </Text>
+                    {showSaveLabel ? (
+                        <Text style={[styles.text, { color: countColor }]}>
+                            {isSaved ? 'Saved' : 'Save'}
+                        </Text>
+                    ) : null}
                 </TouchableOpacity>
             ) : null}
 
             {showViews ? (
-                <View style={styles.item}>
+                <View style={[styles.item, compact && styles.itemCompact]}>
                     <Text style={[styles.text, { color: countColor }]}>{views}</Text>
                 </View>
             ) : null}
@@ -151,6 +180,9 @@ const styles = StyleSheet.create({
         flexWrap: 'nowrap',
         minWidth: 0,
     },
+    rowCompact: {
+        columnGap: 6,
+    },
     /** Web EngagementBar: `min-h-[40px] px-1 gap-1`. */
     item: {
         flexDirection: 'row',
@@ -159,6 +191,10 @@ const styles = StyleSheet.create({
         minHeight: 40,
         paddingHorizontal: 2,
         flexShrink: 0,
+    },
+    itemCompact: {
+        paddingHorizontal: 0,
+        columnGap: 2,
     },
     text: {
         fontSize: FEED_UI.type.actionCount,
@@ -184,4 +220,3 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
 });
-

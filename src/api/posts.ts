@@ -10,7 +10,7 @@ import {
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
-import { getActiveBoostedPostIds, activateBoost } from './boost';
+import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
@@ -280,6 +280,22 @@ function savePostsToStorage(postsToSave: Post[]): void {
   void import('./postsStorage.native')
     .then((m) => m.savePostsToStorageNative(userCreatedPosts))
     .catch(() => {});
+}
+
+/** Persist Sponsored / boost tier on a post (legal disclosure). Used by mock + Stripe activate flows. */
+export function markPostAsBoosted(
+  postId: string,
+  feedType: 'local' | 'regional' | 'national',
+): void {
+  const id = String(postId);
+  const idx = posts.findIndex((p) => String(p.id) === id);
+  if (idx < 0) return;
+  posts[idx] = {
+    ...posts[idx],
+    isBoosted: true,
+    boostFeedType: feedType,
+  };
+  savePostsToStorage(posts);
 }
 
 function markPendingCreatedPost(post: Post): void {
@@ -970,12 +986,13 @@ export function decorateForUser(userId: string, p: Post): Post {
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
   const isFollowing = hasExplicitFollowState(s.follows, p.userHandle) ? fromLocal : fromApi;
+  const idKey = String(p.id);
   const decorated = {
     ...p,
-    userLiked: !!s.likes[p.id],
-    isBookmarked: !!s.bookmarks[p.id],
+    userLiked: !!s.likes[idKey] || !!s.likes[p.id],
+    isBookmarked: !!s.bookmarks[idKey] || !!s.bookmarks[p.id],
     isFollowing,
-    userReclipped: !!s.reclips[p.id],
+    userReclipped: !!s.reclips[idKey] || !!s.reclips[p.id],
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
     textStyle: p.textStyle,
@@ -1277,13 +1294,12 @@ function collectDevMockVideoPostCandidates(): Post[] {
 
 function devMockVideosForDiscoverTab(userId: string): Post[] {
   const all = collectDevMockVideoPostCandidates();
-  // Pure mock mode: always surface demo MP4s on Following (no Laravel).
-  if (!isLaravelApiEnabled()) return all;
   const follows = getFollowsForDiscover(userId);
   const followsSarah = getFollowState(follows, 'Sarah@Artane');
   const followsBob =
     getFollowState(follows, 'Bob@Ireland') || getFollowState(follows, 'Bob@Finglas');
   const followsAlice = getFollowState(follows, 'Alice@Finglas');
+  // Following feed: only people you actually follow (no “dump all demos in mock” shortcut).
   if (!followsSarah && !followsBob && !followsAlice) return [];
   return all.filter((p) => {
     const h = (p.userHandle || '').toLowerCase();
@@ -1294,16 +1310,13 @@ function devMockVideosForDiscoverTab(userId: string): Post[] {
   });
 }
 
-/** Which demo MP4 posts belong on this tab (mock mode is permissive on core location tabs). */
+/** Which demo MP4 posts belong on this tab (respect author location — no Artane→Finglas leak). */
 function collectDevMockVideoPostsForTab(tab: string, userId: string): Post[] {
   const t = tab.toLowerCase();
   if (t === 'clips') return [];
   if (t === 'discover') return devMockVideosForDiscoverTab(userId);
   const all = collectDevMockVideoPostCandidates();
-  // Mock mode: show all demo videos on Finglas / Dublin / Ireland so the news feed isn't empty.
-  if (!isLaravelApiEnabled() && (t === 'finglas' || t === 'dublin' || t === 'ireland')) {
-    return all;
-  }
+  // Always match author location to the tab (Finglas ≠ Artane).
   return all.filter((p) => postMatchesLocationTab(p, tab));
 }
 
@@ -1566,14 +1579,19 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         if (!posts.find(p => p.id === avaNormal.id)) posts.push(avaNormal);
       }
 
-      // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-      // boostedSetApi already fetched in parallel above
-      if (boostedSetApi.size > 0) {
-        items = items.map(p =>
-          boostedSetApi.has(p.id)
-            ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedTypeApi ?? 'regional' }
-            : p
-        );
+      // Mark ANY actively boosted post as Sponsored (legal disclosure) — not only the current tab's boost tier.
+      const allBoostLabels = await getAllActiveBoostLabels();
+      for (const id of boostedSetApi) allBoostLabels.set(String(id), (feedTypeApi ?? 'regional') as any);
+      if (allBoostLabels.size > 0) {
+        items = items.map((p) => {
+          const label = allBoostLabels.get(String(p.id));
+          if (!label && !p.isBoosted) return p;
+          return {
+            ...p,
+            isBoosted: true as const,
+            boostFeedType: p.boostFeedType ?? label ?? feedTypeApi ?? 'regional',
+          };
+        });
       }
 
       // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
@@ -1653,9 +1671,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       if (isOwn) {
         if (t === 'discover') return true; // Following feed: always show your posts
 
-        // For your own posts in the three core location tabs (local / regional / national),
-        // always show them – users expect to see their own posts in all of their tiers.
-        if (['finglas', 'dublin', 'ireland'].includes(t)) {
+        // Always show your own posts on your profile location tiers (and legacy Dublin demo tabs).
+        const ownTabs = [_userLocal, _userRegional, _userNational]
+          .map((s) => (s || '').trim().toLowerCase())
+          .filter(Boolean);
+        if (ownTabs.includes(t) || ['finglas', 'dublin', 'ireland'].includes(t)) {
           return true;
         }
 
@@ -1863,13 +1883,23 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         items = merged;
       }
     }
-    // Mark any post that is in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-    if (boostedIdsSet.size > 0) {
-      items = items.map(p =>
-        boostedIdsSet.has(p.id)
-          ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedType ?? 'regional' }
-          : p
-      );
+    // Mark ANY actively boosted post as Sponsored (legal disclosure) on every feed tab.
+    const allBoostLabels = await getAllActiveBoostLabels();
+    for (const id of boostedIdsSet) {
+      if (!allBoostLabels.has(String(id))) {
+        allBoostLabels.set(String(id), (feedType ?? 'regional') as any);
+      }
+    }
+    if (allBoostLabels.size > 0) {
+      items = items.map((p) => {
+        const label = allBoostLabels.get(String(p.id));
+        if (!label && !p.isBoosted) return p;
+        return {
+          ...p,
+          isBoosted: true as const,
+          boostFeedType: p.boostFeedType ?? label ?? feedType ?? 'regional',
+        };
+      });
     }
     // Dev/test: inject Ava's Galway demo on first page only when this tab matches her author location (mock path).
     if (isFirstPage && postMatchesLocationTab(getAvaNormalPost(), tab)) {
@@ -1948,24 +1978,32 @@ export async function toggleLike(userId: string, id: string, currentPost?: Post)
   // Pure mock implementation
   await delay(150);
   const s = getState(userId);
-  let p = posts.find(x => x.id === id);
+  const idKey = String(id);
+  let p = posts.find((x) => String(x.id) === idKey);
+  // Prefer explicit UI liked state when provided — avoids desync that drives likes to -1.
+  const was =
+    currentPost && typeof currentPost.userLiked === 'boolean'
+      ? currentPost.userLiked
+      : !!s.likes[idKey] || !!s.likes[id];
+  const nextLiked = !was;
+  s.likes[idKey] = nextLiked;
+  if (idKey !== id) s.likes[id] = nextLiked;
+
   if (!p && currentPost) {
-    // Post not in global store (e.g. mock Ava/Sarah injected only in feed) – update user like state and return updated currentPost
-    const was = !!s.likes[id];
-    s.likes[id] = !was;
-    const nextLikes = Math.max(0, currentPost.stats.likes + (was ? -1 : 1));
+    const baseLikes = Math.max(0, Number(currentPost.stats?.likes) || 0);
+    const nextLikes = Math.max(0, baseLikes + (was ? -1 : 1));
     return decorateForUser(userId, {
       ...currentPost,
-      userLiked: !was,
+      id: currentPost.id ?? id,
+      userLiked: nextLiked,
       stats: { ...currentPost.stats, likes: nextLikes },
     });
   }
   if (!p) {
     throw new Error('Post not found');
   }
-  const was = !!s.likes[id];
-  s.likes[id] = !was;
-  p.stats.likes += was ? -1 : 1;
+  const baseLikes = Math.max(0, Number(p.stats?.likes) || 0);
+  p.stats.likes = Math.max(0, baseLikes + (was ? -1 : 1));
   return decorateForUser(userId, p);
 }
 

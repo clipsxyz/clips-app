@@ -202,14 +202,13 @@ export default function TextOnlyPostPage() {
             return;
         }
 
-        // Show TikTok-style mini overlay and immediately return to feed.
-        // For text-only posts we reflect the chosen template background in the mini thumbnail.
+        // Show TikTok-style mini overlay while posting, then land on feed with the new post injected.
+        // (Do not navigate before createPost finishes — that races postCreated clearing an empty cursor=0 feed.)
         const overlay = showUploadOverlay({
             initialMessage: 'Posting to Gazetteer…',
             background: activeTemplate ? activeTemplate.background : '#000000',
             label: activeTemplate ? activeTemplate.name?.charAt(0).toUpperCase() || 'Aa' : 'Aa',
         });
-        navigate('/feed');
 
         setIsSubmitting(true);
         try {
@@ -224,7 +223,7 @@ export default function TextOnlyPostPage() {
                 }
                 : { color: '#ffffff', size: 'medium', background: '#000000' };
 
-            await createPost(
+            const newPost = await createPost(
                 user.id,
                 user.handle,
                 text.trim(), // text
@@ -252,9 +251,19 @@ export default function TextOnlyPostPage() {
                 landmarkText.trim() || undefined // landmark
             );
 
+            window.dispatchEvent(new CustomEvent('localPostCreated', {
+                detail: { post: newPost },
+            }));
             window.dispatchEvent(new CustomEvent('postCreated'));
             showToast('Post created successfully!');
             overlay.success('Your post is now live on the feed.');
+            // Prefer id-only route state so large payloads (images) never blow History state limits.
+            navigate('/feed', {
+                state: {
+                    createdPostId: newPost.id,
+                    forceRefreshAt: Date.now(),
+                },
+            });
         } catch (error) {
             console.error('Error creating post:', error);
             showToast('Failed to create post. Please try again.');

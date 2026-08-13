@@ -67,12 +67,15 @@ export default function StorySafeVideo({
                 muted={muted}
                 repeat={repeat}
                 paused={paused}
+                volume={muted ? 0 : 1}
                 playInBackground={false}
                 playWhenInactive={false}
                 viewType={ViewType.TEXTURE}
                 useTextureView
                 hideShutterView
                 ignoreSilentSwitch="ignore"
+                mixWithOthers="mix"
+                disableFocus
                 poster={
                     posterSource
                         ? {

@@ -692,13 +692,14 @@ export default function GalleryPreviewPage() {
             };
             clearGalleryPreviewMedia();
             showToast('Post created successfully!');
-            window.dispatchEvent(new CustomEvent('postCreated'));
             window.dispatchEvent(new CustomEvent('localPostCreated', {
                 detail: { post: newPost }
             }));
+            window.dispatchEvent(new CustomEvent('postCreated'));
+            // Id-only state: full image data URLs can exceed History state limits and drop the inject.
             navigate('/feed', {
                 state: {
-                    createdPost: newPost,
+                    createdPostId: newPost.id,
                     forceRefreshAt: Date.now(),
                 },
             });

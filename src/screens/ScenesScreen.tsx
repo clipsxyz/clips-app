@@ -72,6 +72,7 @@ export default function ScenesScreen({ route, navigation }: any) {
                 feedLabel={params.feedLabel}
                 viewerUserId={user?.id ?? 'anon'}
                 viewerHandle={user?.handle}
+                viewerAvatarUrl={user?.avatarUrl}
                 onClose={handleClose}
                 onVisitProfile={(handle) =>
                     navigation.navigate('ViewProfile', { handle })

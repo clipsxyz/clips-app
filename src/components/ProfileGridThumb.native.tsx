@@ -44,17 +44,11 @@ export default function ProfileGridThumb({ post }: Props) {
     ) : null;
 
     const videoOverlays = (
-        <>
-            <View style={styles.playCenter} pointerEvents="none">
-                <View style={styles.playCircle}>
-                    <Icon name="play" size={22} color="#FFFFFF" style={styles.playIconOffset} />
-                </View>
+        <View style={styles.playCenter} pointerEvents="none">
+            <View style={styles.playCircle}>
+                <Icon name="play" size={22} color="#FFFFFF" style={styles.playIconOffset} />
             </View>
-            <View style={styles.videoBadge} pointerEvents="none">
-                <Icon name="videocam" size={10} color="#FFFFFF" />
-                <Text style={styles.videoBadgeText}>Video</Text>
-            </View>
-        </>
+        </View>
     );
 
     const bodyText = getPostBodyText(post);
@@ -157,25 +151,6 @@ const styles = StyleSheet.create({
     },
     playIconOffset: {
         marginLeft: 2,
-    },
-    videoBadge: {
-        position: 'absolute',
-        right: 6,
-        bottom: 6,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 3,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-    },
-    videoBadgeText: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '600',
     },
     locationBadge: {
         position: 'absolute',

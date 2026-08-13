@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import { searchLocations, type LocationSuggestion } from '../api/locations';
+import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '../api/locations';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
@@ -100,6 +100,8 @@ export default function DiscoverScreen({ navigation }: any) {
             setLoading(false);
             return;
         }
+        // Paint local matches immediately so the dropdown never waits on network.
+        setSuggestions(searchLocalGazetteer(q, 20, 'all'));
         const ctrl = new AbortController();
         const id = setTimeout(async () => {
             try {
@@ -107,11 +109,13 @@ export default function DiscoverScreen({ navigation }: any) {
                 const res = await searchLocations(q, 20, 'all', ctrl.signal);
                 if (!ctrl.signal.aborted) setSuggestions(res);
             } catch (e) {
-                if (!ctrl.signal.aborted && (e as Error)?.name !== 'AbortError') setSuggestions([]);
+                if (!ctrl.signal.aborted && (e as Error)?.name !== 'AbortError') {
+                    setSuggestions(searchLocalGazetteer(q, 20, 'all'));
+                }
             } finally {
                 if (!ctrl.signal.aborted) setLoading(false);
             }
-        }, 200);
+        }, 120);
         return () => {
             clearTimeout(id);
             ctrl.abort();

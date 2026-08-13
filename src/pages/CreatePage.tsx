@@ -811,6 +811,7 @@ export default function CreatePage() {
                     window.dispatchEvent(new CustomEvent('localPostCreated', {
                         detail: { post: newPost }
                     }));
+                    window.dispatchEvent(new CustomEvent('postCreated'));
                 }
 
                 // Reset form
@@ -825,10 +826,10 @@ export default function CreatePage() {
                 setStickers([]);
                 setTaggedUsers([]);
 
-                // Navigate back to feed with created post for deterministic injection
+                // Id-only state: full image data URLs can exceed History state limits and drop the inject.
                 navigate('/feed', {
                     state: {
-                        createdPost: newPost,
+                        createdPostId: newPost.id,
                         forceRefreshAt: Date.now(),
                     },
                 });

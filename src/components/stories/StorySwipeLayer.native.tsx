@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { View, PanResponder, StyleSheet, type ViewProps } from 'react-native';
 
 const SWIPE_THRESHOLD = 40;
+const HOLD_DELAY_MS = 140;
 
 type Props = ViewProps & {
     enabled: boolean;
@@ -12,7 +13,11 @@ type Props = ViewProps & {
     children: React.ReactNode;
 };
 
-/** Horizontal swipe + hold-to-pause gesture layer (web Stories swipe parity). */
+/**
+ * Horizontal swipe + hold-to-pause.
+ * Do NOT claim the responder on touch start — that steals taps from shared-post cards
+ * (and loses to Android TextureView). Only claim after a clear horizontal move.
+ */
 export default function StorySwipeLayer({
     enabled,
     onSwipeLeft,
@@ -30,24 +35,54 @@ export default function StorySwipeLayer({
     const onSwipeRightRef = useRef(onSwipeRight);
     const onHoldStartRef = useRef(onHoldStart);
     const onHoldEndRef = useRef(onHoldEnd);
+    const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const holdingRef = useRef(false);
     enabledRef.current = enabled;
     onSwipeLeftRef.current = onSwipeLeft;
     onSwipeRightRef.current = onSwipeRight;
     onHoldStartRef.current = onHoldStart;
     onHoldEndRef.current = onHoldEnd;
 
+    const clearHoldTimer = () => {
+        if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+        }
+    };
+
+    const endHold = () => {
+        clearHoldTimer();
+        if (!holdingRef.current) return;
+        holdingRef.current = false;
+        onHoldEndRef.current?.();
+    };
+
+    const beginHoldTimer = () => {
+        if (!enabledRef.current) return;
+        clearHoldTimer();
+        holdTimerRef.current = setTimeout(() => {
+            holdTimerRef.current = null;
+            if (!enabledRef.current) return;
+            holdingRef.current = true;
+            onHoldStartRef.current?.();
+        }, HOLD_DELAY_MS);
+    };
+
     const panResponder = useRef(
         PanResponder.create({
-            onStartShouldSetPanResponder: () => enabledRef.current,
+            onStartShouldSetPanResponder: () => false,
+            onStartShouldSetPanResponderCapture: () => false,
             onMoveShouldSetPanResponder: (_, g) =>
-                enabledRef.current && (Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8),
+                enabledRef.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy),
+            onMoveShouldSetPanResponderCapture: (_, g) =>
+                enabledRef.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy),
             onPanResponderGrant: (_, gesture) => {
+                clearHoldTimer();
                 startX.current = gesture.x0;
                 startY.current = gesture.y0;
-                onHoldStartRef.current?.();
             },
             onPanResponderRelease: (_, gesture) => {
-                onHoldEndRef.current?.();
+                endHold();
                 if (startX.current == null || startY.current == null) return;
                 const dx = gesture.moveX - startX.current;
                 const dy = gesture.moveY - startY.current;
@@ -58,7 +93,7 @@ export default function StorySwipeLayer({
                 else onSwipeRightRef.current();
             },
             onPanResponderTerminate: () => {
-                onHoldEndRef.current?.();
+                endHold();
                 startX.current = null;
                 startY.current = null;
             },
@@ -69,6 +104,9 @@ export default function StorySwipeLayer({
         <View
             style={[styles.fill, style]}
             {...rest}
+            onTouchStart={() => beginHoldTimer()}
+            onTouchEnd={() => endHold()}
+            onTouchCancel={() => endHold()}
             {...(enabled ? panResponder.panHandlers : {})}
         >
             {children}

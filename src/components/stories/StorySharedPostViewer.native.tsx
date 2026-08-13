@@ -55,6 +55,7 @@ function SharedBackdrop({
     posterSource?: ImageSourcePropType;
 }) {
     // Never mount a paused Video for the blurred backdrop — TextureView shutter is black.
+    // pointerEvents none — Android TextureView steals taps meant for the card / modal.
     if (isVideo && posterSource) {
         return (
             <Image
@@ -62,6 +63,7 @@ function SharedBackdrop({
                 style={[StyleSheet.absoluteFill, styles.backdropMedia]}
                 resizeMode="cover"
                 blurRadius={18}
+                pointerEvents="none"
             />
         );
     }
@@ -69,12 +71,14 @@ function SharedBackdrop({
         const source = storyVideoSource(mediaUrl);
         if (source) {
             return (
-                <StorySafeVideo
-                    source={source}
-                    posterSource={posterSource}
-                    style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                    paused
-                />
+                <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                    <StorySafeVideo
+                        source={source}
+                        posterSource={posterSource}
+                        style={[StyleSheet.absoluteFill, styles.backdropMedia]}
+                        paused
+                    />
+                </View>
             );
         }
     }
@@ -84,6 +88,7 @@ function SharedBackdrop({
             style={[StyleSheet.absoluteFill, styles.backdropMedia]}
             resizeMode="cover"
             blurRadius={isVideo ? 0 : 12}
+            pointerEvents="none"
         />
     );
 }
@@ -105,20 +110,36 @@ function SharedCardMedia({
         const source = storyVideoSource(mediaUrl);
         if (source) {
             return (
-                <StorySafeVideo
-                    source={source}
-                    posterSource={posterSource}
-                    style={styles.cardMedia}
-                    muted={isMuted}
-                    paused={paused}
-                />
+                <View style={styles.cardMedia} pointerEvents="none">
+                    <StorySafeVideo
+                        source={source}
+                        posterSource={posterSource}
+                        style={StyleSheet.absoluteFill}
+                        muted={isMuted}
+                        paused={paused}
+                    />
+                </View>
             );
         }
         if (posterSource) {
-            return <Image source={posterSource} style={styles.cardMedia} resizeMode="cover" />;
+            return (
+                <Image
+                    source={posterSource}
+                    style={styles.cardMedia}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
+            );
         }
     }
-    return <Image source={{ uri: mediaUrl }} style={styles.cardMedia} resizeMode="cover" />;
+    return (
+        <Image
+            source={{ uri: mediaUrl }}
+            style={styles.cardMedia}
+            resizeMode="cover"
+            pointerEvents="none"
+        />
+    );
 }
 
 type Props = {

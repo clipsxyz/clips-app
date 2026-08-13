@@ -134,6 +134,8 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [storyFollowRequested, setStoryFollowRequested] = useState(false);
     const [isFollowLoading, setIsFollowLoading] = useState(false);
     const [showSharedPostModal, setShowSharedPostModal] = useState(false);
+    /** Tear down story ExoPlayer before Scenes mounts the same URL (avoids lagged audio). */
+    const [suspendStoryMedia, setSuspendStoryMedia] = useState(false);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
     const [fullscreenCommentsPost, setFullscreenCommentsPost] = useState<Post | null>(null);
     const [fullscreenSharePost, setFullscreenSharePost] = useState<Post | null>(null);
@@ -696,14 +698,23 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (!originalPost) return;
         setShowSharedPostModal(false);
         setPaused(true);
+        setIsMuted(true);
 
         // Scenes is video-only — still images + text use the fullscreen overlay (wired actions).
         if (postHasVideoMedia(originalPost)) {
             openedFullPostRef.current = true;
-            navigation.navigate('Scenes', {
-                initialPostId: originalPost.id,
-                posts: [originalPost],
-                feedLabel: 'Stories',
+            // Unmount story TextureView first so Scenes doesn't fight the same audio session.
+            setSuspendStoryMedia(true);
+            const post = originalPost;
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    navigation.navigate('Scenes', {
+                        initialPostId: post.id,
+                        posts: [post],
+                        feedLabel: 'Stories',
+                        initialMuted: true,
+                    });
+                }, 40);
             });
             return;
         }
@@ -826,6 +837,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         useCallback(() => {
             if (!openedFullPostRef.current) return;
             openedFullPostRef.current = false;
+            setSuspendStoryMedia(false);
             if (!showInlineReplyComposerRef.current) setPaused(false);
         }, []),
     );
@@ -1187,6 +1199,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                         onHoldEnd={releaseHold}
                     >
                         {currentStory.sharedFromPost ? (
+                            suspendStoryMedia ? (
+                                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} />
+                            ) : (
                             <StorySharedPostViewer
                                 story={currentStory}
                                 originalPost={originalPost}
@@ -1204,6 +1219,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     }, 100);
                                 }}
                             />
+                            )
+                        ) : suspendStoryMedia ? (
+                            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} />
                         ) : (
                             <StoryViewerMedia
                                 story={currentStory}

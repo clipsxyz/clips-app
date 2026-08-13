@@ -152,26 +152,30 @@ export default function MyFeedPostCard({
             />
 
             <View style={styles.engagementBar}>
-                <FeedEngagementRow
-                    likeButtonRef={likeButtonRef}
-                    likes={post.stats?.likes ?? 0}
-                    comments={post.stats?.comments ?? 0}
-                    shares={post.stats?.shares ?? 0}
-                    reclips={post.stats?.reclips ?? 0}
-                    userLiked={post.userLiked}
-                    userReclipped={post.userReclipped}
-                    isSaved={post.isBookmarked}
-                    onLike={onLikePress}
-                    onLikesPress={() => {
-                        if ((post.stats?.likes ?? 0) > 0) setLikesSheetVisible(true);
-                    }}
-                    onComment={onCommentPress}
-                    onShareToStories={() => setShareToStoriesVisible(true)}
-                    onReclip={onReclipPress}
-                    onSave={onBookmarkPress}
-                    showReclip={Boolean(onReclipPress)}
-                    tone="feed"
-                />
+                <View style={styles.engagementLeft}>
+                    <FeedEngagementRow
+                        likeButtonRef={likeButtonRef}
+                        likes={post.stats?.likes ?? 0}
+                        comments={post.stats?.comments ?? 0}
+                        shares={post.stats?.shares ?? 0}
+                        reclips={post.stats?.reclips ?? 0}
+                        userLiked={post.userLiked}
+                        userReclipped={post.userReclipped}
+                        isSaved={post.isBookmarked}
+                        onLike={onLikePress}
+                        onLikesPress={() => {
+                            if ((post.stats?.likes ?? 0) > 0) setLikesSheetVisible(true);
+                        }}
+                        onComment={onCommentPress}
+                        onShareToStories={() => setShareToStoriesVisible(true)}
+                        onReclip={onReclipPress}
+                        onSave={onBookmarkPress}
+                        showReclip={Boolean(onReclipPress)}
+                        showSaveLabel={!post.isBoosted}
+                        compact={Boolean(post.isBoosted)}
+                        tone="feed"
+                    />
+                </View>
                 <FeedEngagementRightActions
                     showMetrics={Boolean(post.isBoosted)}
                     metricsOpen={boostMetricsOpen}
@@ -256,6 +260,13 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
         borderTopWidth: 1,
         borderTopColor: 'rgba(255,255,255,0.06)',
+        minWidth: 0,
+    },
+    engagementLeft: {
+        flex: 1,
+        minWidth: 0,
+        flexShrink: 1,
+        marginRight: 8,
     },
     rightActions: {
         flexDirection: 'row',

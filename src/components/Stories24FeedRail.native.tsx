@@ -110,28 +110,43 @@ function StoryPreviewVideo({
     const posterSource =
         posterUri && !posterUri.startsWith('#') ? { uri: posterUri } : undefined;
 
+    // Android TextureView steals touches — keep preview non-interactive so the card press works.
     if (effectivelyPaused) {
         if (posterSource) {
-            return <Image source={posterSource} style={StyleSheet.absoluteFill} resizeMode="cover" />;
+            return (
+                <Image
+                    source={posterSource}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
+            );
         }
-        return <View style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />;
+        return (
+            <View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
+            />
+        );
     }
 
     return (
-        <StorySafeVideo
-            videoRef={videoRef}
-            source={source}
-            posterSource={posterSource}
-            style={StyleSheet.absoluteFill}
-            muted
-            repeat
-            paused={effectivelyPaused}
-            onProgress={({ currentTime }) => {
-                if (currentTime > 3) {
-                    videoRef.current?.seek(0);
-                }
-            }}
-        />
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <StorySafeVideo
+                videoRef={videoRef}
+                source={source}
+                posterSource={posterSource}
+                style={StyleSheet.absoluteFill}
+                muted
+                repeat
+                paused={effectivelyPaused}
+                onProgress={({ currentTime }) => {
+                    if (currentTime > 3) {
+                        videoRef.current?.seek(0);
+                    }
+                }}
+            />
+        </View>
     );
 }
 
@@ -157,11 +172,27 @@ function StoryCard({
     const displayHandle = item.handle.startsWith('@') ? item.handle : `@${item.handle.replace(/^@/, '')}`;
 
     const measureAndPress = () => {
+        const fallback: CardRect = { x: 0, y: 0, width: CARD_W, height: CARD_H };
         const node = cardRef.current;
-        if (!node) return;
+        if (!node) {
+            onPress(fallback);
+            return;
+        }
+        let settled = false;
+        const settle = (rect: CardRect) => {
+            if (settled) return;
+            settled = true;
+            onPress(rect);
+        };
         node.measureInWindow((x, y, width, height) => {
-            onPress({ x, y, width, height });
+            if (width < 8 || height < 8) {
+                settle(fallback);
+                return;
+            }
+            settle({ x, y, width, height });
         });
+        // Android can drop measureInWindow after rail remount (e.g. post share refresh).
+        setTimeout(() => settle(fallback), 64);
     };
 
     const setCardRef = (node: View | null) => {
@@ -224,7 +255,12 @@ function StoryCard({
                         paused={previewVideosPaused}
                     />
                 ) : item.thumb ? (
-                    <Image source={{ uri: item.thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    <Image
+                        source={{ uri: item.thumb }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                        pointerEvents="none"
+                    />
                 ) : null}
                 <LinearGradient
                     colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.85)']}
@@ -282,13 +318,17 @@ function Stories24ExpandOverlay({
             1,
             { duration: STORIES24_EXPAND_MS, easing: EXPAND_EASE },
             (ok) => {
-                if (ok) runOnJS(finish)();
+                // Finish even when cancelled mid-flight so taps aren't stuck behind expand state.
+                runOnJS(finish)();
+                void ok;
             },
         );
         const fallback = setTimeout(finish, STORIES24_EXPAND_MS + 100);
         return () => {
             clearTimeout(fallback);
             cancelAnimation(progress);
+            // If feed refresh tears down the morph, still open Stories.
+            finish();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expanding]);
@@ -596,7 +636,11 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         const handleKey = normalizeStories24Handle(first.handle);
         const node = cardRefs.current[handleKey];
         const startExpand = (rect: CardRect) => {
-            if (expandingRef.current) return;
+            if (expandingRef.current) {
+                onOpenStory(first, railHandles);
+                setExpanding(null);
+                return;
+            }
             lastOpenRectByHandleRef.current[handleKey] = rect;
             setExpanding({ item: first, railHandles, rect });
         };
@@ -619,9 +663,14 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     if (items.length === 0) return null;
 
     const handleStoryCardPress = (item: Stories24RailItem, rect: CardRect) => {
-        if (expandingRef.current) return;
         const handleKey = normalizeStories24Handle(item.handle);
         lastOpenRectByHandleRef.current[handleKey] = rect;
+        // If a morph is already in flight (or stuck), open immediately instead of eating taps.
+        if (expandingRef.current) {
+            onOpenStory(item, railHandles);
+            setExpanding(null);
+            return;
+        }
         setExpanding({ item, railHandles, rect });
     };
 

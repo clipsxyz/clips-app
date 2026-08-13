@@ -22,6 +22,7 @@ import {
     Platform,
     useWindowDimensions,
     Animated,
+    DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -161,7 +162,7 @@ import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
-import { getActiveBoost } from '../api/boost';
+import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
@@ -1336,6 +1337,8 @@ const FeedCard = React.memo(function FeedCard({
                         reclipDisabled={isCurrentUser}
                         onSave={() => { void onBookmark(); }}
                         showReclip
+                        showSaveLabel={!showBoostMetrics}
+                        compact={showBoostMetrics}
                         tone="feed"
                     />
                 </View>
@@ -1466,6 +1469,60 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         hiddenPostIds: new Set(),
         notInterestedPostIds: new Set(),
     });
+
+    // Legal: keep Sponsored visible on any actively boosted post in the loaded feed.
+    const applySponsoredLabels = useCallback(async () => {
+        try {
+            const labels = await getAllActiveBoostLabels();
+            if (labels.size === 0) return;
+            setPages((prev) =>
+                prev.map((page) =>
+                    page.map((p) => {
+                        const ft = labels.get(String(p.id));
+                        if (!ft) return p;
+                        if (p.isBoosted && p.boostFeedType === ft) return p;
+                        return {
+                            ...p,
+                            isBoosted: true,
+                            boostFeedType: p.boostFeedType ?? ft,
+                        };
+                    }),
+                ),
+            );
+        } catch {
+            /* ignore */
+        }
+    }, []);
+
+    useEffect(() => {
+        const sub = DeviceEventEmitter.addListener(
+            'boostActivated',
+            (payload: { postId?: string; feedType?: 'local' | 'regional' | 'national' }) => {
+                const postId = payload?.postId ? String(payload.postId) : '';
+                if (!postId) return;
+                setPages((prev) =>
+                    prev.map((page) =>
+                        page.map((p) =>
+                            String(p.id) === postId
+                                ? {
+                                      ...p,
+                                      isBoosted: true,
+                                      boostFeedType: payload.feedType ?? p.boostFeedType ?? 'regional',
+                                  }
+                                : p,
+                        ),
+                    ),
+                );
+            },
+        );
+        return () => sub.remove();
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            void applySponsoredLabels();
+        }, [applySponsoredLabels]),
+    );
     const [cursor, setCursor] = useState<string | number | null>(0);
     const [initialLoading, setInitialLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
@@ -3527,9 +3584,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                                   userLiked: updated.userLiked ?? !prevLiked,
                                                   stats: {
                                                       ...p.stats,
-                                                      likes:
-                                                          updated.stats?.likes ??
-                                                          Math.max(0, prevLikes + (prevLiked ? -1 : 1)),
+                                                      likes: Math.max(
+                                                          0,
+                                                          typeof updated.stats?.likes === 'number'
+                                                              ? updated.stats.likes
+                                                              : prevLikes + (prevLiked ? -1 : 1),
+                                                      ),
                                                   },
                                               }
                                             : p,

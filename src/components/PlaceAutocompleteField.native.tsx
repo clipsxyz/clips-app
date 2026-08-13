@@ -9,7 +9,7 @@ import {
   type TextInputProps,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { searchLocations, type LocationSuggestion } from '../api/locations';
+import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '../api/locations';
 import {
   feedHeaderLabelFromSuggestion,
   formatFeedLevelsLine,
@@ -61,18 +61,19 @@ export default function PlaceAutocompleteField({
       return;
     }
     const ctrl = new AbortController();
+    const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : 'location';
+    setSuggestions(searchLocalGazetteer(q, 12, apiMode));
     const id = setTimeout(async () => {
       try {
         setLoading(true);
-        const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : 'location';
         const res = await searchLocations(q, 12, apiMode, ctrl.signal);
         if (!ctrl.signal.aborted) setSuggestions(res);
       } catch {
-        if (!ctrl.signal.aborted) setSuggestions([]);
+        if (!ctrl.signal.aborted) setSuggestions(searchLocalGazetteer(q, 12, apiMode));
       } finally {
         if (!ctrl.signal.aborted) setLoading(false);
       }
-    }, 200);
+    }, 120);
     return () => {
       clearTimeout(id);
       ctrl.abort();

@@ -158,14 +158,22 @@ function MainTabs() {
       )}
     >
       <Tab.Screen name="Home" component={HomeTabStack} options={{ title: 'Home' }} />
-      <Tab.Screen name="Boost" component={BoostTabStack} options={{ title: 'Boost' }} />
+      <Tab.Screen
+        name="Boost"
+        component={BoostTabStack}
+        options={{ title: 'Boost', lazy: false }}
+      />
       <Tab.Screen
         name="Create"
         component={CreateTabPlaceholder}
         options={{ title: 'Create' }}
       />
       <Tab.Screen name="Search" component={SearchTabStack} options={{ title: 'Search' }} />
-      <Tab.Screen name="Inbox" component={InboxTabStack} options={{ title: 'Inbox' }} />
+      <Tab.Screen
+        name="Inbox"
+        component={InboxTabStack}
+        options={{ title: 'Inbox', lazy: false }}
+      />
     </Tab.Navigator>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     View,
     Text,
@@ -8,24 +8,19 @@ import {
     ActivityIndicator,
     Alert,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
+import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { chipActiveMagenta, chipActiveMagentaText, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
 import BoostSelectionModal from '../components/BoostSelectionModal.native';
 import BoostPostTile, { boostTileSize } from '../components/BoostPostTile.native';
-import { getActiveBoost, getBoostAnalytics, type BoostAnalytics } from '../api/boost';
+import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import {
     classifyBoostStatus,
-    getQualityLabel,
-    getQualityReason,
-    estimateReachTeaser,
-    boostStatusLabel,
 } from '../utils/boostPostGrid';
 
-import { buildInstantAnalytics } from '../utils/boostInsightsNative';
 import BoostInsightsSheet from '../components/BoostInsightsSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -37,28 +32,35 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [error, setError] = useState<string | null>(null);
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [showBoostModal, setShowBoostModal] = useState(false);
-    const [analyticsByPostId, setAnalyticsByPostId] = useState<Record<string, BoostAnalytics>>({});
     const [boostFilter, setBoostFilter] = useState<'all' | 'ready' | 'active' | 'ended'>('all');
     const [boostSort, setBoostSort] = useState<'best' | 'recent'>('best');
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
-    const analyticsCacheRef = useRef<Map<string, { data: BoostAnalytics; ts: number }>>(new Map());
 
-    useEffect(() => {
-        loadUserPosts();
-    }, [user?.handle]);
-
-    const loadUserPosts = async () => {
+    const loadUserPosts = useCallback(async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
             setLoading(false);
             return;
         }
-        setLoading(true);
+        if (!opts?.silent) {
+            setLoading(true);
+        }
         setError(null);
         try {
             const userPosts = await fetchPostsByUser(user.handle, 50);
-            const decorated = userPosts.map(p => decorateForUser(userId, p));
+            // One map lookup for all Sponsored flags — avoid N× getActiveBoost (was timing out on API in mock).
+            const boostLabels = await getAllActiveBoostLabels();
+            const decorated = userPosts.map((p) => {
+                const base = decorateForUser(userId, p);
+                const feedType = boostLabels.get(String(p.id));
+                if (!feedType && !base.isBoosted) return base;
+                return {
+                    ...base,
+                    isBoosted: true as const,
+                    boostFeedType: base.boostFeedType ?? feedType ?? 'regional',
+                };
+            });
             setPosts(decorated);
         } catch (err) {
             console.error('Error loading user posts:', err);
@@ -66,7 +68,18 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [user?.handle, userId]);
+
+    useEffect(() => {
+        void loadUserPosts();
+    }, [loadUserPosts]);
+
+    // Soft refresh on focus — keep existing tiles visible (no full-screen spinner).
+    useFocusEffect(
+        useCallback(() => {
+            void loadUserPosts({ silent: true });
+        }, [loadUserPosts]),
+    );
 
     const openBoostModal = useCallback(async (post: Post) => {
         setSelectedPost(post);
@@ -103,7 +116,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const filteredPosts = useMemo(() => {
         if (boostFilter === 'all') return posts;
         return posts.filter((p) => classifyBoostStatus(p) === boostFilter);
-    }, [posts, boostFilter, classifyBoostStatus]);
+    }, [posts, boostFilter]);
 
     const sortedPosts = useMemo(() => {
         const next = [...filteredPosts];
@@ -120,35 +133,11 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         const ready = posts.filter((p) => classifyBoostStatus(p) === 'ready').length;
         const ended = posts.filter((p) => classifyBoostStatus(p) === 'ended').length;
         return { active, ready, ended, total: posts.length };
-    }, [posts, classifyBoostStatus]);
-
-    const getInsightsCached = useCallback(async (postId: string) => {
-        const key = `${insightsRange}:${postId}`;
-        const cached = analyticsCacheRef.current.get(key);
-        const ttlMs = 60 * 1000;
-        if (cached && Date.now() - cached.ts < ttlMs) return cached.data;
-        const data = await getBoostAnalytics(postId, insightsRange);
-        analyticsCacheRef.current.set(key, { data, ts: Date.now() });
-        return data;
-    }, [insightsRange]);
-
-    useEffect(() => {
-        sortedPosts.slice(0, 8).forEach((p) => {
-            void getInsightsCached(p.id)
-                .then((analytics) => {
-                    setAnalyticsByPostId((prev) => ({ ...prev, [p.id]: prev[p.id] || analytics }));
-                })
-                .catch(() => {});
-        });
-    }, [sortedPosts, getInsightsCached]);
+    }, [posts]);
 
     const openInsights = (post: Post) => {
         setInsightsPost(post);
         setInsightsVisible(true);
-        setAnalyticsByPostId((prev) => ({
-            ...prev,
-            [post.id]: prev[post.id] || buildInstantAnalytics(post),
-        }));
     };
 
     if (!user) {
@@ -257,60 +246,30 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                     columnWrapperStyle={styles.gridRow}
                     contentContainerStyle={styles.gridContent}
                     renderItem={({ item }) => {
-                        const status = classifyBoostStatus(item);
-                        const quality = getQualityLabel(item);
-                        const qualityToneStyle =
-                            quality.tone === 'emerald'
-                                ? styles.qualityEmerald
-                                : quality.tone === 'sky'
-                                  ? styles.qualitySky
-                                  : styles.qualityAmber;
-                        const statusToneStyle =
-                            status === 'active'
-                                ? styles.statusActive
-                                : status === 'ended'
-                                  ? styles.statusEnded
-                                  : styles.statusReady;
-
                         return (
                             <View style={[styles.gridCell, { width: tileSize }]}>
-                                <View style={styles.tileMetaCard}>
-                                    <View style={styles.tileMetaRow}>
-                                        <Text style={[styles.qualityPill, qualityToneStyle]}>
-                                            {quality.label}
-                                        </Text>
-                                        <Text style={[styles.statusPill, statusToneStyle]}>
-                                            {boostStatusLabel(status)}
+                                <View style={[styles.tileWrap, { width: tileSize, height: tileSize }]}>
+                                    <BoostPostTile
+                                        post={item}
+                                        size={tileSize}
+                                        showBoostIcon
+                                        onPress={() => {
+                                            void openBoostModal(item);
+                                        }}
+                                    />
+                                    <View style={styles.tileOverlayBadges} pointerEvents="none">
+                                        <Text style={styles.tapToBoostPill} numberOfLines={1}>
+                                            Tap to boost
                                         </Text>
                                     </View>
-                                    <Text style={styles.tileMetaReason} numberOfLines={2}>
-                                        {getQualityReason(item)}
-                                    </Text>
-                                    <Text style={styles.tileMetaReach} numberOfLines={1}>
-                                        {estimateReachTeaser(item)} from base EUR 4.99
-                                    </Text>
                                 </View>
                                 <TouchableOpacity
                                     onPress={() => openInsights(item)}
                                     style={styles.insightsBtn}
+                                    hitSlop={6}
                                 >
-                                    <Text style={styles.insightsBtnText}>View insights</Text>
+                                    <Text style={styles.insightsBtnText}>Insights</Text>
                                 </TouchableOpacity>
-                                {analyticsByPostId[item.id]?.hasBoost &&
-                                analyticsByPostId[item.id]?.analytics ? (
-                                    <Text style={styles.tileInsightsHint} numberOfLines={1}>
-                                        {analyticsByPostId[item.id]?.analytics?.impressions ?? 0} imp ·{' '}
-                                        {analyticsByPostId[item.id]?.analytics?.likes ?? 0} likes
-                                    </Text>
-                                ) : null}
-                                <BoostPostTile
-                                    post={item}
-                                    size={tileSize}
-                                    showBoostIcon
-                                    onPress={() => {
-                                        void openBoostModal(item);
-                                    }}
-                                />
                             </View>
                         );
                     }}
@@ -446,100 +405,53 @@ const styles = StyleSheet.create({
     },
     gridRow: {
         gap: ox(6),
-        marginBottom: ox(6),
+        marginBottom: ox(10),
+        alignItems: 'flex-start',
     },
     gridCell: {
-        marginBottom: ox(10),
+        marginBottom: ox(4),
     },
-    tileMetaCard: {
-        borderRadius: ox(10),
-        padding: ox(8),
-        marginBottom: ox(6),
-        ...glassPanel,
+    tileWrap: {
+        borderRadius: ox(12),
+        overflow: 'hidden',
+        position: 'relative',
     },
-    tileMetaRow: {
+    tileOverlayBadges: {
+        position: 'absolute',
+        left: ox(6),
+        right: ox(6),
+        bottom: ox(6),
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: ox(4),
-        marginBottom: ox(4),
     },
-    qualityPill: {
-        fontSize: ox(9),
+    tapToBoostPill: {
+        fontSize: ox(10),
         fontWeight: '700',
-        paddingHorizontal: ox(6),
-        paddingVertical: ox(2),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(4),
         borderRadius: ox(999),
-        borderWidth: 1,
         overflow: 'hidden',
-    },
-    qualityEmerald: {
-        color: '#6EE7B7',
-        borderColor: 'rgba(52, 211, 153, 0.4)',
-        backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    },
-    qualitySky: {
-        color: '#7DD3FC',
-        borderColor: 'rgba(56, 189, 248, 0.4)',
-        backgroundColor: 'rgba(14, 165, 233, 0.12)',
-    },
-    qualityAmber: {
-        color: '#FCD34D',
-        borderColor: 'rgba(251, 191, 36, 0.4)',
-        backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    },
-    statusPill: {
-        fontSize: ox(9),
-        fontWeight: '700',
-        paddingHorizontal: ox(6),
-        paddingVertical: ox(2),
-        borderRadius: ox(999),
+        color: '#FFFFFF',
+        backgroundColor: 'rgba(0,0,0,0.72)',
         borderWidth: 1,
-    },
-    statusActive: {
-        color: '#6EE7B7',
-        borderColor: 'rgba(52, 211, 153, 0.4)',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    },
-    statusEnded: {
-        color: '#D1D5DB',
-        borderColor: 'rgba(156, 163, 175, 0.35)',
-        backgroundColor: 'rgba(107, 114, 128, 0.15)',
-    },
-    statusReady: {
-        color: '#7DD3FC',
-        borderColor: 'rgba(56, 189, 248, 0.4)',
-        backgroundColor: 'rgba(14, 165, 233, 0.12)',
-    },
-    tileMetaReason: {
-        fontSize: ox(9),
-        color: '#6B7280',
-        lineHeight: ox(12),
-    },
-    tileMetaReach: {
-        fontSize: ox(9),
-        color: '#9CA3AF',
-        marginTop: ox(2),
+        borderColor: 'rgba(255,255,255,0.28)',
     },
     insightsBtn: {
-        minHeight: ox(30),
+        marginTop: ox(6),
+        minHeight: ox(28),
         borderRadius: ox(8),
         borderWidth: 1,
         borderColor: 'rgba(56, 189, 248, 0.35)',
         backgroundColor: 'rgba(14, 165, 233, 0.12)',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: ox(6),
         paddingHorizontal: ox(6),
     },
     insightsBtnText: {
-        color: '#BAE6FD',
-        fontSize: ox(10),
+        color: '#7DD3FC',
+        fontSize: ox(11),
         fontWeight: '700',
-    },
-    tileInsightsHint: {
-        fontSize: ox(9),
-        color: '#94A3B8',
-        marginBottom: ox(4),
     },
     errorText: {
         fontSize: ox(16),

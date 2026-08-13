@@ -5323,6 +5323,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             }}
           />
         )}
+        {isTileBoostMode && (
+          <div className="absolute left-1.5 right-1.5 bottom-1.5 z-30 pointer-events-none flex flex-wrap gap-1">
+            <span className="inline-flex items-center rounded-full border border-white/30 bg-black/70 px-2 py-1 text-[10px] font-bold text-white">
+              Tap to boost
+            </span>
+          </div>
+        )}
         {/* PostHeader overlaid on media for posts with media */}
         {hasMedia && (
           <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
@@ -7271,7 +7278,15 @@ function FeedPageWrapper() {
           seenInChunk.add(x.id);
           return true;
         });
-        const next = isFirstPageCursor ? [dedupedChunk] : [...prev, dedupedChunk];
+        // Keep very recent locally-injected posts if a concurrent first-page fetch omitted them.
+        const recentInjected = isFirstPageCursor
+          ? prev.flat().filter((p) => {
+              const ageMs = Date.now() - (Number(p.createdAt) || 0);
+              return ageMs >= 0 && ageMs < 120_000 && !dedupedChunk.some((x) => String(x.id) === String(p.id));
+            })
+          : [];
+        const mergedFirst = recentInjected.length > 0 ? [...recentInjected, ...dedupedChunk] : dedupedChunk;
+        const next = isFirstPageCursor ? [mergedFirst] : [...prev, dedupedChunk];
         if (isFirstPageCursor) {
           pagesLoadedForFilterRef.current = filterForRequest;
           if (!page.fromMock) saveFeed(userId, currentFilter, next).catch(() => {});
@@ -7294,13 +7309,15 @@ function FeedPageWrapper() {
   // Listen for new posts and refresh feed
   React.useEffect(() => {
     const handlePostCreated = () => {
-      // Reset feed state; initial load effect will trigger loadMore when cursor becomes 0
+      // Reset feed state and force the initial-load effect to re-run even when cursor is already 0.
       setPages([]);
       setCursor(0);
       setEnd(false);
       setLoading(false);
       setError(null);
       latestPostIdRef.current = null;
+      pagesLoadedForFilterRef.current = null;
+      setDiscoverRefreshTrigger((t) => t + 1);
     };
 
     window.addEventListener('postCreated', handlePostCreated);
@@ -7547,11 +7564,20 @@ function FeedPageWrapper() {
     navigate('/feed', { replace: true, state: {} });
   }, [routerLocation.pathname, routerLocation.state]);
 
-  // Deterministic injection path: when create flows navigate to /feed with createdPost in route state.
+  // Deterministic injection path: when create flows navigate to /feed with createdPost / createdPostId.
   React.useEffect(() => {
-    const state = routerLocation.state as { createdPost?: Post; forceRefreshAt?: number } | null;
-    if (routerLocation.pathname !== '/feed' || !state?.createdPost) return;
-    const createdPost = state.createdPost;
+    const state = routerLocation.state as {
+      createdPost?: Post;
+      createdPostId?: string;
+      forceRefreshAt?: number;
+    } | null;
+    if (routerLocation.pathname !== '/feed') return;
+    const createdPost =
+      state?.createdPost ||
+      (state?.createdPostId
+        ? postsStore.find((p) => String(p.id) === String(state.createdPostId))
+        : undefined);
+    if (!createdPost) return;
     if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
       postsStore.unshift(createdPost);
     }
@@ -9812,39 +9838,6 @@ function BoostPageWrapper() {
     return { active, ready, ended, total: posts.length };
   }, [posts, classifyBoostStatus]);
 
-  const getQualityLabel = React.useCallback((p: Post): { label: string; tone: string } => {
-    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / Math.max(1, p.stats.views || 1);
-    if (engagement >= 0.07 && (p.stats.views || 0) >= 250) return { label: 'Best candidate', tone: 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10' };
-    if (engagement >= 0.035) return { label: 'Good candidate', tone: 'text-sky-300 border-sky-400/40 bg-sky-500/10' };
-    return { label: 'Needs stronger post', tone: 'text-amber-300 border-amber-400/40 bg-amber-500/10' };
-  }, []);
-
-  const getQualityReason = React.useCallback((p: Post): string => {
-    const views = Math.max(1, p.stats.views || 1);
-    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / views;
-    const postAgeDays = (Date.now() - (p.createdAt || 0)) / (1000 * 60 * 60 * 24);
-    if (engagement >= 0.07 && views >= 250) {
-      return 'High engagement and strong recent performance.';
-    }
-    if (engagement >= 0.035) {
-      return postAgeDays <= 7
-        ? 'Solid engagement with fresh recency signal.'
-        : 'Solid engagement; likely to perform with broader reach.';
-    }
-    return views < 120
-      ? 'Try growing organic engagement first before boosting.'
-      : 'Consider improving hook/caption for better conversion.';
-  }, []);
-
-  const estimateReachTeaser = React.useCallback((p: Post): string => {
-    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / Math.max(1, p.stats.views || 1);
-    const base = Math.max(800, Math.round((p.stats.views || 0) * 2.2 + (engagement * 1000)));
-    const low = Math.round(base * 0.78);
-    const high = Math.round(base * 1.32);
-    const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
-    return `Estimated reach ${fmt(low)}-${fmt(high)}`;
-  }, []);
-
   const sparklineBars = React.useCallback((values: number[]): string => {
     if (!values.length) return 'â€”';
     const bars = ['â–', 'â–‚', 'â–ƒ', 'â–„', 'â–…', 'â–†', 'â–‡', 'â–ˆ'];
@@ -10073,11 +10066,10 @@ function BoostPageWrapper() {
             );
           })}
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-gray-500 font-semibold">Sort</span>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {([
-            { id: 'best' as const, label: 'Best candidates' },
-            { id: 'recent' as const, label: 'Most recent' },
+            { id: 'best' as const, label: 'Best' },
+            { id: 'recent' as const, label: 'Recent' },
           ]).map((opt) => {
             const active = boostSort === opt.id;
             return (
@@ -10095,9 +10087,6 @@ function BoostPageWrapper() {
               </button>
             );
           })}
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-gray-500 font-semibold">Insights range</span>
           {([
             { id: '24h' as const, label: '24h' },
             { id: '7d' as const, label: '7d' },
@@ -10111,7 +10100,7 @@ function BoostPageWrapper() {
                 onClick={() => setInsightsRange(opt.id)}
                 className={`min-h-[30px] px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
                   active
-                    ? 'bg-sky-500 text-white border-sky-400'
+                    ? 'bg-sky-500/30 text-sky-100 border-sky-400/50'
                     : 'bg-black/40 text-gray-300 border-white/20 hover:bg-white/10'
                 }`}
               >
@@ -10130,38 +10119,10 @@ function BoostPageWrapper() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-[6px] px-2 pb-2 sm:grid-cols-3 md:grid-cols-4">
+        <div className="grid grid-cols-3 gap-x-[6px] gap-y-2.5 px-2 pb-2 sm:grid-cols-3 md:grid-cols-4">
           {sortedBoostPosts.map(p => {
-            const status = classifyBoostStatus(p);
-            const quality = getQualityLabel(p);
-            const qualityReason = getQualityReason(p);
             return (
-              <div key={p.id}>
-                <div className="hidden sm:block mt-2 mb-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${quality.tone}`}>
-                    {quality.label}
-                  </span>
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                    status === 'active'
-                      ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10'
-                      : status === 'ended'
-                        ? 'text-gray-300 border-gray-400/30 bg-gray-500/10'
-                        : 'text-sky-300 border-sky-400/40 bg-sky-500/10'
-                  }`}>
-                    {status === 'active' ? 'Active boost' : status === 'ended' ? 'Ended boost' : 'Ready to boost'}
-                  </span>
-                </div>
-                <p className="mt-1 text-[11px] text-gray-500">{qualityReason}</p>
-                <p className="mt-1 text-xs text-gray-400">{estimateReachTeaser(p)} from base â‚¬4.99</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => { void handleViewBoostInsights(p); }}
-                className="mb-1 w-full min-h-[32px] rounded-lg border border-sky-400/30 bg-sky-500/10 text-[11px] font-semibold text-sky-200 hover:bg-sky-500/20"
-              >
-                View insights
-              </button>
+              <div key={p.id} className="min-w-0">
               <FeedCard
                 post={p}
                 showBoostIcon={true}
@@ -10274,6 +10235,13 @@ function BoostPageWrapper() {
                 }}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
+              <button
+                type="button"
+                onClick={() => { void handleViewBoostInsights(p); }}
+                className="mt-1.5 w-full min-h-[28px] rounded-lg border border-sky-400/35 bg-sky-500/10 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20"
+              >
+                Insights
+              </button>
               </div>
             );
           })}

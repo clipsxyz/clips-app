@@ -193,6 +193,7 @@ export const FEED_CARD_ENGAGEMENT_LEFT = {
     flex: 1,
     minWidth: 0,
     flexShrink: 1,
+    marginRight: 8,
 };
 
 /** Web carousel thumb rail: px-3 py-2 bg-black/95 border-t border-white/10. */

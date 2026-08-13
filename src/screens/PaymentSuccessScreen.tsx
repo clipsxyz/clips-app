@@ -23,12 +23,33 @@ export default function PaymentSuccessScreen({ navigation, route }: any) {
 
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
+          onPress={() =>
+            navigation.navigate('MainTabs', {
+              screen: 'Home',
+              params: {
+                boostSuccess: true,
+                postId: route?.params?.postId,
+                feedType: route?.params?.feedType,
+              },
+            })
+          }
         >
           <Text style={styles.primaryButtonText}>Back to Feed</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.navigate('Boost')}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() =>
+            navigation.navigate('MainTabs', {
+              screen: 'Boost',
+              params: {
+                boostSuccess: true,
+                postId: route?.params?.postId,
+                feedType: route?.params?.feedType,
+              },
+            })
+          }
+        >
           <Text style={styles.secondaryButtonText}>Back to Boost</Text>
         </TouchableOpacity>
       </View>

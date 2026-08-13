@@ -126,7 +126,7 @@ export default function TextOnlyPostDetailsPage() {
 
         setIsSubmitting(true);
         try {
-            await createPost(
+            const newPost = await createPost(
                 user.id,
                 user.handle,
                 text.trim(), // text
@@ -154,9 +154,17 @@ export default function TextOnlyPostDetailsPage() {
                 landmarkText.trim() || undefined // landmark
             );
 
+            window.dispatchEvent(new CustomEvent('localPostCreated', {
+                detail: { post: newPost },
+            }));
             window.dispatchEvent(new CustomEvent('postCreated'));
             showToast('Post created successfully!');
-            navigate('/feed');
+            navigate('/feed', {
+                state: {
+                    createdPostId: newPost.id,
+                    forceRefreshAt: Date.now(),
+                },
+            });
         } catch (error) {
             console.error('Error creating post:', error);
             showToast('Failed to create post. Please try again.');

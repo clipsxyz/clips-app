@@ -192,10 +192,11 @@ export default function InboxScreen({ navigation, route }: any) {
     }, [user?.handle]);
 
     // Refresh when returning to Inbox (e.g. after sending a feed DM to Ava).
+    // Keep existing rows visible — full skeleton only on first load.
     useFocusEffect(
         useCallback(() => {
             if (!user?.handle) return;
-            void loadData();
+            void loadData({ silent: true });
         }, [user?.handle])
     );
 
@@ -286,12 +287,15 @@ export default function InboxScreen({ navigation, route }: any) {
         });
     }, [notifications, conversations, dmAvatarMap, user?.id]);
 
-    const loadData = async () => {
+    const loadData = async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
             setLoading(false);
             return;
         }
-        setLoading(true);
+        const silent = opts?.silent === true;
+        if (!silent) {
+            setLoading(true);
+        }
         try {
             const [notifs, storyInsights] = await Promise.all([
                 getNotifications(user.handle),
@@ -361,7 +365,7 @@ export default function InboxScreen({ navigation, route }: any) {
     const refreshData = async () => {
         setRefreshing(true);
         try {
-            await loadData();
+            await loadData({ silent: true });
         } finally {
             setRefreshing(false);
         }

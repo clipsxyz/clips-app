@@ -28,7 +28,7 @@ import { postHasVideoMedia } from '../utils/postMedia';
 import { getScenesMediaSlides } from '../utils/scenesMediaNative';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { buildPostMetadataItems } from '../utils/feedPostMeta';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle, getFlagForHandle, setAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
 import Flag from './Flag.native';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
@@ -117,6 +117,8 @@ export type ScenesViewerProps = {
     feedLabel?: string;
     viewerUserId: string;
     viewerHandle?: string;
+    /** Auth profile photo — required for own posts (handle map often has no entry yet). */
+    viewerAvatarUrl?: string;
     onClose: (savedTime?: number, postId?: string, mutedState?: boolean) => void;
     onVisitProfile: (handle: string) => void;
     onPostsChange?: (posts: Post[]) => void;
@@ -132,6 +134,7 @@ export default function ScenesViewer({
     feedLabel,
     viewerUserId,
     viewerHandle,
+    viewerAvatarUrl,
     onClose,
     onVisitProfile,
     onPostsChange,
@@ -142,6 +145,14 @@ export default function ScenesViewer({
     const windowHeight = Dimensions.get('window').height;
     const windowWidth = Dimensions.get('window').width;
     const mediaHeightSv = useSharedValue(windowHeight);
+
+    // Keep handle→avatar map warm so own + other chrome can resolve the photo.
+    useEffect(() => {
+        if (viewerHandle && viewerAvatarUrl) {
+            setAvatarForHandle(viewerHandle, viewerAvatarUrl);
+        }
+    }, [viewerHandle, viewerAvatarUrl]);
+
     // Android Video surfaces ignore overflow clipping — drive the player height explicitly
     // so the MP4 actually becomes a Reels-style mini viewport above the sheet.
     const [mediaViewportHeight, setMediaViewportHeight] = useState(windowHeight);
@@ -564,7 +575,10 @@ export default function ScenesViewer({
                 userLiked: updated.userLiked ?? nextLiked,
                 stats: {
                     ...p.stats,
-                    likes: updated.stats?.likes ?? nextLikes,
+                    likes: Math.max(
+                        0,
+                        typeof updated.stats?.likes === 'number' ? updated.stats.likes : nextLikes,
+                    ),
                 },
             }));
         } catch {
@@ -788,8 +802,14 @@ export default function ScenesViewer({
     }
 
     const { profileHandle, displayHandle } = getReclipDisplay(activePost, viewerHandle);
-    const isOwn = viewerHandle === activePost.userHandle;
+    const isOwn =
+        !!viewerHandle &&
+        viewerHandle.replace(/^@/, '').trim().toLowerCase() ===
+            activePost.userHandle.replace(/^@/, '').trim().toLowerCase();
     const canReclip = Boolean(viewerHandle && !isOwn && !activePost.userReclipped);
+    const authorAvatarSrc = isOwn
+        ? viewerAvatarUrl || getAvatarForHandle(profileHandle) || getAvatarForHandle(viewerHandle)
+        : getAvatarForHandle(profileHandle);
     const dismissOpacity = Math.max(0.55, 1 - dismissPull / (windowHeight * 0.45));
     const captionLong = caption.length > 50;
 
@@ -1008,7 +1028,7 @@ export default function ScenesViewer({
                         onPress={() => onVisitProfile(profileHandle)}
                     >
                         <Avatar
-                            src={isOwn ? undefined : getAvatarForHandle(profileHandle)}
+                            src={authorAvatarSrc}
                             name={displayHandle.split('@')[0]}
                             size={36}
                         />

@@ -735,12 +735,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     containerHeight={height}
                 />
             ) : null}
-            {video && mode === 'feed' && !playFailed ? (
-                <View style={styles.videoTypeBadge} pointerEvents="none">
-                    <Icon name="videocam" size={12} color="#FFFFFF" />
-                    <Text style={styles.videoTypeBadgeText}>VIDEO</Text>
-                </View>
-            ) : null}
             {renderFeedTapOverlay()}
             {showScenesCta ? (
                 <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={post.userHandle} />
@@ -871,25 +865,6 @@ const styles = StyleSheet.create({
         textShadowColor: 'rgba(0,0,0,0.85)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 4,
-    },
-    videoTypeBadge: {
-        position: 'absolute',
-        top: 10,
-        left: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.55)',
-        zIndex: 5,
-    },
-    videoTypeBadgeText: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '700',
-        letterSpacing: 0.6,
     },
     videoErrorOverlay: {
         ...StyleSheet.absoluteFill,

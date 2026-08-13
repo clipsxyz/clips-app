@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './apiBaseUrl';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 function buildPlacesUrl(path: string, params: Record<string, string>): string {
     // Resolve per call — RN module-load can race SourceCode.scriptURL / Metro host.
@@ -69,7 +70,7 @@ const LOCAL_GAZETTEER: LocationSuggestion[] = [
     { name: 'Colosseum', type: 'landmark', country: 'Italy', display_name: 'Colosseum' },
 ];
 
-function searchLocalGazetteer(
+export function searchLocalGazetteer(
     query: string,
     limit: number,
     mode: 'all' | 'location' | 'venue' | 'landmark',
@@ -104,6 +105,16 @@ export async function searchLocations(
     signal?: AbortSignal,
     scope?: SearchLocationsOptions
 ): Promise<LocationSuggestion[]> {
+    const localInstant = searchLocalGazetteer(query, limit, mode);
+
+    // Mock / offline: never wait on Laravel — dropdown should feel instant on RN.
+    if (!isLaravelApiEnabled()) {
+        if (signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        return localInstant;
+    }
+
     const params: Record<string, string> = {
         q: query,
         limit: String(limit),
@@ -113,7 +124,8 @@ export async function searchLocations(
     if (scope?.country?.trim()) params.country = scope.country.trim();
     if (scope?.region?.trim()) params.region = scope.region.trim();
 
-    const timeoutMs = 4000;
+    // Keep network wait short so typing stays responsive when API is down.
+    const timeoutMs = 1500;
     const timeoutCtrl = new AbortController();
     const onAbort = () => timeoutCtrl.abort();
     const timer = setTimeout(onAbort, timeoutMs);
@@ -154,5 +166,5 @@ export async function searchLocations(
         throw new DOMException('Aborted', 'AbortError');
     }
 
-    return searchLocalGazetteer(query, limit, mode);
+    return localInstant;
 }

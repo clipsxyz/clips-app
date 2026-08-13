@@ -45,15 +45,28 @@ export default function PaymentScreen({ route, navigation }: any) {
     }
     setIsProcessing(true);
     try {
-      await activateBoost(postId, user.id, feedType, amount, undefined, meta);
+      // Mock / offline path — no Stripe SDK on RN. Same as web when Stripe keys are unset.
+      await activateBoost(postId, user.id, feedType, amount, undefined, {
+        goal: meta?.goal,
+        durationHours: meta?.durationHours,
+        estimatedReach: meta?.estimatedReach,
+        radiusKm: meta?.radiusKm,
+        eligibleUsersCount: meta?.eligibleUsersCount,
+        centerLocal: meta?.centerLocal,
+      } as any);
       navigation.replace('PaymentSuccess', {
         postId,
         feedType,
         amount,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('RN payment failed:', error);
-      Alert.alert('Payment failed', 'Could not complete payment. Please try again.');
+      Alert.alert(
+        'Payment failed',
+        error?.message
+          ? String(error.message)
+          : 'Could not complete the mock boost. Please try again.',
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -118,8 +131,8 @@ export default function PaymentScreen({ route, navigation }: any) {
           <Text style={styles.amount}>EUR {amount.toFixed(2)}</Text>
 
           <Text style={[styles.helper, styles.spaced]}>
-            Card payments via Stripe are on web. On mobile, confirming activates your boost
-            immediately (same mock path as web when Stripe is not configured).
+            Stripe card checkout is web-only. On this APK build, Confirm runs the mock boost
+            (no real charge) — same path as web when Stripe is not configured.
           </Text>
 
           <TouchableOpacity

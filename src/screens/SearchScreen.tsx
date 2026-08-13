@@ -4,7 +4,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { unifiedSearch, type SearchSections } from '../api/search';
-import { searchLocations, type LocationSuggestion } from '../api/locations';
+import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '../api/locations';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { followOrRequest } from '../utils/followOrRequest';
@@ -130,6 +130,8 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
         const ctrl = new AbortController();
         const modeForApi =
             searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        // Instant local rows while (optional) network search completes.
+        setPlaceSuggestions(searchLocalGazetteer(q, 8, modeForApi));
         const id = setTimeout(() => {
             setPlaceSuggestionsLoading(true);
             searchLocations(q, 8, modeForApi, ctrl.signal)
@@ -137,12 +139,14 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                     if (!ctrl.signal.aborted) setPlaceSuggestions(res);
                 })
                 .catch((err) => {
-                    if (!ctrl.signal.aborted && (err as Error)?.name !== 'AbortError') setPlaceSuggestions([]);
+                    if (!ctrl.signal.aborted && (err as Error)?.name !== 'AbortError') {
+                        setPlaceSuggestions(searchLocalGazetteer(q, 8, modeForApi));
+                    }
                 })
                 .finally(() => {
                     if (!ctrl.signal.aborted) setPlaceSuggestionsLoading(false);
                 });
-        }, 200);
+        }, 120);
         return () => {
             ctrl.abort();
             clearTimeout(id);
