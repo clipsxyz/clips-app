@@ -2,8 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import type { Post } from '../types';
 import Avatar from './Avatar';
-import Flag from './Flag.native';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import VerifiedBadge from './VerifiedBadge.native';
+import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 
 type TextStyle = {
@@ -41,7 +41,7 @@ export default function ScenesTextPostCard({ post, text, textStyle }: Props) {
                             <Text style={styles.handle} numberOfLines={1}>
                                 {handle}
                             </Text>
-                            <Flag value={getFlagForHandle(handle) || ''} size={14} />
+                            <VerifiedBadge accountType={post.userAccountType} size={14} />
                         </View>
                         {post.locationLabel ? (
                             <Text style={styles.meta} numberOfLines={1}>

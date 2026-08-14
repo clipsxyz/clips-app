@@ -15,8 +15,8 @@ import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollow
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { reclipPost } from '../api/posts';
-import { getFlagForHandle, getAvatarForHandle } from '../api/users';
-import Flag from '../components/Flag';
+import { getAvatarForHandle } from '../api/users';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -2164,10 +2164,8 @@ export default function StoriesPage() {
                                                                     <div className="flex-1">
                                                                         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
                                                                             <span>{originalPost.userHandle}</span>
-                                                                            <Flag
-                                                                                value={
-                                                                                    getFlagForHandle(originalPost.userHandle) || ''
-                                                                                }
+                                                                            <VerifiedBadge
+                                                                                accountType={originalPost.userAccountType}
                                                                                 size={14}
                                                                             />
                                                                         </h3>

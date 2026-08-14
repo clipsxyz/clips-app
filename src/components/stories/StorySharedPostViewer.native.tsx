@@ -11,7 +11,7 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
-import Flag from '../Flag.native';
+import VerifiedBadge from '../VerifiedBadge.native';
 import StorySafeVideo from './StorySafeVideo.native';
 import type { Post, Story } from '../../types';
 import {
@@ -24,7 +24,7 @@ import {
     storyVideoSource,
 } from '../../utils/storyMediaNative';
 import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
-import { getAvatarForHandle, getFlagForHandle } from '../../api/users';
+import { getAvatarForHandle } from '../../api/users';
 import { timeAgo } from '../../utils/timeAgo';
 import { ox } from '../../constants/nativeOpticalScale';
 
@@ -283,10 +283,7 @@ export default function StorySharedPostViewer({
                                     <Text style={styles.textCardHandle} numberOfLines={1}>
                                         {post.userHandle}
                                     </Text>
-                                    <Flag
-                                        value={getFlagForHandle(post.userHandle) || ''}
-                                        size={ox(12)}
-                                    />
+                                    <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
                                 </View>
                                 <View style={styles.textCardSubRow}>
                                     {post.locationLabel ? (

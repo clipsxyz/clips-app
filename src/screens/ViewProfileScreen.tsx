@@ -16,6 +16,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
+import VerifiedBadge from '../components/VerifiedBadge.native';
 import {
     glassSearch,
     glassSurface,
@@ -987,18 +988,26 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                             <Text style={styles.coverHandle} numberOfLines={1}>
                                 {profileUser?.handle || decodedHandle}
                             </Text>
-                            <Flag
-                                value={
-                                    isOwnProfile
-                                        ? user?.countryFlag || ''
-                                        : getFlagForHandle(profileUser?.handle || decodedHandle) || ''
-                                }
-                                size={ox(16)}
-                            />
+                            <VerifiedBadge accountType={profileAccountType} size={ox(15)} />
                         </View>
                         {profileAccountType === 'business' ? (
                             <View style={styles.coverBadgeWrap}>
                                 <AccountTypeBadge accountType="business" compact />
+                            </View>
+                        ) : null}
+                        {(isOwnProfile
+                            ? user?.countryFlag
+                            : getFlagForHandle(profileUser?.handle || decodedHandle)) ? (
+                            <View style={styles.coverFlagRow}>
+                                <Flag
+                                    value={
+                                        isOwnProfile
+                                            ? user?.countryFlag || ''
+                                            : getFlagForHandle(profileUser?.handle || decodedHandle) || ''
+                                    }
+                                    size={ox(18)}
+                                />
+                                <Text style={styles.coverFlagLabel}>Country</Text>
                             </View>
                         ) : null}
                     </View>
@@ -1613,6 +1622,25 @@ const styles = StyleSheet.create({
         marginTop: ox(8),
         alignItems: 'center',
         alignSelf: 'center',
+    },
+    coverFlagRow: {
+        marginTop: ox(10),
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: ox(6),
+        alignSelf: 'center',
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(4),
+        borderRadius: ox(999),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        backgroundColor: 'rgba(0,0,0,0.28)',
+    },
+    coverFlagLabel: {
+        fontSize: ox(11),
+        fontWeight: '600',
+        color: 'rgba(229,231,235,0.85)',
     },
     displayName: {
         fontSize: ox(18),

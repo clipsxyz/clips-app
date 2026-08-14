@@ -3,9 +3,9 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } fr
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { getPostById } from '../api/posts';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
-import Flag from './Flag.native';
+import VerifiedBadge from './VerifiedBadge.native';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -45,7 +45,7 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
                 <View style={styles.cardHeaderText}>
                     <View style={styles.handleRow}>
                         <Text style={styles.handleDark}>{post.userHandle}</Text>
-                        <Flag value={getFlagForHandle(post.userHandle) || ''} size={ox(12)} />
+                        <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
                     </View>
                     <View style={styles.metaRow}>
                         {post.locationLabel ? (
@@ -77,6 +77,7 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
                         size={ox(28)}
                     />
                     <Text style={styles.handleDark}>{post.userHandle}</Text>
+                    <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
                 </View>
                 {post.text ? (
                     <Text style={styles.captionDark} numberOfLines={2}>

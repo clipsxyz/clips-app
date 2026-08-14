@@ -28,9 +28,9 @@ import { postHasVideoMedia } from '../utils/postMedia';
 import { getScenesMediaSlides } from '../utils/scenesMediaNative';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { buildPostMetadataItems } from '../utils/feedPostMeta';
-import { getAvatarForHandle, getFlagForHandle, setAvatarForHandle } from '../api/users';
+import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
-import Flag from './Flag.native';
+import VerifiedBadge from './VerifiedBadge.native';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import FeedShareModal from './FeedShareModal';
 import PostCommentsSheet from './PostCommentsSheet';
@@ -1051,9 +1051,12 @@ export default function ScenesViewer({
                     ) : null}
                     <View style={styles.profileTextCol}>
                         <Pressable onPress={() => onVisitProfile(profileHandle)}>
-                            <Text style={styles.handleText} numberOfLines={1}>
-                                {displayHandle.replace(/^@/, '')}
-                            </Text>
+                            <View style={styles.handleWithBadge}>
+                                <Text style={styles.handleText} numberOfLines={1}>
+                                    {displayHandle.replace(/^@/, '')}
+                                </Text>
+                                <VerifiedBadge accountType={activePost.userAccountType} size={12} />
+                            </View>
                         </Pressable>
                         {activePost.locationLabel ? (
                             <View style={styles.locationRow}>
@@ -1061,7 +1064,6 @@ export default function ScenesViewer({
                                 <Text style={styles.locationText} numberOfLines={1}>
                                     {activePost.locationLabel}
                                 </Text>
-                                <Flag value={getFlagForHandle(profileHandle) || ''} size={11} />
                             </View>
                         ) : null}
                     </View>
@@ -1616,6 +1618,13 @@ const styles = StyleSheet.create({
         textShadowColor: 'rgba(0,0,0,0.45)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 2,
+        flexShrink: 1,
+    },
+    handleWithBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        minWidth: 0,
     },
     locationRow: {
         flexDirection: 'row',

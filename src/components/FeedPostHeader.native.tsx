@@ -5,11 +5,11 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle } from '../api/users';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import Avatar from './Avatar';
-import Flag from './Flag.native';
+import VerifiedBadge from './VerifiedBadge.native';
 import FeedPostMetaCarousel from './FeedPostMetaCarousel.native';
 import {
     buildPostMetadataItems,
@@ -18,6 +18,7 @@ import {
 } from '../utils/feedPostMeta';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
+import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -71,9 +72,9 @@ export default function FeedPostHeader({
         ? user?.avatarUrl
         : getAvatarForHandle(profileHandle);
 
-    const flagValue = isCurrentUser
-        ? user?.countryFlag || ''
-        : getFlagForHandle(isReclip ? post.originalUserHandle! : post.userHandle) || '';
+    const verifiedAccountType = resolveVerifiedAccountType(
+        isCurrentUser ? user?.accountType : post.userAccountType,
+    );
 
     const textPrimary = isOverlaid ? '#FFFFFF' : '#F3F4F6';
     const textMuted = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
@@ -165,11 +166,7 @@ export default function FeedPostHeader({
             <Text style={[styles.handleText, { color: textPrimary }]} numberOfLines={1}>
                 {displayHandle}
             </Text>
-            <Flag
-                value={flagValue}
-                national={isCurrentUser ? user?.national : undefined}
-                size={FEED_UI.icon.flag}
-            />
+            <VerifiedBadge accountType={verifiedAccountType} size={FEED_UI.icon.flag} />
         </TouchableOpacity>
     );
 
