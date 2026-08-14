@@ -27,8 +27,8 @@ const FEED_UI_BY_MODE = {
     },
     type: {
       actionCount: 12,
-      /** Web PostHeader `text-sm`; slightly under so RN bold doesn’t look oversized on phone. */
-      handle: 13,
+      /** Feed PostHeader username — denser than web `text-sm`. */
+      handle: 12,
       /** Web metadata carousel `text-[10px]`. */
       meta: 10,
       /** Web metadata icon `w-3 h-3`. */
@@ -40,7 +40,8 @@ const FEED_UI_BY_MODE = {
     icon: {
       /** Web EngagementBar `w-6 h-6` (24). Use 20 so RN SVG stroke weight matches Fi visual size. */
       action: 20,
-      flag: 12,
+      /** Matches smaller feed handle (~12px). */
+      flag: 11,
       /** Web avatar `w-8 h-8` (32); 28 reads closer on dense phone feed. */
       avatar: 28,
       tab: 16,
@@ -66,7 +67,7 @@ const FEED_UI_BY_MODE = {
     },
     type: {
       actionCount: 12,
-      handle: 13,
+      handle: 12,
       meta: 10,
       metaIcon: 12,
       reclip: 11,
@@ -75,7 +76,7 @@ const FEED_UI_BY_MODE = {
     },
     icon: {
       action: 20,
-      flag: 12,
+      flag: 11,
       avatar: 28,
       tab: 16,
       tabSquare: 28,

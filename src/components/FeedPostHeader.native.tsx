@@ -385,10 +385,10 @@ const styles = StyleSheet.create({
         gap: 6,
         maxWidth: '100%',
     },
-    // Web: `text-sm font-semibold` — optically bumped
+    // Web feed: `text-xs font-semibold`
     handleText: {
         fontSize: FEED_UI.type.handle,
-        fontWeight: '700',
+        fontWeight: '600',
         flexShrink: 1,
     },
     socialPill: {

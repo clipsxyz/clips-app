@@ -1,11 +1,14 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
+import Svg, { Path } from 'react-native-svg';
 import {
     resolveVerifiedAccountType,
     VERIFIED_BADGE_BLUE,
-    VERIFIED_BADGE_PERSONAL_BG,
     VERIFIED_BADGE_PERSONAL_CHECK,
+    VERIFIED_BADGE_PERSONAL_FILL,
+    VERIFIED_BADGE_PERSONAL_STROKE,
+    VERIFIED_CHECK_PATH,
+    VERIFIED_SEAL_PATH,
     type VerifiedAccountType,
 } from '../utils/verifiedBadge';
 
@@ -14,32 +17,28 @@ type Props = {
     size?: number;
 };
 
-/** Instagram-style verified tick beside usernames (personal = white, business = blue). */
-export default function VerifiedBadge({ accountType, size = 14 }: Props) {
+/** Instagram / X–style scalloped verified seal (personal = white, business = blue). */
+export default function VerifiedBadge({ accountType, size = 15 }: Props) {
     const type: VerifiedAccountType = resolveVerifiedAccountType(accountType);
     const isBusiness = type === 'business';
-    const checkSize = Math.max(8, Math.round(size * 0.62));
+    const fill = isBusiness ? VERIFIED_BADGE_BLUE : VERIFIED_BADGE_PERSONAL_FILL;
+    const check = isBusiness ? '#FFFFFF' : VERIFIED_BADGE_PERSONAL_CHECK;
 
     return (
         <View
             accessible
             accessibilityLabel={isBusiness ? 'Business verified' : 'Verified'}
-            style={[
-                styles.badge,
-                {
-                    width: size,
-                    height: size,
-                    borderRadius: size / 2,
-                    backgroundColor: isBusiness ? VERIFIED_BADGE_BLUE : VERIFIED_BADGE_PERSONAL_BG,
-                },
-            ]}
+            style={[styles.badge, { width: size, height: size }]}
         >
-            <Icon
-                name="checkmark"
-                size={checkSize}
-                color={isBusiness ? '#FFFFFF' : VERIFIED_BADGE_PERSONAL_CHECK}
-                style={styles.check}
-            />
+            <Svg width={size} height={size} viewBox="0 0 24 24">
+                <Path
+                    d={VERIFIED_SEAL_PATH}
+                    fill={fill}
+                    stroke={isBusiness ? 'none' : VERIFIED_BADGE_PERSONAL_STROKE}
+                    strokeWidth={isBusiness ? 0 : 0.75}
+                />
+                <Path d={VERIFIED_CHECK_PATH} fill={check} />
+            </Svg>
         </View>
     );
 }
@@ -49,8 +48,5 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-    },
-    check: {
-        marginTop: 0.5,
     },
 });
