@@ -1655,7 +1655,7 @@ function PostHeader({
                 className={`text-left w-full min-w-0 transition-opacity ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
               >
                 <span
-                  className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`}
+                  className={`text-xs font-semibold flex items-center gap-1 leading-tight ${textColorClass}`}
                   style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
                 >
                   <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
@@ -1663,7 +1663,7 @@ function PostHeader({
                     accountType={
                       isCurrentUser ? user?.accountType : post.userAccountType
                     }
-                    size={16}
+                    size={12}
                   />
                 </span>
               </button>
@@ -1959,13 +1959,13 @@ function PostHeader({
               }}
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
-              <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <h3 id={titleId} className={`text-xs font-semibold flex items-center gap-1 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                 <VerifiedBadge
                   accountType={
                     isCurrentUser ? user?.accountType : post.userAccountType
                   }
-                  size={16}
+                  size={12}
                 />
               </h3>
             </button>
