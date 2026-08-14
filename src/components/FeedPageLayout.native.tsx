@@ -394,7 +394,7 @@ export const FEED_HEADER_LOCATION_PILL = {
     paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: FEED_LOCATION_PILL_BG,
-    overflow: 'visible' as const,
+    overflow: 'hidden' as const,
 };
 
 export const FEED_HEADER_ACTIVE_DOT = {

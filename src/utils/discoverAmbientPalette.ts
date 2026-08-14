@@ -43,6 +43,24 @@ export const PASSPORT_PALETTE: AmbientPalette = {
 
 export const PASSPORT_ABYSS = '#060d16';
 
+/** Brass wash used with sea-glass on passport chrome (borders, accents). */
+export const PASSPORT_BRASS = '#c4a574';
+export const PASSPORT_BRASS_LIGHT = '#e8d5a3';
+
+/**
+ * Conic / traveling border stops for the feed switcher pill
+ * (Instagram-style motion, passport ink — not IG purple/magenta).
+ */
+export const PASSPORT_TRAVELING_BORDER_COLORS = [
+    '#3d9b8f',
+    PASSPORT_BRASS,
+    '#12263a',
+    '#3d9b8f',
+    PASSPORT_BRASS_LIGHT,
+    PASSPORT_ABYSS,
+    '#3d9b8f',
+] as const;
+
 export function getAmbientPalette(variant: DiscoverAmbientVariant): AmbientPalette {
     if (variant === 'goldChrome') return GOLD_CHROME_PALETTE;
     if (variant === 'passport') return PASSPORT_PALETTE;

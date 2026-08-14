@@ -21,6 +21,8 @@ import { fetchFollowers, mapLaravelUserToAppFields, updateAuthProfile } from '..
 import { getFollowedUsers } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { nextHandleAfterNameChange, normalizeHandle as handleKey } from '../utils/gazetteerHandle';
+import { renameUserHandleEverywhere } from '../api/posts';
 import { fetchCitiesForRegion, fetchRegionsForCountry } from '../utils/googleMaps';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import type { LocationSuggestion } from '../api/locations';
@@ -36,6 +38,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 
 export type ProfileCardId =
+    | 'name'
     | 'bio'
     | 'social'
     | 'personal'
@@ -60,6 +63,9 @@ type Props = {
     isPrivate?: boolean;
     onPressPhoto?: () => void;
     onPressCover?: () => void;
+    /** Open a card from the parent (e.g. tapping the passport header name). */
+    openCardRequest?: ProfileCardId | null;
+    onOpenCardRequestHandled?: () => void;
 };
 
 const FLAG_ISO_OPTIONS = ['IE', 'GB', 'FR', 'ES', 'IT', 'DE', 'PT', 'NL', 'US', 'CA', 'BR', 'MX', 'AU', 'NZ', 'JP', 'CN', 'IN', 'PK', 'ZA', 'KE', 'EG', 'TR', 'RU', 'UA'];
@@ -227,6 +233,8 @@ export default function ProfilePassportCards({
     isPrivate,
     onPressPhoto,
     onPressCover,
+    openCardRequest,
+    onOpenCardRequestHandled,
 }: Props) {
     const { user, login } = useAuth();
     const { width: screenWidth } = useWindowDimensions();
@@ -237,6 +245,7 @@ export default function ProfilePassportCards({
     }, [screenWidth]);
     const [selectedCard, setSelectedCard] = useState<ProfileCardId | null>(null);
 
+    const [displayName, setDisplayName] = useState(user?.name || '');
     const [bio, setBio] = useState(user?.bio || '');
     const [socialLinks, setSocialLinks] = useState({
         website: user?.socialLinks?.website || '',
@@ -271,6 +280,7 @@ export default function ProfilePassportCards({
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
+        setDisplayName(user?.name || '');
         setBio(user?.bio || '');
         setSocialLinks({
             website: user?.socialLinks?.website || '',
@@ -287,6 +297,12 @@ export default function ProfilePassportCards({
         setPreferredLocations(user?.placesTraveled ?? []);
         setAccountType(user?.accountType === 'business' ? 'business' : 'personal');
     }, [user]);
+
+    useEffect(() => {
+        if (!openCardRequest) return;
+        setSelectedCard(openCardRequest);
+        onOpenCardRequestHandled?.();
+    }, [openCardRequest, onOpenCardRequestHandled]);
 
     const profileCompletion = useMemo(() => {
         const checks = [
@@ -442,6 +458,8 @@ export default function ProfilePassportCards({
 
     const cardTitle = (id: ProfileCardId) => {
         switch (id) {
+            case 'name':
+                return 'Edit name';
             case 'bio':
                 return 'Edit Bio';
             case 'social':
@@ -460,6 +478,54 @@ export default function ProfilePassportCards({
                 return 'Following';
             default:
                 return '';
+        }
+    };
+
+    const saveDisplayName = async () => {
+        if (!user) return;
+        const nextName = displayName.trim();
+        if (!nextName || nextName.length > 100) return;
+        const oldHandle = String(user.handle || '');
+        const nextHandle = nextHandleAfterNameChange({
+            displayName: nextName,
+            currentHandle: oldHandle,
+            regional: user.regional,
+            local: user.local,
+        });
+        const handleChanging =
+            Boolean(oldHandle) &&
+            handleKey(oldHandle) !== handleKey(nextHandle);
+        setSaving(true);
+        try {
+            const ok = await persistLaravelProfile({
+                display_name: nextName,
+                ...(handleChanging ? { handle: nextHandle } : {}),
+            });
+            if (handleChanging) {
+                await renameUserHandleEverywhere(oldHandle, nextHandle);
+            }
+            if (!ok) {
+                login({
+                    ...user,
+                    name: nextName,
+                    ...(handleChanging ? { handle: nextHandle } : {}),
+                });
+            } else if (handleChanging && handleKey(user.handle || '') !== handleKey(nextHandle)) {
+                // API may return updated handle via persistLaravelProfile → login; ensure local rewrite happened.
+                login({ ...user, name: nextName, handle: nextHandle });
+            }
+        } catch {
+            if (handleChanging) {
+                await renameUserHandleEverywhere(oldHandle, nextHandle);
+            }
+            login({
+                ...user,
+                name: nextName,
+                ...(handleChanging ? { handle: nextHandle } : {}),
+            });
+        } finally {
+            setSaving(false);
+            setSelectedCard(null);
         }
     };
 
@@ -593,6 +659,58 @@ export default function ProfilePassportCards({
                         <Text style={styles.personHandle}>{handle}</Text>
                     </TouchableOpacity>
                 ))
+            );
+        }
+
+        if (selectedCard === 'name') {
+            const trimmed = displayName.trim();
+            const invalid = !trimmed || trimmed.length > 100;
+            return (
+                <>
+                    <Text style={styles.fieldLabel}>Display name</Text>
+                    <TextInput
+                        style={styles.wordInput}
+                        value={displayName}
+                        onChangeText={setDisplayName}
+                        placeholder="Your name"
+                        placeholderTextColor="#6B7280"
+                        maxLength={100}
+                        autoCapitalize="words"
+                        autoCorrect={false}
+                    />
+                    <Text style={styles.fieldHint}>
+                        Shown on your passport and across Gazetteer. Your @handle updates with this name. {trimmed.length}/100
+                    </Text>
+                    {user?.handle ? (
+                        <>
+                            <Text style={[styles.fieldLabel, styles.fieldSpaced]}>Handle preview</Text>
+                            <TextInput
+                                style={[styles.wordInput, styles.inputDisabled]}
+                                value={`@${nextHandleAfterNameChange({
+                                    displayName: trimmed || displayName,
+                                    currentHandle: user.handle,
+                                    regional: user.regional,
+                                    local: user.local,
+                                })}`}
+                                editable={false}
+                            />
+                            <Text style={styles.fieldHint}>
+                                Saving renames your handle everywhere (feed, posts, profile)
+                            </Text>
+                        </>
+                    ) : null}
+                    <TouchableOpacity
+                        style={[styles.saveBtn, invalid && styles.saveBtnDisabled]}
+                        onPress={() => void saveDisplayName()}
+                        disabled={saving || invalid}
+                    >
+                        {saving ? (
+                            <ActivityIndicator color="#111827" />
+                        ) : (
+                            <Text style={styles.saveBtnText}>Save name</Text>
+                        )}
+                    </TouchableOpacity>
+                </>
             );
         }
 
@@ -864,6 +982,10 @@ export default function ProfilePassportCards({
                     <View style={[styles.progressFill, { width: `${profileCompletion.percent}%` }]} />
                 </View>
                 <View style={styles.quickGrid}>
+                    <TouchableOpacity style={styles.quickBtn} onPress={() => setSelectedCard('name')}>
+                        <Icon name="person-outline" size={16} color="#FFFFFF" />
+                        <Text style={styles.quickBtnText}>Name</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity style={styles.quickBtn} onPress={onPressPhoto}>
                         <Icon name="camera-outline" size={16} color="#FFFFFF" />
                         <Text style={styles.quickBtnText}>Photo</Text>
@@ -875,10 +997,6 @@ export default function ProfilePassportCards({
                     <TouchableOpacity style={styles.quickBtn} onPress={() => setSelectedCard('bio')}>
                         <Icon name="create-outline" size={16} color="#FFFFFF" />
                         <Text style={styles.quickBtnText}>Bio</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.quickBtn} onPress={() => setSelectedCard('social')}>
-                        <Icon name="link-outline" size={16} color="#FFFFFF" />
-                        <Text style={styles.quickBtnText}>Links</Text>
                     </TouchableOpacity>
                 </View>
                 </View>
@@ -909,6 +1027,14 @@ export default function ProfilePassportCards({
             <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Identity</Text>
                 <View style={styles.cardRow}>
+                    <ProfileCardButton
+                        cardId="name"
+                        icon="person-outline"
+                        title="Name"
+                        subtitle={displayName.trim() || 'Add your name'}
+                        cardWidth={cardWidth}
+                        onPress={() => setSelectedCard('name')}
+                    />
                     <ProfileCardButton
                         cardId="bio"
                         icon="create-outline"

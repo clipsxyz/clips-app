@@ -24,6 +24,7 @@ import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native'
 import GazetteerMenuSheet from '../components/GazetteerMenuSheet.native';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
+import { buildGazetteerHandle } from '../utils/gazetteerHandle';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import {
     ensureCameraPermission,
@@ -170,8 +171,14 @@ export default function LoginScreen({ navigation, route }: any) {
         return missing;
     })();
     const handlePreview = regional
-        ? `${name.trim().split(/\s+/)[0] || (isBusinessAccount ? 'business' : 'you')}@${regional}`
-        : `${name.trim().split(/\s+/)[0] || (isBusinessAccount ? 'business' : 'you')}@yourregion`;
+        ? buildGazetteerHandle(
+            name.trim() || (isBusinessAccount ? 'business' : 'you'),
+            regional,
+          )
+        : buildGazetteerHandle(
+            name.trim() || (isBusinessAccount ? 'business' : 'you'),
+            'yourregion',
+          );
 
     function applyHomeLocation(suggestion: LocationSuggestion) {
         const parsed = parsedPlaceFeedFromSuggestion(suggestion);
@@ -339,7 +346,7 @@ export default function LoginScreen({ navigation, route }: any) {
         setErrorText('');
         const age = getAgeFromBirthday();
         const consentTimestamp = new Date().toISOString();
-        const handle = `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`;
+        const handle = buildGazetteerHandle(name.trim() || 'user', regional);
         const userData = {
             name: name.trim(),
             email: email.trim(),

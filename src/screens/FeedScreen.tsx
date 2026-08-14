@@ -28,6 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
+import PassportTravelingBorder from '../components/PassportTravelingBorder.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
@@ -685,12 +686,7 @@ function PillTabs({
                 </TouchableOpacity>
 
                 <View style={FEED_HEADER_CENTER}>
-                    <TouchableOpacity
-                        onPress={() => setMenuOpen((prev) => !prev)}
-                        style={FEED_HEADER_LOCATION_PILL}
-                        activeOpacity={0.85}
-                        accessibilityLabel="Change feed"
-                    >
+                    <View style={styles.feedSwitchPillWrap}>
                         {showFeedSwitchCue && !menuOpen ? (
                             <Animated.View
                                 pointerEvents="none"
@@ -722,21 +718,30 @@ function PillTabs({
                                 </View>
                             </Animated.View>
                         ) : null}
-                        <Icon
-                            name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
-                            size={FEED_UI.icon.headerLocation}
-                            color="#FFFFFF"
-                        />
-                        <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
-                        <Text
-                            style={FEED_HEADER_LOCATION_TITLE}
-                            numberOfLines={1}
-                            ellipsizeMode="tail"
-                        >
-                            {headerLabel}
-                        </Text>
-                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
-                    </TouchableOpacity>
+                        <PassportTravelingBorder borderRadius={10} borderWidth={2}>
+                            <TouchableOpacity
+                                onPress={() => setMenuOpen((prev) => !prev)}
+                                style={FEED_HEADER_LOCATION_PILL}
+                                activeOpacity={0.85}
+                                accessibilityLabel="Change feed"
+                            >
+                                <Icon
+                                    name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
+                                    size={FEED_UI.icon.headerLocation}
+                                    color="#FFFFFF"
+                                />
+                                <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
+                                <Text
+                                    style={FEED_HEADER_LOCATION_TITLE}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                >
+                                    {headerLabel}
+                                </Text>
+                                <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
+                            </TouchableOpacity>
+                        </PassportTravelingBorder>
+                    </View>
 
                     <Modal
                         visible={menuOpen}
@@ -1517,6 +1522,36 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                   }
                                 : p,
                         ),
+                    ),
+                );
+            },
+        );
+        return () => sub.remove();
+    }, []);
+
+    useEffect(() => {
+        const rewrite = (h: string | undefined, oldNorm: string, nextHandle: string) => {
+            if (!h) return h;
+            return String(h).replace(/^@/, '').trim().toLowerCase() === oldNorm ? nextHandle : h;
+        };
+        const sub = DeviceEventEmitter.addListener(
+            'userHandleChanged',
+            (payload: { oldHandle?: string; newHandle?: string }) => {
+                const oldNorm = String(payload?.oldHandle || '')
+                    .replace(/^@/, '')
+                    .trim()
+                    .toLowerCase();
+                const nextHandle = String(payload?.newHandle || '').replace(/^@/, '').trim();
+                if (!oldNorm || !nextHandle) return;
+                setPages((prev) =>
+                    prev.map((page) =>
+                        page.map((p) => ({
+                            ...p,
+                            userHandle: rewrite(p.userHandle, oldNorm, nextHandle) || p.userHandle,
+                            originalUserHandle: p.originalUserHandle
+                                ? rewrite(p.originalUserHandle, oldNorm, nextHandle) || p.originalUserHandle
+                                : p.originalUserHandle,
+                        })),
                     ),
                 );
             },
@@ -4742,6 +4777,11 @@ const styles = StyleSheet.create({
         marginTop: ox(10),
         zIndex: 20,
         alignItems: 'center',
+    },
+    feedSwitchPillWrap: {
+        position: 'relative',
+        alignSelf: 'center',
+        maxWidth: '100%',
     },
     feedSwitchBadgeInner: {
         flexDirection: 'row',

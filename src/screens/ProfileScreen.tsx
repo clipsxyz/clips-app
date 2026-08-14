@@ -79,7 +79,7 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
-import ProfilePassportCards from '../components/ProfilePassportCards.native';
+import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
 import ProfilePictureModal from '../components/ProfilePictureModal.native';
 import CommentSafetyModal from '../components/CommentSafetyModal.native';
 import {
@@ -135,6 +135,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [myFeedReplyDraft, setMyFeedReplyDraft] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [showProfilePictureModal, setShowProfilePictureModal] = useState(false);
+    const [openPassportCardRequest, setOpenPassportCardRequest] = useState<ProfileCardId | null>(null);
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [isTogglingPrivacy, setIsTogglingPrivacy] = useState(false);
     const [profileAlert, setProfileAlert] = useState<ProfileAlertConfig | null>(null);
@@ -780,9 +781,17 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Icon name="add" size={ox(14)} color="#FFFFFF" />
                     </View>
                 </TouchableOpacity>
-                <Text style={styles.title} numberOfLines={1}>
-                    {user?.name || 'Passport'}
-                </Text>
+                <TouchableOpacity
+                    onPress={() => setOpenPassportCardRequest('name')}
+                    accessibilityLabel="Edit display name"
+                    style={styles.headerNameBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <Text style={styles.title} numberOfLines={1}>
+                        {user?.name || 'Passport'}
+                    </Text>
+                    <Icon name="create-outline" size={ox(16)} color="rgba(255,255,255,0.7)" />
+                </TouchableOpacity>
                 <TouchableOpacity
                     onPress={handleTogglePrivacy}
                     disabled={isTogglingPrivacy}
@@ -1022,6 +1031,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     isPrivate={isPrivate}
                     onPressPhoto={() => setShowProfilePictureModal(true)}
                     onPressCover={() => navigation.navigate('ProfileCover')}
+                    openCardRequest={openPassportCardRequest}
+                    onOpenCardRequestHandled={() => setOpenPassportCardRequest(null)}
                 />
             </View>
 
@@ -2104,11 +2115,20 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     title: {
-        flex: 1,
+        flexShrink: 1,
         fontSize: ox(20),
         fontWeight: '700',
         color: '#FFFFFF',
         textAlign: 'center',
+    },
+    headerNameBtn: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: ox(6),
+        paddingHorizontal: ox(4),
     },
     headerPrivacyBtnDisabled: {
         opacity: 0.45,

@@ -706,6 +706,45 @@ export function sortStoriesNewestFirst(stories: Story[]): Story[] {
     return [...stories].sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Rewrite denormalized handles after a passport name/handle change (mock store). */
+export function renameStoryHandlesEverywhere(oldHandle: string, newHandle: string): void {
+    const oldNorm = String(oldHandle || '')
+        .replace(/^@/, '')
+        .trim()
+        .toLowerCase();
+    const nextHandle = String(newHandle || '').replace(/^@/, '').trim();
+    if (!oldNorm || !nextHandle || oldNorm === nextHandle.toLowerCase()) return;
+
+    const rewrite = (h?: string | null) => {
+        if (!h) return h;
+        const n = String(h).replace(/^@/, '').trim().toLowerCase();
+        return n === oldNorm ? nextHandle : h;
+    };
+
+    stories = stories.map((s) => ({
+        ...s,
+        userHandle: rewrite(s.userHandle) || s.userHandle,
+        sharedFromUserHandle: (s as any).sharedFromUserHandle
+            ? rewrite((s as any).sharedFromUserHandle)
+            : (s as any).sharedFromUserHandle,
+        taggedUsers: Array.isArray(s.taggedUsers)
+            ? s.taggedUsers.map((t) => rewrite(t) || t)
+            : s.taggedUsers,
+        reactions: Array.isArray(s.reactions)
+            ? s.reactions.map((r) => ({
+                  ...r,
+                  userHandle: rewrite(r.userHandle) || r.userHandle,
+              }))
+            : s.reactions,
+        replies: Array.isArray(s.replies)
+            ? s.replies.map((r) => ({
+                  ...r,
+                  userHandle: rewrite(r.userHandle) || r.userHandle,
+              }))
+            : s.replies,
+    }));
+}
+
 export type StoriesPage = {
     items: Story[];
     nextCursor: string | null;

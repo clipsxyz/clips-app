@@ -214,6 +214,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
 
 export async function updateAuthProfile(data: {
     display_name?: string;
+    handle?: string;
     bio?: string | null;
     places_traveled?: string[];
     location_local?: string | null;

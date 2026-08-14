@@ -282,6 +282,99 @@ function savePostsToStorage(postsToSave: Post[]): void {
     .catch(() => {});
 }
 
+function remapFollowKeyMap(
+  follows: Record<string, boolean>,
+  oldNorm: string,
+  newHandle: string,
+): Record<string, boolean> {
+  const next: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(follows || {})) {
+    const k = String(key || '').replace(/^@/, '').trim();
+    if (k.toLowerCase() === oldNorm) {
+      next[newHandle] = value;
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/**
+ * After a passport name/handle change: rewrite denormalized handles in mock posts,
+ * comments, and follow maps so the feed and profile stay in sync.
+ */
+export async function renameUserHandleEverywhere(
+  oldHandle: string,
+  newHandle: string,
+): Promise<void> {
+  const oldNorm = String(oldHandle || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
+  const nextHandle = String(newHandle || '').replace(/^@/, '').trim();
+  if (!oldNorm || !nextHandle || oldNorm === nextHandle.toLowerCase()) return;
+
+  const rewrite = (h?: string | null) => {
+    if (!h) return h;
+    const n = String(h).replace(/^@/, '').trim().toLowerCase();
+    return n === oldNorm ? nextHandle : h;
+  };
+
+  posts = posts.map((p) => ({
+    ...p,
+    userHandle: rewrite(p.userHandle) || p.userHandle,
+    originalUserHandle: p.originalUserHandle
+      ? rewrite(p.originalUserHandle) || p.originalUserHandle
+      : p.originalUserHandle,
+    taggedUsers: Array.isArray(p.taggedUsers)
+      ? p.taggedUsers.map((t) => rewrite(t) || t)
+      : p.taggedUsers,
+  }));
+  savePostsToStorage(posts);
+
+  comments = comments.map((c) => ({
+    ...c,
+    userHandle: rewrite(c.userHandle) || c.userHandle,
+    replies: Array.isArray(c.replies)
+      ? c.replies.map((r) => ({
+          ...r,
+          userHandle: rewrite(r.userHandle) || r.userHandle,
+        }))
+      : c.replies,
+  }));
+
+  for (const [uid, state] of Object.entries(userState)) {
+    if (!state?.follows) continue;
+    state.follows = remapFollowKeyMap(state.follows, oldNorm, nextHandle);
+    saveFollowsToStorage(uid, state.follows);
+  }
+
+  try {
+    const { renameStoryHandlesEverywhere } = await import('./stories');
+    renameStoryHandlesEverywhere(oldHandle, nextHandle);
+  } catch {
+    /* stories module optional in some environments */
+  }
+
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('userHandleChanged', {
+          detail: { oldHandle, newHandle: nextHandle },
+        }),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { DeviceEventEmitter } = await import('react-native');
+    DeviceEventEmitter.emit('userHandleChanged', { oldHandle, newHandle: nextHandle });
+  } catch {
+    /* web */
+  }
+}
+
 /** Persist Sponsored / boost tier on a post (legal disclosure). Used by mock + Stripe activate flows. */
 export function markPostAsBoosted(
   postId: string,
