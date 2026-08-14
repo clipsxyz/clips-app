@@ -12,8 +12,7 @@ import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollow
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { reclipPost } from '../api/posts';
-import { getFlagForHandle, getAvatarForHandle } from '../api/users';
-import Flag from '../components/Flag';
+import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -23,6 +22,7 @@ import type { Story, StoryGroup, Post } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import VerifiedBadge from '../components/VerifiedBadge';
 
 /** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
 const STORIES24_LOADING_HOLD_MS = 2600;
@@ -2173,10 +2173,8 @@ export default function StoriesPage() {
                                                                     <div className="flex-1">
                                                                         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
                                                                             <span>{originalPost.userHandle}</span>
-                                                                            <Flag
-                                                                                value={
-                                                                                    getFlagForHandle(originalPost.userHandle) || ''
-                                                                                }
+                                                                            <VerifiedBadge
+                                                                                accountType={originalPost.userAccountType}
                                                                                 size={14}
                                                                             />
                                                                         </h3>

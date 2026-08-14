@@ -10,7 +10,7 @@ import Avatar from './Avatar';
 import ShareModal from './ShareModal';
 import StickerOverlayComponent from './StickerOverlay';
 import EffectWrapper from './EffectWrapper';
-import Flag from './Flag';
+import VerifiedBadge from './VerifiedBadge';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
@@ -24,7 +24,7 @@ import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import type { Comment } from '../types';
 import { enqueue } from '../utils/mutationQueue';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
@@ -1804,8 +1804,8 @@ export default function ScenesModal({
                                                     <div className="flex-1">
                                                         <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
                                                             <span>{post.userHandle}</span>
-                                                            <Flag
-                                                                value={getFlagForHandle(post.userHandle) || ''}
+                                                            <VerifiedBadge
+                                                                accountType={post.userAccountType}
                                                                 size={14}
                                                             />
                                                         </h3>

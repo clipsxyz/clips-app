@@ -6,6 +6,7 @@ import Avatar from '../components/Avatar';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
 import Flag from '../components/Flag';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { useAuth } from '../context/Auth';
 import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, setReclipState, posts as allPosts, toggleLike, reclipPost, incrementViews, deletePost, transformLaravelPost } from '../api/posts';
 import { enqueue } from '../utils/mutationQueue';
@@ -2090,13 +2091,31 @@ export default function ViewProfilePage() {
                             <h1 className="text-2xl font-bold mb-1 text-white tracking-tight drop-shadow-lg">
                                 {profileUser.name}
                             </h1>
-                            <p className="text-sm text-gray-200/90 flex items-center justify-center gap-1">
+                            <p className="text-sm text-gray-200/90 flex items-center justify-center gap-1.5">
                                 <span>{profileUser.handle}</span>
-                                <Flag
-                                    value={profileUser.handle === user?.handle ? (user?.countryFlag || '') : (getFlagForHandle(profileUser.handle) || '')}
-                                    size={16}
+                                <VerifiedBadge
+                                    accountType={
+                                        profileUser.accountType ||
+                                        (profileUser.handle === user?.handle ? user?.accountType : undefined)
+                                    }
+                                    size={15}
                                 />
                             </p>
+                            {(profileUser.handle === user?.handle
+                                ? user?.countryFlag
+                                : getFlagForHandle(profileUser.handle)) ? (
+                                <div className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-full border border-white/20 bg-black/30 px-2.5 py-1">
+                                    <Flag
+                                        value={
+                                            profileUser.handle === user?.handle
+                                                ? user?.countryFlag || ''
+                                                : getFlagForHandle(profileUser.handle) || ''
+                                        }
+                                        size={16}
+                                    />
+                                    <span className="text-[11px] font-semibold text-gray-200/90">Country</span>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 </div>
@@ -2543,17 +2562,13 @@ export default function ViewProfilePage() {
                                             ? `@${String(profileUser.handle || gridPeekPost.userHandle).replace(/^@/, '')}`
                                             : ''}
                                     </span>
-                                    {profileUser.is_verified ? (
-                                        <span
-                                            className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-white border border-white"
-                                            title="Verified"
-                                            aria-label="Verified"
-                                        >
-                                            <svg className="h-2.5 w-2.5 text-black" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                                                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
-                                            </svg>
-                                        </span>
-                                    ) : null}
+                                    <VerifiedBadge
+                                        accountType={
+                                            profileUser.accountType ||
+                                            (profileUser.handle === user?.handle ? user?.accountType : undefined)
+                                        }
+                                        size={16}
+                                    />
                                 </div>
                             </div>
                             <div className="relative max-h-[min(52vh,420px)] min-h-[200px] bg-black flex items-center justify-center">

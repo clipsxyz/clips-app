@@ -30,8 +30,8 @@ import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
-import { getFlagForHandle, getAvatarForHandle } from './api/users';
-import Flag from './components/Flag';
+import { getAvatarForHandle } from './api/users';
+import VerifiedBadge from './components/VerifiedBadge';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
@@ -1659,9 +1659,10 @@ function PostHeader({
                   style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
                 >
                   <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
-                  <Flag
-                    value={isCurrentUser ? user?.countryFlag || '' : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ''}
-                    national={isCurrentUser ? user?.national : undefined}
+                  <VerifiedBadge
+                    accountType={
+                      isCurrentUser ? user?.accountType : post.userAccountType
+                    }
                     size={16}
                   />
                 </span>
@@ -1960,9 +1961,10 @@ function PostHeader({
             >
               <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
-                <Flag
-                  value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
-                  national={isCurrentUser ? user?.national : undefined}
+                <VerifiedBadge
+                  accountType={
+                    isCurrentUser ? user?.accountType : post.userAccountType
+                  }
                   size={16}
                 />
               </h3>
@@ -2704,7 +2706,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, postUserAccountType, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; postUserAccountType?: string | null; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -3750,8 +3752,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                         <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
                           <span>{postUserHandle || 'User'}</span>
                           {postUserHandle && (
-                            <Flag
-                              value={getFlagForHandle(postUserHandle) || ''}
+                            <VerifiedBadge
+                              accountType={postUserAccountType}
                               size={14}
                             />
                           )}
@@ -5306,6 +5308,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             postUserHandle={post.userHandle}
             postLocationLabel={post.locationLabel}
             postCreatedAt={post.createdAt?.toString()}
+            postUserAccountType={post.userAccountType}
             videoPosterUrl={post.videoPosterUrl}
             priority={priority}
             tileMode={isTileBoostMode}

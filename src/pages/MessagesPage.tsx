@@ -26,14 +26,14 @@ import {
     fetchGroupThreadMessagesPage,
     markGroupConversationReadById,
 } from '../api/messages';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getPostById, getFollowedUsers, getState, toggleLike } from '../api/posts';
 import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
 import type { Post } from '../types';
-import Flag from '../components/Flag';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { showToast } from '../utils/toast';
 import { getSocket } from '../services/socketio';
@@ -216,10 +216,7 @@ function CommentCard({ post, commentText, commenterHandle }: { post: Post; comme
                     <div className="flex-1">
                         <div className="flex items-center gap-1.5">
                             <span className="font-semibold text-sm" style={{ color: '#111827' }}>{commenterHandle}</span>
-                            <Flag
-                                value={getFlagForHandle(commenterHandle) || ''}
-                                size={12}
-                            />
+                            <VerifiedBadge accountType="personal" size={12} />
                             <span className="text-xs" style={{ color: '#6b7280' }}>commented</span>
                         </div>
                     </div>
@@ -245,10 +242,7 @@ function CommentCard({ post, commentText, commenterHandle }: { post: Post; comme
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 mb-1">
                             <span className="font-semibold text-xs" style={{ color: '#111827' }}>{post.userHandle}</span>
-                            <Flag
-                                value={getFlagForHandle(post.userHandle) || ''}
-                                size={10}
-                            />
+                            <VerifiedBadge accountType="personal" size={10} />
                         </div>
                         {post.text && (
                             <p className="text-xs line-clamp-2 mb-2" style={{ color: '#4b5563' }}>{post.text}</p>
@@ -417,10 +411,7 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
                         <div className="flex-1">
                             <h3 className="font-semibold flex items-center gap-1.5 text-sm" style={{ color: '#111827' }}>
                                 <span>{post.userHandle}</span>
-                                <Flag
-                                    value={getFlagForHandle(post.userHandle) || ''}
-                                    size={14}
-                                />
+                                <VerifiedBadge accountType="personal" size={14} />
                             </h3>
                             <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: '#4b5563' }}>
                                 {post.locationLabel && (
