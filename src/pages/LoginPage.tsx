@@ -6,6 +6,7 @@ import { loginUser, registerUser } from '../api/client';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
+import { buildGazetteerHandle } from '../utils/gazetteerHandle';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
@@ -184,8 +185,9 @@ export default function LoginPage() {
     return age;
   }
 
-  const handleFirstName = name.trim().split(/\s+/)[0] || 'yourname';
-  const handlePreview = regional ? `${handleFirstName}@${regional}` : `${handleFirstName}@yourregion`;
+  const handlePreview = regional
+    ? buildGazetteerHandle(name.trim() || 'yourname', regional)
+    : buildGazetteerHandle(name.trim() || 'yourname', 'yourregion');
   const previewCountryFlag = normalizeCountryFlagInput('', national);
   const homeLocationComplete = Boolean(local && regional && national);
   const birthdateComplete = React.useMemo(() => {
@@ -290,7 +292,7 @@ export default function LoginPage() {
       local: local,
       regional: regional,
       national: national,
-      handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
+      handle: buildGazetteerHandle(name.trim() || 'user', regional),
       countryFlag: normalizeCountryFlagInput('', national),
       avatarUrl: profilePicture || undefined,
       accountType: accountType ?? 'personal',
@@ -312,7 +314,7 @@ export default function LoginPage() {
         email: email.trim(),
         password,
         displayName: name.trim(),
-        handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
+        handle: buildGazetteerHandle(name.trim() || 'user', regional),
         locationLocal: local,
         locationRegional: regional,
         locationNational: national,

@@ -12,12 +12,13 @@ import QRCode from 'qrcode';
 import Flag from '../components/Flag';
 import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
-import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
+import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, renameUserHandleEverywhere, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { showToast } from '../utils/toast';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
+import { nextHandleAfterNameChange, normalizeHandle as handleKey } from '../utils/gazetteerHandle';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
 import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
@@ -120,6 +121,7 @@ export default function ProfilePage() {
   const nav = useNavigate();
   const [isUpdatingProfile, setIsUpdatingProfile] = React.useState(false);
   const [bio, setBio] = React.useState(user?.bio || '');
+  const [displayName, setDisplayName] = React.useState(user?.name || '');
   const [socialLinks, setSocialLinks] = React.useState({
     website: user?.socialLinks?.website || '',
     x: user?.socialLinks?.x || '',
@@ -157,7 +159,7 @@ export default function ProfilePage() {
     getEffectiveProfilePrivate(user?.handle, user?.is_private)
   );
   const [isTogglingPrivacy, setIsTogglingPrivacy] = React.useState(false);
-  const [selectedCard, setSelectedCard] = React.useState<'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | 'followers' | 'following' | null>(null);
+  const [selectedCard, setSelectedCard] = React.useState<'name' | 'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | 'followers' | 'following' | null>(null);
   const [followersCount, setFollowersCount] = React.useState(0);
   const [followingCount, setFollowingCount] = React.useState(0);
   const [followersList, setFollowersList] = React.useState<string[]>([]);
@@ -452,6 +454,10 @@ export default function ProfilePage() {
     'Samoa', 'Guam', 'Kiribati', 'Micronesia', 'Tonga', 'Marshall Islands', 'Palau', 'American Samoa', 'Northern Mariana Islands',
     'Cook Islands', 'Tuvalu', 'Wallis and Futuna', 'Nauru', 'Niue', 'Tokelau', 'Pitcairn Islands'
   ];
+
+  React.useEffect(() => {
+    setDisplayName(user?.name || '');
+  }, [user?.name]);
 
   React.useEffect(() => {
     if (user?.bio) {
@@ -1215,11 +1221,20 @@ export default function ProfilePage() {
               </button>
             </div>
 
-            {/* Center: User name */}
+            {/* Center: User name (tap to edit) */}
             <div className="flex-1 flex justify-center min-w-0 px-2">
-              <h1 className="text-xl font-bold text-white truncate" title={user?.name}>
-                {user?.name || 'Passport'}
-              </h1>
+              <button
+                type="button"
+                onClick={() => setSelectedCard('name')}
+                className="inline-flex items-center gap-1.5 max-w-full min-w-0 rounded-lg px-1.5 py-0.5 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                title="Edit display name"
+                aria-label="Edit display name"
+              >
+                <h1 className="text-xl font-bold text-white truncate" title={user?.name}>
+                  {user?.name || 'Passport'}
+                </h1>
+                <FiEdit3 className="w-3.5 h-3.5 text-white/70 shrink-0" aria-hidden />
+              </button>
             </div>
 
             {/* Right: Private/Public Toggle */}
@@ -1533,6 +1548,14 @@ export default function ProfilePage() {
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 type="button"
+                onClick={() => setSelectedCard('name')}
+                className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <FiUser className="w-4 h-4" />
+                Name
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowProfilePictureModal(true)}
                 className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
               >
@@ -1554,14 +1577,6 @@ export default function ProfilePage() {
               >
                 <FiEdit3 className="w-4 h-4" />
                 Bio
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedCard('social')}
-                className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-              >
-                <FiLink2 className="w-4 h-4" />
-                Links
               </button>
             </div>
           </div>
@@ -1609,6 +1624,22 @@ export default function ProfilePage() {
           <section className="space-y-2">
             <div className="px-1 text-[11px] uppercase tracking-[0.16em] text-gray-500 font-semibold">Identity</div>
             <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setSelectedCard('name')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.bio}
+                    icon={<FiUser className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Name</div>
+                    <div className="text-xs text-gray-400 mt-0.5 truncate">{displayName.trim() || 'Add your name'}</div>
+                  </div>
+                </div>
+              </button>
+
               <button
                 onClick={() => setSelectedCard('bio')}
                 className="rounded-2xl cursor-pointer text-left w-full group"
@@ -1736,6 +1767,7 @@ export default function ProfilePage() {
               {/* Header - title and X close for all cards */}
               <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200 gap-3">
                 <h2 className="text-xl font-bold text-gray-900 flex-1 min-w-0">
+                  {selectedCard === 'name' && 'Edit name'}
                   {selectedCard === 'bio' && 'Edit Bio'}
                   {selectedCard === 'social' && 'Social Links'}
                   {selectedCard === 'personal' && 'Account & preferred locations'}
@@ -1819,6 +1851,104 @@ export default function ProfilePage() {
                         ))}
                       </ul>
                     )}
+                  </div>
+                )}
+
+                {/* Display name form */}
+                {selectedCard === 'name' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Display name
+                      </label>
+                      <input
+                        type="text"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value.slice(0, 100))}
+                        placeholder="Your name"
+                        maxLength={100}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        Shown on your passport and across Gazetteer. Your @handle updates with this name. {displayName.trim().length}/100
+                      </p>
+                    </div>
+                    {user?.handle ? (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Handle preview
+                        </label>
+                        <input
+                          type="text"
+                          value={`@${nextHandleAfterNameChange({
+                            displayName: displayName.trim() || displayName,
+                            currentHandle: user.handle,
+                            regional: user.regional,
+                            local: user.local,
+                          })}`}
+                          disabled
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Saving renames your handle everywhere (feed, posts, profile)
+                        </p>
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={!displayName.trim() || displayName.trim().length > 100}
+                      onClick={async () => {
+                        const nextName = displayName.trim();
+                        if (!nextName || !user) return;
+                        const oldHandle = String(user.handle || '');
+                        const nextHandle = nextHandleAfterNameChange({
+                          displayName: nextName,
+                          currentHandle: oldHandle,
+                          regional: user.regional,
+                          local: user.local,
+                        });
+                        const handleChanging =
+                          Boolean(oldHandle) && handleKey(oldHandle) !== handleKey(nextHandle);
+                        try {
+                          const ok = await persistLaravelProfile({
+                            display_name: nextName,
+                            ...(handleChanging ? { handle: nextHandle } : {}),
+                          });
+                          if (handleChanging) {
+                            await renameUserHandleEverywhere(oldHandle, nextHandle);
+                          }
+                          if (!ok) {
+                            login({
+                              ...user,
+                              name: nextName,
+                              ...(handleChanging ? { handle: nextHandle } : {}),
+                            });
+                          } else if (handleChanging && handleKey(user.handle || '') !== handleKey(nextHandle)) {
+                            login({ ...user, name: nextName, handle: nextHandle });
+                          }
+                        } catch {
+                          if (handleChanging) {
+                            await renameUserHandleEverywhere(oldHandle, nextHandle);
+                          }
+                          Swal.fire(
+                            bottomSheet({
+                              title: 'Could not save',
+                              message: 'Name was saved on this device only.',
+                              icon: 'alert',
+                            })
+                          );
+                          login({
+                            ...user,
+                            name: nextName,
+                            ...(handleChanging ? { handle: nextHandle } : {}),
+                          });
+                        }
+                        setSelectedCard(null);
+                      }}
+                      className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Save name
+                    </button>
                   </div>
                 )}
 

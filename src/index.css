@@ -1345,3 +1345,58 @@ video {
   background: rgba(40, 40, 46, 0.75);
   border-color: rgba(255, 255, 255, 0.16);
 }
+
+/* Feed switcher — Instagram-style traveling border (passport sea-glass + brass) */
+@property --passport-feed-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes passport-feed-border-spin {
+  to {
+    --passport-feed-border-angle: 360deg;
+  }
+}
+
+.passport-feed-traveling-border {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: 10px;
+  isolation: isolate;
+}
+
+.passport-feed-traveling-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--passport-feed-border-angle),
+    #3d9b8f 0deg,
+    #c4a574 55deg,
+    #12263a 110deg,
+    #3d9b8f 175deg,
+    #e8d5a3 235deg,
+    #060d16 295deg,
+    #3d9b8f 360deg
+  );
+  z-index: -1;
+  animation: passport-feed-border-spin 4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .passport-feed-traveling-border::before {
+    animation: none;
+    background: conic-gradient(
+      from 40deg,
+      #3d9b8f 0deg,
+      #c4a574 90deg,
+      #12263a 180deg,
+      #3d9b8f 270deg,
+      #3d9b8f 360deg
+    );
+  }
+}

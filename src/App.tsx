@@ -889,41 +889,43 @@ function PillTabs(props: {
           </button>
 
           <div ref={menuRef} className="relative flex justify-center">
-            <button
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label="Change feed"
-              onClick={() => setMenuOpen((prev) => !prev)}
-              className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-            >
-              <span className="shrink-0" aria-hidden>
-                {props.customFilterType === 'venue' ? (
-                  <FiHome className="h-4 w-4 text-white" />
-                ) : props.customFilterType === 'landmark' ? (
-                  <GiGreekTemple className="h-4 w-4 text-white" />
-                ) : (
-                  <FiMapPin className="h-4 w-4 text-white" />
-                )}
-              </span>
-              <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${activeHeaderDotClass}`} aria-hidden />
-              <span
-                className="max-w-[9rem] truncate sm:max-w-[11rem]"
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  lineHeight: '1.1',
-                  fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif',
-                  color: '#E5E7EB',
-                }}
+            <div className="passport-feed-traveling-border relative">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label="Change feed"
+                onClick={() => setMenuOpen((prev) => !prev)}
+                className="relative z-[1] inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
               >
-                {headerLabel}
-              </span>
-              <FiChevronDown
-                className={`h-4 w-4 text-white/90 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
-                aria-hidden
-              />
-            </button>
+                <span className="shrink-0" aria-hidden>
+                  {props.customFilterType === 'venue' ? (
+                    <FiHome className="h-4 w-4 text-white" />
+                  ) : props.customFilterType === 'landmark' ? (
+                    <GiGreekTemple className="h-4 w-4 text-white" />
+                  ) : (
+                    <FiMapPin className="h-4 w-4 text-white" />
+                  )}
+                </span>
+                <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${activeHeaderDotClass}`} aria-hidden />
+                <span
+                  className="max-w-[9rem] truncate sm:max-w-[11rem]"
+                  style={{
+                    fontSize: '18px',
+                    fontWeight: 700,
+                    lineHeight: '1.1',
+                    fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif',
+                    color: '#E5E7EB',
+                  }}
+                >
+                  {headerLabel}
+                </span>
+                <FiChevronDown
+                  className={`h-4 w-4 text-white/90 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
+                  aria-hidden
+                />
+              </button>
+            </div>
 
             {menuOpen && (
               <div
@@ -6354,6 +6356,40 @@ function FeedPageWrapper() {
 
     window.addEventListener('feedUserBlocked', onFeedUserBlocked as EventListener);
     return () => window.removeEventListener('feedUserBlocked', onFeedUserBlocked as EventListener);
+  }, []);
+
+  React.useEffect(() => {
+    const rewrite = (h: string | undefined, oldNorm: string, nextHandle: string) => {
+      if (!h) return h;
+      return String(h).replace(/^@/, '').trim().toLowerCase() === oldNorm ? nextHandle : h;
+    };
+    const onHandleChanged = (event: CustomEvent<{ oldHandle?: string; newHandle?: string }>) => {
+      const oldNorm = String(event.detail?.oldHandle || '')
+        .replace(/^@/, '')
+        .trim()
+        .toLowerCase();
+      const nextHandle = String(event.detail?.newHandle || '').replace(/^@/, '').trim();
+      if (!oldNorm || !nextHandle) return;
+      setPages((prev) =>
+        prev.map((page) =>
+          page.map((p) => ({
+            ...p,
+            userHandle: rewrite(p.userHandle, oldNorm, nextHandle) || p.userHandle,
+            originalUserHandle: p.originalUserHandle
+              ? rewrite(p.originalUserHandle, oldNorm, nextHandle) || p.originalUserHandle
+              : p.originalUserHandle,
+          }))
+        )
+      );
+      setStoriesRailItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          handle: rewrite(item.handle, oldNorm, nextHandle) || item.handle,
+        }))
+      );
+    };
+    window.addEventListener('userHandleChanged', onHandleChanged as EventListener);
+    return () => window.removeEventListener('userHandleChanged', onHandleChanged as EventListener);
   }, []);
 
   React.useEffect(() => {

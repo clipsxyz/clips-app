@@ -9,10 +9,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
@@ -114,6 +116,14 @@ class AuthController extends Controller
 
         $validator = Validator::make($request->all(), [
             'display_name' => 'sometimes|string|min:1|max:100',
+            'handle' => [
+                'sometimes',
+                'string',
+                'min:3',
+                'max:100',
+                'regex:/^[a-zA-Z0-9]+@[a-zA-Z0-9]+$/',
+                Rule::unique('users', 'handle')->ignore($user->id),
+            ],
             'bio' => 'sometimes|nullable|string|max:5000',
             'places_traveled' => 'sometimes|nullable|array|max:80',
             'places_traveled.*' => 'string|max:200',
@@ -130,6 +140,10 @@ class AuthController extends Controller
         }
 
         $data = $validator->validated();
+        $oldHandle = (string) $user->handle;
+        $newHandle = array_key_exists('handle', $data) ? (string) $data['handle'] : $oldHandle;
+        $handleChanging = $newHandle !== '' && strcasecmp($oldHandle, $newHandle) !== 0;
+
         $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled'];
         foreach ($fillable as $field) {
             if (array_key_exists($field, $data)) {
@@ -140,7 +154,63 @@ class AuthController extends Controller
             $raw = $data['profile_background_url'];
             $user->profile_background_url = ($raw === null || $raw === '') ? null : $raw;
         }
-        $user->save();
+        if ($handleChanging) {
+            $user->handle = $newHandle;
+            if (Schema::hasColumn('users', 'username')) {
+                $user->username = $newHandle;
+            }
+        }
+
+        DB::transaction(function () use ($user, $handleChanging, $oldHandle, $newHandle) {
+            $user->save();
+
+            if (! $handleChanging) {
+                return;
+            }
+
+            // Keep denormalized handle copies in sync so feeds/search stay correct.
+            DB::table('posts')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            if (Schema::hasColumn('posts', 'original_user_handle')) {
+                DB::table('posts')->where('original_user_handle', $oldHandle)->update(['original_user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('comments')) {
+                DB::table('comments')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('stories')) {
+                DB::table('stories')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+                if (Schema::hasColumn('stories', 'shared_from_user_handle')) {
+                    DB::table('stories')->where('shared_from_user_handle', $oldHandle)->update(['shared_from_user_handle' => $newHandle]);
+                }
+            }
+            if (Schema::hasTable('story_reactions')) {
+                DB::table('story_reactions')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('story_replies')) {
+                DB::table('story_replies')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('post_reclips')) {
+                DB::table('post_reclips')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('post_tagged_users')) {
+                DB::table('post_tagged_users')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('notifications')) {
+                DB::table('notifications')->where('from_handle', $oldHandle)->update(['from_handle' => $newHandle]);
+                DB::table('notifications')->where('to_handle', $oldHandle)->update(['to_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('fcm_tokens')) {
+                DB::table('fcm_tokens')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('notification_preferences')) {
+                DB::table('notification_preferences')->where('user_handle', $oldHandle)->update(['user_handle' => $newHandle]);
+            }
+            if (Schema::hasTable('messages')) {
+                DB::table('messages')->where('sender_handle', $oldHandle)->update(['sender_handle' => $newHandle]);
+                DB::table('messages')->where('recipient_handle', $oldHandle)->update(['recipient_handle' => $newHandle]);
+            }
+        });
+
+        Cache::put('feed_version', (int) Cache::get('feed_version', 0) + 1);
 
         // Bust suggested-by-places cache for this user (version bump; works on file/redis drivers)
         $vk = 'user_profile_sig_version:'.$user->id;
