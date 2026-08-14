@@ -49,6 +49,7 @@ import {
     deleteCommentById,
     setCommentModerationState,
     decorateForUser,
+    getLocalPostById,
     postMatchesLocationTab,
 } from '../api/posts';
 import { getUnreadTotal } from '../api/messages';
@@ -2630,10 +2631,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const applyFeedPageResult = React.useCallback(
         (items: Post[], nextCursor: string | number | null) => {
             const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
-            const recent = recentCreatedPostsRef.current.filter((p) => {
-                if (!feedTab || feedTab.toLowerCase() === 'discover') return true;
-                return postMatchesLocationTab(p, feedTab);
-            });
+            const recent = recentCreatedPostsRef.current
+                .map((p) => {
+                    const live = getLocalPostById(p.id);
+                    const merged = live
+                        ? {
+                              ...p,
+                              ...live,
+                              stats: { ...p.stats, ...live.stats },
+                          }
+                        : p;
+                    return decorateForUser(userId, merged);
+                })
+                .filter((p) => {
+                    if (!feedTab || feedTab.toLowerCase() === 'discover') return true;
+                    return postMatchesLocationTab(p, feedTab);
+                });
+            recentCreatedPostsRef.current = recent;
             const recentIds = new Set(recent.map((p) => String(p.id)));
             const withoutDupes = items.filter((p) => !recentIds.has(String(p.id)));
             let merged = recent.length > 0 ? [...recent, ...withoutDupes] : items;
@@ -2658,7 +2672,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 setEnd(true);
             }
         },
-        [],
+        [userId],
     );
 
     const reloadFeedFromStart = React.useCallback(async (opts?: { quiet?: boolean }) => {
@@ -3438,6 +3452,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [user, userId, patchFollowForHandle],
     );
 
+    const syncFullscreenPost = React.useCallback((updated: Post) => {
+        const updatedId = String(updated.id);
+        setImageFullscreenPost((prev) =>
+            prev && String(prev.id) === updatedId ? { ...prev, ...updated } : prev,
+        );
+        setSelectedPostForComments((prev) =>
+            prev && String(prev.id) === updatedId ? { ...prev, ...updated } : prev,
+        );
+    }, []);
+
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
         ({ item }: { item: FeedListRow }) => {
@@ -3632,13 +3656,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     suspendNativeVideo={feedNativeVideoSuspended}
                     onLike={async () => {
                         if (isPendingUpload) return;
+                        const postId = String(mergedPost.id);
                         const prevLiked = mergedPost.userLiked === true;
                         const prevLikes = mergedPost.stats?.likes ?? 0;
                         // Optimistic like-only patch — avoid full post replace (layout churn).
                         setPages((prev) =>
                             prev.map((page) =>
                                 page.map((p) =>
-                                    p.id === mergedPost.id
+                                    String(p.id) === postId
                                         ? {
                                               ...p,
                                               userLiked: !prevLiked,
@@ -3653,32 +3678,49 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         );
                         try {
                             const updated = await toggleLike(userId, mergedPost.id, mergedPost);
+                            const nextLiked = updated.userLiked ?? !prevLiked;
+                            const nextLikes = Math.max(
+                                0,
+                                typeof updated.stats?.likes === 'number'
+                                    ? updated.stats.likes
+                                    : prevLikes + (prevLiked ? -1 : 1),
+                            );
                             setPages((prev) =>
                                 prev.map((page) =>
                                     page.map((p) =>
-                                        p.id === mergedPost.id
+                                        String(p.id) === postId
                                             ? {
                                                   ...p,
-                                                  userLiked: updated.userLiked ?? !prevLiked,
+                                                  userLiked: nextLiked,
                                                   stats: {
                                                       ...p.stats,
-                                                      likes: Math.max(
-                                                          0,
-                                                          typeof updated.stats?.likes === 'number'
-                                                              ? updated.stats.likes
-                                                              : prevLikes + (prevLiked ? -1 : 1),
-                                                      ),
+                                                      likes: nextLikes,
                                                   },
                                               }
                                             : p,
                                     ),
                                 ),
                             );
+                            recentCreatedPostsRef.current = recentCreatedPostsRef.current.map((p) =>
+                                String(p.id) === postId
+                                    ? {
+                                          ...p,
+                                          userLiked: nextLiked,
+                                          stats: { ...p.stats, likes: nextLikes },
+                                      }
+                                    : p,
+                            );
+                            syncFullscreenPost({
+                                ...mergedPost,
+                                ...updated,
+                                userLiked: nextLiked,
+                                stats: { ...mergedPost.stats, ...updated.stats, likes: nextLikes },
+                            });
                         } catch {
                             setPages((prev) =>
                                 prev.map((page) =>
                                     page.map((p) =>
-                                        p.id === mergedPost.id
+                                        String(p.id) === postId
                                             ? {
                                                   ...p,
                                                   userLiked: prevLiked,
@@ -3756,8 +3798,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         if (isPendingUpload) return;
                         setImageFullscreenStartIndex(startIndex);
                         setImageFullscreenOrigin(origin);
-                        // Re-decorate so author-level follow map wins over a stale per-post flag.
-                        setImageFullscreenPost(decorateForUser(userId, mergedPost));
+                        // Prefer live in-memory stats (mock like map + persisted count) over a stale card snapshot.
+                        const live = getLocalPostById(mergedPost.id);
+                        const latest = live
+                            ? {
+                                  ...mergedPost,
+                                  ...live,
+                                  stats: { ...mergedPost.stats, ...live.stats },
+                                  userLiked: live.userLiked ?? mergedPost.userLiked,
+                              }
+                            : mergedPost;
+                        setImageFullscreenPost(decorateForUser(userId, latest));
                     }}
                     onOpenScenes={() => {
                         if (isPendingUpload) return;
@@ -3875,13 +3926,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             stories24CollapsePayload,
             patchFollowForHandle,
             showFeedLikeBurst,
+            syncFullscreenPost,
         ]
     );
-
-    const syncFullscreenPost = React.useCallback((updated: Post) => {
-        setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
-        setSelectedPostForComments((prev) => (prev?.id === updated.id ? updated : prev));
-    }, []);
 
     const closeCommentsSheet = React.useCallback(() => {
         setCommentsModalOpen(false);

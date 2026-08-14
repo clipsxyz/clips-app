@@ -1064,13 +1064,20 @@ export function setReclipState(userId: string, postId: string, reclipped: boolea
  */
 export function upsertLocalPost(post: Post): Post {
   if (!post?.id) return post;
-  const idx = posts.findIndex((p) => p.id === post.id);
+  const idx = posts.findIndex((p) => String(p.id) === String(post.id));
   if (idx >= 0) {
-    posts[idx] = { ...posts[idx], ...post, id: post.id };
+    posts[idx] = { ...posts[idx], ...post, id: posts[idx].id };
     return posts[idx];
   }
   posts.unshift(post);
   return post;
+}
+
+/** Live in-memory post snapshot (for feed pins / fullscreen after like). */
+export function getLocalPostById(postId: string | undefined | null): Post | undefined {
+  if (postId == null || postId === '') return undefined;
+  const idKey = String(postId);
+  return posts.find((p) => String(p.id) === idKey);
 }
 
 // Local follow map wins when present (including explicit unfollow). Otherwise fall back to API flag.
@@ -2046,24 +2053,25 @@ export async function toggleLike(userId: string, id: string, currentPost?: Post)
     }
   }
 
-  // Pure mock implementation
-  await delay(150);
+  // Pure mock implementation — apply like state synchronously so rapid taps can't all read "unliked".
   const s = getState(userId);
   const idKey = String(id);
   let p = posts.find((x) => String(x.id) === idKey);
-  // Prefer explicit UI liked state when provided — avoids desync that drives likes to -1.
-  const was =
-    currentPost && typeof currentPost.userLiked === 'boolean'
-      ? currentPost.userLiked
-      : !!s.likes[idKey] || !!s.likes[id];
+  // Trust persisted like map (not a possibly-stale UI snapshot) so own posts can't +1 forever.
+  const was = !!s.likes[idKey] || !!s.likes[id] || !!s.likes[String(id)];
   const nextLiked = !was;
   s.likes[idKey] = nextLiked;
-  if (idKey !== id) s.likes[id] = nextLiked;
+  s.likes[String(id)] = nextLiked;
+
+  const baseLikes = Math.max(
+    0,
+    Number(p?.stats?.likes) || 0,
+    Number(currentPost?.stats?.likes) || 0,
+  );
+  const nextLikes = Math.max(0, baseLikes + (was ? -1 : 1));
 
   if (!p && currentPost) {
-    const baseLikes = Math.max(0, Number(currentPost.stats?.likes) || 0);
-    const nextLikes = Math.max(0, baseLikes + (was ? -1 : 1));
-    return decorateForUser(userId, {
+    p = upsertLocalPost({
       ...currentPost,
       id: currentPost.id ?? id,
       userLiked: nextLiked,
@@ -2073,8 +2081,14 @@ export async function toggleLike(userId: string, id: string, currentPost?: Post)
   if (!p) {
     throw new Error('Post not found');
   }
-  const baseLikes = Math.max(0, Number(p.stats?.likes) || 0);
-  p.stats.likes = Math.max(0, baseLikes + (was ? -1 : 1));
+
+  p.stats = { ...p.stats, likes: nextLikes };
+  // Persist user-created posts so fullscreen / feed reload keep the count (mock Sarah posts stay in RAM).
+  if (!isMockPostId(String(p.id))) {
+    savePostsToStorage(posts);
+  }
+
+  await delay(150);
   return decorateForUser(userId, p);
 }
 
