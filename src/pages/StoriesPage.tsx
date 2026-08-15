@@ -4,15 +4,19 @@ import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolu
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
-import { appendMessage } from '../api/messages';
+import {
+    deliverStoryReactionToInbox,
+    deliverStoryReplyToInbox,
+} from '../utils/sendStoryInteractionToInbox';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { isProfilePrivate, canSendMessage, createFollowRequest } from '../api/privacy';
-import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState, getFollowState } from '../api/posts';
+import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState, getFollowState, getAccountTypeForHandle } from '../api/posts';
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { reclipPost } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -22,7 +26,6 @@ import type { Story, StoryGroup, Post } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
-import VerifiedBadge from '../components/VerifiedBadge';
 
 /** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
 const STORIES24_LOADING_HOLD_MS = 2600;
@@ -191,6 +194,7 @@ export default function StoriesPage() {
     const openStoryId = location.state?.openStoryId;
     const fromDmViewStory = location.state?.fromDmViewStory === true;
     const fromStories24Rail = location.state?.fromStories24Rail === true;
+    const skipStories24RailReturn = location.state?.skipStories24RailReturn === true;
     const railHandles = Array.isArray(location.state?.railHandles)
         ? (location.state.railHandles as string[])
         : [];
@@ -199,7 +203,8 @@ export default function StoriesPage() {
     /** True if we opened from Stories 24 rail (state or session handle match — avoids navigate(-1) → Inbox on mobile). */
     const stories24OpenFromFeedRail =
         fromStories24Rail ||
-        (typeof openUserHandle === 'string' &&
+        (!skipStories24RailReturn &&
+            typeof openUserHandle === 'string' &&
             (() => {
                 try {
                     const stored = sessionStorage.getItem(STORIES24_FROM_RAIL_HANDLE_KEY);
@@ -215,7 +220,7 @@ export default function StoriesPage() {
     /** Signals feed rail to run the “drop back” shrink into the card (must match App.tsx `STORIES24_RAIL_RETURN_KEY`). Uses a JPEG frame for video so the overlay matches the static-image-only collapse path. */
     const persistStories24RailReturnAnimation = React.useCallback(
         async (storySnapshot: Story | undefined, navState: Stories24NavState) => {
-            if (!openUserHandle || !stories24OpenFromFeedRail) return;
+            if (!openUserHandle || !stories24OpenFromFeedRail || skipStories24RailReturn) return;
             const previewVideoUrl = navState?.previewVideoUrl;
             let previewThumb = navState?.previewThumb;
             const mediaUrl = storySnapshot?.mediaUrl;
@@ -241,7 +246,7 @@ export default function StoriesPage() {
                 /* ignore */
             }
         },
-        [openUserHandle, stories24OpenFromFeedRail]
+        [openUserHandle, skipStories24RailReturn, stories24OpenFromFeedRail]
     );
 
     function clearStories24RailSessionHandle() {
@@ -468,7 +473,11 @@ export default function StoriesPage() {
             await persistStories24RailReturnAnimation(storySnapshot, navState);
             if (cancelled) return;
             clearStories24RailSessionHandle();
-            navigate('/feed', { replace: true });
+            if (skipStories24RailReturn) {
+                navigate(-1);
+            } else {
+                navigate('/feed', { replace: true });
+            }
         })();
 
         return () => {
@@ -479,6 +488,7 @@ export default function StoriesPage() {
         viewingStories,
         navigate,
         persistStories24RailReturnAnimation,
+        skipStories24RailReturn,
         stories24OpenFromFeedRail,
         storyGroups,
         currentGroupIndex,
@@ -775,9 +785,14 @@ export default function StoriesPage() {
                 detail: { userHandle: openUserHandle }
             }));
             // Feed rail: always /feed (session handle matches if `location.state` was dropped on mobile).
+            // Inbox followed-stories rail: same open format, but return to inbox (not feed).
             if (stories24OpenFromFeedRail) {
                 clearStories24RailSessionHandle();
-                navigate('/feed', { replace: true });
+                if (skipStories24RailReturn) {
+                    navigate(-1);
+                } else {
+                    navigate('/feed', { replace: true });
+                }
             } else {
                 navigate(-1);
             }
@@ -1143,6 +1158,23 @@ export default function StoriesPage() {
             await addStoryReaction(storyId, user.id, user.handle, emoji);
             setShowEmojiPicker(false);
             setIsMuted(keepMuted);
+            const toHandle = currentGroup?.userHandle;
+            if (
+                toHandle &&
+                toHandle.trim().toLowerCase() !== user.handle.trim().toLowerCase()
+            ) {
+                try {
+                    await deliverStoryReactionToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        emoji,
+                    });
+                } catch (inboxError) {
+                    console.warn('Story reaction inbox delivery failed:', inboxError);
+                }
+            }
         } catch (error) {
             console.error('Error adding reaction:', error);
             // Revert optimistic reaction on failure.
@@ -1243,71 +1275,24 @@ export default function StoriesPage() {
         if (!currentStory || !user?.id || !user?.handle || !replyText.trim()) return;
         try {
             await addStoryReply(currentStory.id, user.id, user.handle, replyText);
-            // Also append to chat between replier and story owner
+            // Instagram-style: also land in the story owner's Messages inbox.
             const toHandle = currentGroup?.userHandle;
-            if (toHandle) {
-                // Attach a stable thumbnail so DM shows which story was replied to.
-                const storyPreview = await generateStoryReplyThumbnail();
-                let storyThumb = storyPreview?.previewUrl;
-                const sharedPostForContext =
-                    currentStory.sharedFromPost && !originalPost
-                        ? await getPostById(currentStory.sharedFromPost, user.id)
-                        : null;
-                const postForContext = originalPost || sharedPostForContext;
-                // If the story only had `sharedFromPost` and `originalPost` was not loaded yet, resolve media for the preview.
-                if (!storyThumb && postForContext) {
-                    const u = (postForContext.mediaUrl || '').trim() || (postForContext.mediaItems?.find((m) => m.type === 'image' || m.type === 'video')?.url || '').trim();
-                    if (u) {
-                        const isVid =
-                            /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(u) ||
-                            postForContext.mediaType === 'video' ||
-                            postForContext.mediaItems?.[0]?.type === 'video';
-                        if (isVid) {
-                            const cap = await captureVideoFrameDataUrl(u);
-                            storyThumb = cap || u;
-                        } else {
-                            storyThumb = u;
-                        }
-                    }
-                }
-                const contextOwner = (currentStory.sharedFromUser || '').trim()
-                    || (currentStory.sharedFromPost ? (postForContext?.userHandle || toHandle) : toHandle);
-                const rawContextText = currentStory.sharedFromPost
-                    ? (postForContext?.text || currentStory.text || '')
-                    : (currentStory.text || '');
-                const storyContextText = rawContextText.trim().slice(0, 120);
-                const normalizedReply = replyText.trim();
-                const isVisualStory =
-                    !!currentStory.mediaUrl ||
-                    currentStory.mediaType === 'image' ||
-                    currentStory.mediaType === 'video' ||
-                    (currentStory.sharedFromPost &&
-                        !!((postForContext?.mediaUrl && postForContext.mediaUrl.trim() !== '') ||
-                            (postForContext?.mediaItems && postForContext.mediaItems.length > 0)));
-                if (storyThumb) {
-                    await appendMessage(user.handle, toHandle, {
-                        imageUrl: storyThumb,
-                        storyId: currentStory.id,
-                        storyContextOwner: contextOwner || undefined,
+            const isSelfStory =
+                !!toHandle &&
+                !!user.handle &&
+                toHandle.trim().toLowerCase() === user.handle.trim().toLowerCase();
+            if (toHandle && !isSelfStory) {
+                try {
+                    await deliverStoryReplyToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        replyText: replyText.trim(),
                     });
-                } else {
-                    const contextBubbleText = storyContextText
-                        ? `Replying to @${contextOwner}'s story:\n"${storyContextText}"`
-                        : `Replying to @${contextOwner}'s story`;
-                    await appendMessage(user.handle, toHandle, {
-                        text: contextBubbleText,
-                        isSystemMessage: true,
-                    });
+                } catch (inboxError) {
+                    console.warn('Story reply inbox delivery failed:', inboxError);
                 }
-                await appendMessage(user.handle, toHandle, {
-                    text: normalizedReply,
-                    imageUrl: isVisualStory ? undefined : storyThumb,
-                    storyId: currentStory.id,
-                    storyContextText: isVisualStory ? undefined : (storyContextText || undefined),
-                    storyContextOwner: contextOwner || undefined,
-                });
-                // Optional: system echo for owner (kept same conversation id)
-                await appendMessage(toHandle, user.handle, { text: `You replied to their story`, isSystemMessage: true });
                 startDeliveryFx('message', toHandle);
             }
             setReplyText('');
@@ -1763,7 +1748,7 @@ export default function StoriesPage() {
                 aria-live="polite"
                 aria-label="Opening stories"
             >
-                <DiscoverAmbientCanvas variant="goldChrome" />
+                <DiscoverAmbientCanvas variant="passport" />
                 <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
                     <StoriesPopIcon size={80} />
                     <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>
@@ -1775,10 +1760,16 @@ export default function StoriesPage() {
 
     if (loading && openUserHandle && !stories24OpenFromFeedRail) {
         return (
-            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-10 h-10 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                    <p className="text-sm text-gray-300">Opening story...</p>
+            <div
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
+                role="status"
+                aria-live="polite"
+                aria-label="Opening story"
+            >
+                <DiscoverAmbientCanvas variant="passport" />
+                <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
+                    <div className="w-10 h-10 border-2 border-[#3d9b8f] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-sm font-medium text-white/70">Opening story...</p>
                 </div>
             </div>
         );
@@ -3512,6 +3503,15 @@ export default function StoriesPage() {
                                     <div className="flex flex-col gap-0.5 min-w-0">
                                         <div className="flex items-center gap-1.5 min-w-0 max-w-[min(55vw,16rem)]">
                                             <p className="text-white font-semibold text-sm truncate max-w-full">{currentGroup?.userHandle}</p>
+                                            <VerifiedBadge
+                                                accountType={
+                                                    currentGroup?.userHandle &&
+                                                    user?.handle === currentGroup.userHandle
+                                                        ? user?.accountType
+                                                        : getAccountTypeForHandle(currentGroup?.userHandle)
+                                                }
+                                                size={13}
+                                            />
                                         </div>
                                         {/* Metadata carousel: location → venue → timestamp (collapsible for cleaner header) */}
                                         {storyMetadataItems.length > 0 ? (() => {
@@ -4618,7 +4618,11 @@ export default function StoriesPage() {
                                     navState
                                 );
                                 clearStories24RailSessionHandle();
-                                navigate('/feed', { replace: true });
+                                if (skipStories24RailReturn) {
+                                    navigate(-1);
+                                } else {
+                                    navigate('/feed', { replace: true });
+                                }
                             })();
                         }}
                         className="p-1.5 rounded-full hover:bg-gray-800 transition-colors"

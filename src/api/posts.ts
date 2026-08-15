@@ -1,12 +1,25 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import { evaluateCommentModeration } from '../utils/commentModeration';
-import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
+import {
+  isLaravelApiEnabled,
+  isLaravelUnreachableThisSession,
+  isViteDevMode,
+  markLaravelUnreachable,
+} from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
-import { getActiveBoostedPostIds, activateBoost } from './boost';
+import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
+import {
+  createFollowRequest,
+  hasPendingFollowRequest,
+  isProfilePrivate,
+  removeFollowRequest,
+} from './privacy';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -244,6 +257,7 @@ function isMockPostId(id: string): boolean {
 // Get posts from localStorage
 function getPostsFromStorage(): Post[] {
   try {
+    if (typeof localStorage === 'undefined') return [];
     const stored = localStorage.getItem(POSTS_STORAGE_KEY);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
@@ -254,21 +268,140 @@ function getPostsFromStorage(): Post[] {
 
 // Save posts to localStorage — only user-created posts (exclude all mock/seed posts to avoid unbounded growth and duplicates on reload)
 function savePostsToStorage(postsToSave: Post[]): void {
+  const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
   try {
-    const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
-    localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
-    console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
+      console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+    }
   } catch (error) {
     console.error('Error saving posts to localStorage:', error);
   }
+  void import('./postsStorage.native')
+    .then((m) => m.savePostsToStorageNative(userCreatedPosts))
+    .catch(() => {});
+}
+
+function remapFollowKeyMap(
+  follows: Record<string, boolean>,
+  oldNorm: string,
+  newHandle: string,
+): Record<string, boolean> {
+  const next: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(follows || {})) {
+    const k = String(key || '').replace(/^@/, '').trim();
+    if (k.toLowerCase() === oldNorm) {
+      next[newHandle] = value;
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/**
+ * After a passport name/handle change: rewrite denormalized handles in mock posts,
+ * comments, and follow maps so the feed and profile stay in sync.
+ */
+export async function renameUserHandleEverywhere(
+  oldHandle: string,
+  newHandle: string,
+): Promise<void> {
+  const oldNorm = String(oldHandle || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
+  const nextHandle = String(newHandle || '').replace(/^@/, '').trim();
+  if (!oldNorm || !nextHandle || oldNorm === nextHandle.toLowerCase()) return;
+
+  const rewrite = (h?: string | null) => {
+    if (!h) return h;
+    const n = String(h).replace(/^@/, '').trim().toLowerCase();
+    return n === oldNorm ? nextHandle : h;
+  };
+
+  posts = posts.map((p) => ({
+    ...p,
+    userHandle: rewrite(p.userHandle) || p.userHandle,
+    originalUserHandle: p.originalUserHandle
+      ? rewrite(p.originalUserHandle) || p.originalUserHandle
+      : p.originalUserHandle,
+    taggedUsers: Array.isArray(p.taggedUsers)
+      ? p.taggedUsers.map((t) => rewrite(t) || t)
+      : p.taggedUsers,
+  }));
+  savePostsToStorage(posts);
+
+  comments = comments.map((c) => ({
+    ...c,
+    userHandle: rewrite(c.userHandle) || c.userHandle,
+    replies: Array.isArray(c.replies)
+      ? c.replies.map((r) => ({
+          ...r,
+          userHandle: rewrite(r.userHandle) || r.userHandle,
+        }))
+      : c.replies,
+  }));
+
+  for (const [uid, state] of Object.entries(userState)) {
+    if (!state?.follows) continue;
+    state.follows = remapFollowKeyMap(state.follows, oldNorm, nextHandle);
+    saveFollowsToStorage(uid, state.follows);
+  }
+
+  try {
+    const { renameStoryHandlesEverywhere } = await import('./stories');
+    renameStoryHandlesEverywhere(oldHandle, nextHandle);
+  } catch {
+    /* stories module optional in some environments */
+  }
+
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('userHandleChanged', {
+          detail: { oldHandle, newHandle: nextHandle },
+        }),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { DeviceEventEmitter } = await import('react-native');
+    DeviceEventEmitter.emit('userHandleChanged', { oldHandle, newHandle: nextHandle });
+  } catch {
+    /* web */
+  }
+}
+
+/** Persist Sponsored / boost tier on a post (legal disclosure). Used by mock + Stripe activate flows. */
+export function markPostAsBoosted(
+  postId: string,
+  feedType: 'local' | 'regional' | 'national',
+): void {
+  const id = String(postId);
+  const idx = posts.findIndex((p) => String(p.id) === id);
+  if (idx < 0) return;
+  posts[idx] = {
+    ...posts[idx],
+    isBoosted: true,
+    boostFeedType: feedType,
+  };
+  savePostsToStorage(posts);
 }
 
 function markPendingCreatedPost(post: Post): void {
   try {
-    localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+    }
   } catch {
     // Ignore storage failures; post creation should still succeed.
   }
+  void import('./postsStorage.native')
+    .then((m) => m.markPendingCreatedPostNative(post))
+    .catch(() => {});
 }
 
 export function consumePendingCreatedPost(): Post | null {
@@ -366,7 +499,7 @@ if (!postsInitialized) {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=800',
       mediaType: 'image',
       caption: 'Amazing sunset over Galway Bay! The west of Ireland never disappoints.',
       createdAt: artaneNow - 9000000, // 2.5 hours ago
@@ -416,9 +549,8 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: artaneNow - 7200000, // 2 hours ago
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -434,9 +566,8 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: artaneNow - 86400000, // 1 day ago
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -469,7 +600,7 @@ if (!postsInitialized) {
       venue: 'Phoenix Park',
       landmark: 'Phoenix Park',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800',
       mediaType: 'image',
       caption: 'Perfect morning walk in Phoenix Park! The deer are out and about 🦌',
       createdAt: artaneNow - 259200000, // 3 days ago
@@ -542,7 +673,62 @@ if (!postsInitialized) {
     userNational: 'Ireland',
   } as Post;
 
-  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
+  // Extra Finglas locals so the home (local) tab has more than Alice's videos
+  const finglasPosts: Post[] = [
+    {
+      id: `finglas-post-1-${artaneNow - 2400000}`,
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas Village',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800',
+      mediaType: 'image',
+      caption: 'Saturday market haul — strawberries were perfect',
+      createdAt: artaneNow - 2400000,
+      stats: { likes: 38, views: 201, comments: 6, shares: 2, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+    } as Post,
+    {
+      id: `finglas-post-2-${artaneNow - 10800000}`,
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas, Dublin',
+      tags: [],
+      text: 'Anyone else hear the buskers on the main street tonight? Absolute class. Community vibes on point. 🎸',
+      createdAt: artaneNow - 10800000,
+      stats: { likes: 19, views: 97, comments: 8, shares: 1, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+      mediaUrl: undefined,
+      mediaType: undefined,
+    } as Post,
+    {
+      id: `finglas-post-3-${artaneNow - 15000000}`,
+      userHandle: 'Bob@Finglas',
+      locationLabel: 'Jamestown Road',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=800',
+      mediaType: 'image',
+      caption: 'New coffee spot near the roundabout — 10/10 flat white',
+      createdAt: artaneNow - 15000000,
+      stats: { likes: 52, views: 310, comments: 11, shares: 4, reclips: 2 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+    } as Post,
+  ];
+
+  posts = [...posts, ...artanePosts, ...bobPosts, ...finglasPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
 
   // Dedupe by id (keep first occurrence) so corrupted localStorage or old saves don't leave thousands of duplicates
   const seenIds = new Set<string>();
@@ -703,96 +889,44 @@ function saveFollowsToStorage(userId: string, follows: Record<string, boolean>):
       localStorage.setItem(FOLLOWS_STORAGE_KEY(userId), JSON.stringify(follows));
     }
   } catch (_) {}
+  void import('./postsStorage.native')
+    .then((m) => m.saveFollowsToStorageNative(userId, follows))
+    .catch(() => {});
 }
 
-function remapFollowKeyMap(
-  follows: Record<string, boolean>,
-  oldNorm: string,
-  newHandle: string,
-): Record<string, boolean> {
-  const next: Record<string, boolean> = {};
-  for (const [key, value] of Object.entries(follows || {})) {
-    const k = String(key || '').replace(/^@/, '').trim();
-    if (k.toLowerCase() === oldNorm) {
-      next[newHandle] = value;
-    } else {
-      next[key] = value;
-    }
-  }
-  return next;
-}
-
-/**
- * After a passport name/handle change: rewrite denormalized handles in mock posts,
- * comments, and follow maps so the feed and profile stay in sync.
- */
-export async function renameUserHandleEverywhere(
-  oldHandle: string,
-  newHandle: string,
-): Promise<void> {
-  const oldNorm = String(oldHandle || '')
-    .replace(/^@/, '')
-    .trim()
-    .toLowerCase();
-  const nextHandle = String(newHandle || '').replace(/^@/, '').trim();
-  if (!oldNorm || !nextHandle || oldNorm === nextHandle.toLowerCase()) return;
-
-  const rewrite = (h?: string | null) => {
-    if (!h) return h;
-    const n = String(h).replace(/^@/, '').trim().toLowerCase();
-    return n === oldNorm ? nextHandle : h;
-  };
-
-  posts = posts.map((p) => ({
-    ...p,
-    userHandle: rewrite(p.userHandle) || p.userHandle,
-    originalUserHandle: p.originalUserHandle
-      ? rewrite(p.originalUserHandle) || p.originalUserHandle
-      : p.originalUserHandle,
-    taggedUsers: Array.isArray(p.taggedUsers)
-      ? p.taggedUsers.map((t) => rewrite(t) || t)
-      : p.taggedUsers,
-  }));
-  savePostsToStorage(posts);
-
-  comments = comments.map((c) => ({
-    ...c,
-    userHandle: rewrite(c.userHandle) || c.userHandle,
-    replies: Array.isArray(c.replies)
-      ? c.replies.map((r) => ({
-          ...r,
-          userHandle: rewrite(r.userHandle) || r.userHandle,
-        }))
-      : c.replies,
-  }));
-
-  for (const [uid, state] of Object.entries(userState)) {
-    if (!state?.follows) continue;
-    state.follows = remapFollowKeyMap(state.follows, oldNorm, nextHandle);
-    saveFollowsToStorage(uid, state.follows);
-  }
-
+/** RN: pull follows for a userId into the in-memory localStorage shim (call early on startup). */
+export async function hydrateFollowsStorage(userId: string): Promise<void> {
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  if (!uid) return;
   try {
-    const { renameStoryHandlesEverywhere } = await import('./stories');
-    renameStoryHandlesEverywhere(oldHandle, nextHandle);
-  } catch {
-    /* stories module optional in some environments */
-  }
-
-  try {
-    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(
-        new CustomEvent('userHandleChanged', {
-          detail: { oldHandle, newHandle: nextHandle },
-        }),
-      );
+    const m = await import('./postsStorage.native');
+    const follows = await m.getFollowsFromStorageNative(uid);
+    if (follows && Object.keys(follows).length > 0) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(FOLLOWS_STORAGE_KEY(uid), JSON.stringify(follows));
+      }
+      // Keep getState() cache in sync — it may already exist before AsyncStorage resolves.
+      if (userState[uid]) {
+        userState[uid].follows = { ...follows, ...userState[uid].follows };
+      }
     }
   } catch {
-    /* ignore */
+    // web / unavailable
   }
 }
 
-/** Fresh follows from localStorage (no in-memory cache). Merge from all possible keys so phone/tablet never miss follows due to userId mismatch. */
+/** Drop in-memory likes/follows/etc so the next getState() reloads from storage. */
+export function clearUserState(userId?: string): void {
+  if (userId != null && String(userId)) {
+    delete userState[String(userId)];
+    return;
+  }
+  for (const key of Object.keys(userState)) {
+    delete userState[key];
+  }
+}
+
+/** Follows for Following feed: storage + in-memory (RN has no localStorage, so taps live in userState). */
 function getFollowsForDiscover(userId: string): Record<string, boolean> {
   const uid = typeof userId === 'string' ? userId : String(userId);
   const fromUid = loadFollowsFromStorage(uid);
@@ -809,7 +943,8 @@ function getFollowsForDiscover(userId: string): Record<string, boolean> {
       }
     }
   } catch (_) {}
-  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid };
+  const fromMemory = userState[uid]?.follows || {};
+  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid, ...fromMemory };
 }
 
 export function getState(userId: string): UserState {
@@ -825,6 +960,9 @@ export function getState(userId: string): UserState {
         try {
           if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('anon'));
         } catch (_) {}
+        void import('./postsStorage.native')
+          .then((m) => m.removeFollowsFromStorageNative('anon'))
+          .catch(() => {});
       }
       // Merge from 'test-user' so follows made before signup don't vanish (test-user is the default pre-login user)
       if (uid !== 'test-user') {
@@ -835,6 +973,9 @@ export function getState(userId: string): UserState {
           try {
             if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('test-user'));
           } catch (_) {}
+          void import('./postsStorage.native')
+            .then((m) => m.removeFollowsFromStorageNative('test-user'))
+            .catch(() => {});
         }
       }
     }
@@ -851,7 +992,13 @@ export function getState(userId: string): UserState {
 
 const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
-export type Page = { items: Post[]; nextCursor: string | number | null; fromMock?: boolean };
+export type Page = {
+  items: Post[];
+  nextCursor: string | number | null;
+  fromMock?: boolean;
+  /** True when Laravel was skipped because the backend was unreachable this session. */
+  laravelBypassed?: boolean;
+};
 
 function isFirstFeedPageCursor(cursor: string | number | null): boolean {
   if (cursor === null) return true;
@@ -867,17 +1014,26 @@ export function getFollowState(follows: Record<string, boolean>, handle: string 
   return key ? !!follows[key] : false;
 }
 
-/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates. */
+/** True when this handle has an explicit local follow entry (including unfollow → false). */
+export function hasExplicitFollowState(
+  follows: Record<string, boolean>,
+  handle: string | undefined,
+): boolean {
+  if (handle == null || typeof handle !== 'string') return false;
+  const lower = handle.toLowerCase();
+  return Object.keys(follows).some((k) => k.toLowerCase() === lower);
+}
+
+/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates.
+ *  Unfollow stores `false` (does not delete) so decorateForUser won't fall back to a stale post.isFollowing. */
 function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
   const lower = handle.toLowerCase();
   const existingKey = Object.keys(follows).find(k => k.toLowerCase() === lower);
   if (existingKey) {
-    if (isFollowing) follows[existingKey] = true;
-    else delete follows[existingKey];
+    follows[existingKey] = isFollowing;
     return;
   }
-  if (isFollowing) follows[handle] = true;
-  else delete follows[handle];
+  follows[handle] = isFollowing;
 }
 
 // Get list of user handles that the current user follows
@@ -902,18 +1058,63 @@ export function setReclipState(userId: string, postId: string, reclipped: boolea
   else delete s.reclips[postId];
 }
 
-// compute view for a user: show following if local state OR API says so (so backend signups and + taps both work)
+/** Look up personal/business from an in-memory post by author handle. */
+export function getAccountTypeForHandle(
+  handle: string | undefined | null,
+): 'personal' | 'business' | undefined {
+  const norm = String(handle || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
+  if (!norm) return undefined;
+  const match = posts.find((p) => {
+    const h = String(p.userHandle || '')
+      .replace(/^@/, '')
+      .trim()
+      .toLowerCase();
+    return h === norm;
+  });
+  if (match?.userAccountType === 'business' || match?.userAccountType === 'personal') {
+    return match.userAccountType;
+  }
+  return undefined;
+}
+
+/**
+ * Keep a hydrated post in the in-memory store (e.g. collection snapshots) so comments/likes
+ * and getPostById keep working after navigation.
+ */
+export function upsertLocalPost(post: Post): Post {
+  if (!post?.id) return post;
+  const idx = posts.findIndex((p) => String(p.id) === String(post.id));
+  if (idx >= 0) {
+    posts[idx] = { ...posts[idx], ...post, id: posts[idx].id };
+    return posts[idx];
+  }
+  posts.unshift(post);
+  return post;
+}
+
+/** Live in-memory post snapshot (for feed pins / fullscreen after like). */
+export function getLocalPostById(postId: string | undefined | null): Post | undefined {
+  if (postId == null || postId === '') return undefined;
+  const idKey = String(postId);
+  return posts.find((p) => String(p.id) === idKey);
+}
+
+// Local follow map wins when present (including explicit unfollow). Otherwise fall back to API flag.
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
-  const isFollowing = fromLocal || fromApi;
+  const isFollowing = hasExplicitFollowState(s.follows, p.userHandle) ? fromLocal : fromApi;
+  const idKey = String(p.id);
   const decorated = {
     ...p,
-    userLiked: !!s.likes[p.id],
-    isBookmarked: !!s.bookmarks[p.id],
+    userLiked: !!s.likes[idKey] || !!s.likes[p.id],
+    isBookmarked: !!s.bookmarks[idKey] || !!s.bookmarks[p.id],
     isFollowing,
-    userReclipped: !!s.reclips[p.id],
+    userReclipped: !!s.reclips[idKey] || !!s.reclips[p.id],
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
     textStyle: p.textStyle,
@@ -1098,7 +1299,7 @@ export async function fetchSuggestedPostsByPlaces(params: {
   });
 }
 
-/** Mock Sarah and Bob video posts for Scenes testing – always merged into first page of feed when in dev. */
+/** Mock Sarah / Bob / Alice video posts for Scenes + feed testing – merged into first page when in mock mode. */
 function getMockScenesVideoPosts(): Post[] {
   const now = Date.now();
   return [
@@ -1107,9 +1308,8 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: now - 7200000,
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -1125,9 +1325,8 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: now - 86400000,
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -1143,9 +1342,8 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.joyrides,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=1200',
       caption: 'Amazing sunset over Galway Bay!',
       createdAt: now - 9000000,
       stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
@@ -1155,8 +1353,107 @@ function getMockScenesVideoPosts(): Post[] {
       userLocal: 'Galway',
       userRegional: 'Galway',
       userNational: 'Ireland'
-    }
+    },
+    {
+      id: 'mock-scenes-alice-1',
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas, Dublin',
+      tags: [],
+      mediaUrl: MOCK_FEED_VIDEO_URLS.blazes,
+      mediaType: 'video',
+      caption: 'Evening walk around Finglas village — golden hour hits different',
+      createdAt: now - 5400000,
+      stats: { likes: 41, views: 220, comments: 9, shares: 3, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: 'mock-scenes-alice-2',
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Tolka Valley Park',
+      tags: [],
+      mediaUrl: MOCK_FEED_VIDEO_URLS.elephants,
+      mediaType: 'video',
+      caption: 'Park loop before work — birds were loud today 🐦',
+      createdAt: now - 43200000,
+      stats: { likes: 28, views: 164, comments: 4, shares: 1, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
   ];
+}
+
+/** Demo MP4 feed cards — never hide via mute/hide/not-interested prefs. */
+export function isDevMockFeedVideoPost(post: Post): boolean {
+  const id = String(post.id || '');
+  if (id.startsWith('mock-scenes-')) return true;
+  if (id.startsWith('artane-post-') && postHasVideoMedia(post)) return true;
+  return false;
+}
+
+/** Stable mock-scenes-* posts plus in-memory seed videos (Sarah/Bob Artane posts). */
+function collectDevMockVideoPostCandidates(): Post[] {
+  const byId = new Map<string, Post>();
+  const add = (p: Post) => {
+    const id = String(p.id);
+    if (!byId.has(id)) byId.set(id, p);
+  };
+  for (const p of getMockScenesVideoPosts()) add(p);
+  for (const p of posts) {
+    if (!postHasVideoMedia(p)) continue;
+    if (isMockPostId(p.id) || String(p.id).startsWith('mock-scenes-')) add(p);
+  }
+  return [...byId.values()];
+}
+
+function devMockVideosForDiscoverTab(userId: string): Post[] {
+  const all = collectDevMockVideoPostCandidates();
+  const follows = getFollowsForDiscover(userId);
+  const followsSarah = getFollowState(follows, 'Sarah@Artane');
+  const followsBob =
+    getFollowState(follows, 'Bob@Ireland') || getFollowState(follows, 'Bob@Finglas');
+  const followsAlice = getFollowState(follows, 'Alice@Finglas');
+  // Following feed: only people you actually follow (no “dump all demos in mock” shortcut).
+  if (!followsSarah && !followsBob && !followsAlice) return [];
+  return all.filter((p) => {
+    const h = (p.userHandle || '').toLowerCase();
+    if (followsSarah && h.includes('sarah')) return true;
+    if (followsBob && h.includes('bob')) return true;
+    if (followsAlice && h.includes('alice')) return true;
+    return false;
+  });
+}
+
+/** Which demo MP4 posts belong on this tab (respect author location — no Artane→Finglas leak). */
+function collectDevMockVideoPostsForTab(tab: string, userId: string): Post[] {
+  const t = tab.toLowerCase();
+  if (t === 'clips') return [];
+  if (t === 'discover') return devMockVideosForDiscoverTab(userId);
+  const all = collectDevMockVideoPostCandidates();
+  // Always match author location to the tab (Finglas ≠ Artane).
+  return all.filter((p) => postMatchesLocationTab(p, tab));
+}
+
+/** Prepend demo MP4 cards on feed page 0 (location tabs + Following when you follow Sarah/Bob). */
+function prependDevMockVideoPostsForFirstPage(items: Post[], tab: string, userId: string): Post[] {
+  const t = tab.toLowerCase();
+  if (t === 'clips') return items;
+
+  const candidates = collectDevMockVideoPostsForTab(tab, userId);
+
+  if (!candidates.length) return items;
+
+  const existingIds = new Set(items.map((p) => String(p.id)));
+  const toPrepend = candidates.filter((p) => !existingIds.has(String(p.id)));
+  return toPrepend.length > 0 ? [...toPrepend, ...items] : items;
 }
 
 /** Ava's normal (non-sponsored) mock post for Ireland feed. Stable id for dedupe. */
@@ -1244,13 +1541,16 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const venueQuery = isVenueFeed ? t.slice('venue:'.length).trim() : '';
   if (isVenueFeed) {
     const venue = normalize((p as any).venue);
-    return !!venue && (venue === venueQuery || venue.includes(venueQuery) || venueQuery.includes(venue));
+    // Exact / contains only when the query is specific enough (avoid "a" matching everything).
+    if (!venue || venueQuery.length < 2) return false;
+    return venue === venueQuery || venue.includes(venueQuery);
   }
   const isLandmarkFeed = t.startsWith('landmark:');
   const landmarkQuery = isLandmarkFeed ? t.slice('landmark:'.length).trim() : '';
   if (isLandmarkFeed) {
     const lm = normalize((p as any).landmark);
-    return !!lm && (lm === landmarkQuery || lm.includes(landmarkQuery) || landmarkQuery.includes(lm));
+    if (!lm || landmarkQuery.length < 2) return false;
+    return lm === landmarkQuery || lm.includes(landmarkQuery);
   }
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
@@ -1259,28 +1559,34 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
     const userRegionalLower = normalize(p.userRegional);
     const userNationalLower = normalize(p.userNational);
     if (t === 'finglas') return userLocalLower === 'finglas';
-    if (t === 'dublin') return userRegionalLower === 'dublin';
-    if (t === 'ireland') return userNationalLower === 'ireland';
+    if (t === 'dublin') return userRegionalLower === 'dublin' || userLocalLower === 'dublin';
+    if (t === 'ireland') {
+      if (userNationalLower === 'ireland') return true;
+      // Match mock-feed rules: Dublin-area authors also appear on Ireland tab.
+      if (userRegionalLower === 'dublin' || userLocalLower === 'dublin') return true;
+      return false;
+    }
     return false;
   }
   const query = t.trim().toLowerCase();
+  if (!query) return false;
   const local = normalize(p.userLocal);
   const regional = normalize(p.userRegional);
   const national = normalize(p.userNational);
   const locationLabel = normalize((p as any).locationLabel);
+
+  // Author tiers are exact — never substring-match "rome" inside unrelated labels.
+  if (local === query || regional === query || national === query) return true;
   if (LOCATION_COUNTRIES.has(query)) {
-    return (
-      national === query ||
-      (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
-      (query === 'usa' && (national === 'usa' || national === 'united states')) ||
-      locationLabel === query ||
-      locationLabel.includes(query)
-    );
+    if (query === 'uk' && (national === 'united kingdom' || national === 'uk')) return true;
+    if (query === 'usa' && (national === 'usa' || national === 'united states')) return true;
+    return national === query;
   }
   if (LOCATION_CITIES.has(query)) {
-    return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
+    return regional === query || local === query;
   }
-  return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
+  // Custom neighbourhood / place name: allow label equality only (no fuzzy includes).
+  return locationLabel === query;
 }
 
 export async function fetchPostsPage(tab: string, cursor: string | number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
@@ -1344,9 +1650,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         })
         .filter((x: Post | null): x is Post => x !== null);
 
-      // Guard custom location feeds from server over-broad matches.
-      // Keep only posts whose author/location metadata actually matches the queried location.
-      if (isCustomLocationFeed) {
+      // Guard location feeds from server over-broad matches (author local/regional/national must match tab).
+      if (t === 'finglas' || t === 'dublin' || t === 'ireland' || isCustomLocationFeed) {
         transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
       }
 
@@ -1377,15 +1682,14 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       );
       const allApiAndMockIds = new Set(transformedItems.map(p => p.id));
 
-      // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
       const isFirstPage = isFirstFeedPageCursor(cursor);
-      const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
-      const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-      const dedupedMock = mockVideoPosts.filter(p => !allApiAndMockIds.has(p.id));
       const dedupedUserCreated = userCreatedMatchingTab.filter(p => !allApiAndMockIds.has(p.id));
 
-      // Order: user-created first (newest), then mock videos, then API posts
-      let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
+      // Order: user-created first (newest), then API posts; demo MP4 cards prepended on page 0
+      let items = [...dedupedUserCreated, ...transformedItems];
+      if (isFirstPage) {
+        items = prependDevMockVideoPostsForFirstPage(items, tab, userId);
+      }
       const itemIds = new Set(items.map(p => p.id));
 
       // Dev/test: inject Ava's Galway demo on first page only when this feed is actually Ireland/Galway (not London, Paris, etc.).
@@ -1401,14 +1705,19 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         if (!posts.find(p => p.id === avaNormal.id)) posts.push(avaNormal);
       }
 
-      // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-      // boostedSetApi already fetched in parallel above
-      if (boostedSetApi.size > 0) {
-        items = items.map(p =>
-          boostedSetApi.has(p.id)
-            ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedTypeApi ?? 'regional' }
-            : p
-        );
+      // Mark ANY actively boosted post as Sponsored (legal disclosure) — not only the current tab's boost tier.
+      const allBoostLabels = await getAllActiveBoostLabels();
+      for (const id of boostedSetApi) allBoostLabels.set(String(id), (feedTypeApi ?? 'regional') as any);
+      if (allBoostLabels.size > 0) {
+        items = items.map((p) => {
+          const label = allBoostLabels.get(String(p.id));
+          if (!label && !p.isBoosted) return p;
+          return {
+            ...p,
+            isBoosted: true as const,
+            boostFeedType: p.boostFeedType ?? label ?? feedTypeApi ?? 'regional',
+          };
+        });
       }
 
       // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
@@ -1431,6 +1740,25 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
   // Mock implementation (fallback)
   try {
+    // React Native: hydrate user-created posts from AsyncStorage.
+    // Note: index.js installs an in-memory localStorage shim, so typeof localStorage
+    // is never 'undefined' on RN — always attempt the native hydrate.
+    try {
+      const { getPostsFromStorageNative } = await import('./postsStorage.native');
+      const storedNative = (await getPostsFromStorageNative()).filter((p) => !isMockPostId(p.id));
+      if (storedNative.length > 0) {
+        const seenNative = new Set(posts.map((p) => String(p.id)));
+        for (const p of storedNative) {
+          if (!seenNative.has(String(p.id))) {
+            posts.push(p);
+            seenNative.add(String(p.id));
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     // Reload only user-created posts from localStorage (exclude mock ids to avoid duplicates)
   const userCreatedPosts = getPostsFromStorage()
     .filter(p => !isMockPostId(p.id))
@@ -1443,18 +1771,19 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         userNational: p.userNational,
       }),
     }));
-    // Keep current in-memory mock/seed posts (don't reload mock from storage)
-    const mockPosts = posts.filter(p => isMockPostId(p.id));
-    // Merge: user-created first, then mock/seed (single copy of each)
-    if (userCreatedPosts.length > 0 || posts.length === 0) {
-      const seen = new Set<string>();
-      posts = [...userCreatedPosts, ...mockPosts].filter(p => {
+    // Always keep mock/seed posts (Sarah MP4 demos, JSON seed) even when localStorage has user posts.
+    const mockSeedPosts = posts.filter((p) => isMockPostId(p.id));
+    const nonMockPosts = posts.filter((p) => !isMockPostId(p.id));
+    const userCreatedIds = new Set(userCreatedPosts.map((p) => String(p.id)));
+    const seen = new Set<string>();
+    posts = [...userCreatedPosts, ...mockSeedPosts, ...nonMockPosts.filter((p) => !userCreatedIds.has(String(p.id)))].filter(
+      (p) => {
         const id = String(p.id);
         if (seen.has(id)) return false;
         seen.add(id);
         return true;
-      });
-    }
+      },
+    );
 
     await delay(0);
 
@@ -1468,9 +1797,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       if (isOwn) {
         if (t === 'discover') return true; // Following feed: always show your posts
 
-        // For your own posts in the three core location tabs (local / regional / national),
-        // always show them – users expect to see their own posts in all of their tiers.
-        if (['finglas', 'dublin', 'ireland'].includes(t)) {
+        // Always show your own posts on your profile location tiers (and legacy Dublin demo tabs).
+        const ownTabs = [_userLocal, _userRegional, _userNational]
+          .map((s) => (s || '').trim().toLowerCase())
+          .filter(Boolean);
+        if (ownTabs.includes(t) || ['finglas', 'dublin', 'ireland'].includes(t)) {
           return true;
         }
 
@@ -1503,39 +1834,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        const normalize = (v?: string) => (v || '').trim().toLowerCase();
-        const isVenueQuery = t.startsWith('venue:');
-        const isLandmarkQuery = t.startsWith('landmark:');
-        const query = isVenueQuery
-          ? t.slice('venue:'.length).trim().toLowerCase()
-          : isLandmarkQuery
-            ? t.slice('landmark:'.length).trim().toLowerCase()
-            : t.trim().toLowerCase();
-        const venue = normalize((p as any).venue);
-        const landmark = normalize((p as any).landmark);
-        // Venue feeds: if tab matches a venue, keep posts tagged with that venue.
-        if (isVenueQuery) {
-          return !!venue && (venue === query || venue.includes(query) || query.includes(venue));
-        }
-        if (isLandmarkQuery) {
-          return !!landmark && (landmark === query || landmark.includes(query) || query.includes(landmark));
-        }
-        if (venue && (venue === query || venue.includes(query) || query.includes(venue))) return true;
-        if (landmark && (landmark === query || landmark.includes(query) || query.includes(landmark))) return true;
-        const local = normalize(p.userLocal);
-        const regional = normalize(p.userRegional);
-        const national = normalize(p.userNational);
-        const locationLabel = normalize((p as any).locationLabel);
-        if (LOCATION_COUNTRIES.has(query))
-          return (
-            national === query ||
-            (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
-            (query === 'usa' && (national === 'usa' || national === 'united states')) ||
-            locationLabel === query ||
-            locationLabel.includes(query)
-          );
-        if (LOCATION_CITIES.has(query)) return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
-        return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
+        // Custom location / venue / landmark — one strict matcher, no substring leaks.
+        return postMatchesLocationTab(p, t);
       }
 
       const tabLower = t.toLowerCase();
@@ -1622,12 +1922,9 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
     const start = typeof cursor === 'number' ? cursor : 0;
     const isFirstPage = start === 0;
-    // Only add mock Sarah/Bob posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, not in Galway
-    const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
-    const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-    const existingIdsInSorted = new Set(sorted.map(p => p.id));
-    const dedupedMock = mockVideoPosts.filter(p => !existingIdsInSorted.has(p.id));
-    const sortedWithMock = dedupedMock.length > 0 ? [...dedupedMock, ...sorted] : sorted;
+    const sortedWithMock = isFirstPage
+      ? prependDevMockVideoPostsForFirstPage(sorted, tab, userId)
+      : sorted;
 
     const slice = sortedWithMock.slice(start, start + limit).map(p => decorateForUser(userId, p));
 
@@ -1650,18 +1947,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     if (feedType) {
       const existingIds = new Set(slice.map(p => p.id));
       const boostedPosts: Post[] = [];
-      const tabLower = tab.toLowerCase();
       for (const id of Array.from(boostedIdsSet)) {
         if (existingIds.has(id)) continue;
         const p = await getPostById(id);
         if (!p) continue;
         // Only inject into this tab if the post author's location matches the tab
-        const authorRegional = (p.userRegional || '').toLowerCase();
-        const authorNational = (p.userNational || '').toLowerCase();
-        const authorLocal = (p.userLocal || '').toLowerCase();
-        const matchesTab =
-          tabLower === authorRegional || tabLower === authorNational || tabLower === authorLocal;
-        if (!matchesTab) continue;
+        if (!postMatchesLocationTab(p, tab)) continue;
         const decorated = decorateForUser(userId, { ...p, isBoosted: true, boostFeedType: feedType });
         boostedPosts.push(decorated);
       }
@@ -1681,13 +1972,23 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         items = merged;
       }
     }
-    // Mark any post that is in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-    if (boostedIdsSet.size > 0) {
-      items = items.map(p =>
-        boostedIdsSet.has(p.id)
-          ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedType ?? 'regional' }
-          : p
-      );
+    // Mark ANY actively boosted post as Sponsored (legal disclosure) on every feed tab.
+    const allBoostLabels = await getAllActiveBoostLabels();
+    for (const id of boostedIdsSet) {
+      if (!allBoostLabels.has(String(id))) {
+        allBoostLabels.set(String(id), (feedType ?? 'regional') as any);
+      }
+    }
+    if (allBoostLabels.size > 0) {
+      items = items.map((p) => {
+        const label = allBoostLabels.get(String(p.id));
+        if (!label && !p.isBoosted) return p;
+        return {
+          ...p,
+          isBoosted: true as const,
+          boostFeedType: p.boostFeedType ?? label ?? feedType ?? 'regional',
+        };
+      });
     }
     // Dev/test: inject Ava's Galway demo on first page only when this tab matches her author location (mock path).
     if (isFirstPage && postMatchesLocationTab(getAvaNormalPost(), tab)) {
@@ -1700,12 +2001,60 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     }
     items = dedupeItemsById(items);
 
+    // Final mock-path guard: location feeds never return foreign author cards.
+    if (isCustomLocationFeed || t === 'finglas' || t === 'dublin' || t === 'ireland') {
+      const before = items.length;
+      items = items.filter((p) => postMatchesLocationTab(p, tab));
+      if (items.length < before && typeof console !== 'undefined') {
+        console.warn(
+          `[location-guard] fetchPostsPage dropped ${before - items.length} leak(s) from "${tab}"`,
+        );
+      }
+    }
+
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
-    return { items: items.map(normalizeCaptionFields), nextCursor: next, fromMock: true };
+    return {
+      items: items.map(normalizeCaptionFields),
+      nextCursor: next,
+      fromMock: true,
+      laravelBypassed: isLaravelUnreachableThisSession(),
+    };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
-    throw error;
+    const msg = error instanceof Error ? error.message : String(error ?? '');
+    const looksLikeCorruptJson =
+      error instanceof SyntaxError ||
+      /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(msg);
+    // Only wipe posts storage on corrupt JSON — never on unrelated mock errors.
+    if (looksLikeCorruptJson) {
+      try {
+        const { clearCorruptPostsStorageNative } = await import('./postsStorage.native');
+        await clearCorruptPostsStorageNative();
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(POSTS_STORAGE_KEY);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const seed = posts
+      .filter((p) => isMockPostId(p.id))
+      .slice(0, Math.max(1, limit))
+      .map((p) => decorateForUser(userId, p))
+      .map(normalizeCaptionFields);
+    if (seed.length > 0) {
+      return {
+        items: seed,
+        nextCursor: null,
+        fromMock: true,
+      };
+    }
+    return { items: [], nextCursor: null, fromMock: true };
   }
 }
 
@@ -1726,27 +2075,42 @@ export async function toggleLike(userId: string, id: string, currentPost?: Post)
     }
   }
 
-  // Pure mock implementation
-  await delay(150);
+  // Pure mock implementation — apply like state synchronously so rapid taps can't all read "unliked".
   const s = getState(userId);
-  let p = posts.find(x => x.id === id);
+  const idKey = String(id);
+  let p = posts.find((x) => String(x.id) === idKey);
+  // Trust persisted like map (not a possibly-stale UI snapshot) so own posts can't +1 forever.
+  const was = !!s.likes[idKey] || !!s.likes[id] || !!s.likes[String(id)];
+  const nextLiked = !was;
+  s.likes[idKey] = nextLiked;
+  s.likes[String(id)] = nextLiked;
+
+  const baseLikes = Math.max(
+    0,
+    Number(p?.stats?.likes) || 0,
+    Number(currentPost?.stats?.likes) || 0,
+  );
+  const nextLikes = Math.max(0, baseLikes + (was ? -1 : 1));
+
   if (!p && currentPost) {
-    // Post not in global store (e.g. mock Ava/Sarah injected only in feed) – update user like state and return updated currentPost
-    const was = !!s.likes[id];
-    s.likes[id] = !was;
-    const nextLikes = Math.max(0, currentPost.stats.likes + (was ? -1 : 1));
-    return decorateForUser(userId, {
+    p = upsertLocalPost({
       ...currentPost,
-      userLiked: !was,
+      id: currentPost.id ?? id,
+      userLiked: nextLiked,
       stats: { ...currentPost.stats, likes: nextLikes },
     });
   }
   if (!p) {
     throw new Error('Post not found');
   }
-  const was = !!s.likes[id];
-  s.likes[id] = !was;
-  p.stats.likes += was ? -1 : 1;
+
+  p.stats = { ...p.stats, likes: nextLikes };
+  // Persist user-created posts so fullscreen / feed reload keep the count (mock Sarah posts stay in RAM).
+  if (!isMockPostId(String(p.id))) {
+    savePostsToStorage(posts);
+  }
+
+  await delay(150);
   return decorateForUser(userId, p);
 }
 
@@ -1788,19 +2152,152 @@ export async function toggleBookmark(userId: string, id: string): Promise<Post> 
   return decorateForUser(userId, p);
 }
 
-export async function toggleFollowForPost(userId: string, id: string, userHandle?: string): Promise<Post> {
+export async function toggleFollowForPost(
+  userId: string,
+  id: string,
+  userHandle?: string,
+  viewerHandle?: string,
+): Promise<Post> {
   await delay(150);
-  const p = posts.find(x => x.id === id);
+  let p = posts.find(x => x.id === id);
+  // Feed/Scenes demo videos (mock-scenes-*) often aren't in the in-memory store —
+  // upsert so callers that merge the returned post keep mediaUrl / slides.
+  if (!p && String(id).startsWith('mock-scenes-')) {
+    const mock = getMockScenesVideoPosts().find((x) => x.id === id);
+    if (mock) {
+      p = { ...mock, stats: { ...mock.stats } };
+      posts.push(p);
+    }
+  }
   const handle = p?.userHandle ?? userHandle;
   if (!handle) {
     throw new Error('Post not found');
   }
   const s = getState(userId);
   const wasFollowing = getFollowState(s.follows, handle);
-  setFollowStateKey(s.follows, handle, !wasFollowing);
-  saveFollowsToStorage(userId, s.follows);
+  const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
 
-  if (p) return decorateForUser(userId, p);
+  // Private accounts: follow → request (not instant follow). Matches View Profile / Scenes.
+  if (!wasFollowing && isProfilePrivate(handle)) {
+    // Without a viewer handle we must not silently auto-follow private accounts.
+    if (!viewer) {
+      setFollowStateKey(s.follows, handle, false);
+      saveFollowsToStorage(userId, s.follows);
+      if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+      return {
+        id,
+        userHandle: handle,
+        locationLabel: '',
+        tags: [],
+        createdAt: Date.now(),
+        stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: false,
+        isFollowing: false,
+        userLiked: false,
+      } as Post;
+    }
+
+    // Second tap on a pending request cancels it (matches View Profile / Search / Stories).
+    if (hasPendingFollowRequest(viewer, handle)) {
+      removeFollowRequest(viewer, handle);
+      setFollowStateKey(s.follows, handle, false);
+      saveFollowsToStorage(userId, s.follows);
+      if (isLaravelApiEnabled()) {
+        try {
+          await apiClient.toggleFollow(handle);
+        } catch {
+          // Keep local cancel even if the server call fails.
+        }
+      }
+      if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+      return {
+        id,
+        userHandle: handle,
+        locationLabel: '',
+        tags: [],
+        createdAt: Date.now(),
+        stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: false,
+        isFollowing: false,
+        userLiked: false,
+      } as Post;
+    }
+
+    if (isLaravelApiEnabled()) {
+      try {
+        const result = await apiClient.toggleFollow(handle);
+        if (result?.status === 'pending') {
+          createFollowRequest(viewer, handle);
+          setFollowStateKey(s.follows, handle, false);
+          saveFollowsToStorage(userId, s.follows);
+          if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+          return {
+            id,
+            userHandle: handle,
+            locationLabel: '',
+            tags: [],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: false,
+            userLiked: false,
+          } as Post;
+        }
+        if (result?.status === 'accepted' || result?.following === true) {
+          setFollowStateKey(s.follows, handle, true);
+          saveFollowsToStorage(userId, s.follows);
+          removeFollowRequest(viewer, handle);
+          if (p) return decorateForUser(userId, p);
+          return {
+            id,
+            userHandle: handle,
+            locationLabel: '',
+            tags: [],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: true,
+            userLiked: false,
+          } as Post;
+        }
+      } catch {
+        // Fall through to local mock request.
+      }
+    }
+
+    createFollowRequest(viewer, handle);
+    setFollowStateKey(s.follows, handle, false);
+    saveFollowsToStorage(userId, s.follows);
+    if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+    return {
+      id,
+      userHandle: handle,
+      locationLabel: '',
+      tags: [],
+      createdAt: Date.now(),
+      stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+    } as Post;
+  }
+
+  const nextFollowing = !wasFollowing;
+  setFollowStateKey(s.follows, handle, nextFollowing);
+  saveFollowsToStorage(userId, s.follows);
+  if (!nextFollowing && viewer) {
+    removeFollowRequest(viewer, handle);
+  }
+
+  // Follow is per-author: keep every in-memory post for this handle aligned.
+  const handleLower = handle.toLowerCase();
+  for (const post of posts) {
+    if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
+      post.isFollowing = nextFollowing;
+    }
+  }
+
+  if (p) return { ...decorateForUser(userId, p), isFollowing: nextFollowing };
   // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
   return {
     id,
@@ -1810,7 +2307,7 @@ export async function toggleFollowForPost(userId: string, id: string, userHandle
     createdAt: Date.now(),
     stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
     isBookmarked: false,
-    isFollowing: !wasFollowing,
+    isFollowing: nextFollowing,
     userLiked: false
   } as Post;
 }
@@ -1941,17 +2438,43 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
   // Mock implementation (fallback)
   await delay(100);
   const idStr = String(id);
-  const p = posts.find(x => String(x.id) === idStr);
+  const normalizedIdStr = idStr
+    .trim()
+    .replace(/\s+/g, '-')
+    // Common typo seen in mock scenes IDs.
+    .replace('srarh', 'sarah');
+  const p =
+    posts.find(x => String(x.id) === idStr) ||
+    posts.find(x => String(x.id) === normalizedIdStr);
   if (!p) {
     // Try storage (user-created posts may exist only there if feed just reloaded)
     const fromStorage = getPostsFromStorage();
-    const inStorage = fromStorage.find(x => String(x.id) === idStr);
+    const inStorage =
+      fromStorage.find(x => String(x.id) === idStr) ||
+      fromStorage.find(x => String(x.id) === normalizedIdStr);
     if (inStorage) {
       inStorage.stats = inStorage.stats || { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
       inStorage.stats.shares += 1;
-      const updated = fromStorage.map(x => (String(x.id) === idStr ? inStorage : x));
+      const updated = fromStorage.map(x =>
+        String(x.id) === idStr || String(x.id) === normalizedIdStr ? inStorage : x
+      );
       savePostsToStorage(updated);
       return decorateForUser(userId, inStorage);
+    }
+    // Frontend-only mock scenes IDs may be stale/misspelled in some paths.
+    // Don't hard-fail share UX when this optimistic increment cannot resolve a mock post.
+    if (idStr.startsWith('mock-scenes-') || normalizedIdStr.startsWith('mock-scenes-')) {
+      const mockCandidates = posts.filter(x => String(x.id).startsWith('mock-scenes-'));
+      if (mockCandidates.length > 0) {
+        const suffix = normalizedIdStr.match(/-(\d+)$/)?.[1];
+        const fallback =
+          (suffix
+            ? mockCandidates.find(x => String(x.id).endsWith(`-${suffix}`))
+            : undefined) || mockCandidates[0];
+        return decorateForUser(userId, fallback);
+      }
+      // As a last resort, no-op fallback to avoid noisy errors in RN share flow.
+      return decorateForUser(userId, posts[0]);
     }
     console.error('Post not found for incrementShares:', id);
     throw new Error(`Post with id ${id} not found`);
@@ -1992,7 +2515,10 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
 }
 
 export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
-  const useLaravelAPI = isLaravelApiEnabled();
+  const useLaravelAPI =
+    isLaravelApiEnabled() &&
+    !String(originalPostId).startsWith('mock-scenes-') &&
+    !isMockPostId(originalPostId);
 
   if (useLaravelAPI) {
     try {
@@ -2037,14 +2563,38 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   }
 
   await delay(200);
-  const originalPost = posts.find(x => x.id === originalPostId);
+
+  // Demo / feed-only posts (e.g. mock-scenes-*) are often not in the in-memory `posts`
+  // store — resolve + upsert so Scenes reclip works in mock mode.
+  let originalPost = posts.find((x) => x.id === originalPostId) ?? null;
+  if (!originalPost) {
+    if (String(originalPostId).startsWith('mock-scenes-')) {
+      const mock = getMockScenesVideoPosts().find((p) => p.id === originalPostId);
+      if (mock) {
+        originalPost = { ...mock, stats: { ...mock.stats } };
+        posts.push(originalPost);
+      }
+    }
+  }
+  if (!originalPost) {
+    const resolved = await getPostById(originalPostId, userId);
+    if (resolved) {
+      originalPost = { ...resolved, stats: { ...resolved.stats } };
+      if (!posts.find((x) => x.id === originalPostId)) {
+        posts.push(originalPost);
+      } else {
+        originalPost = posts.find((x) => x.id === originalPostId)!;
+      }
+    }
+  }
   if (!originalPost) {
     console.error('Original post not found for reclipPost (mock):', originalPostId);
     throw new Error(`Original post with id ${originalPostId} not found`);
   }
 
-  // Prevent users from reclipping their own posts
-  if (originalPost.userHandle === userHandle) {
+  // Prevent users from reclipping their own posts (case-insensitive)
+  const norm = (h?: string) => String(h || '').trim().toLowerCase();
+  if (norm(originalPost.userHandle) === norm(userHandle)) {
     console.log('Cannot reclip your own post:', originalPostId);
     throw new Error('Cannot reclip your own post');
   }
@@ -2423,30 +2973,22 @@ export async function addComment(postId: string, userHandle: string, text: strin
       post.stats.comments += 1;
     }
 
-    // Send DM to post owner with comment notification (only if not commenting on own post).
-    // Skip for frontend-only demo posts — Laravel has no Ava mock user / post to message.
+    // Notify post owner in Inbox → Notifs (not Messages / DM).
+    // Skip for frontend-only demo posts and own posts.
     if (post.userHandle !== userHandle && !isFrontendOnlyPostId(resolvedPostId)) {
-      // Dynamically import to avoid circular dependency
-      const { appendMessage } = await import('./messages');
-      console.log('Sending comment notification DM:', {
-        from: userHandle,
-        to: post.userHandle,
-        postId,
-        commentText: text
-      });
       try {
-        await appendMessage(userHandle, post.userHandle, {
-          postId: postId,
+        const { createNotification } = await import('./notifications');
+        await createNotification({
+          type: 'comment',
+          fromHandle: userHandle,
+          toHandle: post.userHandle,
+          message: text,
+          postId: resolvedPostId,
           commentId: comment.id,
-          commentText: text,
-          isSystemMessage: false
         });
-        console.log('Comment notification DM sent successfully');
       } catch (error) {
-        console.error('Failed to send comment notification DM:', error);
+        console.error('Failed to create comment notification:', error);
       }
-    } else {
-      console.log('Skipping DM - user is commenting on their own post');
     }
   } else {
     console.warn('Post not found for comment:', postId, 'Available post IDs:', posts.map(p => p.id).slice(0, 5));
@@ -2513,6 +3055,24 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     }
     parentComment.replies.push(reply);
     parentComment.replyCount = (parentComment.replyCount || 0) + 1;
+
+    // Instagram-style: reply-to-comment → Activity/Notifs for the parent author (not a DM).
+    const parentAuthor = String(parentComment.userHandle || '').trim();
+    if (parentAuthor && parentAuthor.toLowerCase() !== String(userHandle || '').trim().toLowerCase()) {
+      try {
+        const { createNotification } = await import('./notifications');
+        await createNotification({
+          type: 'reply',
+          fromHandle: userHandle,
+          toHandle: parentAuthor,
+          message: text,
+          postId,
+          commentId: reply.id,
+        });
+      } catch (error) {
+        console.error('Failed to create comment-reply notification:', error);
+      }
+    }
   }
 
   return reply;
@@ -2672,8 +3232,6 @@ export async function createPost(
   videoFrameMode?: 'crop' | 'fit' | 'original',
   videoPosterUrl?: string,
 ): Promise<Post> {
-  // Use real Laravel API
-  const { createPost: createPostAPI } = await import('./client');
   const currentUserAccountType = (() => {
     try {
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
@@ -2686,123 +3244,131 @@ export async function createPost(
     }
   })();
 
-  try {
-    const response = await createPostAPI({
-      text: text || undefined,
-      location: location || undefined,
-      venue: venue || undefined,
-      landmark: landmark || undefined,
-      socialFormat: socialFormat || undefined,
-      mediaUrl: imageUrl || undefined,
-      mediaType: mediaType || undefined,
-      videoFrameMode: videoFrameMode || undefined,
-      videoPosterUrl: videoPosterUrl || undefined,
-      caption: caption || undefined,
-      imageText: imageText || undefined,
-      bannerText: bannerText || undefined,
-      stickers: stickers || undefined,
-      templateId: templateId || undefined,
-      mediaItems: mediaItems || undefined,
-      textStyle: textStyle || undefined,
-      taggedUsers: taggedUsers || undefined,
-      videoCaptionsEnabled: videoCaptionsEnabled || undefined,
-      videoCaptionText: videoCaptionText || undefined,
-      subtitlesEnabled: subtitlesEnabled || undefined,
-      subtitleText: subtitleText || undefined,
-      editTimeline: editTimeline || undefined,
-      musicTrackId: musicTrackId || undefined,
-    });
-
-    // Transform Laravel response using the same helper we use for feeds
-    // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
-    let transformed = transformLaravelPost(response);
-
-    // Ensure we preserve/override location from the current user when available,
-    // and always keep the venue/landmark that the creator entered so the metadata carousel
-    // and feeds can rely on them even if the API omits them.
-    const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
-      for (const v of vals) {
-        if (typeof v === 'string') {
-          const s = v.trim();
-          if (s.length > 0) return s;
-        }
-      }
-      return undefined;
-    };
-
-    const normalizedCreatedLocations = resolveAuthorLocations({
-      userHandle,
-      userLocal: userLocal ?? transformed.userLocal,
-      userRegional: userRegional ?? transformed.userRegional,
-      userNational: userNational ?? transformed.userNational,
-    });
-
-    transformed = {
-      ...transformed,
-      // Preserve user-entered copy even if API response omits it on create.
-      text: pickNonEmptyString(transformed.text, text),
-      caption: pickNonEmptyString(transformed.caption, caption, text),
-      ...normalizedCreatedLocations,
-      userAccountType: transformed.userAccountType ?? currentUserAccountType,
-      venue: venue || transformed.venue,
-      landmark: landmark || transformed.landmark,
-      socialFormat: socialFormat ?? transformed.socialFormat,
-      videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
-      videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
-      mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
-    };
-    (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
-
-    // Also store newly created posts in the local in-memory array + localStorage
-    // so Boost page and mock-mode feeds can see them immediately.
+  // Mock / offline mode: never touch the Laravel client. A dynamic import of ./client on RN
+  // can throw LoadBundleFromServerRequestError outside any catch and mark the upload failed.
+  if (isLaravelApiEnabled()) {
     try {
-      posts.unshift(transformed);
-      savePostsToStorage(posts);
-    } catch (e) {
-      console.warn('Failed to cache created post locally:', e);
+      const response = await apiClient.createPost({
+        text: text || undefined,
+        location: location || undefined,
+        venue: venue || undefined,
+        landmark: landmark || undefined,
+        socialFormat: socialFormat || undefined,
+        mediaUrl: imageUrl || undefined,
+        mediaType: mediaType || undefined,
+        videoFrameMode: videoFrameMode || undefined,
+        videoPosterUrl: videoPosterUrl || undefined,
+        caption: caption || undefined,
+        imageText: imageText || undefined,
+        bannerText: bannerText || undefined,
+        stickers: stickers || undefined,
+        templateId: templateId || undefined,
+        mediaItems: mediaItems || undefined,
+        textStyle: textStyle || undefined,
+        taggedUsers: taggedUsers || undefined,
+        videoCaptionsEnabled: videoCaptionsEnabled || undefined,
+        videoCaptionText: videoCaptionText || undefined,
+        subtitlesEnabled: subtitlesEnabled || undefined,
+        subtitleText: subtitleText || undefined,
+        editTimeline: editTimeline || undefined,
+        musicTrackId: musicTrackId || undefined,
+      });
+
+      // Transform Laravel response using the same helper we use for feeds
+      // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
+      let transformed = transformLaravelPost(response);
+
+      // Ensure we preserve/override location from the current user when available,
+      // and always keep the venue/landmark that the creator entered so the metadata carousel
+      // and feeds can rely on them even if the API omits them.
+      const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
+        for (const v of vals) {
+          if (typeof v === 'string') {
+            const s = v.trim();
+            if (s.length > 0) return s;
+          }
+        }
+        return undefined;
+      };
+
+      const normalizedCreatedLocations = resolveAuthorLocations({
+        userHandle,
+        userLocal: userLocal ?? transformed.userLocal,
+        userRegional: userRegional ?? transformed.userRegional,
+        userNational: userNational ?? transformed.userNational,
+      });
+
+      transformed = {
+        ...transformed,
+        // Preserve user-entered copy even if API response omits it on create.
+        text: pickNonEmptyString(transformed.text, text),
+        caption: pickNonEmptyString(transformed.caption, caption, text),
+        ...normalizedCreatedLocations,
+        userAccountType: transformed.userAccountType ?? currentUserAccountType,
+        venue: venue || transformed.venue,
+        landmark: landmark || transformed.landmark,
+        socialFormat: socialFormat ?? transformed.socialFormat,
+        videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
+        videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
+        mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
+      };
+      (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
+
+      // Also store newly created posts in the local in-memory array + localStorage
+      // so Boost page and mock-mode feeds can see them immediately.
+      try {
+        posts.unshift(transformed);
+        savePostsToStorage(posts);
+      } catch (e) {
+        console.warn('Failed to cache created post locally:', e);
+      }
+
+      void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
+        notifySubscribersOfCreatorPost(userHandle, transformed.id),
+      );
+
+      return transformed;
+    } catch (error: any) {
+      console.error('Error creating post via API:', error);
+      console.error('Error details:', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+        response: error?.response,
+      });
+
+      const msg = String(error?.message || '');
+      const isConnectionError =
+        error?.name === 'ConnectionRefused' ||
+        error?.name === 'LoadBundleFromServerRequestError' ||
+        msg.includes('CONNECTION_REFUSED') ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('Could not load bundle') ||
+        msg.includes('Network request failed') ||
+        (error?.name === 'TypeError' && msg.includes('fetch'));
+
+      const isAuthError =
+        msg.includes('Authentication required') ||
+        msg.includes('Unauthenticated') ||
+        error?.status === 401;
+
+      if (isConnectionError) {
+        markLaravelUnreachable();
+        console.log('⚠️ API connection failed, using mock fallback for post creation');
+        await delay(500);
+      } else if (isAuthError) {
+        console.log('⚠️ API requires authentication, using mock fallback for post creation');
+        await delay(500);
+      } else {
+        console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
+        await delay(500);
+      }
     }
+  }
 
-    void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
-      notifySubscribersOfCreatorPost(userHandle, transformed.id),
-    );
-
-    return transformed;
-  } catch (error: any) {
-    console.error('Error creating post via API:', error);
-    console.error('Error details:', {
-      name: error?.name,
-      message: error?.message,
-      status: error?.status,
-      response: error?.response
-    });
-
-    // Check if it's a connection error - if so, use mock fallback
-    const isConnectionError =
-      error?.name === 'ConnectionRefused' ||
-      error?.message?.includes('CONNECTION_REFUSED') ||
-      error?.message?.includes('Failed to fetch') ||
-      error?.message?.includes('NetworkError') ||
-      (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-
-    // Also fall back to mock when backend requires auth but user isn't logged in (e.g. no token)
-    const isAuthError =
-      error?.message?.includes('Authentication required') ||
-      error?.message?.includes('Unauthenticated') ||
-      error?.status === 401;
-
-    if (isConnectionError) {
-      console.log('⚠️ API connection failed, using mock fallback for post creation');
-      console.log('This is normal when backend is not running or not accessible from your device');
-      await delay(500);
-    } else if (isAuthError) {
-      console.log('⚠️ API requires authentication, using mock fallback for post creation');
-      await delay(500);
-    } else {
-      // For other errors (validation, etc), still fall back to mock so local dev always works
-      console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
-      await delay(500);
-    }
-
+  // Mock create (local-only) — used when API is off or after API failure.
+  {
     // Helper function to convert blob URL to data URL for persistence
     async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {
