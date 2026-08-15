@@ -134,6 +134,12 @@ async function hydratePreferencesOnce(): Promise<void> {
 
 void hydratePreferencesOnce();
 
+/** Await AsyncStorage hydrate so Settings toggles match last session (mock + production). */
+export async function loadNotificationPreferences(): Promise<NotificationPreferences> {
+  await hydratePreferencesOnce();
+  return getNotificationPreferences();
+}
+
 export function getNotificationPreferences(): NotificationPreferences {
   return { ...defaultPreferences, ...inMemoryNotificationPrefs };
 }
@@ -177,6 +183,19 @@ export function saveNotificationPreferences(prefs: NotificationPreferences): voi
   void AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs)).catch((error) => {
     console.error('Error saving notification preferences:', error);
   });
+}
+
+/** Awaitable save for Settings UI (ensures toggle state is on disk before next cold start). */
+export async function saveNotificationPreferencesAsync(
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  inMemoryNotificationPrefs = { ...defaultPreferences, ...prefs };
+  try {
+    await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+  } catch (error) {
+    console.error('Error saving notification preferences:', error);
+  }
+  return getNotificationPreferences();
 }
 
 export function resetNotificationPreferences(): NotificationPreferences {
@@ -258,7 +277,6 @@ export async function initializeNotifications(options?: NotificationInitOptions)
   }
 
   // Always attempt token fetch so Firebase console / log-android can capture the device token.
-  // Full push listeners still respect prefs + permission below.
   try {
     if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
       await messaging.requestPermission();
@@ -267,22 +285,6 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     await getFCMToken();
   } catch (error) {
     console.warn('Native FCM token fetch failed:', error);
-  }
-
-  if (!prefs.enabled) {
-    return;
-  }
-  const permission = await requestNotificationPermission();
-  if (permission !== 'granted') {
-    return;
-  }
-
-  try {
-    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
-      await messaging.requestPermission();
-    }
-  } catch (error) {
-    console.warn('Native notification permission request failed:', error);
   }
 
   if (unsubscribeForeground) {
@@ -298,10 +300,8 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     unsubscribeTokenRefresh = null;
   }
 
-  unsubscribeForeground = await onForegroundMessage(() => {
-    // Keep listener active for future in-app badges/refresh hooks.
-  });
-
+  // Deep-link listeners always register in mock/dev — tapping a push must navigate even if
+  // the master Settings toggle is off (toggle gates delivery, not open handling).
   if (typeof messaging.onNotificationOpenedApp === 'function' && options?.onNotificationPress) {
     unsubscribeOpened = messaging.onNotificationOpenedApp((remoteMessage: NotificationPayload) => {
       options.onNotificationPress?.(remoteMessage?.data || {});
@@ -318,6 +318,27 @@ export async function initializeNotifications(options?: NotificationInitOptions)
       console.warn('Failed to read initial notification:', error);
     }
   }
+
+  if (!prefs.enabled) {
+    return;
+  }
+
+  const permission = await requestNotificationPermission();
+  if (permission !== 'granted') {
+    return;
+  }
+
+  try {
+    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
+      await messaging.requestPermission();
+    }
+  } catch (error) {
+    console.warn('Native notification permission request failed:', error);
+  }
+
+  unsubscribeForeground = await onForegroundMessage(() => {
+    // Keep listener active for future in-app badges/refresh hooks.
+  });
 
   if (typeof messaging.onTokenRefresh === 'function') {
     unsubscribeTokenRefresh = messaging.onTokenRefresh((token: string) => {

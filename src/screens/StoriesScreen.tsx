@@ -73,7 +73,7 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, toggleLike, reclipPost, fetchComments } from '../api/posts';
+import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost, fetchComments } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { followOrRequest } from '../utils/followOrRequest';
 import { hasPendingFollowRequest } from '../api/privacy';
@@ -1290,6 +1290,11 @@ export default function StoriesScreen({ route, navigation }: any) {
                         avatarRef={avatarRef}
                         avatarUrl={currentGroup.avatarUrl}
                         userHandle={currentGroup.userHandle}
+                        accountType={
+                            user?.handle === currentGroup.userHandle
+                                ? user?.accountType
+                                : getAccountTypeForHandle(currentGroup.userHandle)
+                        }
                         showFollowBadge={
                             !!currentGroup.userHandle &&
                             !!user?.handle &&

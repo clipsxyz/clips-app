@@ -126,6 +126,17 @@ export function saveNotificationPreferences(prefs: NotificationPreferences): voi
   }
 }
 
+export async function loadNotificationPreferences(): Promise<NotificationPreferences> {
+  return getNotificationPreferences();
+}
+
+export async function saveNotificationPreferencesAsync(
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  saveNotificationPreferences(prefs);
+  return getNotificationPreferences();
+}
+
 export function resetNotificationPreferences(): NotificationPreferences {
   const next = { ...defaultPreferences };
   saveNotificationPreferences(next);

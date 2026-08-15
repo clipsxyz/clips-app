@@ -1058,6 +1058,28 @@ export function setReclipState(userId: string, postId: string, reclipped: boolea
   else delete s.reclips[postId];
 }
 
+/** Look up personal/business from an in-memory post by author handle. */
+export function getAccountTypeForHandle(
+  handle: string | undefined | null,
+): 'personal' | 'business' | undefined {
+  const norm = String(handle || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
+  if (!norm) return undefined;
+  const match = posts.find((p) => {
+    const h = String(p.userHandle || '')
+      .replace(/^@/, '')
+      .trim()
+      .toLowerCase();
+    return h === norm;
+  });
+  if (match?.userAccountType === 'business' || match?.userAccountType === 'personal') {
+    return match.userAccountType;
+  }
+  return undefined;
+}
+
 /**
  * Keep a hydrated post in the in-memory store (e.g. collection snapshots) so comments/likes
  * and getPostById keep working after navigation.

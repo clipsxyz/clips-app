@@ -84,7 +84,9 @@ import ProfilePictureModal from '../components/ProfilePictureModal.native';
 import CommentSafetyModal from '../components/CommentSafetyModal.native';
 import {
     getNotificationPreferences,
+    loadNotificationPreferences,
     saveNotificationPreferences,
+    saveNotificationPreferencesAsync,
     resetNotificationPreferences,
     type NotificationPreferences,
 } from '../services/notifications';
@@ -187,6 +189,17 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         loadData();
     }, [user?.handle]);
+
+    // Hydrate Push Notification toggles from AsyncStorage (survive restarts in mock mode).
+    useEffect(() => {
+        let cancelled = false;
+        void loadNotificationPreferences().then((prefs) => {
+            if (!cancelled) setNotificationPrefs(prefs);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     // Repair sessions created before Auth.login persisted accountType.
     useEffect(() => {
@@ -1961,15 +1974,50 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <View style={styles.safetySection}>
                                 <View style={styles.safetySectionHeader}>
                                     <Text style={styles.safetySectionTitle}>Push Notifications</Text>
-                                    <TouchableOpacity
-                                        style={styles.smallActionButton}
-                                        onPress={() => {
-                                            const reset = resetNotificationPreferences();
-                                            setNotificationPrefs(reset);
-                                        }}
-                                    >
-                                        <Text style={styles.smallActionButtonText}>Reset</Text>
-                                    </TouchableOpacity>
+                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                        <TouchableOpacity
+                                            style={styles.smallActionButton}
+                                            onPress={() => {
+                                                void (async () => {
+                                                    try {
+                                                        const { seedInboxTestNotifications } = await import(
+                                                            '../utils/testNotifications'
+                                                        );
+                                                        const n = await seedInboxTestNotifications();
+                                                        const prefs = getNotificationPreferences();
+                                                        setNotificationPrefs(prefs);
+                                                        showProfileAlert({
+                                                            title: 'Inbox badge test',
+                                                            message: `Added ${n} unread notifications. Check the footer Inbox icon.`,
+                                                            icon: 'success',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                    } catch (err) {
+                                                        showProfileAlert({
+                                                            title: 'Could not seed notifications',
+                                                            message:
+                                                                err instanceof Error
+                                                                    ? err.message
+                                                                    : 'Try again after signing in.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                    }
+                                                })();
+                                            }}
+                                        >
+                                            <Text style={styles.smallActionButtonText}>Test badge</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.smallActionButton}
+                                            onPress={() => {
+                                                const reset = resetNotificationPreferences();
+                                                setNotificationPrefs(reset);
+                                            }}
+                                        >
+                                            <Text style={styles.smallActionButtonText}>Reset</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
 
                                 <View style={styles.toggleRow}>
@@ -1982,7 +2030,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                         onPress={() => {
                                             const next = { ...notificationPrefs, enabled: !notificationPrefs.enabled };
                                             setNotificationPrefs(next);
-                                            saveNotificationPreferences(next);
+                                            void saveNotificationPreferencesAsync(next);
                                         }}
                                     >
                                         <View style={[styles.toggleThumb, notificationPrefs.enabled && styles.toggleThumbActive]} />
@@ -2017,7 +2065,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                             [key]: !(notificationPrefs as any)[key],
                                                         } as NotificationPreferences;
                                                         setNotificationPrefs(next);
-                                                        saveNotificationPreferences(next);
+                                                        void saveNotificationPreferencesAsync(next);
                                                     }}
                                                 >
                                                     <View

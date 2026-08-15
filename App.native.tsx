@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorScheme, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
@@ -15,7 +15,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
 import { getUnreadNotificationCount } from './src/api/notifications';
-import { navigateMainTab } from './src/navigation/mainTabs';
 import {
   HomeTabStack,
   BoostTabStack,
@@ -56,6 +55,7 @@ import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
+import { schedulePushNotificationNavigation } from './src/utils/pushNotificationNavigationNative';
 import UploadProgressToast from './src/components/UploadProgressToast.native';
 
 const Tab = createBottomTabNavigator();
@@ -118,11 +118,12 @@ function MainTabs() {
       return;
     }
     let mounted = true;
+    const handle = user.handle;
     const refresh = async () => {
       try {
         const [notificationUnread, messageUnread] = await Promise.all([
-          getUnreadNotificationCount(user.handle).catch(() => 0),
-          getUnreadTotal(user.handle).catch(() => 0),
+          getUnreadNotificationCount(handle).catch(() => 0),
+          getUnreadTotal(handle).catch(() => 0),
         ]);
         if (mounted) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
       } catch {
@@ -130,10 +131,37 @@ function MainTabs() {
       }
     };
     void refresh();
-    const interval = setInterval(refresh, 12000);
+    const interval = setInterval(() => {
+      void refresh();
+    }, 8000);
+
+    const onInboxUnread = (payload?: { handle?: string; unread?: number }) => {
+      if (payload?.handle && payload.handle !== handle) return;
+      // Prefer live message unread when provided; still refresh notifications.
+      void refresh();
+    };
+    const onNotificationsChanged = (payload?: { handle?: string }) => {
+      if (payload?.handle && payload.handle !== handle) return;
+      void refresh();
+    };
+
+    const subs = [
+      DeviceEventEmitter.addListener('inboxUnreadChanged', onInboxUnread),
+      DeviceEventEmitter.addListener('notificationsUpdated', onNotificationsChanged),
+      DeviceEventEmitter.addListener('notificationCreated', onNotificationsChanged),
+      DeviceEventEmitter.addListener('conversationUpdated', () => {
+        void refresh();
+      }),
+    ];
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+
     return () => {
       mounted = false;
       clearInterval(interval);
+      subs.forEach((s) => s.remove());
+      appStateSub.remove();
     };
   }, [user?.handle]);
 
@@ -182,34 +210,7 @@ function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
 
   const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
-    if (!navigationRef.isReady()) return;
-    const nav = navigationRef as any;
-    const chatGroupId = data.chatGroupId || data.chat_group_id || data.groupId || data.group_id;
-    const fromHandle = data.fromHandle || data.from_handle || data.senderHandle || data.sender_handle;
-    const storyId = data.storyId || data.story_id;
-    const postId = data.postId || data.post_id;
-
-    if (chatGroupId) {
-      nav.navigate('Messages', { chatGroupId, kind: 'group' });
-      return;
-    }
-
-    if (fromHandle && storyId) {
-      nav.navigate('Stories', { openUserHandle: fromHandle, openStoryId: storyId });
-      return;
-    }
-
-    if (fromHandle) {
-      nav.navigate('Messages', { handle: fromHandle });
-      return;
-    }
-
-    if (postId) {
-      nav.navigate('PostDetail', { postId });
-      return;
-    }
-
-    navigateMainTab(nav, 'Inbox', { initialTab: 'notifications' });
+    schedulePushNotificationNavigation(() => navigationRef, data || {});
   }, []);
 
   React.useEffect(() => {

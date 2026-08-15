@@ -11,7 +11,7 @@ import {
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { isProfilePrivate, canSendMessage, createFollowRequest } from '../api/privacy';
-import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState, getFollowState } from '../api/posts';
+import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState, getFollowState, getAccountTypeForHandle } from '../api/posts';
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { reclipPost } from '../api/posts';
@@ -3503,6 +3503,15 @@ export default function StoriesPage() {
                                     <div className="flex flex-col gap-0.5 min-w-0">
                                         <div className="flex items-center gap-1.5 min-w-0 max-w-[min(55vw,16rem)]">
                                             <p className="text-white font-semibold text-sm truncate max-w-full">{currentGroup?.userHandle}</p>
+                                            <VerifiedBadge
+                                                accountType={
+                                                    currentGroup?.userHandle &&
+                                                    user?.handle === currentGroup.userHandle
+                                                        ? user?.accountType
+                                                        : getAccountTypeForHandle(currentGroup?.userHandle)
+                                                }
+                                                size={13}
+                                            />
                                         </div>
                                         {/* Metadata carousel: location → venue → timestamp (collapsible for cleaner header) */}
                                         {storyMetadataItems.length > 0 ? (() => {

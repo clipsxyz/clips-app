@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
+import VerifiedBadge from '../VerifiedBadge.native';
 import type { StoryMetadataItem } from '../../utils/storyViewerMeta';
 
 type Props = {
     avatarRef: React.RefObject<View | null>;
     avatarUrl?: string;
     userHandle: string;
+    accountType?: string | null;
     showFollowBadge: boolean;
     followLoading?: boolean;
     metadataItems: StoryMetadataItem[];
@@ -37,6 +39,7 @@ export default function StoryViewerHeader({
     avatarRef,
     avatarUrl,
     userHandle,
+    accountType,
     showFollowBadge,
     followLoading,
     metadataItems,
@@ -90,9 +93,12 @@ export default function StoryViewerHeader({
                     </View>
                 </View>
                 <TouchableOpacity style={styles.nameCol} onPress={onAvatarPress} activeOpacity={0.85}>
-                    <Text style={styles.handle} numberOfLines={1}>
-                        {userHandle}
-                    </Text>
+                    <View style={styles.handleRow}>
+                        <Text style={styles.handle} numberOfLines={1}>
+                            {userHandle}
+                        </Text>
+                        <VerifiedBadge accountType={accountType} size={13} />
+                    </View>
                     {currentMeta ? (
                         <View style={styles.metaPill}>
                             <Icon
@@ -166,7 +172,14 @@ const styles = StyleSheet.create({
         zIndex: 2,
     },
     nameCol: { flex: 1, minWidth: 0, gap: 2 },
-    handle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    handleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        minWidth: 0,
+        maxWidth: '100%',
+    },
+    handle: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
     metaPill: {
         flexDirection: 'row',
         alignItems: 'center',
