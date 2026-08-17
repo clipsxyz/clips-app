@@ -1,4 +1,7 @@
-import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtimeEnv';
+import {
+    getConfiguredApiEnvUrl,
+    getReactNativeDefaultApiBaseUrl,
+} from '../config/runtimeEnv';
 
 function isViteDev(): boolean {
     try {
@@ -11,10 +14,12 @@ function isViteDev(): boolean {
 
 /**
  * Resolve Laravel API base URL for web and React Native.
+ * Prefers `EXPO_PUBLIC_API_BASE_URL`, then legacy `VITE_API_URL`.
  * Web dev (localhost or LAN IP like 192.168.x.x:5173) uses `/api` so Vite proxies to Laravel on the dev machine.
+ * When `EXPO_PUBLIC_USE_MOCK=true`, `isLaravelApiEnabled()` / the API client skip live network use.
  */
 export function getApiBaseUrl(): string {
-    const envUrl = getRuntimeEnv('VITE_API_URL');
+    const envUrl = getConfiguredApiEnvUrl();
 
     if (typeof window === 'undefined') {
         if (envUrl) {

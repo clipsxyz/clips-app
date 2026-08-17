@@ -7,6 +7,8 @@ import { firebaseSwPlugin } from './vite-plugin-firebase-sw'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), noCache(), firebaseSwPlugin()],
+  // Expose both Vite and Expo-style public env keys to the client bundle.
+  envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),

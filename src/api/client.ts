@@ -2,13 +2,25 @@
 import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthorizationHeader } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
+import { IS_MOCK } from './apiMode';
 
-const API_BASE_URL = getApiBaseUrl();
+function throwMockConnectionRefused(): never {
+    markLaravelUnreachable();
+    const connectionError = new Error('CONNECTION_REFUSED');
+    connectionError.name = 'ConnectionRefused';
+    throw connectionError;
+}
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
 export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
+    // Mock mode: keep local mock data; do not hit Laravel.
+    if (IS_MOCK) {
+        throwMockConnectionRefused();
+    }
+
     const authHeader = await getAuthorizationHeader();
     const { timeoutMs = 8000, ...fetchOptions } = options;
+    const API_BASE_URL = getApiBaseUrl();
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -837,12 +849,17 @@ export async function getBoostAnalyticsApi(postId: string, range: '24h' | '7d' |
 const UPLOAD_TIMEOUT_MS = 60000; // 60s for slow connections
 
 export async function uploadFile(file: File) {
+    if (IS_MOCK) {
+        throwMockConnectionRefused();
+    }
+
     const formData = new FormData();
     formData.append('file', file);
 
     const authHeader = await getAuthorizationHeader();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const API_BASE_URL = getApiBaseUrl();
 
     try {
         const response = await fetch(`${API_BASE_URL}/upload/single`, {

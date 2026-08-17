@@ -1,30 +1,6 @@
+import { getApiBaseUrl } from '../api/apiBaseUrl';
+import { IS_MOCK } from '../api/apiMode';
 import { getAuthorizationHeader } from './authTokenBridge';
-import { getReactNativeDefaultApiBaseUrl, getRuntimeEnv } from '../config/runtimeEnv';
-
-function getApiBaseUrl(): string {
-    const envUrl = getRuntimeEnv('VITE_API_URL');
-    if (envUrl) {
-        try {
-            const parsed = new URL(envUrl);
-            if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-                const rn = getReactNativeDefaultApiBaseUrl();
-                if (rn) {
-                    const rnParsed = new URL(rn);
-                    parsed.protocol = rnParsed.protocol;
-                    parsed.hostname = rnParsed.hostname;
-                    parsed.port = rnParsed.port;
-                    return parsed.toString().replace(/\/$/, '');
-                }
-            }
-        } catch {
-            // use env as-is
-        }
-        return envUrl.replace(/\/$/, '');
-    }
-    const rn = getReactNativeDefaultApiBaseUrl();
-    if (rn) return rn.replace(/\/$/, '');
-    return 'http://localhost:8000/api';
-}
 
 export type NativeUploadResult = {
     success?: boolean;
@@ -38,6 +14,12 @@ export async function uploadFileFromUri(
     mimeType = 'image/jpeg',
     fileName = 'upload.jpg',
 ): Promise<NativeUploadResult> {
+    if (IS_MOCK) {
+        const err = new Error('CONNECTION_REFUSED');
+        err.name = 'ConnectionRefused';
+        throw err;
+    }
+
     const authHeader = await getAuthorizationHeader();
     const formData = new FormData();
     formData.append('file', {

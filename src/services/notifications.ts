@@ -1,10 +1,10 @@
 // Notification service with Firebase Cloud Messaging support
 // Firebase imports are loaded dynamically to avoid errors if package not installed
 
-import { getReactNativeDefaultApiBaseUrl, getRuntimeEnv } from '../config/runtimeEnv';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
 
 function notificationApiBase(): string {
-  return getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+  return getApiBaseUrl();
 }
 
 // Notification preferences storage key

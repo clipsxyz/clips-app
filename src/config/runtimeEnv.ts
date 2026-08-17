@@ -61,14 +61,39 @@ export function isLaravelUnreachableThisSession(): boolean {
   return laravelUnreachableThisSession;
 }
 
+/** True when EXPO_PUBLIC_USE_MOCK=true (mock data fallback; no Laravel). */
+export function isMockMode(): boolean {
+  try {
+    if (typeof process !== 'undefined' && process.env.EXPO_PUBLIC_USE_MOCK === 'true') {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return getRuntimeEnv('EXPO_PUBLIC_USE_MOCK') === 'true';
+}
+
+/**
+ * Prefer migration env `EXPO_PUBLIC_API_BASE_URL`, then legacy `VITE_API_URL`.
+ */
+export function getConfiguredApiEnvUrl(): string | undefined {
+  return (
+    getRuntimeEnv('EXPO_PUBLIC_API_BASE_URL') ||
+    getRuntimeEnv('VITE_API_URL') ||
+    undefined
+  );
+}
+
 export function isLaravelApiEnabled(): boolean {
   if (laravelUnreachableThisSession) return false;
+  // Migration flag: keep mock data when EXPO_PUBLIC_USE_MOCK=true.
+  if (isMockMode()) return false;
   const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');
   if (raw === 'false') return false;
   if (isReactNativeRuntime()) {
     // Physical devices cannot reach Metro's localhost API URL — use bundled mock feed instead.
     if (raw !== 'true') return false;
-    const base = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || '';
+    const base = getConfiguredApiEnvUrl() || getReactNativeDefaultApiBaseUrl() || '';
     if (/localhost|127\.0\.0\.1/i.test(base)) return false;
     return true;
   }
