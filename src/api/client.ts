@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
-import { getAuthorizationHeader } from '../utils/authTokenBridge';
+import { getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
 import { IS_MOCK } from './apiMode';
 
@@ -11,10 +11,22 @@ function throwMockConnectionRefused(): never {
     throw connectionError;
 }
 
+/**
+ * Gradual Laravel migration allowlist for `apiRequest`.
+ * Login is handled by `loginUser()` (not this set). Keep empty so all other
+ * endpoints stay on mock even when `EXPO_PUBLIC_USE_MOCK=false`.
+ */
+const LIVE_API_REQUEST_PATHS = new Set<string>([]);
+
+function isMigratedApiRequestPath(endpoint: string): boolean {
+    const path = endpoint.split('?')[0] || '';
+    return LIVE_API_REQUEST_PATHS.has(path);
+}
+
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
 export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
-    // Mock mode: keep local mock data; do not hit Laravel.
-    if (IS_MOCK) {
+    // Mock mode, or unmigrated endpoint: keep local mock data; do not hit Laravel.
+    if (IS_MOCK || !isMigratedApiRequestPath(endpoint)) {
         throwMockConnectionRefused();
     }
 
@@ -97,11 +109,77 @@ export async function registerUser(userData: {
     });
 }
 
-export async function loginUser(email: string, password: string) {
-    return apiRequest('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-    });
+export async function loginUser(email: string, password: string): Promise<{
+    user: Record<string, unknown>;
+    token: string;
+}> {
+    // Keep existing mock login path (UI falls back to local registrations).
+    if (IS_MOCK) {
+        throwMockConnectionRefused();
+    }
+
+    // Laravel mounts auth under `/api/auth/*`. `getApiBaseUrl()` already includes `/api`.
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/login`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({ email, password }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Login failed' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            throw error;
+        }
+
+        const data = (await response.json()) as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Login succeeded but no API token was returned');
+        }
+
+        await persistAuthToken(token);
+
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function getCurrentUser() {
