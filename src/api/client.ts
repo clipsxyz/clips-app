@@ -13,8 +13,8 @@ function throwMockConnectionRefused(): never {
 
 /**
  * Gradual Laravel migration allowlist for `apiRequest`.
- * Login is handled by `loginUser()` (not this set). Keep empty so all other
- * endpoints stay on mock even when `EXPO_PUBLIC_USE_MOCK=false`.
+ * Login uses `loginUser()`; feed list uses `fetchPostsPage()` — both bypass this set.
+ * Keep other endpoints on mock even when `EXPO_PUBLIC_USE_MOCK=false`.
  */
 const LIVE_API_REQUEST_PATHS = new Set<string>([]);
 
@@ -324,7 +324,17 @@ export async function updateAuthProfile(data: {
 }
 
 // Posts API (6s timeout for faster fallback on slow mobile networks)
-export async function fetchPostsPage(cursor: number | string | null = 0, limit: number = 10, filter: string = 'Dublin', userId?: string) {
+export async function fetchPostsPage(
+    cursor: number | string | null = 0,
+    limit: number = 10,
+    filter: string = 'Dublin',
+    userId?: string,
+) {
+    // Keep existing mock feed path (posts.ts falls through to local seed data).
+    if (IS_MOCK) {
+        throwMockConnectionRefused();
+    }
+
     const params = new URLSearchParams({
         cursor: String(cursor ?? 0),
         limit: limit.toString(),
@@ -332,7 +342,65 @@ export async function fetchPostsPage(cursor: number | string | null = 0, limit: 
         ...(userId && { userId }),
     });
 
-    return apiRequest(`/posts?${params}`, { timeoutMs: 6000 });
+    // Laravel: GET /api/posts (API_BASE_URL already includes `/api`)
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/posts?${params}`;
+    const authHeader = await getAuthorizationHeader();
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Network error' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            throw error;
+        }
+
+        const text = await response.text();
+        if (!text) return { items: [], nextCursor: null };
+        try {
+            return JSON.parse(text);
+        } catch {
+            const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+            throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
+        }
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function fetchPost(postId: string, userId?: string) {

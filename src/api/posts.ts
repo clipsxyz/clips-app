@@ -8,6 +8,7 @@ import {
   markLaravelUnreachable,
 } from '../config/runtimeEnv';
 import * as apiClient from './client';
+import { IS_MOCK } from './apiMode';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
@@ -1600,8 +1601,9 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     t !== 'finglas' &&
     t !== 'dublin' &&
     t !== 'ireland';
-  // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
-  const useLaravelAPI = isLaravelApiEnabled() && t !== 'discover';
+  // When mock is on, use local seed feed. Discover (Following) stays mock so local follows work.
+  // Login-style gate: `!IS_MOCK` enables live main feed even when other endpoints remain mock.
+  const useLaravelAPI = !IS_MOCK && t !== 'discover';
 
   if (useLaravelAPI) {
     try {
