@@ -354,17 +354,20 @@ class PostController extends Controller
             'venue' => 'nullable|string|max:200',
             'landmark' => 'nullable|string|max:200',
             'socialFormat' => 'nullable|string|in:youtube_shorts,tiktok,instagram_reels',
-            'mediaUrl' => 'nullable|url',
+            'mediaUrl' => 'nullable|string|max:2048',
             'mediaType' => 'nullable|in:image,video',
+            'videoFrameMode' => 'nullable|in:crop,fit,original',
+            'videoPosterUrl' => 'nullable|string|max:2048',
             'caption' => 'nullable|string|max:500',
             'imageText' => 'nullable|string|max:500',
             'bannerText' => 'nullable|string|max:200',
             'stickers' => 'nullable|array',
             'templateId' => 'nullable|string|max:100',
             'mediaItems' => 'nullable|array',
-            'mediaItems.*.url' => 'required|url',
-            'mediaItems.*.type' => 'required|in:image,video',
+            'mediaItems.*.url' => 'required|string|max:2048',
+            'mediaItems.*.type' => 'required|in:image,video,text',
             'mediaItems.*.duration' => 'nullable|numeric|min:0',
+            'mediaItems.*.posterUrl' => 'nullable|string|max:2048',
             'textStyle' => 'nullable|array',
             'textStyle.color' => 'nullable|string|max:50',
             'textStyle.size' => 'nullable|in:small,medium,large',
@@ -388,7 +391,34 @@ class PostController extends Controller
             return response()->json(['error' => 'Post must have text or media'], 400);
         }
 
+        $mediaUrl = $request->input('mediaUrl');
+        if (is_string($mediaUrl) && $mediaUrl !== '' && !preg_match('#^https?://#i', $mediaUrl)) {
+            return response()->json([
+                'error' => 'Invalid media URL',
+                'message' => 'mediaUrl must be an http(s) URL after upload. Local device paths are not allowed.',
+            ], 400);
+        }
+        $videoPosterUrl = $request->input('videoPosterUrl');
+        if (is_string($videoPosterUrl) && $videoPosterUrl !== '' && !preg_match('#^https?://#i', $videoPosterUrl)) {
+            return response()->json([
+                'error' => 'Invalid poster URL',
+                'message' => 'videoPosterUrl must be an http(s) URL after upload.',
+            ], 400);
+        }
+
         $user = Auth::user();
+        if (! $user) {
+            \Log::warning('posts.store rejected: unauthenticated');
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        \Log::info('posts.store', [
+            'user_id' => $user->id,
+            'handle' => $user->handle,
+            'has_media' => (bool) ($request->mediaUrl || $request->mediaItems),
+            'media_type' => $request->mediaType,
+            'location' => $request->location,
+        ]);
 
         $post = DB::transaction(function () use ($request, $user) {
             $post = Post::create([
@@ -465,6 +495,13 @@ class PostController extends Controller
 
             return $post;
         });
+
+        \Log::info('posts.store created', [
+            'post_id' => $post->id,
+            'user_id' => $post->user_id,
+            'user_handle' => $post->user_handle,
+            'posts_count' => $user->fresh()?->posts_count,
+        ]);
 
         // Transform taggedUsers to array of handles for frontend compatibility
         $postData = $post->toArray();

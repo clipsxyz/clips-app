@@ -27,6 +27,7 @@ import {
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
@@ -176,6 +177,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         !suspendNativeVideo &&
         String(storeActivePostId) === String(post.id);
 
+    // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
+    const [playerEpoch, setPlayerEpoch] = useState(0);
+    const needsRemountAfterSuspendRef = useRef(false);
+
     const carouselItems = useMemo(
         () =>
             (post.mediaItems || []).filter(
@@ -232,6 +237,27 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         setVideoUrlFallbackByRaw({});
     }, [post.id]);
 
+    // Prefetch video posters so placeholders paint instantly on re-scroll.
+    useEffect(() => {
+        const uris = new Set<string>();
+        if (typeof post.videoPosterUrl === 'string' && post.videoPosterUrl.trim()) {
+            uris.add(post.videoPosterUrl.trim());
+        }
+        for (const item of post.mediaItems || []) {
+            const poster =
+                (item as { posterUrl?: string; thumbnailUrl?: string } | undefined)?.posterUrl ||
+                (item as { thumbnailUrl?: string } | undefined)?.thumbnailUrl;
+            if (typeof poster === 'string' && poster.trim() && /^https?:\/\//i.test(poster.trim())) {
+                uris.add(poster.trim());
+            }
+        }
+        for (const uri of uris) {
+            if (/^https?:\/\//i.test(uri)) {
+                void Image.prefetch(uri).catch(() => {});
+            }
+        }
+    }, [post.id, post.mediaItems, post.videoPosterUrl]);
+
     /** Thumb-rail tap only — do not scrollTo when the swipe already moved us there. */
     useEffect(() => {
         if (!hasCarousel || !width) return;
@@ -268,6 +294,23 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const showScenesCta =
         mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
     const showMuteButton = video && mode === 'feed' && isFeedAutoplayActive;
+
+    useEffect(() => {
+        if (suspendNativeVideo) {
+            needsRemountAfterSuspendRef.current = true;
+        }
+    }, [suspendNativeVideo]);
+
+    useEffect(() => {
+        if (mode !== 'feed' || !video) return;
+        if (!isFeedAutoplayActive || suspendNativeVideo) return;
+        if (!needsRemountAfterSuspendRef.current) return;
+        needsRemountAfterSuspendRef.current = false;
+        setPlayerEpoch((n) => n + 1);
+        resetPosterCover();
+        setPaused(false);
+        setPlayFailed(false);
+    }, [isFeedAutoplayActive, mode, resetPosterCover, suspendNativeVideo, video]);
 
     const fireBurstAt = useCallback((x: number, y: number) => {
         setBurstAt({ x, y });
@@ -310,7 +353,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
-        if (isFeedAutoplayActive) {
+        if (isFeedAutoplayActive && !suspendNativeVideo) {
             resetPosterCover();
             setPaused(false);
             setPlayFailed(false);
@@ -318,12 +361,37 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             if (handoff && Number.isFinite(handoff.currentTime) && handoff.currentTime > 0.05) {
                 pendingSeekRef.current = handoff.currentTime;
             }
-        } else {
-            setPaused(true);
-            resetPosterCover();
-            pendingSeekRef.current = null;
+            return;
         }
-    }, [isFeedAutoplayActive, mode, post.id, resetPosterCover, video]);
+
+        // Leaving view / overlay / blur: hard-stop native player so audio cannot leak.
+        setPaused(true);
+        pendingSeekRef.current = null;
+        resetPosterCover();
+        const player = feedVideoRef.current as
+            | (VideoRef & { pause?: () => void; seek?: (t: number) => void })
+            | null;
+        try {
+            player?.pause?.();
+            player?.seek?.(0);
+        } catch {
+            /* ignore */
+        }
+    }, [isFeedAutoplayActive, mode, post.id, resetPosterCover, suspendNativeVideo, video]);
+
+    // Unmount / remount safety — always stop ExoPlayer audio.
+    useEffect(() => {
+        return () => {
+            const player = feedVideoRef.current as
+                | (VideoRef & { pause?: () => void })
+                | null;
+            try {
+                player?.pause?.();
+            } catch {
+                /* ignore */
+            }
+        };
+    }, []);
 
     useEffect(() => {
         resetPosterCover();
@@ -456,9 +524,14 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             return mockFeedVideoSource(uri);
         }
         const lower = sourceUri.toLowerCase();
-        if (lower.includes('.m3u8')) return { uri: sourceUri, type: 'm3u8' as const };
-        if (lower.includes('.webm')) return { uri: sourceUri, type: 'webm' as const };
-        return { uri: sourceUri };
+        if (lower.includes('.m3u8')) {
+            return withFeedVideoCache({ uri: sourceUri, type: 'm3u8' as const });
+        }
+        if (lower.includes('.webm')) {
+            return withFeedVideoCache({ uri: sourceUri, type: 'webm' as const });
+        }
+        // Remote MP4s: enable disk cache so re-scrolling reuses buffered media.
+        return withFeedVideoCache({ uri: sourceUri });
     };
 
     const setFeedSoundOn = (nextSoundOn: boolean) => {
@@ -555,12 +628,13 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             );
         }
 
-        // Poster Image stays at opacity 1 over the player until first frame; #121212 only if no URI.
-        const showBufferCover = !slideMountVideo || posterMounted;
+        // Poster stays fully visible until first decoded frame — covers buffer/black frames.
+        const showBufferCover = !slideMountVideo || posterMounted || !videoSurfaceReady;
         const onFirstFrameReady = () => {
             markUrlLoaded(slideRawUrl);
             fadeOutPosterCover();
         };
+        const cachedVideoSource = videoSource(slideUrl, slideRawUrl);
 
         return (
             <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
@@ -571,21 +645,43 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                         collapsable={false}
                     >
                         <Video
-                            key={`video-${post.id}-${slideIndex}-${slideRawUrl}`}
+                            key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
                             ref={feedVideoRef}
-                            source={videoSource(slideUrl, slideRawUrl) as object}
+                            source={cachedVideoSource as object}
                             style={styles.videoFill}
                             resizeMode="cover"
                             controls={false}
-                            paused={mode === 'detail' ? paused : false}
-                            muted={mode === 'feed' ? !soundOn : false}
-                            volume={mode === 'feed' ? (soundOn ? 1 : 0) : 1}
+                            paused={
+                                mode === 'detail'
+                                    ? paused
+                                    : !isFeedAutoplayActive || suspendNativeVideo || paused
+                            }
+                            muted={
+                                mode === 'feed'
+                                    ? !soundOn || !isFeedAutoplayActive || suspendNativeVideo
+                                    : false
+                            }
+                            volume={
+                                mode === 'feed'
+                                    ? soundOn && isFeedAutoplayActive && !suspendNativeVideo
+                                        ? 1
+                                        : 0
+                                    : 1
+                            }
                             repeat={mode === 'feed'}
                             playInBackground={false}
                             playWhenInactive={false}
                             ignoreSilentSwitch="ignore"
                             useTextureView
                             hideShutterView
+                            poster={
+                                slidePosterUri
+                                    ? {
+                                          source: { uri: slidePosterUri },
+                                          resizeMode: 'cover' as const,
+                                      }
+                                    : undefined
+                            }
                             {...androidListSafeVideoProps()}
                             pointerEvents="none"
                             onLoadStart={() => {

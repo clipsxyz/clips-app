@@ -19,12 +19,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { persistAuthToken } from '../utils/authTokenBridge';
 import { useAuth } from '../context/Auth';
 import { loginUser, registerUser, mapLaravelUserToAppFields } from '../api/client';
+import { buildGazetteerHandle } from '../utils/gazetteerHandle';
+import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import Avatar from '../components/Avatar';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import GazetteerMenuSheet from '../components/GazetteerMenuSheet.native';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
-import { buildGazetteerHandle } from '../utils/gazetteerHandle';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import {
     ensureCameraPermission,
@@ -86,6 +87,11 @@ export default function LoginScreen({ navigation, route }: any) {
     const getFieldError = (key: string) => fieldErrors[key] || '';
 
     useEffect(() => {
+        // A prior feed/upload failure can mark Laravel unreachable for the JS session.
+        clearLaravelUnreachable();
+    }, []);
+
+    useEffect(() => {
         const nextMode = resolveAuthMode(route?.params?.mode);
         setMode(nextMode);
         if (nextMode === 'signup') setStep(1);
@@ -107,6 +113,21 @@ export default function LoginScreen({ navigation, route }: any) {
 
     const goToFeed = () => {
         navigation.replace('MainTabs', { screen: 'Home' });
+    };
+
+    const enterLiveSession = async (nextUser: any) => {
+        login(nextUser);
+        try {
+            const { isMockMode } = await import('../api/apiMode');
+            if (!isMockMode()) {
+                const { clearLocalFeedPostsStorage } = await import('../api/posts');
+                await clearLocalFeedPostsStorage();
+            }
+        } catch {
+            /* ignore */
+        }
+        setBusy(false);
+        goToFeed();
     };
 
     const switchMode = (next: AuthMode) => {
@@ -260,12 +281,98 @@ export default function LoginScreen({ navigation, route }: any) {
                 accountType: mapped.accountType,
                 is_private: mapped.is_private,
             };
-            login(mergedUser);
-            setBusy(false);
-            goToFeed();
+            await enterLiveSession(mergedUser);
             return;
         } catch (err: any) {
-            // Backend unavailable or login failed - fallback to local registration
+            // Live Laravel mode: do not silently log in without a Sanctum token (create/upload → 401).
+            const { isMockMode } = await import('../api/apiMode');
+            if (!isMockMode()) {
+                clearLaravelUnreachable();
+                const msg = String(err?.message || 'Login failed');
+                const isConnection =
+                    err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+                if (isConnection) {
+                    setErrorText('Cannot reach the server. Check Laravel is running and try again.');
+                    setBusy(false);
+                    return;
+                }
+
+                // Migrate a prior local-only account onto Laravel (fresh DB / first live login).
+                try {
+                    const reg = await getLocalRegistrations();
+                    const key = loginEmail.trim().toLowerCase();
+                    const localRecord = reg[key];
+                    if (localRecord && localRecord.password === loginPassword) {
+                        const u = localRecord.userData || {};
+                        const apiResponse = await registerUser({
+                            username: String(loginEmail.trim().split('@')[0] || 'user').replace(
+                                /[^a-zA-Z0-9_]/g,
+                                '_',
+                            ),
+                            email: loginEmail.trim(),
+                            password: loginPassword,
+                            displayName: String(u.name || loginEmail.split('@')[0] || 'User'),
+                            handle: String(
+                                u.handle ||
+                                    buildGazetteerHandle(
+                                        String(u.name || 'User'),
+                                        String(u.regional || u.local || 'Unknown'),
+                                    ),
+                            ),
+                            locationLocal: String(u.local || ''),
+                            locationRegional: String(u.regional || ''),
+                            locationNational: String(u.national || ''),
+                            accountType:
+                                u.accountType === 'business' || u.accountType === 'personal'
+                                    ? u.accountType
+                                    : 'personal',
+                            isBusiness: u.accountType === 'business',
+                        });
+                        if (apiResponse?.token) {
+                            await persistAuthToken(apiResponse.token);
+                        }
+                        const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
+                        const fallbackName = String(mapped.name || u.name || loginEmail.split('@')[0] || 'User');
+                        await enterLiveSession({
+                            name: fallbackName,
+                            email: loginEmail.trim(),
+                            password: '',
+                            local: String(mapped.local || u.local || ''),
+                            regional: String(mapped.regional || u.regional || ''),
+                            national: String(mapped.national || u.national || ''),
+                            handle: String(mapped.handle || u.handle || `${fallbackName}@Unknown`),
+                            countryFlag: String(mapped.countryFlag || u.countryFlag || ''),
+                            id: mapped.id || u.id,
+                            avatarUrl: mapped.avatarUrl || u.avatarUrl,
+                            bio: mapped.bio || u.bio,
+                            socialLinks: mapped.socialLinks || u.socialLinks,
+                            placesTraveled: mapped.placesTraveled || u.placesTraveled,
+                            accountType: mapped.accountType || u.accountType,
+                            is_private: mapped.is_private ?? u.is_private,
+                        });
+                        return;
+                    }
+                } catch (migrateErr: any) {
+                    const migrateMsg = String(migrateErr?.message || '');
+                    // Email already on server with different password, or validation failed.
+                    if (migrateMsg.toLowerCase().includes('email') || migrateMsg.includes('unique')) {
+                        setErrorText(
+                            'That email is already on the server. Use the password you registered with, or create a new account.',
+                        );
+                        setBusy(false);
+                        return;
+                    }
+                }
+
+                setErrorText(
+                    msg.includes('Invalid')
+                        ? 'Invalid email or password. If this is your first time on the live server, tap Sign up.'
+                        : msg,
+                );
+                setBusy(false);
+                return;
+            }
+            // Mock mode: fall through to local registration store
         }
 
         try {
@@ -366,7 +473,7 @@ export default function LoginScreen({ navigation, route }: any) {
 
         try {
             const apiResponse = await registerUser({
-                username: email.trim(),
+                username: email.trim().split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
                 email: email.trim(),
                 password,
                 displayName: name.trim(),
@@ -380,8 +487,37 @@ export default function LoginScreen({ navigation, route }: any) {
             if (apiResponse?.token) {
                 await persistAuthToken(apiResponse.token);
             }
-        } catch {
-            // keep local registration fallback
+            const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
+            const mergedUser = {
+                ...userData,
+                id: mapped.id ?? userData.handle,
+                handle: String(mapped.handle || userData.handle),
+                name: String(mapped.name || userData.name),
+                local: String(mapped.local || userData.local),
+                regional: String(mapped.regional || userData.regional),
+                national: String(mapped.national || userData.national),
+                avatarUrl: mapped.avatarUrl || userData.avatarUrl,
+                accountType: (mapped.accountType as 'personal' | 'business') || userData.accountType,
+                is_private: mapped.is_private,
+            };
+            await saveLocalRegistration(email.trim(), password, mergedUser);
+            await enterLiveSession(mergedUser);
+            return;
+        } catch (err: any) {
+            const { isMockMode } = await import('../api/apiMode');
+            if (!isMockMode()) {
+                const msg = String(err?.message || 'Registration failed');
+                const isConnection =
+                    err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+                setErrorText(
+                    isConnection
+                        ? 'Cannot reach the server. Check Laravel is running and try again.'
+                        : msg,
+                );
+                setBusy(false);
+                return;
+            }
+            // Mock mode: keep local registration fallback
         }
 
         await saveLocalRegistration(email.trim(), password, userData);

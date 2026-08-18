@@ -2,7 +2,7 @@
 import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
-import { IS_MOCK } from './apiMode';
+import { isMockMode } from './apiMode';
 
 function throwMockConnectionRefused(): never {
     markLaravelUnreachable();
@@ -13,20 +13,23 @@ function throwMockConnectionRefused(): never {
 
 /**
  * Gradual Laravel migration allowlist for `apiRequest`.
- * Login uses `loginUser()`; feed list uses `fetchPostsPage()` — both bypass this set.
- * Keep other endpoints on mock even when `EXPO_PUBLIC_USE_MOCK=false`.
+ * Login / feed list / createPost / profile fetch use dedicated helpers that bypass this set
+ * or match paths below. Keep other endpoints on mock when EXPO_PUBLIC_USE_MOCK=false.
  */
-const LIVE_API_REQUEST_PATHS = new Set<string>([]);
+const LIVE_API_REQUEST_PATHS = new Set<string>(['/posts', '/upload/single']);
 
 function isMigratedApiRequestPath(endpoint: string): boolean {
-    const path = endpoint.split('?')[0] || '';
-    return LIVE_API_REQUEST_PATHS.has(path);
+    const path = (endpoint.split('?')[0] || '').replace(/\/$/, '') || '/';
+    if (LIVE_API_REQUEST_PATHS.has(path)) return true;
+    // Profile grid: GET /users/{handle}
+    if (/^\/users\/[^/]+$/.test(path)) return true;
+    return false;
 }
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
 export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
     // Mock mode, or unmigrated endpoint: keep local mock data; do not hit Laravel.
-    if (IS_MOCK || !isMigratedApiRequestPath(endpoint)) {
+    if (isMockMode() || !isMigratedApiRequestPath(endpoint)) {
         throwMockConnectionRefused();
     }
 
@@ -102,11 +105,93 @@ export async function registerUser(userData: {
     locationNational?: string;
     accountType?: 'personal' | 'business';
     isBusiness?: boolean;
-}) {
-    return apiRequest('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(userData),
-    });
+}): Promise<{ user: Record<string, unknown>; token: string }> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/register`;
+
+    // Laravel username must be [a-zA-Z0-9_]; never send a raw email.
+    const emailLocal = String(userData.email || '')
+        .split('@')[0]
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .slice(0, 40);
+    const username =
+        String(userData.username || '')
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .slice(0, 50) ||
+        emailLocal ||
+        `user_${Date.now()}`;
+
+    const payload = {
+        ...userData,
+        username,
+        // `confirmed` rule on AuthController::register
+        password_confirmation: userData.password,
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    try {
+        console.log('[registerUser/client] POST', url, { username, email: userData.email, handle: userData.handle });
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const errorData = await response.json().catch(() => ({ error: 'Registration failed' }));
+        if (!response.ok) {
+            const errorMessage =
+                (errorData as any).error ||
+                (errorData as any).message ||
+                ((errorData as any).errors ? JSON.stringify((errorData as any).errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            console.log('[registerUser/client] failed', { status: response.status, errorMessage });
+            throw error;
+        }
+
+        const data = errorData as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Registration succeeded but no API token was returned');
+        }
+        await persistAuthToken(token);
+        console.log('[registerUser/client] ok', { hasToken: true, userId: (data.user as any)?.id });
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error(`CONNECTION_REFUSED registering at ${url}`);
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function loginUser(email: string, password: string): Promise<{
@@ -114,7 +199,7 @@ export async function loginUser(email: string, password: string): Promise<{
     token: string;
 }> {
     // Keep existing mock login path (UI falls back to local registrations).
-    if (IS_MOCK) {
+    if (isMockMode()) {
         throwMockConnectionRefused();
     }
 
@@ -330,8 +415,17 @@ export async function fetchPostsPage(
     filter: string = 'Dublin',
     userId?: string,
 ) {
+    console.log('[fetchPostsPage/client] IS_MOCK=', isMockMode(), {
+        EXPO_PUBLIC_USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK,
+        cursor,
+        limit,
+        filter,
+        userId,
+    });
+
     // Keep existing mock feed path (posts.ts falls through to local seed data).
-    if (IS_MOCK) {
+    if (isMockMode()) {
+        console.log('[fetchPostsPage/client] short-circuit: IS_MOCK=true → CONNECTION_REFUSED');
         throwMockConnectionRefused();
     }
 
@@ -345,7 +439,9 @@ export async function fetchPostsPage(
     // Laravel: GET /api/posts (API_BASE_URL already includes `/api`)
     const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
     const url = `${API_BASE_URL}/posts?${params}`;
+    console.log('[fetchPostsPage/client] request URL=', url);
     const authHeader = await getAuthorizationHeader();
+    console.log('[fetchPostsPage/client] Authorization header present=', Boolean(authHeader.Authorization));
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -362,8 +458,20 @@ export async function fetchPostsPage(
         });
         clearTimeout(timeoutId);
 
+        const text = await response.text();
+        let payload: unknown = text;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[fetchPostsPage/client] response status=', response.status, 'payload=', payload);
+
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Network error' }));
+            const errorData =
+                payload && typeof payload === 'object'
+                    ? (payload as Record<string, any>)
+                    : { error: 'Network error' };
             const errorMessage =
                 errorData.error ||
                 errorData.message ||
@@ -374,16 +482,17 @@ export async function fetchPostsPage(
             throw error;
         }
 
-        const text = await response.text();
         if (!text) return { items: [], nextCursor: null };
-        try {
-            return JSON.parse(text);
-        } catch {
-            const preview = text.slice(0, 80).replace(/\s+/g, ' ');
-            throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
-        }
+        if (payload && typeof payload === 'object') return payload;
+        const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+        throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
     } catch (error: any) {
         clearTimeout(timeoutId);
+        console.log('[fetchPostsPage/client] fetch error=', {
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
@@ -460,14 +569,108 @@ export async function createPost(postData: {
     videoCaptionText?: string;
     subtitlesEnabled?: boolean;
     subtitleText?: string;
-    editTimeline?: any; // Edit timeline for hybrid editing pipeline
-    musicTrackId?: number; // Library music track ID
+    editTimeline?: any;
+    musicTrackId?: number;
     templateStyle?: 'default' | 'polaroid' | 'neon' | 'glass' | 'magazine';
 }) {
-    return apiRequest('/posts', {
-        method: 'POST',
-        body: JSON.stringify(postData),
+    if (isMockMode()) {
+        console.log('[createPost/client] IS_MOCK=true → skip Laravel');
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/posts`;
+    const authHeader = await getAuthorizationHeader();
+    if (!authHeader.Authorization) {
+        console.log('[createPost/client] missing Sanctum token → 401');
+        const error = new Error(
+            'Not signed in to the server. Log out and register/log in again so posts can sync.',
+        );
+        (error as any).status = 401;
+        throw error;
+    }
+    console.log('[createPost/client] POST', url, {
+        hasAuth: Boolean(authHeader.Authorization),
+        mediaType: postData.mediaType,
+        hasMediaUrl: Boolean(postData.mediaUrl),
+        mediaUrlPreview:
+            typeof postData.mediaUrl === 'string' ? postData.mediaUrl.slice(0, 80) : undefined,
+        mediaItems: postData.mediaItems?.length ?? 0,
+        location: postData.location,
     });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            body: JSON.stringify(postData),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+        let payload: any = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[createPost/client] response status=', response.status, {
+            id: payload?.id,
+            user_id: payload?.user_id,
+            user_handle: payload?.user_handle || payload?.userHandle,
+            errors: payload?.errors,
+            error: payload?.error,
+        });
+
+        if (!response.ok) {
+            const errorMessage =
+                payload?.error ||
+                payload?.message ||
+                (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = payload;
+            throw error;
+        }
+
+        return payload;
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        console.log('[createPost/client] fetch error=', {
+            url,
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+            cause: error?.cause,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error(
+                `CONNECTION_REFUSED creating post at ${url}: ${error?.message || 'network error'}`,
+            );
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function toggleLike(postId: string) {
@@ -599,13 +802,85 @@ export async function fetchUserProfile(
     postsLimit?: number,
     sourcePostId?: string,
 ) {
+    if (isMockMode()) {
+        console.log('[fetchUserProfile/client] IS_MOCK=true → skip Laravel');
+        throwMockConnectionRefused();
+    }
+
     const params = new URLSearchParams();
     if (userId) params.append('userId', userId);
     if (postsCursor != null) params.append('postsCursor', String(postsCursor));
     if (postsLimit != null) params.append('postsLimit', String(postsLimit));
     if (sourcePostId) params.append('sourcePostId', sourcePostId);
     const encoded = encodeURIComponent(handle);
-    return apiRequest(`/users/${encoded}?${params}`);
+    const qs = params.toString();
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/users/${encoded}${qs ? `?${qs}` : ''}`;
+    const authHeader = await getAuthorizationHeader();
+    console.log('[fetchUserProfile/client] GET', url, { hasAuth: Boolean(authHeader.Authorization) });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const text = await response.text();
+        let payload: any = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[fetchUserProfile/client] response status=', response.status, {
+            handle: payload?.handle,
+            posts_count: payload?.posts_count ?? payload?.postsCount,
+            postsLen: Array.isArray(payload?.posts) ? payload.posts.length : 0,
+            error: payload?.error,
+        });
+        if (!response.ok) {
+            const errorMessage =
+                payload?.error ||
+                payload?.message ||
+                (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = payload;
+            throw error;
+        }
+        return payload;
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        console.log('[fetchUserProfile/client] fetch error=', {
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function toggleFollow(handle: string) {
@@ -995,7 +1270,7 @@ export async function getBoostAnalyticsApi(postId: string, range: '24h' | '7d' |
 const UPLOAD_TIMEOUT_MS = 60000; // 60s for slow connections
 
 export async function uploadFile(file: File) {
-    if (IS_MOCK) {
+    if (isMockMode()) {
         throwMockConnectionRefused();
     }
 
@@ -1005,12 +1280,15 @@ export async function uploadFile(file: File) {
     const authHeader = await getAuthorizationHeader();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-    const API_BASE_URL = getApiBaseUrl();
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const uploadUrl = `${API_BASE_URL}/upload/single`;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/upload/single`, {
+        // Do NOT set Content-Type — browser sets multipart boundary automatically.
+        const response = await fetch(uploadUrl, {
             method: 'POST',
             headers: {
+                Accept: 'application/json',
                 ...authHeader,
             },
             body: formData,
@@ -1028,18 +1306,25 @@ export async function uploadFile(file: File) {
             } catch (e) {
                 errorMessage = `Upload failed: HTTP ${response.status} ${response.statusText}`;
             }
+            console.log('[uploadFile/web] response status=', response.status, errorMessage);
             throw new Error(errorMessage);
         }
 
         return response.json();
     } catch (err: any) {
         clearTimeout(timeoutId);
+        console.log('[uploadFile/web] fetch error=', {
+            url: uploadUrl,
+            name: err?.name,
+            message: err?.message,
+        });
         if (err?.name === 'AbortError') {
             throw new Error('Upload timed out. Check your connection and try again.');
         }
         const msg = err?.message ?? '';
         const isNetwork =
             msg === 'Failed to fetch' ||
+            msg.includes('Network request failed') ||
             msg.includes('NetworkError') ||
             msg.includes('Load failed') ||
             err?.name === 'TypeError';
@@ -1048,8 +1333,8 @@ export async function uploadFile(file: File) {
                 window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
             throw new Error(
                 onNetwork
-                    ? "Can't reach the server. Use the same Wi‑Fi as this computer and ensure the backend is running (e.g. http://<this-PC-IP>:8000)."
-                    : 'Network error. Check that the backend is running and try again.'
+                    ? `Can't reach the server at ${uploadUrl}. Use the same Wi‑Fi as this computer and ensure the backend is running.`
+                    : `Network error uploading to ${uploadUrl}. Check that the backend is running and try again.`,
             );
         }
         throw err;

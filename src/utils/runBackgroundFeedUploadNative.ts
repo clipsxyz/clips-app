@@ -1,5 +1,5 @@
 import { createPost } from '../api/posts';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isMockMode } from '../api/apiMode';
 import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPostNative';
 import { prepareMediaForPostNative } from './prepareMediaForPostNative';
 import {
@@ -9,6 +9,21 @@ import {
     type PendingFeedUploadJob,
 } from './pendingFeedUploadNative';
 import { getUploadOverlayForJob } from './uploadOverlayNative';
+
+function isLocalDeviceMediaUrl(url?: string | null): boolean {
+    if (!url) return false;
+    return /^(file|content|ph):\/\//i.test(url) || url.startsWith('data:');
+}
+
+function assertRemoteMediaForLive(url: string | undefined, label: string): void {
+    if (isMockMode()) return;
+    if (!url) return;
+    if (isLocalDeviceMediaUrl(url)) {
+        throw new Error(
+            `${label} is still a local device file. Upload to the server failed — check Laravel is reachable (adb reverse tcp:8000) and try again.`,
+        );
+    }
+}
 
 async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void> {
     if (job.isTextOnly) {
@@ -46,6 +61,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
 
     const isCarousel =
         Array.isArray(job.localMediaItems) && job.localMediaItems.length > 1;
+    const live = !isMockMode();
 
     if (isCarousel && job.localMediaItems) {
         let uploaded = job.localMediaItems.map((item) => ({
@@ -56,31 +72,28 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         let carouselVideoPoster: string | undefined =
             job.localMediaItems.find((i) => i.type === 'video')?.uri || undefined;
 
-        if (isLaravelApiEnabled()) {
-            try {
-                const videoFilter =
-                    job.mediaType === 'video' ||
-                    job.localMediaItems.some((i) => i.type === 'video')
-                        ? job.filterForExport
-                        : null;
-                const prepared = await prepareCarouselMediaForPostNative(job.localMediaItems, {
-                    filterInfo: job.filterForExport,
-                    videoFilterInfo: videoFilter,
-                    videoCoverTime: job.videoCoverTime,
-                });
-                if (prepared.items.length > 0) {
-                    uploaded = prepared.items;
-                    carouselVideoPoster =
-                        prepared.videoPosterUrl ||
-                        prepared.items.find((item) => item.type === 'video' && item.posterUrl)
-                            ?.posterUrl;
-                }
-            } catch (err) {
-                console.warn(
-                    'runBackgroundFeedUploadNative: carousel upload failed, using local media',
-                    err,
-                );
+        if (live) {
+            const videoFilter =
+                job.mediaType === 'video' ||
+                job.localMediaItems.some((i) => i.type === 'video')
+                    ? job.filterForExport
+                    : null;
+            const prepared = await prepareCarouselMediaForPostNative(job.localMediaItems, {
+                filterInfo: job.filterForExport,
+                videoFilterInfo: videoFilter,
+                videoCoverTime: job.videoCoverTime,
+            });
+            if (prepared.items.length === 0) {
+                throw new Error('Carousel upload returned no items.');
             }
+            uploaded = prepared.items;
+            carouselVideoPoster =
+                prepared.videoPosterUrl ||
+                prepared.items.find((item) => item.type === 'video' && item.posterUrl)?.posterUrl;
+            for (const item of uploaded) {
+                assertRemoteMediaForLive(item.url, 'Carousel item');
+            }
+            assertRemoteMediaForLive(carouselVideoPoster, 'Carousel poster');
         }
 
         if (uploaded.length === 0) {
@@ -126,31 +139,26 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
     let mediaType = job.mediaType || undefined;
     let videoPosterUrl: string | undefined;
 
-    if (isLaravelApiEnabled() && job.localMediaUri && job.mediaType) {
-        try {
-            const preparedMedia = await prepareMediaForPostNative({
-                mediaUrl: job.localMediaUri,
-                mediaType: job.mediaType,
-                filterInfo: job.filterForExport,
-                videoCoverTime: job.videoCoverTime,
-            });
-            if (preparedMedia.filterExportFailed && job.filterForExport) {
-                console.warn('runBackgroundFeedUploadNative: filter bake partially failed');
-            }
-            if (preparedMedia.videoCompressFailed && job.mediaType === 'video') {
-                console.warn(
-                    'runBackgroundFeedUploadNative: video compression failed; uploading best-effort file',
-                );
-            }
-            mediaUrl = preparedMedia.mediaUrl || mediaUrl;
-            mediaType = preparedMedia.mediaType || mediaType;
-            videoPosterUrl = preparedMedia.videoPosterUrl;
-        } catch (err) {
+    if (live && job.localMediaUri && job.mediaType) {
+        const preparedMedia = await prepareMediaForPostNative({
+            mediaUrl: job.localMediaUri,
+            mediaType: job.mediaType,
+            filterInfo: job.filterForExport,
+            videoCoverTime: job.videoCoverTime,
+        });
+        if (preparedMedia.filterExportFailed && job.filterForExport) {
+            console.warn('runBackgroundFeedUploadNative: filter bake partially failed');
+        }
+        if (preparedMedia.videoCompressFailed && job.mediaType === 'video') {
             console.warn(
-                'runBackgroundFeedUploadNative: media upload failed, using local media',
-                err,
+                'runBackgroundFeedUploadNative: video compression failed; uploading best-effort file',
             );
         }
+        mediaUrl = preparedMedia.mediaUrl || mediaUrl;
+        mediaType = preparedMedia.mediaType || mediaType;
+        videoPosterUrl = preparedMedia.videoPosterUrl;
+        assertRemoteMediaForLive(mediaUrl, 'Post media');
+        assertRemoteMediaForLive(videoPosterUrl, 'Video poster');
     }
 
     const createdPost = await createPost(

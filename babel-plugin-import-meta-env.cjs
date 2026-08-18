@@ -34,6 +34,10 @@ function loadDotEnv() {
 }
 
 const DOT_ENV = loadDotEnv();
+// Prefer file values for public keys so a stale shell `process.env` cannot pin mock mode.
+for (const [key, value] of Object.entries(DOT_ENV)) {
+  process.env[key] = value;
+}
 
 module.exports = function importMetaEnvForHermes({ types: t }) {
   function isImportMeta(node) {
@@ -69,11 +73,14 @@ module.exports = function importMetaEnvForHermes({ types: t }) {
 
   function inlineEnvValue(key) {
     if (!key || !/^(VITE_|EXPO_PUBLIC_)/.test(key)) return null;
+    // Re-read `.env` on each transform so Metro picks up flag flips without a full process restart
+    // (still recommend `--reset-cache` after changing env — transform cache may retain old ASTs).
+    const fileEnv = loadDotEnv();
+    if (Object.prototype.hasOwnProperty.call(fileEnv, key)) {
+      return String(fileEnv[key]);
+    }
     if (Object.prototype.hasOwnProperty.call(process.env, key) && process.env[key] !== undefined) {
       return String(process.env[key]);
-    }
-    if (Object.prototype.hasOwnProperty.call(DOT_ENV, key)) {
-      return String(DOT_ENV[key]);
     }
     return null;
   }

@@ -57,20 +57,29 @@ export function markLaravelUnreachable(): void {
   laravelUnreachableThisSession = true;
 }
 
+/** Clear the session poison-pill (e.g. on Login screen or after a successful API call). */
+export function clearLaravelUnreachable(): void {
+  laravelUnreachableThisSession = false;
+}
+
 export function isLaravelUnreachableThisSession(): boolean {
   return laravelUnreachableThisSession;
 }
 
-/** True when EXPO_PUBLIC_USE_MOCK=true (mock data fallback; no Laravel). */
+/** True when EXPO_PUBLIC_USE_MOCK is explicitly `'true'` (mock data fallback; no Laravel). */
 export function isMockMode(): boolean {
+  let raw: string | undefined;
   try {
-    if (typeof process !== 'undefined' && process.env.EXPO_PUBLIC_USE_MOCK === 'true') {
-      return true;
+    if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_USE_MOCK !== undefined) {
+      raw = String(process.env.EXPO_PUBLIC_USE_MOCK);
     }
   } catch {
     /* ignore */
   }
-  return getRuntimeEnv('EXPO_PUBLIC_USE_MOCK') === 'true';
+  if (raw === undefined || raw === '') {
+    raw = getRuntimeEnv('EXPO_PUBLIC_USE_MOCK');
+  }
+  return String(raw ?? '').trim().toLowerCase() === 'true';
 }
 
 /**
@@ -90,14 +99,15 @@ export function isLaravelApiEnabled(): boolean {
   if (isMockMode()) return false;
   const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');
   if (raw === 'false') return false;
-  if (isReactNativeRuntime()) {
-    // Physical devices cannot reach Metro's localhost API URL — use bundled mock feed instead.
-    if (raw !== 'true') return false;
-    const base = getConfiguredApiEnvUrl() || getReactNativeDefaultApiBaseUrl() || '';
-    if (/localhost|127\.0\.0\.1/i.test(base)) return false;
+  // Live migration mode: EXPO_PUBLIC_USE_MOCK=false enables Laravel for migrated routes.
+  // RN keeps localhost API hosts for `adb reverse tcp:8000` (see getApiBaseUrl).
+  if (raw === 'true' || getRuntimeEnv('EXPO_PUBLIC_USE_MOCK') === 'false') {
     return true;
   }
-  if (raw === 'true') return true;
+  if (isReactNativeRuntime()) {
+    // Legacy default: stay on mock unless explicitly enabled above.
+    return false;
+  }
   return true;
 }
 
@@ -108,38 +118,39 @@ export function isViteDevMode(): boolean {
 
 /**
  * Default Laravel API URL when running under Metro (no window.location).
- * Android emulator: 10.0.2.2 → host machine.
+ *
+ * Physical Android: prefer `http://localhost:8000/api` with
+ * `adb reverse tcp:8000 tcp:8000` (never 10.0.2.2 — that only works on emulators).
+ * Wi‑Fi Metro (e.g. 192.168.x.x:8081) may use the same LAN host for Laravel.
  */
 export function getReactNativeDefaultApiBaseUrl(): string | null {
   if (typeof require === 'undefined') return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Platform, NativeModules } = require('react-native') as typeof import('react-native');
+    const { NativeModules } = require('react-native') as typeof import('react-native');
     const port = '8000';
+    const localhostApi = `http://localhost:${port}/api`;
 
     const scriptUrl = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
     if (scriptUrl) {
       try {
         const parsed = new URL(scriptUrl);
         const host = parsed.hostname;
-        // LAN / Wi‑Fi Metro (e.g. 192.168.x.x:8081) → same host for Laravel.
+        // LAN / Wi‑Fi Metro → same host for Laravel when not using ADB reverse for API.
         if (host && host !== 'localhost' && host !== '127.0.0.1') {
           return `http://${host}:${port}/api`;
         }
-        // USB `adb reverse` Metro is localhost — API must also be localhost (reverse :8000),
-        // NOT 10.0.2.2 (emulator-only; black-holes places search on physical devices).
+        // USB / wireless ADB with Metro on localhost — API via `adb reverse tcp:8000`.
         if (host === 'localhost' || host === '127.0.0.1') {
-          return `http://127.0.0.1:${port}/api`;
+          return localhostApi;
         }
       } catch {
         /* ignore malformed script URL */
       }
     }
 
-    if (Platform.OS === 'android') {
-      return `http://10.0.2.2:${port}/api`;
-    }
-    return `http://localhost:${port}/api`;
+    // Physical device + emulator fallback: localhost (requires adb reverse on hardware).
+    return localhostApi;
   } catch {
     return null;
   }

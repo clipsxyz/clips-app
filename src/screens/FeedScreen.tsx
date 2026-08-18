@@ -51,7 +51,9 @@ import {
     decorateForUser,
     getLocalPostById,
     postMatchesLocationTab,
+    clearLocalFeedPostsStorage,
 } from '../api/posts';
+import { isMockMode } from '../api/apiMode';
 import { getUnreadTotal } from '../api/messages';
 import { blockUser } from '../api/messages';
 import { isUserBlocked } from '../api/messages';
@@ -281,7 +283,7 @@ import {
     type PlaceMatchedPost,
 } from '../utils/suggestedPlaces';
 import { fetchSuggestedPostsByPlaces, transformLaravelPost } from '../api/posts';
-import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -1577,9 +1579,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
     const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
-    /** Feed under Scenes fullScreenModal often stays "focused" — still kill its ExoPlayer. */
-    const feedNativeVideoSuspended =
-        commentsModalOpen || !isFeedFocused || scenesViewerActive;
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
@@ -1587,6 +1586,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [imageFullscreenOrigin, setImageFullscreenOrigin] = useState<ImageFullscreenOrigin | null>(
         null,
     );
+    /** Feed under Scenes / image fullscreen / comments — kill ExoPlayer so audio cannot leak. */
+    const feedNativeVideoSuspended =
+        commentsModalOpen ||
+        !isFeedFocused ||
+        scenesViewerActive ||
+        Boolean(imageFullscreenPost);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
@@ -1713,6 +1718,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastViewableVideoPostIdRef = useRef<string | null>(null);
+    /** Video that was playing (or the video card under the overlay) — restore on overlay close. */
+    const overlayResumeVideoPostIdRef = useRef<string | null>(null);
 
     const feedAutoplayPrefRef = useRef<FeedAutoplayPref>('always');
 
@@ -1878,23 +1885,76 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const scenesViewerActiveRef = useRef(scenesViewerActive);
     scenesViewerActiveRef.current = scenesViewerActive;
 
+    const imageFullscreenOpenRef = useRef(Boolean(imageFullscreenPost));
+    imageFullscreenOpenRef.current = Boolean(imageFullscreenPost);
+
+    const commentsModalOpenRef = useRef(commentsModalOpen);
+    commentsModalOpenRef.current = commentsModalOpen;
+
+    /** True after the first viewability pass — list data patches must never invent a player. */
+    const feedViewabilitySeenRef = useRef(false);
+
+    const feedAutoplayOverlayBlocks = () =>
+        scenesViewerActiveRef.current ||
+        imageFullscreenOpenRef.current ||
+        commentsModalOpenRef.current;
+
+    const captureOverlayVideoResume = useCallback((fallbackPost?: Post | null) => {
+        const active = activeVideoPostIdRef.current;
+        if (active) {
+            overlayResumeVideoPostIdRef.current = String(active);
+            return;
+        }
+        if (fallbackPost && postHasVideoMedia(fallbackPost)) {
+            overlayResumeVideoPostIdRef.current = String(fallbackPost.id);
+            return;
+        }
+        overlayResumeVideoPostIdRef.current = null;
+    }, []);
+
+    const restoreFeedVideoAfterOverlay = useCallback(() => {
+        const resumeId = overlayResumeVideoPostIdRef.current;
+        if (!resumeId || !feedAutoplayAllowedRef.current) {
+            if (!feedAutoplayOverlayBlocks()) {
+                overlayResumeVideoPostIdRef.current = null;
+            }
+            return;
+        }
+        // Another overlay still open (e.g. comments under image fullscreen) — keep resume id.
+        if (feedAutoplayOverlayBlocks()) return;
+        overlayResumeVideoPostIdRef.current = null;
+        lastViewableVideoPostIdRef.current = resumeId;
+        // Force a clean remount — suspend unmounts TextureView and leaves a blank frame
+        // if we only flip suspend without re-arming the active id.
+        activeVideoPostIdRef.current = null;
+        setActiveFeedVideoPostId(null);
+        requestAnimationFrame(() => {
+            if (feedAutoplayOverlayBlocks()) {
+                overlayResumeVideoPostIdRef.current = resumeId;
+                return;
+            }
+            if (!feedAutoplayAllowedRef.current) return;
+            scheduleActiveFeedVideoRef.current(resumeId, true);
+        });
+    }, []);
+
     useEffect(() => {
-        if (!scenesViewerActive) return;
+        if (!scenesViewerActive && !imageFullscreenPost && !commentsModalOpen) return;
         if (autoplayTimerRef.current) {
             clearTimeout(autoplayTimerRef.current);
             autoplayTimerRef.current = null;
         }
         activeVideoPostIdRef.current = null;
         setActiveFeedVideoPostId(null);
-    }, [scenesViewerActive]);
+    }, [scenesViewerActive, imageFullscreenPost, commentsModalOpen]);
 
     const scheduleActiveFeedVideo = useCallback((postId: string | null, force = false) => {
         if (autoplayTimerRef.current) {
             clearTimeout(autoplayTimerRef.current);
             autoplayTimerRef.current = null;
         }
-        // fullScreenModal often leaves Feed "focused" — never re-arm under Scenes.
-        if (scenesViewerActiveRef.current) {
+        // Overlays / comments: never re-arm from list re-renders or stale viewability.
+        if (feedAutoplayOverlayBlocks()) {
             activeVideoPostIdRef.current = null;
             setActiveFeedVideoPostId(null);
             return;
@@ -1904,20 +1964,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setActiveFeedVideoPostId(null);
             return;
         }
-        // Store-only updates — do not setState on FeedScreen (that re-renders FlatList).
+        // Same id already active — do not force-notify (that remounts/resumes ExoPlayer
+        // when like/comment merely re-renders the FlatList / re-fires viewability).
         if (!force && String(activeVideoPostIdRef.current) === String(postId)) {
+            return;
+        }
+        if (force && String(activeVideoPostIdRef.current) === String(postId)) {
+            // Explicit scroll/focus restore of the same card — re-broadcast once.
             forceActiveFeedVideoPostId(postId);
             return;
         }
         const apply = () => {
-            if (scenesViewerActiveRef.current) {
+            if (feedAutoplayOverlayBlocks()) {
                 activeVideoPostIdRef.current = null;
                 setActiveFeedVideoPostId(null);
                 autoplayTimerRef.current = null;
                 return;
             }
             activeVideoPostIdRef.current = postId;
-            forceActiveFeedVideoPostId(postId);
+            if (force) {
+                forceActiveFeedVideoPostId(postId);
+            } else {
+                setActiveFeedVideoPostId(postId);
+            }
             lastFeedAutoplayAtMsRef.current = Date.now();
             autoplayTimerRef.current = null;
         };
@@ -1951,6 +2020,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 scheduleActiveFeedVideoRef.current(null);
                 return;
             }
+            feedViewabilitySeenRef.current = true;
             const visibleVideos: Array<{ post: Post; index: number }> = [];
             for (const token of viewableItems) {
                 if (!token.isViewable || !token.item) continue;
@@ -2010,7 +2080,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             scenesReturnScrollYRef.current = null;
 
             const finishRestore = () => {
-                if (scenesViewerActiveRef.current) return;
+                if (feedAutoplayOverlayBlocks()) return;
                 if (restoreId && feedAutoplayAllowedRef.current) {
                     // Force so blur→focus with the same post still remounts/plays.
                     activeVideoPostIdRef.current = null;
@@ -2519,6 +2589,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         pagesRef.current = pages;
     }, [pages]);
 
+    // Live mode: strip cached Sarah/Bob seed posts once on mount, then refresh.
+    useEffect(() => {
+        if (isMockMode()) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                await clearLocalFeedPostsStorage();
+            } catch {
+                /* ignore */
+            }
+            if (!cancelled) setReloadTick((t) => t + 1);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     // Update unread count function
     const updateUnreadCount = React.useCallback(async () => {
         if (!user?.handle) return;
@@ -2728,7 +2815,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
 
             if (isLaravelApiEnabled()) {
-                markLaravelUnreachable();
+                // Soft-fail only: don't poison the whole session so login/upload keep working.
+                console.warn('[FeedScreen] feed load failed (Laravel still enabled for auth/upload)');
             }
 
             const retryTimeout = makeLoadTimeout();
@@ -3272,24 +3360,40 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     ]);
     flatForRenderRef.current = flatForRender;
 
-    // If viewability never armed a player (common on first paint), kick the first
-    // on-screen-ish video once the list has data and the tab is focused.
+    // First-paint bootstrap only. Like/comment patch `pages` → new `flat` identity;
+    // that must NEVER re-arm a player. After viewability has spoken, it owns autoplay.
+    const feedHasPosts = flat.length > 0;
     React.useEffect(() => {
-        if (!isFeedFocused || scenesViewerActive || !feedAutoplayAllowed) return;
-        if (flat.length === 0) return;
+        if (feedHasPosts) return;
+        feedViewabilitySeenRef.current = false;
+        lastViewableVideoPostIdRef.current = null;
+    }, [feedHasPosts]);
+    React.useEffect(() => {
+        if (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost) || commentsModalOpen) {
+            return;
+        }
+        if (!feedAutoplayAllowed || !feedHasPosts) return;
         if (activeVideoPostIdRef.current) return;
+        // Once FlatList viewability has run, stay quiet — do not invent playback from data updates.
+        if (feedViewabilitySeenRef.current) return;
         const preferred = lastViewableVideoPostIdRef.current;
-        const fallback = flat.find(postHasVideoMedia)?.id ?? null;
-        const nextId = preferred || fallback;
-        if (!nextId) return;
+        if (!preferred) return;
         const t = setTimeout(() => {
             if (activeVideoPostIdRef.current) return;
-            if (scenesViewerActiveRef.current) return;
+            if (feedAutoplayOverlayBlocks()) return;
             if (!feedAutoplayAllowedRef.current) return;
-            scheduleActiveFeedVideoRef.current(String(nextId), true);
+            if (feedViewabilitySeenRef.current) return;
+            scheduleActiveFeedVideoRef.current(String(preferred), true);
         }, 200);
         return () => clearTimeout(t);
-    }, [isFeedFocused, scenesViewerActive, feedAutoplayAllowed, flat]);
+    }, [
+        isFeedFocused,
+        scenesViewerActive,
+        imageFullscreenPost,
+        commentsModalOpen,
+        feedAutoplayAllowed,
+        feedHasPosts,
+    ]);
 
     React.useEffect(() => {
         const pendingY = pendingFeedScrollRestoreRef.current;
@@ -3768,6 +3872,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onComment={() => {
                         if (isPendingUpload) return;
+                        captureOverlayVideoResume(mergedPost);
+                        commentsModalOpenRef.current = true;
+                        activeVideoPostIdRef.current = null;
+                        setActiveFeedVideoPostId(null);
                         setSelectedPostId(mergedPost.id);
                         setSelectedPostForComments(mergedPost);
                         setCommentsModalOpen(true);
@@ -3796,6 +3904,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onOpenImageFullscreen={(startIndex = 0, origin = null) => {
                         if (isPendingUpload) return;
+                        // Stop any feed video audio before image fullscreen / like re-renders.
+                        if (autoplayTimerRef.current) {
+                            clearTimeout(autoplayTimerRef.current);
+                            autoplayTimerRef.current = null;
+                        }
+                        captureOverlayVideoResume(mergedPost);
+                        imageFullscreenOpenRef.current = true;
+                        activeVideoPostIdRef.current = null;
+                        setActiveFeedVideoPostId(null);
                         setImageFullscreenStartIndex(startIndex);
                         setImageFullscreenOrigin(origin);
                         // Prefer live in-memory stats (mock like map + persisted count) over a stale card snapshot.
@@ -3927,14 +4044,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             patchFollowForHandle,
             showFeedLikeBurst,
             syncFullscreenPost,
+            captureOverlayVideoResume,
         ]
     );
 
     const closeCommentsSheet = React.useCallback(() => {
+        commentsModalOpenRef.current = false;
         setCommentsModalOpen(false);
         setSelectedPostId(null);
         setSelectedPostForComments(null);
-    }, []);
+        restoreFeedVideoAfterOverlay();
+    }, [restoreFeedVideoAfterOverlay]);
 
     return (
         <View style={styles.container}>
@@ -3992,11 +4112,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }}
                 extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${isFeedFocused}-${scenesViewerActive}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
-                initialNumToRender={3}
-                maxToRenderPerBatch={3}
-                windowSize={7}
-                updateCellsBatchingPeriod={80}
-                removeClippedSubviews={false}
+                // Keep the render window tight for max FPS while flinging; clip offscreen cells.
+                initialNumToRender={2}
+                maxToRenderPerBatch={2}
+                windowSize={5}
+                updateCellsBatchingPeriod={50}
+                removeClippedSubviews
                 onScrollBeginDrag={() => {
                     feedScrollingRef.current = true;
                     setFeedScrollBusy(true);
@@ -4017,11 +4138,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     feedScrollingRef.current = false;
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
+                        // Scroll settle only — never from like/comment re-renders.
+                        if (feedAutoplayOverlayBlocks()) {
+                            requestAnimationFrame(() => setFeedScrollBusy(false));
+                            return;
+                        }
                         scheduleActiveFeedVideoRef.current(
                             feedAutoplayAllowedRef.current
                                 ? lastViewableVideoPostIdRef.current
                                 : null,
-                            true,
+                            false,
                         );
                         requestAnimationFrame(() => setFeedScrollBusy(false));
                     }, 80);
@@ -4035,11 +4161,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
                     feedScrollIdleTimerRef.current = setTimeout(() => {
                         feedScrollingRef.current = false;
+                        if (feedAutoplayOverlayBlocks()) {
+                            requestAnimationFrame(() => setFeedScrollBusy(false));
+                            return;
+                        }
                         scheduleActiveFeedVideoRef.current(
                             feedAutoplayAllowedRef.current
                                 ? lastViewableVideoPostIdRef.current
                                 : null,
-                            true,
+                            false,
                         );
                         requestAnimationFrame(() => setFeedScrollBusy(false));
                     }, 80);
@@ -4155,7 +4285,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                         ) : (
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => navigation.navigate('CreateComposer')}
+                                                onPress={() => navigation.navigate('InstantCreate')}
                                             >
                                                 <LinearGradient
                                                     colors={[...FEED_EMPTY_CREATE_GRADIENT]}
@@ -4201,7 +4331,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                             </Text>
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => navigation.navigate('CreateComposer')}
+                                                onPress={() => navigation.navigate('InstantCreate')}
                                             >
                                                 <LinearGradient
                                                     colors={[...FEED_EMPTY_CREATE_GRADIENT]}
@@ -4238,9 +4368,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 initialIndex={imageFullscreenStartIndex}
                 originRect={imageFullscreenOrigin}
                 onClose={() => {
+                    imageFullscreenOpenRef.current = false;
                     setImageFullscreenPost(null);
                     setImageFullscreenStartIndex(0);
                     setImageFullscreenOrigin(null);
+                    restoreFeedVideoAfterOverlay();
                 }}
                 onLike={
                     imageFullscreenPost
@@ -4258,6 +4390,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 onComment={
                     imageFullscreenPost
                         ? () => {
+                              captureOverlayVideoResume(imageFullscreenPost);
+                              commentsModalOpenRef.current = true;
                               setSelectedPostId(imageFullscreenPost.id);
                               setSelectedPostForComments(imageFullscreenPost);
                               setCommentsModalOpen(true);

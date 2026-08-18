@@ -8,7 +8,8 @@ import {
   markLaravelUnreachable,
 } from '../config/runtimeEnv';
 import * as apiClient from './client';
-import { IS_MOCK } from './apiMode';
+import { isMockMode } from './apiMode';
+import { getApiBaseUrl } from './apiBaseUrl';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
@@ -283,6 +284,32 @@ function savePostsToStorage(postsToSave: Post[]): void {
     .catch(() => {});
 }
 
+/** Wipe local feed cache (used when entering live Laravel mode so Sarah/Bob seeds can't linger). */
+export async function clearLocalFeedPostsStorage(): Promise<void> {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(POSTS_STORAGE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { clearCorruptPostsStorageNative } = await import('./postsStorage.native');
+    await clearCorruptPostsStorageNative();
+  } catch {
+    /* ignore */
+  }
+  if (!isMockMode()) {
+    posts = posts.filter(
+      (p) =>
+        !isMockPostId(p.id) &&
+        !['sarah@artane', 'bob@ireland', 'ava@galway', 'alice@cork'].includes(
+          String(p.userHandle || '').toLowerCase(),
+        ),
+    );
+  }
+}
+
 function remapFollowKeyMap(
   follows: Record<string, boolean>,
   oldNorm: string,
@@ -470,6 +497,18 @@ if (!postsInitialized) {
   console.log('📂 Loaded', userCreatedPosts.length, 'user-created posts from localStorage');
 
   // Merge: user-created posts first (newest), then JSON posts — mock posts are never loaded from storage
+  // Live mode: never seed Sarah/Bob/Ava/json demos into memory (they leak into feeds).
+  if (!isMockMode()) {
+    posts = [...userCreatedPosts].filter(
+      (p) =>
+        !isMockPostId(p.id) &&
+        !['sarah@artane', 'bob@ireland', 'ava@galway', 'alice@cork'].includes(
+          String(p.userHandle || '').toLowerCase(),
+        ),
+    );
+    postsInitialized = true;
+    console.log('[posts] live mode — skipped mock seed posts, kept', posts.length, 'local posts');
+  } else {
   posts = [...userCreatedPosts, ...jsonPosts];
   postsInitialized = true;
 
@@ -755,6 +794,7 @@ if (!postsInitialized) {
 
   // Activate boost for Ava's post so it appears as Sponsored in Dublin (regional) feed
   activateBoost(avaBoostedPost.id, 'ava-mock-user', 'regional', 5).catch(() => { });
+  } // end isMockMode() seed
 } else {
   console.log('Posts array already initialized, length:', posts.length);
 }
@@ -1158,13 +1198,46 @@ function normalizeCaptionFields<T extends Post>(post: T): T {
 /** Rewrite localhost media URLs so they work when opening app from phone on network */
 function rewriteMediaUrlForNetwork(url: string): string {
   if (!url || typeof url !== 'string') return url;
-  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return url;
-  // On phone/tablet: replace localhost:8000 with current host:8000 so backend media loads
+
+  // RN polyfills `window` without a real `location` — never read `.hostname` blindly.
+  let browserHost = '';
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      typeof window.location.hostname === 'string'
+    ) {
+      browserHost = window.location.hostname;
+    }
+  } catch {
+    browserHost = '';
+  }
+
+  let targetHost = browserHost;
+  if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
+    // Prefer configured API host when it's a LAN IP (Wi‑Fi without adb reverse).
+    try {
+      const apiBase = getApiBaseUrl();
+      if (apiBase && /^https?:\/\//i.test(apiBase)) {
+        const apiHost = new URL(apiBase).hostname;
+        if (apiHost && apiHost !== 'localhost' && apiHost !== '127.0.0.1') {
+          targetHost = apiHost;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Physical device + adb reverse: keep localhost media URLs as-is.
+  if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
+    return url;
+  }
+
   return url
-    .replace(/http:\/\/localhost:8000\//g, `http://${hostname}:8000/`)
-    .replace(/https:\/\/localhost:8000\//g, `https://${hostname}:8000/`)
-    .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${hostname}:8000/`);
+    .replace(/http:\/\/localhost:8000\//g, `http://${targetHost}:8000/`)
+    .replace(/https:\/\/localhost:8000\//g, `https://${targetHost}:8000/`)
+    .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${targetHost}:8000/`);
 }
 
 // Transform Laravel API post response to frontend Post format
@@ -1601,9 +1674,20 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     t !== 'finglas' &&
     t !== 'dublin' &&
     t !== 'ireland';
-  // When mock is on, use local seed feed. Discover (Following) stays mock so local follows work.
-  // Login-style gate: `!IS_MOCK` enables live main feed even when other endpoints remain mock.
-  const useLaravelAPI = !IS_MOCK && t !== 'discover';
+  // When mock is on, use local seed feed (Sarah/Bob demos).
+  // Live mode: hit Laravel for all tabs including Following/discover — no mock seed.
+  const mockMode = isMockMode();
+  const useLaravelAPI = !mockMode;
+  console.log('[fetchPostsPage/posts]', {
+    IS_MOCK: mockMode,
+    EXPO_PUBLIC_USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK,
+    tab,
+    t,
+    useLaravelAPI,
+    cursor,
+    limit,
+    userId,
+  });
 
   if (useLaravelAPI) {
     try {
@@ -1624,6 +1708,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         filter = tab.charAt(0).toUpperCase() + tab.slice(1).toLowerCase();
       }
 
+      console.log('[fetchPostsPage/posts] calling live Laravel feed via apiClient.fetchPostsPage', {
+        filter,
+        apiCursor: cursor ?? 0,
+        limit,
+      });
+
       const apiCursor = cursor ?? 0;
       // Only send userId if it looks like a UUID (backend requires uuid|exists:users,id)
       const uuidLike = typeof userId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
@@ -1636,11 +1726,17 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
           : Promise.resolve(new Set<string>());
       const [boostedSetApi, response] = await Promise.all([
         boostedPromise,
-        apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined),
+        apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined) as Promise<{
+          items?: any[];
+          nextCursor?: string | number | null;
+        }>,
       ]);
 
       // Defensive: ensure items is an array (API may return unexpected shape on error)
       const rawItems = Array.isArray(response?.items) ? response.items : [];
+      console.log('[fetchPostsPage/posts] live response item count=', rawItems.length, {
+        nextCursor: response?.nextCursor ?? null,
+      });
       let transformedItems: Post[] = rawItems
         .map((item: any) => {
           try {
@@ -1657,55 +1753,30 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
       }
 
-      // Following (discover): trust the backend – it returns only posts from people the logged-in user follows (from auth token).
-      // Do NOT filter by local follow state here: for backend signups local state is empty and we would empty the feed.
-      if (t === 'discover') {
-        const stateUserId = userId || 'me';
-        const follows = getState(stateUserId).follows || {};
-        const isFirstPageDiscover = isFirstFeedPageCursor(cursor);
-        const followsAva = getFollowState(follows, 'Ava@galway');
-        if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-normal-ireland-demo')) {
-          const avaNormal = getAvaNormalPost();
-          transformedItems = [decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined }), ...transformedItems];
-          if (!posts.find((p) => p.id === avaNormal.id)) posts.push(avaNormal);
+      // Live mode: API posts only. Do not merge AsyncStorage/local seed (Sarah/Bob leak).
+      let items = [...transformedItems];
+
+      // Optionally keep very recent locally created posts that look like Laravel UUIDs
+      // (optimistic create) — never mock seed handles/ids.
+      const uuidRe =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const recentLocal = getPostsFromStorage().filter((p) => {
+        if (isMockPostId(p.id) || isDevMockFeedVideoPost(p)) return false;
+        if (!uuidRe.test(String(p.id))) return false;
+        const h = String(p.userHandle || '').toLowerCase();
+        if (
+          h === 'sarah@artane' ||
+          h === 'bob@ireland' ||
+          h === 'ava@galway' ||
+          h === 'alice@cork'
+        ) {
+          return false;
         }
-        if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-boosted-discover-demo')) {
-          const avaBoosted = getAvaBoostedPost();
-          transformedItems = [decorateForUser(stateUserId, { ...avaBoosted, isBoosted: true, boostFeedType: 'regional' }), ...transformedItems];
-          if (!posts.find((p) => p.id === avaBoosted.id)) posts.push(avaBoosted);
-        }
-      }
-
-      // Merge user-created posts from localStorage (e.g. when create returned 401 and used mock)
-      // These would otherwise be missing when feed loads from Laravel API
-      const userCreatedFromStorage = getPostsFromStorage().filter(p => !isMockPostId(p.id));
-      const userCreatedMatchingTab = userCreatedFromStorage.filter(p =>
-        t === 'discover' ? true : postMatchesLocationTab(p, t)
-      );
-      const allApiAndMockIds = new Set(transformedItems.map(p => p.id));
-
-      const isFirstPage = isFirstFeedPageCursor(cursor);
-      const dedupedUserCreated = userCreatedMatchingTab.filter(p => !allApiAndMockIds.has(p.id));
-
-      // Order: user-created first (newest), then API posts; demo MP4 cards prepended on page 0
-      let items = [...dedupedUserCreated, ...transformedItems];
-      if (isFirstPage) {
-        items = prependDevMockVideoPostsForFirstPage(items, tab, userId);
-      }
-      const itemIds = new Set(items.map(p => p.id));
-
-      // Dev/test: inject Ava's Galway demo on first page only when this feed is actually Ireland/Galway (not London, Paris, etc.).
-      if (
-        isFirstPage &&
-        !itemIds.has('ava-normal-ireland-demo') &&
-        postMatchesLocationTab(getAvaNormalPost(), tab)
-      ) {
-        const avaNormal = getAvaNormalPost();
-        const stateUserId = userId || 'me';
-        const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
-        items = [decorated, ...items];
-        if (!posts.find(p => p.id === avaNormal.id)) posts.push(avaNormal);
-      }
+        return t === 'discover' ? true : postMatchesLocationTab(p, t);
+      });
+      const apiIds = new Set(items.map((p) => String(p.id)));
+      const dedupedLocal = recentLocal.filter((p) => !apiIds.has(String(p.id)));
+      items = [...dedupedLocal, ...items];
 
       // Mark ANY actively boosted post as Sponsored (legal disclosure) — not only the current tab's boost tier.
       const allBoostLabels = await getAllActiveBoostLabels();
@@ -1732,15 +1803,25 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         fromMock: false
       };
     } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
+      console.log('[fetchPostsPage/posts] live feed failed — returning empty (no mock fallback)', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+      });
+      // Live mode: never fall back to mock seed posts on empty/error responses.
       if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
+        console.warn('Laravel API call failed (live mode, no mock fallback):', error);
       }
-      // Fall through to mock implementation
+      return { items: [], nextCursor: null, fromMock: false };
     }
+  } else {
+    console.log('[fetchPostsPage/posts] using mock feed path (IS_MOCK=true)', {
+      IS_MOCK: mockMode,
+      tab: t,
+    });
   }
 
-  // Mock implementation (fallback)
+  // Mock implementation — only when EXPO_PUBLIC_USE_MOCK=true
   try {
     // React Native: hydrate user-created posts from AsyncStorage.
     // Note: index.js installs an in-memory localStorage shim, so typeof localStorage
@@ -2866,6 +2947,52 @@ export async function fetchCommentsPage(
 
 export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
   await delay(150);
+
+  // Live mode: profile grid comes from Laravel GET /users/{handle}?postsLimit=
+  if (!isMockMode()) {
+    try {
+      console.log('[fetchPostsByUser] live fetch', { userHandle, limit });
+      const profile = await apiClient.fetchUserProfile(userHandle, undefined, null, limit);
+      const raw = Array.isArray(profile?.posts) ? profile.posts : [];
+      console.log('[fetchPostsByUser] live ok', {
+        handle: profile?.handle || userHandle,
+        posts_count: profile?.posts_count ?? profile?.postsCount,
+        items: raw.length,
+      });
+      const transformed = raw
+        .map((item: any) => {
+          try {
+            return transformLaravelPost(item);
+          } catch (err) {
+            console.warn('[fetchPostsByUser] skip malformed post', item?.id, err);
+            return null;
+          }
+        })
+        .filter((x: Post | null): x is Post => x !== null);
+
+      // Keep local cache in sync for other screens.
+      try {
+        for (const p of transformed) {
+          const idx = posts.findIndex((existing) => String(existing.id) === String(p.id));
+          if (idx >= 0) posts[idx] = { ...posts[idx], ...p };
+          else posts.unshift(p);
+        }
+        if (transformed.length > 0) savePostsToStorage(posts);
+      } catch {
+        /* ignore */
+      }
+
+      return transformed.slice(0, limit);
+    } catch (error: any) {
+      console.log('[fetchPostsByUser] live error — returning empty (no mock seed)', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+      });
+      return [];
+    }
+  }
+
   // Keep in-memory list synchronized with persisted user-created posts so profile/my feed
   // can always see newly created posts even after route transitions on mobile browsers.
   try {
@@ -3246,10 +3373,18 @@ export async function createPost(
     }
   })();
 
-  // Mock / offline mode: never touch the Laravel client. A dynamic import of ./client on RN
-  // can throw LoadBundleFromServerRequestError outside any catch and mark the upload failed.
-  if (isLaravelApiEnabled()) {
+  // Live migration: use EXPO_PUBLIC_USE_MOCK (via isMockMode), not the RN localhost gate alone.
+  // A dynamic import of ./client on RN can throw LoadBundleFromServerRequestError outside any catch
+  // and mark the upload failed — keep the try/catch around the create call.
+  if (!isMockMode()) {
     try {
+      console.log('[createPost/posts] live create', {
+        userHandle,
+        mediaType,
+        hasMediaUrl: Boolean(imageUrl),
+        mediaItems: mediaItems?.length ?? 0,
+        location,
+      });
       const response = await apiClient.createPost({
         text: text || undefined,
         location: location || undefined,
@@ -3274,6 +3409,11 @@ export async function createPost(
         subtitleText: subtitleText || undefined,
         editTimeline: editTimeline || undefined,
         musicTrackId: musicTrackId || undefined,
+      });
+      console.log('[createPost/posts] live create ok', {
+        id: response?.id,
+        user_id: response?.user_id,
+        user_handle: response?.user_handle || response?.userHandle,
       });
 
       // Transform Laravel response using the same helper we use for feeds
@@ -3331,8 +3471,10 @@ export async function createPost(
 
       return transformed;
     } catch (error: any) {
-      console.error('Error creating post via API:', error);
-      console.error('Error details:', {
+      const createUrl = `${getApiBaseUrl().replace(/\/$/, '')}/posts`;
+      console.error('[createPost/posts] Error creating post via API:', error);
+      console.error('[createPost/posts] Error details:', {
+        url: createUrl,
         name: error?.name,
         message: error?.message,
         status: error?.status,
@@ -3354,6 +3496,12 @@ export async function createPost(
         msg.includes('Authentication required') ||
         msg.includes('Unauthenticated') ||
         error?.status === 401;
+
+      // Live mode: do not silently create a local-only post (profile would stay at 0 Posts).
+      if (!isMockMode()) {
+        if (isConnectionError) markLaravelUnreachable();
+        throw error;
+      }
 
       if (isConnectionError) {
         markLaravelUnreachable();

@@ -24,7 +24,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts, transformLaravelPost } from '../api/posts';
 import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -36,7 +36,7 @@ import {
     canSendMessage,
 } from '../api/privacy';
 import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Flag from '../components/Flag.native';
@@ -310,8 +310,16 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         typeof sourcePostId === 'string' ? sourcePostId : undefined,
                     );
                     if (cancelled()) return;
-                    if (Array.isArray(profileData?.posts) && profileData.posts.length > 0) {
-                        userPosts = profileData.posts;
+                    if (Array.isArray(profileData?.posts)) {
+                        // Live mode: trust API list even when empty (fixes stale local/mock "0 Posts").
+                        userPosts = profileData.posts.map((item: any) => {
+                            try {
+                                return item?.userHandle ? item : transformLaravelPost(item);
+                            } catch (err) {
+                                console.warn('[ViewProfile] skip malformed profile post', item?.id, err);
+                                return null;
+                            }
+                        }).filter(Boolean) as Post[];
                     }
                     paintLocalProfile(profileData);
                 } catch (error: any) {
@@ -319,6 +327,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         error?.name === 'ConnectionRefused' ||
                         error?.message === 'CONNECTION_REFUSED' ||
                         error?.message?.includes('Failed to fetch');
+                    console.log('[ViewProfile] profile fetch error', {
+                        name: error?.name,
+                        message: error?.message,
+                        status: error?.status,
+                        mockMode: isMockMode(),
+                    });
                     if (!isConnectionError) {
                         console.warn('View profile API failed; using local posts:', error);
                     }

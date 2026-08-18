@@ -494,6 +494,11 @@ export default function CreateScreen({ navigation, route }: any) {
                 videoCoverTime,
             });
         } catch (err) {
+            // Live mode: never fall back to a device file:// URI (Laravel can't serve it).
+            const { isMockMode } = await import('../api/apiMode');
+            if (!isMockMode()) {
+                throw err;
+            }
             console.warn('prepareComposerMedia failed, using local media', err);
             return {
                 mediaUrl: selectedMedia,
