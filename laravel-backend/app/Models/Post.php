@@ -35,6 +35,9 @@ class Post extends Model
         'media_url',
         'media_type',
         'location_label',
+        'place_id',
+        'latitude',
+        'longitude',
         'venue',
         'landmark',
         'social_format',
@@ -80,6 +83,8 @@ class Post extends Model
         'is_reclipped' => 'boolean',
         'video_captions_enabled' => 'boolean',
         'subtitles_enabled' => 'boolean',
+        'latitude' => 'float',
+        'longitude' => 'float',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
@@ -192,21 +197,27 @@ class Post extends Model
         }
 
         if (str_starts_with(strtolower($raw), 'venue:')) {
-            $needle = trim(substr($raw, 6));
+            $needle = $this->primaryPlaceTag(trim(substr($raw, 6)));
             if ($needle === '') {
                 return $query;
             }
 
-            return $query->where('venue', 'LIKE', "%{$needle}%");
+            return $query->where(function ($q) use ($needle) {
+                $q->where('venue', 'LIKE', "%{$needle}%")
+                    ->orWhereRaw('LOWER(TRIM(venue)) = ?', [strtolower($needle)]);
+            });
         }
 
         if (str_starts_with(strtolower($raw), 'landmark:')) {
-            $needle = trim(substr($raw, 9));
+            $needle = $this->primaryPlaceTag(trim(substr($raw, 9)));
             if ($needle === '') {
                 return $query;
             }
 
-            return $query->where('landmark', 'LIKE', "%{$needle}%");
+            return $query->where(function ($q) use ($needle) {
+                $q->where('landmark', 'LIKE', "%{$needle}%")
+                    ->orWhereRaw('LOWER(TRIM(landmark)) = ?', [strtolower($needle)]);
+            });
         }
 
         $needle = $raw;
@@ -215,12 +226,28 @@ class Post extends Model
             $q->where('location_label', 'LIKE', "%{$needle}%")
                 ->orWhere('venue', 'LIKE', "%{$needle}%")
                 ->orWhere('landmark', 'LIKE', "%{$needle}%")
+                ->orWhere('place_id', $needle)
                 ->orWhereHas('user', function ($uq) use ($needle) {
                     $uq->where('location_local', 'LIKE', "%{$needle}%")
                         ->orWhere('location_regional', 'LIKE', "%{$needle}%")
                         ->orWhere('location_national', 'LIKE', "%{$needle}%");
                 });
         });
+    }
+
+    /**
+     * Short place label for venue/landmark feed filters (drop ", City, Country" suffix).
+     */
+    private function primaryPlaceTag(string $raw): string
+    {
+        $primary = trim(explode(',', $raw)[0] ?? $raw);
+        $primary = preg_replace(
+            '/\s+(railway station|train station|bus station|metro station|airport|international airport|station)$/i',
+            '',
+            $primary
+        ) ?? $primary;
+
+        return trim($primary);
     }
 
     public function scopeFollowing($query, $userId)

@@ -19,13 +19,16 @@ class AuthControllerTest extends TestCase
             'password_confirmation' => 'password123',
             'displayName' => 'New User',
             'handle' => '@newuser',
+            'locationLocal' => ' Finglas ',
+            'locationRegional' => 'Dublin',
+            'locationNational' => 'Ireland',
         ];
 
         $response = $this->postJson('/api/auth/register', $payload);
 
         $response->assertStatus(201)
             ->assertJsonStructure([
-                'user' => ['id', 'username', 'email', 'handle', 'display_name'],
+                'user' => ['id', 'username', 'email', 'handle', 'display_name', 'location_local', 'location_regional', 'location_national'],
                 'token',
             ])
             ->assertJson([
@@ -33,12 +36,18 @@ class AuthControllerTest extends TestCase
                     'username' => 'newuser',
                     'email' => 'newuser@example.com',
                     'handle' => '@newuser',
+                    'location_local' => 'Finglas',
+                    'location_regional' => 'Dublin',
+                    'location_national' => 'Ireland',
                 ],
             ]);
 
         $this->assertDatabaseHas('users', [
             'username' => 'newuser',
             'email' => 'newuser@example.com',
+            'location_local' => 'Finglas',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
         ]);
     }
 

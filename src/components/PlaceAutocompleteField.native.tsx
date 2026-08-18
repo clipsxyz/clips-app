@@ -80,7 +80,7 @@ export default function PlaceAutocompleteField({
     };
   }, [mode, value]);
 
-  const showList = value.trim().length >= 2 && (loading || suggestions.length > 0);
+  const showList = value.trim().length >= 2;
 
   const pick = (s: LocationSuggestion) => {
     const parsed = parsedPlaceFeedFromSuggestion(s);

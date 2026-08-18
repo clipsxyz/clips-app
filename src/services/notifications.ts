@@ -232,6 +232,11 @@ export async function getFCMToken(): Promise<string | null> {
   }
 }
 
+/** Web/native parity: (re)register FCM token after login. */
+export async function registerFcmTokenForCurrentUser(): Promise<string | null> {
+  return getFCMToken();
+}
+
 // Save FCM token to backend
 async function saveTokenToBackend(token: string): Promise<void> {
   try {

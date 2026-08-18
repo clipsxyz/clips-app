@@ -401,13 +401,17 @@ export default function SearchPage() {
 
     const onPlaceSuggestionSelected = React.useCallback(
         (suggestion: LocationSuggestion) => {
-            if (getPlaceFeedPickerOptions(suggestion)) {
-                setScopePicker(suggestion);
+            const kind =
+                searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+            const typed: LocationSuggestion =
+                kind === 'venue' || kind === 'landmark' ? { ...suggestion, type: kind } : suggestion;
+            if (kind === 'location' && getPlaceFeedPickerOptions(typed)) {
+                setScopePicker(typed);
                 return;
             }
-            applyFeedSelection(resolvePlaceFeedSelection(suggestion));
+            applyFeedSelection(resolvePlaceFeedSelection(typed));
         },
-        [applyFeedSelection]
+        [applyFeedSelection, searchMode]
     );
 
     const goToLocation = (loc: string) => {

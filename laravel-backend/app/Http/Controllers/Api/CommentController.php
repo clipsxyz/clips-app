@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Comment;
 use App\Models\Post;
+use App\Models\User;
 use App\Services\BoostAnalyticsService;
+use App\Services\InteractionPushService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -160,6 +162,20 @@ class CommentController extends Controller
             return $comment;
         });
 
+        $post = Post::find($postId);
+        if ($post && $post->user_id && $post->user_id !== $user->id) {
+            $owner = User::find($post->user_id);
+            if ($owner) {
+                (new InteractionPushService)->notifyComment(
+                    $user,
+                    $owner,
+                    (string) $post->id,
+                    (string) $comment->id,
+                    (string) $request->text
+                );
+            }
+        }
+
         return response()->json($comment, 201);
     }
 
@@ -198,6 +214,39 @@ class CommentController extends Controller
 
             return $reply;
         });
+
+        // Notify parent comment author (reply) and post owner when different.
+        $push = new InteractionPushService;
+        if ($parentComment->user_id && $parentComment->user_id !== $user->id) {
+            $parentAuthor = User::find($parentComment->user_id);
+            if ($parentAuthor) {
+                $push->notifyComment(
+                    $user,
+                    $parentAuthor,
+                    (string) $parentComment->post_id,
+                    (string) $reply->id,
+                    (string) $request->text
+                );
+            }
+        }
+        $post = Post::find($parentComment->post_id);
+        if (
+            $post
+            && $post->user_id
+            && $post->user_id !== $user->id
+            && $post->user_id !== $parentComment->user_id
+        ) {
+            $owner = User::find($post->user_id);
+            if ($owner) {
+                $push->notifyComment(
+                    $user,
+                    $owner,
+                    (string) $post->id,
+                    (string) $reply->id,
+                    (string) $request->text
+                );
+            }
+        }
 
         return response()->json($reply, 201);
     }

@@ -129,9 +129,12 @@ Route::get('/boost/stripe-status', function () {
 
 // Public search and location routes
 Route::get('/locations/search', [LocationController::class, 'search']);
+Route::get('/locations/geocode', [LocationController::class, 'geocode']);
+Route::get('/locations/details', [LocationController::class, 'details']);
 Route::get('/search', [SearchController::class, 'unified']);
 Route::get('/search/places', [SearchController::class, 'places']);
 Route::get('/search/places/summary', [SearchController::class, 'placeSummary']);
+Route::get('/search/places/details', [LocationController::class, 'details']);
 
 // Public routes
 Route::prefix('auth')->group(function () {

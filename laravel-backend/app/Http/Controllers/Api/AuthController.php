@@ -39,16 +39,20 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $user = DB::transaction(function () use ($request) {
+        $locationLocal = $this->nullableTrimmedString($request->input('locationLocal'));
+        $locationRegional = $this->nullableTrimmedString($request->input('locationRegional'));
+        $locationNational = $this->nullableTrimmedString($request->input('locationNational'));
+
+        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational) {
             $user = User::create([
                 'username' => $request->username,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'display_name' => $request->displayName,
                 'handle' => $request->handle,
-                'location_local' => $request->locationLocal,
-                'location_regional' => $request->locationRegional,
-                'location_national' => $request->locationNational,
+                'location_local' => $locationLocal,
+                'location_regional' => $locationRegional,
+                'location_national' => $locationNational,
             ]);
 
             return $user;
@@ -583,6 +587,16 @@ class AuthController extends Controller
         }
 
         return '+' . $digits;
+    }
+
+    private function nullableTrimmedString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /**

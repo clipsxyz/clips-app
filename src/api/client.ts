@@ -13,10 +13,19 @@ function throwMockConnectionRefused(): never {
 
 /**
  * Gradual Laravel migration allowlist for `apiRequest`.
- * Login / feed list / createPost / profile fetch use dedicated helpers that bypass this set
- * or match paths below. Keep other endpoints on mock when EXPO_PUBLIC_USE_MOCK=false.
+ * Login / feed / createPost / profile / locations use dedicated helpers that bypass this set
+ * or match paths below. Unlisted paths still throw CONNECTION_REFUSED → local mock fallback.
  */
-const LIVE_API_REQUEST_PATHS = new Set<string>(['/posts', '/upload/single']);
+const LIVE_API_REQUEST_PATHS = new Set<string>([
+    '/posts',
+    '/upload/single',
+    '/locations/search',
+    '/locations/geocode',
+    '/locations/details',
+    '/search/places',
+    '/search/places/details',
+    '/search/places/summary',
+]);
 
 function isMigratedApiRequestPath(endpoint: string): boolean {
     const path = (endpoint.split('?')[0] || '').replace(/\/$/, '') || '/';
@@ -126,17 +135,32 @@ export async function registerUser(userData: {
         `user_${Date.now()}`;
 
     const payload = {
-        ...userData,
         username,
+        email: userData.email,
+        password: userData.password,
         // `confirmed` rule on AuthController::register
         password_confirmation: userData.password,
+        displayName: userData.displayName,
+        handle: userData.handle,
+        locationLocal: String(userData.locationLocal || '').trim() || undefined,
+        locationRegional: String(userData.locationRegional || '').trim() || undefined,
+        locationNational: String(userData.locationNational || '').trim() || undefined,
+        accountType: userData.accountType,
+        isBusiness: userData.isBusiness,
     };
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-        console.log('[registerUser/client] POST', url, { username, email: userData.email, handle: userData.handle });
+        console.log('[registerUser/client] POST', url, {
+            username,
+            email: userData.email,
+            handle: userData.handle,
+            locationLocal: payload.locationLocal,
+            locationRegional: payload.locationRegional,
+            locationNational: payload.locationNational,
+        });
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -167,7 +191,13 @@ export async function registerUser(userData: {
             throw new Error('Registration succeeded but no API token was returned');
         }
         await persistAuthToken(token);
-        console.log('[registerUser/client] ok', { hasToken: true, userId: (data.user as any)?.id });
+        console.log('[registerUser/client] ok', {
+            hasToken: true,
+            userId: (data.user as any)?.id,
+            location_local: (data.user as any)?.location_local,
+            location_regional: (data.user as any)?.location_regional,
+            location_national: (data.user as any)?.location_national,
+        });
         return {
             user: data.user && typeof data.user === 'object' ? data.user : {},
             token,
@@ -550,6 +580,10 @@ export async function checkFollowsMe(handle: string): Promise<{ follows_me: bool
 export async function createPost(postData: {
     text?: string;
     location?: string;
+    placeId?: string;
+    place_id?: string;
+    latitude?: number;
+    longitude?: number;
     venue?: string;
     landmark?: string;
     socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';

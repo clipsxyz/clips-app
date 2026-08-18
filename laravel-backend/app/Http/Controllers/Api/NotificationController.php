@@ -115,8 +115,8 @@ class NotificationController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'token' => 'required|string',
-            'userId' => 'required|string',
-            'userHandle' => 'required|string',
+            'userId' => 'nullable|string',
+            'userHandle' => 'nullable|string',
             'remove' => 'sometimes|boolean',
         ]);
 
@@ -128,12 +128,21 @@ class NotificationController extends Controller
         }
 
         try {
+            $authUser = Auth::user();
+            $userId = trim((string) ($authUser?->id ?? $request->input('userId', '')));
+            $userHandle = trim((string) ($authUser?->handle ?? $request->input('userHandle', '')));
+            $token = trim((string) $request->input('token', ''));
+
+            if ($token === '') {
+                return response()->json(['success' => false, 'message' => 'token required'], 422);
+            }
+
             if ($request->boolean('remove')) {
-                DB::table('fcm_tokens')
-                    ->where('user_id', $request->userId)
-                    ->where('user_handle', $request->userHandle)
-                    ->where('token', $request->token)
-                    ->delete();
+                $q = DB::table('fcm_tokens')->where('token', $token);
+                if ($userId !== '') {
+                    $q->where('user_id', $userId);
+                }
+                $q->delete();
 
                 return response()->json([
                     'success' => true,
@@ -141,19 +150,28 @@ class NotificationController extends Controller
                 ]);
             }
 
-            // Store FCM token in database
-            // You can create a migration for this table: fcm_tokens
+            if ($userId === '' || strtolower($userId) === 'unknown') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authenticated user required to register FCM token',
+                ], 401);
+            }
+
             DB::table('fcm_tokens')->updateOrInsert(
+                ['token' => $token],
                 [
-                    'user_id' => $request->userId,
-                    'user_handle' => $request->userHandle,
-                ],
-                [
-                    'token' => $request->token,
+                    'user_id' => $userId,
+                    'user_handle' => $userHandle !== '' ? $userHandle : (string) ($authUser?->handle ?? ''),
                     'updated_at' => now(),
                     'created_at' => now(),
                 ]
             );
+
+            // Drop stale anonymous placeholders from earlier cold starts.
+            DB::table('fcm_tokens')
+                ->where('user_id', 'unknown')
+                ->where('token', $token)
+                ->delete();
 
             return response()->json([
                 'success' => true,

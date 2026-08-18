@@ -103,7 +103,14 @@ class SearchController extends Controller
                             ];
                         })
                         ->filter(function ($item) use ($mode, $level, $countryName, $regionName) {
-                            if ($mode !== 'all' && ($item['type'] ?? 'location') !== $mode) {
+                            $kind = (string) ($item['type'] ?? 'location');
+                            if ($mode === 'landmark') {
+                                // Keep attractions / parks / natural features even if Google also tags them as venues.
+                                if (! in_array($kind, ['landmark', 'venue'], true)
+                                    && ! $this->looksLikeLandmarkName((string) ($item['name'] ?? ''))) {
+                                    return false;
+                                }
+                            } elseif ($mode !== 'all' && $kind !== $mode) {
                                 return false;
                             }
                             if ($level === '') {
@@ -363,16 +370,28 @@ class SearchController extends Controller
      * @return array<string, mixed>|null
      */
     /**
-     * Map app search tab → Google Places Autocomplete types restriction.
-     * @see https://developers.google.com/maps/documentation/places/web-service/autocomplete
+     * Map app search tab → Google Places Autocomplete `types` values.
+     * Landmark needs multiple calls — Autocomplete allows only one type per request.
+     *
+     * @return list<?string>
      */
-    private function googleAutocompleteTypesForMode(string $mode): ?string
+    private function googleAutocompleteTypeQueriesForMode(string $mode): array
     {
         return match ($mode) {
-            'venue' => 'establishment',
-            'location' => 'geocode',
-            default => null,
+            'venue' => ['establishment'],
+            'location' => ['geocode'],
+            // Rivers, parks, attractions — unrestricted autocomplete returns cities first.
+            'landmark' => ['tourist_attraction', 'natural_feature', 'park'],
+            default => [null],
         };
+    }
+
+    /** @deprecated Use googleAutocompleteTypeQueriesForMode */
+    private function googleAutocompleteTypesForMode(string $mode): ?string
+    {
+        $queries = $this->googleAutocompleteTypeQueriesForMode($mode);
+
+        return $queries[0] ?? null;
     }
 
     private function classifyPlaceKind(array $lowerTypes): string
@@ -380,6 +399,8 @@ class SearchController extends Controller
         $landmarkHints = [
             'tourist_attraction', 'natural_feature', 'park', 'museum', 'church',
             'mosque', 'synagogue', 'hindu_temple', 'university', 'cemetery',
+            'aquarium', 'zoo', 'amusement_park', 'art_gallery', 'place_of_worship',
+            'city_hall', 'library', 'landmark', 'premise',
         ];
         $venueHints = [
             'establishment', 'point_of_interest', 'restaurant', 'bar', 'cafe',
@@ -398,6 +419,18 @@ class SearchController extends Controller
         }
 
         return 'location';
+    }
+
+    private function looksLikeLandmarkName(string $name): bool
+    {
+        $lower = strtolower($name);
+        foreach (['river', 'park', 'bridge', 'tower', 'castle', 'cathedral', 'museum', 'falls', 'lake', 'mountain', 'monument', 'statue'] as $hint) {
+            if (str_contains($lower, $hint)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function autocompleteInputForLevel(string $qRaw, string $level, string $countryName, string $regionName): string
@@ -506,7 +539,8 @@ class SearchController extends Controller
         return match ($level) {
             'country' => '(regions)',
             'region' => '(regions)',
-            'local' => '(cities)',
+            // Neighborhoods / suburbs often are not `(cities)` — leave unrestricted for local tier.
+            'local' => null,
             default => null,
         };
     }
@@ -518,18 +552,57 @@ class SearchController extends Controller
         string $level = '',
         ?string $countryIso = null
     ): ?array {
+        $signupTypes = $this->googleAutocompleteTypesForSignupLevel($level);
+        if ($signupTypes !== null) {
+            return $this->googlePlaceAutocompleteSingle($input, $apiKey, $signupTypes, $countryIso);
+        }
+
+        $typeQueries = $this->googleAutocompleteTypeQueriesForMode($mode);
+        $merged = [];
+        $seen = [];
+
+        foreach ($typeQueries as $types) {
+            $payload = $this->googlePlaceAutocompleteSingle($input, $apiKey, $types, $countryIso);
+            if (! is_array($payload)) {
+                continue;
+            }
+            $predictions = is_array($payload['predictions'] ?? null) ? $payload['predictions'] : [];
+            foreach ($predictions as $prediction) {
+                if (! is_array($prediction)) {
+                    continue;
+                }
+                $placeId = (string) ($prediction['place_id'] ?? '');
+                $key = $placeId !== '' ? $placeId : strtolower((string) ($prediction['description'] ?? ''));
+                if ($key === '' || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $merged[] = $prediction;
+            }
+        }
+
+        if ($merged === []) {
+            return null;
+        }
+
+        return [
+            'status' => 'OK',
+            'predictions' => $merged,
+        ];
+    }
+
+    private function googlePlaceAutocompleteSingle(
+        string $input,
+        string $apiKey,
+        ?string $types,
+        ?string $countryIso
+    ): ?array {
         $query = [
             'input' => $input,
             'key' => $apiKey,
         ];
-        $signupTypes = $this->googleAutocompleteTypesForSignupLevel($level);
-        if ($signupTypes !== null) {
-            $query['types'] = $signupTypes;
-        } else {
-            $types = $this->googleAutocompleteTypesForMode($mode);
-            if ($types !== null) {
-                $query['types'] = $types;
-            }
+        if ($types !== null && $types !== '') {
+            $query['types'] = $types;
         }
         if ($countryIso !== null && $countryIso !== '') {
             $query['components'] = 'country:'.strtolower($countryIso);
@@ -561,7 +634,7 @@ class SearchController extends Controller
             return null;
         }
         $payload = json_decode($body, true);
-        if (!is_array($payload) || ($payload['status'] ?? '') !== 'OK') {
+        if (! is_array($payload) || ($payload['status'] ?? '') !== 'OK') {
             return null;
         }
 

@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Models\RenderJob;
 use App\Jobs\ProcessRenderJob;
 use App\Services\BoostAnalyticsService;
+use App\Services\GoogleMapsLocationService;
+use App\Services\InteractionPushService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -25,6 +27,46 @@ class PostController extends Controller
         $base = rtrim((string) (config('app.frontend_url') ?: config('app.url') ?: ''), '/');
         return $base !== '' ? ($base . '/p/' . $token) : ('/p/' . $token);
     }
+
+    /**
+     * Resolve place_id / location label to lat/lng via Google (cached in location_centroids).
+     *
+     * @return array{place_id: ?string, latitude: ?float, longitude: ?float, location_label: ?string}
+     */
+    private function resolvePostGeoFields(Request $request): array
+    {
+        $placeId = trim((string) ($request->input('placeId') ?? $request->input('place_id') ?? ''));
+        $location = trim((string) ($request->input('location') ?? ''));
+        $latIn = $request->input('latitude');
+        $lngIn = $request->input('longitude');
+
+        $out = [
+            'place_id' => $placeId !== '' ? $placeId : null,
+            'latitude' => is_numeric($latIn) ? (float) $latIn : null,
+            'longitude' => is_numeric($lngIn) ? (float) $lngIn : null,
+            'location_label' => $location !== '' ? $location : null,
+        ];
+
+        if ($out['latitude'] !== null && $out['longitude'] !== null && $out['place_id'] !== null) {
+            return $out;
+        }
+
+        $maps = new GoogleMapsLocationService;
+        $resolved = $maps->resolve($out['place_id'], $out['location_label']);
+        if ($resolved === null) {
+            return $out;
+        }
+
+        return [
+            'place_id' => $out['place_id'] ?: ($resolved['place_id'] ?? null),
+            'latitude' => $out['latitude'] ?? ($resolved['latitude'] ?? null),
+            'longitude' => $out['longitude'] ?? ($resolved['longitude'] ?? null),
+            'location_label' => $out['location_label']
+                ?: (isset($resolved['display_name']) ? (string) $resolved['display_name'] : null)
+                ?: (isset($resolved['label']) ? (string) $resolved['label'] : null),
+        ];
+    }
+
     /**
      * Normalize a post model for feed / suggestion API responses (snake_case + relations).
      */
@@ -35,6 +77,10 @@ class PostController extends Controller
         $postData['public_share_token'] = $post->public_share_token;
         $postData['venue'] = $post->venue;
         $postData['landmark'] = $post->landmark;
+        $postData['place_id'] = $post->place_id;
+        $postData['latitude'] = $post->latitude;
+        $postData['longitude'] = $post->longitude;
+        $postData['placeId'] = $post->place_id;
         $postData['taggedUsers'] = $post->relationLoaded('taggedUsers')
             ? $post->taggedUsers->pluck('handle')->toArray()
             : [];
@@ -351,6 +397,10 @@ class PostController extends Controller
         $validator = Validator::make($request->all(), [
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
+            'placeId' => 'nullable|string|max:255',
+            'place_id' => 'nullable|string|max:255',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
             'venue' => 'nullable|string|max:200',
             'landmark' => 'nullable|string|max:200',
             'socialFormat' => 'nullable|string|in:youtube_shorts,tiktok,instagram_reels',
@@ -421,13 +471,18 @@ class PostController extends Controller
         ]);
 
         $post = DB::transaction(function () use ($request, $user) {
+            $geo = $this->resolvePostGeoFields($request);
+
             $post = Post::create([
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
                 'text_content' => $request->text,
                 'media_url' => $request->mediaUrl,
                 'media_type' => $request->mediaType,
-                'location_label' => $request->location,
+                'location_label' => $geo['location_label'] ?? $request->location,
+                'place_id' => $geo['place_id'],
+                'latitude' => $geo['latitude'],
+                'longitude' => $geo['longitude'],
                 'venue' => $request->venue,
                 'landmark' => $request->landmark,
                 'social_format' => $request->socialFormat,
@@ -523,6 +578,10 @@ class PostController extends Controller
         $validator = Validator::make($request->all(), [
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
+            'placeId' => 'nullable|string|max:255',
+            'place_id' => 'nullable|string|max:255',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
             'venue' => 'nullable|string|max:200',
             'landmark' => 'nullable|string|max:200',
         ]);
@@ -543,8 +602,23 @@ class PostController extends Controller
         if ($request->has('text')) {
             $post->text_content = $request->text;
         }
-        if ($request->has('location')) {
-            $post->location_label = $request->location;
+        if ($request->has('location') || $request->has('placeId') || $request->has('place_id')
+            || $request->has('latitude') || $request->has('longitude')) {
+            $geo = $this->resolvePostGeoFields($request);
+            if ($geo['location_label'] !== null) {
+                $post->location_label = $geo['location_label'];
+            } elseif ($request->has('location')) {
+                $post->location_label = $request->location;
+            }
+            if ($geo['place_id'] !== null || $request->has('placeId') || $request->has('place_id')) {
+                $post->place_id = $geo['place_id'];
+            }
+            if ($geo['latitude'] !== null || $request->has('latitude')) {
+                $post->latitude = $geo['latitude'];
+            }
+            if ($geo['longitude'] !== null || $request->has('longitude')) {
+                $post->longitude = $geo['longitude'];
+            }
         }
         if ($request->has('venue')) {
             $post->venue = $request->venue;
@@ -637,6 +711,13 @@ class PostController extends Controller
                 return ['liked' => true];
             }
         });
+
+        if (($result['liked'] ?? false) === true && $post->user_id && $post->user_id !== $user->id) {
+            $owner = User::find($post->user_id);
+            if ($owner) {
+                (new InteractionPushService)->notifyLike($user, $owner, (string) $post->id);
+            }
+        }
 
         return response()->json($result);
     }

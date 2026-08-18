@@ -329,15 +329,17 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const onPlaceSuggestionPress = (suggestion: LocationSuggestion) => {
         const kind =
             searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        const typed: LocationSuggestion =
+            kind === 'venue' || kind === 'landmark' ? { ...suggestion, type: kind } : suggestion;
         if (kind !== 'location') {
-            void openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
+            void openFeedSelection(resolvePlaceFeedSelection(typed), kind);
             return;
         }
-        if (getPlaceFeedPickerOptions(suggestion)) {
-            setScopePicker(suggestion);
+        if (getPlaceFeedPickerOptions(typed)) {
+            setScopePicker(typed);
             return;
         }
-        void openFeedSelection(resolvePlaceFeedSelection(suggestion), 'location');
+        void openFeedSelection(resolvePlaceFeedSelection(typed), 'location');
     };
 
     const goToUser = (handle: string) => {

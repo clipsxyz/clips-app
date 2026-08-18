@@ -194,8 +194,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
           if (parsed.handle) {
-            import('../services/notifications').then(({ initializeNotifications }) => {
-              initializeNotifications();
+            import('../services/notifications').then((mod) => {
+              const init = mod.initializeNotifications;
+              const register =
+                'registerFcmTokenForCurrentUser' in mod
+                  ? (mod as { registerFcmTokenForCurrentUser?: () => Promise<string | null> })
+                      .registerFcmTokenForCurrentUser
+                  : undefined;
+              void init?.();
+              void register?.();
             });
           }
           // If we have an auth token (Laravel), refresh user from API so handle and profile are correct (fixes Share/DM list after refresh)
@@ -335,8 +342,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
           console.warn('Socket connect skipped:', e);
         }
-        import('../services/notifications').then(({ initializeNotifications }) => {
-          initializeNotifications();
+        import('../services/notifications').then((mod) => {
+          const init = mod.initializeNotifications;
+          const register =
+            'registerFcmTokenForCurrentUser' in mod
+              ? (mod as { registerFcmTokenForCurrentUser?: () => Promise<string | null> })
+                  .registerFcmTokenForCurrentUser
+              : undefined;
+          void init?.();
+          void register?.();
         });
       }
       setSentryUser({ id: u.id, username: u.name });

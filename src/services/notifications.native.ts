@@ -88,16 +88,38 @@ async function getCurrentUserIdentity(): Promise<{ id?: string; handle?: string 
 async function saveTokenToBackend(token: string): Promise<void> {
   try {
     const user = await getCurrentUserIdentity();
+    if (!user?.id || user.id === 'unknown') {
+      console.log('[FCM] skip token save until user is signed in');
+      return;
+    }
     await apiRequest('/notifications/fcm-token', {
       method: 'POST',
       body: JSON.stringify({
         token,
-        userId: user?.id || user?.handle || 'unknown',
-        userHandle: user?.handle || '',
+        userId: user.id,
+        userHandle: user.handle || '',
       }),
     });
+    console.log('[FCM] token registered for', user.handle || user.id);
   } catch (error) {
     console.warn('Failed to save FCM token to backend:', error);
+  }
+}
+
+/** Call after login / hydrate so the device token is tied to the Sanctum user. */
+export async function registerFcmTokenForCurrentUser(): Promise<string | null> {
+  await hydratePreferencesOnce();
+  const messaging = getMessagingInstance();
+  if (!messaging) return null;
+  try {
+    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
+      await messaging.requestPermission();
+    }
+    await requestNotificationPermission();
+    return await getFCMToken();
+  } catch (error) {
+    console.warn('[FCM] register after auth failed:', error);
+    return null;
   }
 }
 

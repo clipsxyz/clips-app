@@ -25,11 +25,11 @@ return [
         ],
 
         'public' => [
-            // This repo uses a real `public/storage` directory (not always a symlink).
-            // Write uploads there so `http://localhost:8000/storage/...` serves them.
+            // Standard Laravel layout: files live in storage/app/public and are
+            // served via the `public/storage` symlink (`php artisan storage:link`).
             'driver' => 'local',
-            'root' => public_path('storage'),
-            'url' => env('APP_URL', 'http://localhost:8000').'/storage',
+            'root' => storage_path('app/public'),
+            'url' => rtrim(env('APP_URL', 'http://localhost:8000'), '/').'/storage',
             'visibility' => 'public',
             'throw' => false,
         ],

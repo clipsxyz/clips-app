@@ -2,7 +2,8 @@ import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
-import { loginUser, registerUser } from '../api/client';
+import { loginUser, registerUser, mapLaravelUserToAppFields } from '../api/client';
+import { isMockMode } from '../api/apiMode';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
@@ -11,6 +12,7 @@ import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
 import { persistAuthToken } from '../utils/authTokenBridge';
 import { db } from '../utils/db';
+import { buildGazetteerHandle } from '../utils/gazetteerHandle';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
 const avatarStorageKey = (id: string) => `clips_app_avatar_${id}`;
@@ -280,6 +282,7 @@ export default function LoginPage() {
     setSignupSubmitting(true);
     const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
+    const handle = buildGazetteerHandle(name.trim() || 'user', regional);
     const userId = email.trim().toLowerCase();
     const userData = {
       id: userId,
@@ -288,10 +291,10 @@ export default function LoginPage() {
       password: password,
       age: age ?? undefined,
       interests,
-      local: local,
-      regional: regional,
-      national: national,
-      handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
+      local: local.trim(),
+      regional: regional.trim(),
+      national: national.trim(),
+      handle,
       countryFlag: normalizeCountryFlagInput('', national),
       avatarUrl: profilePicture || undefined,
       accountType: accountType ?? 'personal',
@@ -309,21 +312,51 @@ export default function LoginPage() {
 
     try {
       const apiResponse = await registerUser({
-        username: email.trim(),
+        username: email.trim().split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
         email: email.trim(),
         password,
         displayName: name.trim(),
-        handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
-        locationLocal: local,
-        locationRegional: regional,
-        locationNational: national,
+        handle,
+        locationLocal: local.trim(),
+        locationRegional: regional.trim(),
+        locationNational: national.trim(),
         accountType: (accountType ?? 'personal') as 'personal' | 'business',
         isBusiness: accountType === 'business',
       });
-      const token = (apiResponse as { token?: string })?.token;
+      const token = apiResponse?.token;
       if (token) await persistAuthToken(token);
-    } catch {
-      // Keep local registration fallback behavior aligned with RN.
+      const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
+      const mergedUser = {
+        ...userData,
+        id: mapped.id ?? userData.id,
+        handle: String(mapped.handle || userData.handle),
+        name: String(mapped.name || userData.name),
+        local: String(mapped.local || userData.local),
+        regional: String(mapped.regional || userData.regional),
+        national: String(mapped.national || userData.national),
+        avatarUrl: (mapped.avatarUrl as string | undefined) || userData.avatarUrl,
+        accountType: (mapped.accountType as 'personal' | 'business') || userData.accountType,
+        is_private: mapped.is_private,
+      };
+      login(mergedUser);
+      saveLocalRegistration(email.trim(), password, mergedUser);
+      nav(getPostAuthRedirect(), { replace: true, state: { fromSignup: true } });
+      return;
+    } catch (err: unknown) {
+      if (!isMockMode()) {
+        const message = err instanceof Error ? err.message : 'Registration failed';
+        const isConnection =
+          message.includes('CONNECTION_REFUSED') ||
+          (err instanceof Error && err.name === 'ConnectionRefused');
+        setSignupError(
+          isConnection
+            ? 'Cannot reach the server. Check Laravel is running and try again.'
+            : message,
+        );
+        setSignupSubmitting(false);
+        return;
+      }
+      // Mock mode: keep local registration fallback
     }
 
     try {

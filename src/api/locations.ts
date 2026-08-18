@@ -1,5 +1,8 @@
 import { getApiBaseUrl } from './apiBaseUrl';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import {
+    clearLaravelUnreachable,
+    isMockMode,
+} from '../config/runtimeEnv';
 
 function buildPlacesUrl(path: string, params: Record<string, string>): string {
     // Resolve per call — RN module-load can race SourceCode.scriptURL / Metro host.
@@ -15,6 +18,11 @@ function buildPlacesUrl(path: string, params: Record<string, string>): string {
     return url.toString();
 }
 
+function asLocationSuggestions(data: unknown): LocationSuggestion[] {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    return data.filter((item) => item && typeof item === 'object' && typeof (item as LocationSuggestion).name === 'string') as LocationSuggestion[];
+}
+
 export type LocationSuggestion = {
     name: string;
     type: 'local' | 'city' | 'country' | 'location' | 'venue' | 'landmark';
@@ -26,6 +34,22 @@ export type LocationSuggestion = {
     display_name?: string;
     feed_level?: 'local' | 'regional' | 'national';
     place_id?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    formatted_address?: string | null;
+};
+
+export type GeocodedLocation = {
+    label: string;
+    display_name?: string | null;
+    place_id?: string | null;
+    latitude: number;
+    longitude: number;
+    local?: string | null;
+    regional?: string | null;
+    national?: string | null;
+    feed_level?: string | null;
+    formatted_address?: string | null;
 };
 
 export type SignupLocationLevel = 'country' | 'region' | 'local';
@@ -107,8 +131,9 @@ export async function searchLocations(
 ): Promise<LocationSuggestion[]> {
     const localInstant = searchLocalGazetteer(query, limit, mode);
 
-    // Mock / offline: never wait on Laravel — dropdown should feel instant on RN.
-    if (!isLaravelApiEnabled()) {
+    // Mock mode only: keep local gazetteer. Live mode always hits Laravel Places
+    // (public route) even if an earlier feed/auth failure set the session poison pill.
+    if (isMockMode()) {
         if (signal?.aborted) {
             throw new DOMException('Aborted', 'AbortError');
         }
@@ -117,15 +142,15 @@ export async function searchLocations(
 
     const params: Record<string, string> = {
         q: query,
-        limit: String(limit),
+        limit: String(Math.min(Math.max(limit, 1), 20)),
         mode,
     };
     if (scope?.level) params.level = scope.level;
     if (scope?.country?.trim()) params.country = scope.country.trim();
     if (scope?.region?.trim()) params.region = scope.region.trim();
 
-    // Keep network wait short so typing stays responsive when API is down.
-    const timeoutMs = 1500;
+    // Google Autocomplete via Laravel often needs >1.5s on device + adb reverse.
+    const timeoutMs = 8000;
     const timeoutCtrl = new AbortController();
     const onAbort = () => timeoutCtrl.abort();
     const timer = setTimeout(onAbort, timeoutMs);
@@ -137,26 +162,30 @@ export async function searchLocations(
         signal.addEventListener('abort', onAbort, { once: true });
     }
 
+    const fetchSuggestions = async (path: string, pathParams: Record<string, string>) => {
+        const res = await fetch(buildPlacesUrl(path, pathParams), { signal: timeoutCtrl.signal });
+        if (!res.ok) return [];
+        return asLocationSuggestions(await res.json());
+    };
+
     try {
-        const url = buildPlacesUrl('/search/places', params);
-        const res = await fetch(url, { signal: timeoutCtrl.signal });
-        if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data) && data.length > 0) return data;
-        } else {
-            const legacyUrl = buildPlacesUrl('/locations/search', {
+        // Primary: Places Autocomplete (+ signup level filters) via SearchController.
+        let results = await fetchSuggestions('/search/places', params);
+        // Fallback: LocationController autocomplete (same Google key, simpler filters).
+        if (results.length === 0 && !timeoutCtrl.signal.aborted && !signal?.aborted) {
+            results = await fetchSuggestions('/locations/search', {
                 q: query,
-                limit: String(limit),
+                limit: params.limit,
+                mode,
             });
-            const legacyRes = await fetch(legacyUrl, { signal: timeoutCtrl.signal });
-            if (legacyRes.ok) {
-                const legacyData = await legacyRes.json();
-                if (Array.isArray(legacyData) && legacyData.length > 0) return legacyData;
-            }
+        }
+        if (results.length > 0) {
+            clearLaravelUnreachable();
+            return results;
         }
     } catch (e) {
+        // Keystroke cancel → propagate. Timeout/network → local gazetteer.
         if (signal?.aborted) throw e;
-        // Timeout / network / wrong host — fall through to local gazetteer
     } finally {
         clearTimeout(timer);
         if (signal) signal.removeEventListener('abort', onAbort);
@@ -167,4 +196,91 @@ export async function searchLocations(
     }
 
     return localInstant;
+}
+
+/**
+ * Resolve a Google place_id and/or address to real coordinates via Laravel
+ * (`/locations/geocode` → Google Geocoding / Place Details).
+ */
+export async function geocodeLocation(options: {
+    placeId?: string | null;
+    q?: string | null;
+    signal?: AbortSignal;
+}): Promise<GeocodedLocation | null> {
+    if (isMockMode()) {
+        return null;
+    }
+
+    const placeId = options.placeId?.trim() || '';
+    const q = options.q?.trim() || '';
+    if (!placeId && !q) return null;
+
+    const params: Record<string, string> = {};
+    if (placeId) params.place_id = placeId;
+    if (q) params.q = q;
+
+    try {
+        const url = buildPlacesUrl('/locations/geocode', params);
+        const res = await fetch(url, { signal: options.signal });
+        if (!res.ok) return null;
+        const data = (await res.json()) as Partial<GeocodedLocation>;
+        if (
+            typeof data?.latitude !== 'number' ||
+            typeof data?.longitude !== 'number' ||
+            !Number.isFinite(data.latitude) ||
+            !Number.isFinite(data.longitude)
+        ) {
+            return null;
+        }
+        clearLaravelUnreachable();
+        return {
+            label: String(data.label || data.display_name || q || placeId),
+            display_name: data.display_name ?? null,
+            place_id: data.place_id ?? (placeId || null),
+            latitude: data.latitude,
+            longitude: data.longitude,
+            local: data.local ?? null,
+            regional: data.regional ?? null,
+            national: data.national ?? null,
+            feed_level: data.feed_level ?? null,
+            formatted_address: data.formatted_address ?? null,
+        };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Place Details alias (`/locations/details` or `/search/places/details`).
+ */
+export async function fetchPlaceDetails(
+    placeId: string,
+    signal?: AbortSignal,
+): Promise<GeocodedLocation | null> {
+    const id = placeId.trim();
+    if (!id || isMockMode()) return null;
+    try {
+        const url = buildPlacesUrl('/locations/details', { place_id: id });
+        const res = await fetch(url, { signal });
+        if (!res.ok) return null;
+        const data = (await res.json()) as Partial<GeocodedLocation>;
+        if (typeof data?.latitude !== 'number' || typeof data?.longitude !== 'number') {
+            return null;
+        }
+        clearLaravelUnreachable();
+        return {
+            label: String(data.label || data.display_name || id),
+            display_name: data.display_name ?? null,
+            place_id: data.place_id ?? id,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            local: data.local ?? null,
+            regional: data.regional ?? null,
+            national: data.national ?? null,
+            feed_level: data.feed_level ?? null,
+            formatted_address: data.formatted_address ?? null,
+        };
+    } catch {
+        return null;
+    }
 }

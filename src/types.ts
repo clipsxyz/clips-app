@@ -58,6 +58,10 @@ export type Post = {
   venue?: string;
   /** Named landmark (e.g. Eiffel Tower, River Liffey); optional; carousel + landmark feeds */
   landmark?: string;
+  /** Google Places id when the post was tagged to a real place */
+  placeId?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   /**
    * When the user created the post via Create → Shorts / TikTok / Reels gallery flow.
    * Shown as a small label on the feed card (not the same as posting to those apps).

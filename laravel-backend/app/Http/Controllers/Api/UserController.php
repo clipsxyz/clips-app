@@ -255,7 +255,7 @@ class UserController extends Controller
             } else {
                 // Check if profile is private
                 if ($following->is_private) {
-                    // Create pending follow request
+                    // Create pending follow request + live FCM
                     DB::table('user_follows')->insert([
                         'follower_id' => $follower->id,
                         'following_id' => $following->id,
@@ -264,15 +264,7 @@ class UserController extends Controller
                         'updated_at' => now(),
                     ]);
 
-                    // Create notification for the user being followed
-                    Notification::create([
-                        'user_id' => $following->id,
-                        'type' => 'follow_request',
-                        'from_handle' => $follower->handle,
-                        'to_handle' => $following->handle,
-                        'message' => "{$follower->handle} wants to follow you",
-                        'read' => false,
-                    ]);
+                    (new \App\Services\InteractionPushService)->notifyFollowRequest($follower, $following);
 
                     return ['following' => false, 'status' => 'pending', 'message' => 'Follow request sent'];
                 } else {
@@ -287,6 +279,8 @@ class UserController extends Controller
                     
                     $follower->increment('following_count');
                     $following->increment('followers_count');
+
+                    (new \App\Services\InteractionPushService)->notifyFollow($follower, $following);
                     
                     return ['following' => true, 'status' => 'accepted'];
                 }

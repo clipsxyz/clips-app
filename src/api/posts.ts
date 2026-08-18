@@ -1295,6 +1295,15 @@ export function transformLaravelPost(response: any): Post {
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
+    placeId: response.place_id || response.placeId || existing?.placeId || null,
+    latitude:
+      typeof response.latitude === 'number'
+        ? response.latitude
+        : existing?.latitude ?? null,
+    longitude:
+      typeof response.longitude === 'number'
+        ? response.longitude
+        : existing?.longitude ?? null,
     socialFormat: (response.social_format || response.socialFormat) as Post['socialFormat'] | undefined,
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
@@ -1611,20 +1620,29 @@ function dedupeItemsById(items: Post[]): Post[] {
 export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const normalize = (v?: string) => (v || '').trim().toLowerCase();
+  const primaryTag = (v?: string) =>
+    normalize(v)
+      .split(',')[0]
+      .trim()
+      .replace(/\s+(railway station|train station|bus station|metro station|airport|international airport|station)$/i, '')
+      .trim();
+  /** Match post.venue / post.landmark against a Discover venue:/landmark: feed query. */
+  const placeTagMatches = (stored: string | undefined, query: string): boolean => {
+    const s = primaryTag(stored);
+    const q = primaryTag(query);
+    if (!s || !q || q.length < 2) return false;
+    return s === q || s.includes(q) || q.includes(s);
+  };
+
   const isVenueFeed = t.startsWith('venue:');
   const venueQuery = isVenueFeed ? t.slice('venue:'.length).trim() : '';
   if (isVenueFeed) {
-    const venue = normalize((p as any).venue);
-    // Exact / contains only when the query is specific enough (avoid "a" matching everything).
-    if (!venue || venueQuery.length < 2) return false;
-    return venue === venueQuery || venue.includes(venueQuery);
+    return placeTagMatches((p as any).venue, venueQuery);
   }
   const isLandmarkFeed = t.startsWith('landmark:');
   const landmarkQuery = isLandmarkFeed ? t.slice('landmark:'.length).trim() : '';
   if (isLandmarkFeed) {
-    const lm = normalize((p as any).landmark);
-    if (!lm || landmarkQuery.length < 2) return false;
-    return lm === landmarkQuery || lm.includes(landmarkQuery);
+    return placeTagMatches((p as any).landmark, landmarkQuery);
   }
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
@@ -1748,8 +1766,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         })
         .filter((x: Post | null): x is Post => x !== null);
 
-      // Guard location feeds from server over-broad matches (author local/regional/national must match tab).
-      if (t === 'finglas' || t === 'dublin' || t === 'ireland' || isCustomLocationFeed) {
+      // Guard location / venue / landmark feeds from server over-broad matches.
+      if (
+        t === 'finglas' ||
+        t === 'dublin' ||
+        t === 'ireland' ||
+        isCustomLocationFeed ||
+        isVenueFeed ||
+        isLandmarkFeed
+      ) {
         transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
       }
 
@@ -3360,6 +3385,9 @@ export async function createPost(
   socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels', // Create → Shorts / TikTok / Reels upload flow
   videoFrameMode?: 'crop' | 'fit' | 'original',
   videoPosterUrl?: string,
+  placeId?: string,
+  latitude?: number,
+  longitude?: number,
 ): Promise<Post> {
   const currentUserAccountType = (() => {
     try {
@@ -3388,6 +3416,9 @@ export async function createPost(
       const response = await apiClient.createPost({
         text: text || undefined,
         location: location || undefined,
+        placeId: placeId || undefined,
+        latitude: typeof latitude === 'number' ? latitude : undefined,
+        longitude: typeof longitude === 'number' ? longitude : undefined,
         venue: venue || undefined,
         landmark: landmark || undefined,
         socialFormat: socialFormat || undefined,

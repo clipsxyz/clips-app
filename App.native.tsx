@@ -218,9 +218,20 @@ function App(): React.JSX.Element {
   }, []);
 
   React.useEffect(() => {
-    initializeNotifications({ onNotificationPress: handleNotificationPress }).catch((error) => {
-      console.warn('Native notification initialization failed:', error);
-    });
+    initializeNotifications({ onNotificationPress: handleNotificationPress })
+      .then(() =>
+        import('./src/services/notifications').then((mod) => {
+          const register =
+            'registerFcmTokenForCurrentUser' in mod
+              ? (mod as { registerFcmTokenForCurrentUser?: () => Promise<string | null> })
+                  .registerFcmTokenForCurrentUser
+              : undefined;
+          return register?.();
+        }),
+      )
+      .catch((error) => {
+        console.warn('Native notification initialization failed:', error);
+      });
     return () => teardownNotifications();
   }, [handleNotificationPress]);
 

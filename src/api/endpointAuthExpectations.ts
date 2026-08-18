@@ -13,7 +13,10 @@ export const ENDPOINT_AUTH_EXPECTATIONS: EndpointAuthExpectation[] = [
     { method: 'GET', path: '/health', auth: 'public', area: 'search' },
     { method: 'GET', path: '/search', auth: 'public', area: 'search' },
     { method: 'GET', path: '/search/places', auth: 'public', area: 'search' },
+    { method: 'GET', path: '/search/places/details', auth: 'public', area: 'search' },
     { method: 'GET', path: '/locations/search', auth: 'public', area: 'search' },
+    { method: 'GET', path: '/locations/geocode', auth: 'public', area: 'search' },
+    { method: 'GET', path: '/locations/details', auth: 'public', area: 'search' },
 
     { method: 'POST', path: '/auth/register', auth: 'public', area: 'profile' },
     { method: 'POST', path: '/auth/login', auth: 'public', area: 'profile' },

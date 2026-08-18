@@ -3023,12 +3023,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const handleHeaderPlacePick = useCallback(
         (suggestion: LocationSuggestion, filterType: 'location' | 'venue' | 'landmark') => {
-            if (filterType === 'location' && getPlaceFeedPickerOptions(suggestion)) {
-                setHeaderScopePicker(suggestion);
+            const typed: LocationSuggestion =
+                filterType === 'venue' || filterType === 'landmark'
+                    ? { ...suggestion, type: filterType }
+                    : suggestion;
+            if (filterType === 'location' && getPlaceFeedPickerOptions(typed)) {
+                setHeaderScopePicker(typed);
                 setHeaderScopePickerKind(filterType);
                 return;
             }
-            applyCustomLocationFeed(resolvePlaceFeedSelection(suggestion), filterType);
+            applyCustomLocationFeed(resolvePlaceFeedSelection(typed), filterType);
         },
         [applyCustomLocationFeed]
     );
