@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -142,7 +143,16 @@ class NotificationController extends Controller
                 if ($userId !== '') {
                     $q->where('user_id', $userId);
                 }
-                $q->delete();
+                $deleted = $q->delete();
+                $pruned = $this->pruneRotatedTokens($userId, $token);
+
+                Log::info('FCM token removed', [
+                    'user_id' => $userId,
+                    'user_handle' => $userHandle,
+                    'token_prefix' => substr($token, 0, 12),
+                    'deleted' => $deleted,
+                    'pruned_rotated' => $pruned,
+                ]);
 
                 return response()->json([
                     'success' => true,
@@ -166,6 +176,14 @@ class NotificationController extends Controller
                     'created_at' => now(),
                 ]
             );
+
+            $this->pruneRotatedTokens($userId, $token);
+
+            Log::info('FCM token registered', [
+                'user_id' => $userId,
+                'user_handle' => $userHandle !== '' ? $userHandle : (string) ($authUser?->handle ?? ''),
+                'token_prefix' => substr($token, 0, 12),
+            ]);
 
             // Drop stale anonymous placeholders from earlier cold starts.
             DB::table('fcm_tokens')
@@ -292,5 +310,26 @@ class NotificationController extends Controller
     private function encodeCursor(string $createdAt, string $id): string
     {
         return rtrim(strtr(base64_encode($createdAt . '|' . $id), '+/', '-_'), '=');
+    }
+
+    /**
+     * Drop older FCM tokens from the same app install (same instance id prefix).
+     * Keeps other devices: their instance ids differ.
+     */
+    private function pruneRotatedTokens(string $userId, string $token): int
+    {
+        if ($userId === '' || strtolower($userId) === 'unknown' || ! str_contains($token, ':')) {
+            return 0;
+        }
+        $instanceId = Str::before($token, ':');
+        if ($instanceId === '') {
+            return 0;
+        }
+
+        return DB::table('fcm_tokens')
+            ->where('user_id', $userId)
+            ->where('token', '!=', $token)
+            ->where('token', 'like', $instanceId.':%')
+            ->delete();
     }
 }

@@ -562,6 +562,12 @@ export default function CreateScreen({ navigation, route }: any) {
                 jobId: tempId,
                 thumbUri: localThumbUri ?? undefined,
                 thumbType: mediaType === 'video' ? 'video' : 'image',
+                uploadingTitle:
+                    mediaType === 'video' ? 'Posting your clip…' : 'Preparing post…',
+                initialMessage:
+                    mediaType === 'video'
+                        ? 'This may take a moment.'
+                        : 'Posting to Gazetteer…',
             });
             hapticLight();
             resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });

@@ -4,6 +4,8 @@ export type FeedVideoHandoff = {
     muted: boolean;
     /** True when returning from Scenes (seek resume; do not remount the player). */
     fromScenes?: boolean;
+    /** Playback URI at handoff — Scenes reads this if nav params drop mediaUrl. */
+    mediaUrl?: string;
 };
 
 const handoffByPostId = new Map<string, FeedVideoHandoff>();
@@ -14,6 +16,7 @@ export function setFeedVideoHandoff(postId: string, state: FeedVideoHandoff): vo
         currentTime: Math.max(0, state.currentTime),
         muted: state.muted,
         fromScenes: state.fromScenes === true,
+        mediaUrl: state.mediaUrl,
     });
 }
 

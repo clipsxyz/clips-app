@@ -85,6 +85,7 @@ import PostCommentsSheet from '../components/PostCommentsSheet';
 import FeedShareModal from '../components/FeedShareModal';
 import SavePostModal from '../components/SavePostModal.native';
 import { postHasVideoMedia } from '../utils/postMedia';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
 import { ox } from '../constants/nativeOpticalScale';
@@ -756,16 +757,21 @@ export default function StoriesScreen({ route, navigation }: any) {
             // Unmount story TextureView first so Scenes doesn't fight the same audio session.
             setSuspendStoryMedia(true);
             const post = originalPost;
-            requestAnimationFrame(() => {
-                setTimeout(() => {
-                    navigation.navigate('Scenes', {
-                        initialPostId: post.id,
-                        posts: [post],
-                        feedLabel: 'Stories',
-                        initialMuted: true,
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            setScenesLaunchPayload({
+                                initialPostId: post.id,
+                                posts: [post],
+                                feedLabel: 'Stories',
+                                initialMuted: true,
+                            });
+                            navigation.navigate('Scenes', {
+                                initialPostId: post.id,
+                                feedLabel: 'Stories',
+                                initialMuted: true,
+                            });
+                        }, 40);
                     });
-                }, 40);
-            });
             return;
         }
 

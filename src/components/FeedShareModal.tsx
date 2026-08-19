@@ -3,6 +3,7 @@ import {
     Alert,
     Modal,
     Platform,
+    ScrollView,
     Share,
     StyleSheet,
     Text,
@@ -215,7 +216,15 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                         </TouchableOpacity>
                     </View>
 
-                    <View style={styles.shareToRow}>
+                    <ScrollView
+                        horizontal
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                        showsHorizontalScrollIndicator={false}
+                        bounces
+                        style={styles.shareToScroll}
+                        contentContainerStyle={styles.shareToRow}
+                    >
                         <TouchableOpacity
                             style={styles.appIconBtn}
                             onPress={() => void handleShareToApp('WhatsApp')}
@@ -270,7 +279,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                             </View>
                             <Text style={styles.appLabel}>Threads</Text>
                         </TouchableOpacity>
-                    </View>
+                    </ScrollView>
 
                     <TouchableOpacity onPress={handleShareSystem} style={styles.shareOption}>
                         <Icon name="share-social" size={22} color="#FFFFFF" />
@@ -391,15 +400,19 @@ const styles = StyleSheet.create({
     resetLinkDisabled: {
         opacity: 0.55,
     },
+    shareToScroll: {
+        marginBottom: 12,
+        flexGrow: 0,
+    },
     shareToRow: {
         flexDirection: 'row',
-        gap: 16,
         alignItems: 'flex-start',
-        marginBottom: 12,
+        paddingRight: 8,
     },
     appIconBtn: {
         alignItems: 'center',
         width: 64,
+        marginRight: 16,
     },
     appIconCircle: {
         width: 54,

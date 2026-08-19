@@ -282,7 +282,12 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="Scenes"
             component={ScenesScreen as React.ComponentType}
-            options={{ presentation: 'fullScreenModal' }}
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'fade_from_bottom',
+              animationDuration: 200,
+              contentStyle: { backgroundColor: '#000000' },
+            }}
           />
           <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />
           <Stack.Screen

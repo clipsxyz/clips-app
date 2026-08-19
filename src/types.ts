@@ -43,6 +43,8 @@ export type PostMediaItem = {
   duration?: number;
   /** Per-slide video poster in carousels (when type is video). */
   posterUrl?: string;
+  thumbnailUrl?: string;
+  thumbnail_url?: string;
   effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>;
   text?: string;
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };

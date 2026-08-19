@@ -80,6 +80,7 @@ import {
 } from '../constants/dmImessageTheme.native';
 import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 
 function sameDmHandle(a?: string | null, b?: string | null): boolean {
     return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
@@ -516,9 +517,13 @@ export default function MessagesScreen({ route, navigation }: any) {
     }, [messages, user?.id]);
 
     const openScenesForPost = (post: Post) => {
-        navigation.navigate('Scenes', {
+        setScenesLaunchPayload({
             initialPostId: post.id,
             posts: [post],
+            feedLabel: 'Messages',
+        });
+        navigation.navigate('Scenes', {
+            initialPostId: post.id,
             feedLabel: 'Messages',
         });
     };

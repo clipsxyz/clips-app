@@ -25,6 +25,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/search/places',
     '/search/places/details',
     '/search/places/summary',
+    '/notifications/fcm-token',
 ]);
 
 function isMigratedApiRequestPath(endpoint: string): boolean {

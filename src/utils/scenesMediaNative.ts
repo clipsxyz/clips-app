@@ -14,9 +14,9 @@ export function getScenesMediaSlides(post: Post): ScenesMediaSlide[] {
     const fromItems = (post.mediaItems || []).filter(
         (item) => item?.type === 'image' || item?.type === 'video' || item?.type === 'text',
     );
-    if (fromItems.length > 0) {
+        if (fromItems.length > 0) {
         return fromItems.map((item) => ({
-            url: item.url || '',
+            url: item.url || post.mediaUrl || '',
             type: item.type as ScenesMediaSlide['type'],
             posterUrl: item.posterUrl,
             text:

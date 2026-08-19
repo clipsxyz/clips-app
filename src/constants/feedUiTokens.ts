@@ -14,7 +14,12 @@ const FEED_UI_BY_MODE = {
   compact: {
     media: {
       minAspect: 3 / 4,
+      /** 4:5 portrait video/image (height/width). */
       maxAspect: 5 / 4,
+      /** 16:9 landscape video (height/width). */
+      videoLandscapeAspect: 9 / 16,
+      /** Cap media so header + video + action bar fit in one screen. */
+      maxViewportFraction: 0.58,
     },
     spacing: {
       inset: 12,
@@ -54,7 +59,12 @@ const FEED_UI_BY_MODE = {
   comfortable: {
     media: {
       minAspect: 3 / 4,
+      /** 4:5 portrait video/image (height/width). */
       maxAspect: 5 / 4,
+      /** 16:9 landscape video (height/width). */
+      videoLandscapeAspect: 9 / 16,
+      /** Cap media so header + video + action bar fit in one screen. */
+      maxViewportFraction: 0.58,
     },
     spacing: {
       inset: 14,
@@ -90,3 +100,17 @@ const FEED_UI_BY_MODE = {
 // Switch this to 'comfortable' if you want a roomier layout.
 export const FEED_UI_MODE: FeedUiMode = 'compact';
 export const FEED_UI = FEED_UI_BY_MODE[FEED_UI_MODE];
+
+/** Media frame height: 4:5 vertical (default) or 16:9 landscape, capped to the viewport. */
+export function feedCardMediaHeight(
+  width: number,
+  windowHeight: number,
+  isVideo: boolean,
+  isLandscape = false,
+): number {
+  const aspect =
+    isVideo && isLandscape ? FEED_UI.media.videoLandscapeAspect : FEED_UI.media.maxAspect;
+  const byAspect = width * aspect;
+  const cap = windowHeight * FEED_UI.media.maxViewportFraction;
+  return Math.min(byAspect, cap);
+}

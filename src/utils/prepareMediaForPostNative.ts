@@ -13,6 +13,7 @@ type PrepareNativeMediaArgs = {
     captureVideoPoster?: () => Promise<string>;
     /** Cover frame time in seconds (used for FFmpeg poster fallback). */
     videoCoverTime?: number;
+    onStage?: (stage: 'compress' | 'poster' | 'upload') => void;
 };
 
 type PrepareNativeMediaResult = {
@@ -82,7 +83,7 @@ async function resolveVideoPosterUrl(
 }
 
 /**
- * Instagram-style pipeline: transcode local video (scale/bitrate/fps + optional filter bake),
+ * On-device pipeline: transcode local video (720p / bitrate cap / fps + optional filter bake),
  * attach poster, upload, then createPost uses remote URLs.
  */
 export async function prepareMediaForPostNative({
@@ -91,6 +92,7 @@ export async function prepareMediaForPostNative({
     filterInfo,
     captureVideoPoster,
     videoCoverTime = 0,
+    onStage,
 }: PrepareNativeMediaArgs): Promise<PrepareNativeMediaResult> {
     if (!mediaUrl || !mediaType) {
         return {};
@@ -121,6 +123,7 @@ export async function prepareMediaForPostNative({
     if (mediaType === 'video' && isLocalUri(workingUrl)) {
         const filterName = shouldBake && filterInfo ? filterInfo.active : null;
         try {
+            onStage?.('compress');
             workingUrl = await transcodeVideoForUploadNative(workingUrl, { filterName });
         } catch (err) {
             console.warn('prepareMediaForPostNative: video transcode/compress failed', err);
@@ -132,6 +135,7 @@ export async function prepareMediaForPostNative({
     }
 
     if (mediaType === 'video') {
+        onStage?.('poster');
         videoPosterUrl = await resolveVideoPosterUrl(workingUrl, coverTime, captureVideoPoster);
         if (!videoPosterUrl && workingUrl !== normalizedUrl) {
             videoPosterUrl = await resolveVideoPosterUrl(normalizedUrl, coverTime, captureVideoPoster);
@@ -143,6 +147,7 @@ export async function prepareMediaForPostNative({
             const mime = mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
             const name =
                 mediaType === 'video' ? `clip-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`;
+            onStage?.('upload');
             console.log('[prepareMediaForPostNative] uploading media', {
                 mime,
                 name,

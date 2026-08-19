@@ -73,7 +73,14 @@ function getMessagingInstance(): any | null {
 
 async function getCurrentUserIdentity(): Promise<{ id?: string; handle?: string } | null> {
   try {
-    const userStr = await AsyncStorage.getItem('user');
+    let userStr = await AsyncStorage.getItem('user');
+    if (!userStr) {
+      try {
+        userStr = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
+      } catch {
+        userStr = null;
+      }
+    }
     if (!userStr) return null;
     const userData = JSON.parse(userStr);
     return {
@@ -135,6 +142,7 @@ async function removeTokenFromBackend(token: string): Promise<void> {
         remove: true,
       }),
     });
+    console.log('[FCM] token removed for', user?.handle || user?.id || 'user');
   } catch (error) {
     console.warn('Failed to remove FCM token from backend:', error);
   }
@@ -407,11 +415,19 @@ export async function registerBackgroundMessageHandler(
 }
 
 export async function clearNotificationSession(): Promise<void> {
-  const messaging = await getMessagingInstance();
-  if (currentFcmToken) {
-    await removeTokenFromBackend(currentFcmToken);
-    currentFcmToken = null;
+  const messaging = getMessagingInstance();
+  const tokens = new Set<string>();
+  if (currentFcmToken) tokens.add(currentFcmToken);
+  try {
+    const live = await messaging?.getToken?.();
+    if (typeof live === 'string' && live.trim()) tokens.add(live.trim());
+  } catch (error) {
+    console.warn('[FCM] getToken during logout failed:', error);
   }
+  for (const token of tokens) {
+    await removeTokenFromBackend(token);
+  }
+  currentFcmToken = null;
   if (messaging && typeof messaging.deleteToken === 'function') {
     try {
       await messaging.deleteToken();

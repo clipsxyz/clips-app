@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
+import { getImageFullscreenLaunch, clearImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
@@ -37,17 +38,16 @@ import { useAuth } from '../context/Auth';
 import { ox } from '../constants/nativeOpticalScale';
 
 /**
- * Option 3 — sheet-style slide: fullscreen content slides up from the bottom,
- * slides down on close. Avoids card-morph “shadow” ghosts over the feed.
+ * Fast fade-rise into fullscreen. Short travel so the open does not feel sticky.
  */
-const EXPAND_MS = 380;
-const COLLAPSE_MS = 300;
-const BACKDROP_IN_MS = 280;
-const BACKDROP_OUT_MS = 280;
-const EXPAND_EASE = Easing.bezier(0.22, 1, 0.36, 1);
+const EXPAND_MS = 200;
+const COLLAPSE_MS = 170;
+const BACKDROP_IN_MS = 140;
+const BACKDROP_OUT_MS = 140;
+const EXPAND_EASE = Easing.bezier(0.16, 1, 0.3, 1);
 const COLLAPSE_EASE = Easing.bezier(0.4, 0, 1, 1);
-const EXPAND_FALLBACK_MS = EXPAND_MS + 80;
-const COLLAPSE_FALLBACK_MS = COLLAPSE_MS + 80;
+const EXPAND_FALLBACK_MS = EXPAND_MS + 40;
+const COLLAPSE_FALLBACK_MS = COLLAPSE_MS + 40;
 
 export type ImageFullscreenOrigin = {
     x: number;
@@ -99,7 +99,7 @@ function atHandle(handle: string): string {
 }
 
 /**
- * Still-image viewer — slide-up sheet open / slide-down close.
+ * Still-image viewer — short fade-rise open / close.
  */
 export default function ImageFullscreenModal({
     post,
@@ -131,7 +131,15 @@ export default function ImageFullscreenModal({
     const scrollRef = useRef<ScrollView>(null);
     const skipScrollSyncRef = useRef(false);
     const originRef = useRef<ImageFullscreenOrigin | null>(null);
-    const images = useMemo(() => (post ? collectImageUrls(post) : []), [post]);
+    const images = useMemo(() => {
+        const fromPost = post ? collectImageUrls(post) : [];
+        if (fromPost.length > 0) return fromPost;
+        const launch = getImageFullscreenLaunch();
+        if (launch && post && String(launch.post.id) === String(post.id) && launch.urls.length > 0) {
+            return launch.urls;
+        }
+        return launch?.urls ?? [];
+    }, [post]);
     const textBody = (post?.text || post?.caption || '').trim();
     const isTextOnly = images.length === 0 && Boolean(textBody);
 
@@ -166,6 +174,7 @@ export default function ImageFullscreenModal({
         setClosing(false);
         setImageCover(true);
         setChromeShown(false);
+        clearImageFullscreenLaunch();
         onClose();
     }, [onClose]);
 
@@ -191,23 +200,21 @@ export default function ImageFullscreenModal({
         closeFinishedRef.current = false;
 
         requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                backdropOp.value = withTiming(1, {
-                    duration: BACKDROP_IN_MS,
-                    easing: Easing.out(Easing.cubic),
-                });
-                progress.value = withTiming(
-                    1,
-                    { duration: EXPAND_MS, easing: EXPAND_EASE },
-                    (finished) => {
-                        if (finished) runOnJS(markExpanded)();
-                    },
-                );
-                expandFallbackTimerRef.current = setTimeout(() => {
-                    expandFallbackTimerRef.current = null;
-                    markExpanded();
-                }, EXPAND_FALLBACK_MS);
+            backdropOp.value = withTiming(1, {
+                duration: BACKDROP_IN_MS,
+                easing: Easing.out(Easing.cubic),
             });
+            progress.value = withTiming(
+                1,
+                { duration: EXPAND_MS, easing: EXPAND_EASE },
+                (finished) => {
+                    if (finished) runOnJS(markExpanded)();
+                },
+            );
+            expandFallbackTimerRef.current = setTimeout(() => {
+                expandFallbackTimerRef.current = null;
+                markExpanded();
+            }, EXPAND_FALLBACK_MS);
         });
     }, [backdropOp, markExpanded, originRect, progress]);
 
@@ -276,7 +283,7 @@ export default function ImageFullscreenModal({
         opacity: backdropOp.value,
     }));
 
-    /** Fullscreen panel slides up from below the fold. */
+    /** Fullscreen panel fades in and rises a short distance — not a full-height slide. */
     const shellStyle = useAnimatedStyle(() => {
         const p = progress.value;
         const h = Math.max(1, screenH.value);
@@ -287,8 +294,8 @@ export default function ImageFullscreenModal({
             width: '100%' as const,
             height: h,
             backgroundColor: '#000000',
-            opacity: interpolate(p, [0, 0.12, 1], [0, 1, 1]),
-            transform: [{ translateY: interpolate(p, [0, 1], [h, 0]) }],
+            opacity: interpolate(p, [0, 0.22, 1], [0, 1, 1]),
+            transform: [{ translateY: interpolate(p, [0, 1], [Math.round(h * 0.12), 0]) }],
         };
     });
 

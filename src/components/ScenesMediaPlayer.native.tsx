@@ -15,7 +15,7 @@ import Video, { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import ScenesTextPostCard from './ScenesTextPostCard.native';
-import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
 import {
     getScenesMediaSlides,
     resolveScenesVideoUrl,
@@ -106,6 +106,15 @@ export default function ScenesMediaPlayer({
         [hasCarousel, onSlideProgress, slideIndex, slides.length, width],
     );
 
+    const playableSource = (raw: string) => {
+        const src = scenesVideoSource(raw);
+        if (typeof src === 'number') return src;
+        if (src && isPlayableVideoUri(src.uri)) return src;
+        return null;
+    };
+
+    const videoFillStyle = { width: '100%' as const, height: '100%' as const };
+
     const renderTapCapture = (enabled: boolean) =>
         enabled && onMediaPress ? (
             <Pressable
@@ -139,13 +148,13 @@ export default function ScenesMediaPlayer({
         return (
             <View key={`${post.id}-${index}-${rawUrl}`} style={[styles.slide, { width, height }]}>
                 {slide.type === 'video' ? (
-                    slideActive && canPlayVideo ? (
+                    slideActive && canPlayVideo && playableSource(rawUrl) ? (
                         <Video
                             ref={slideActive ? videoRef : undefined}
-                            source={scenesVideoSource(rawUrl)}
-                            style={{ width, height }}
+                            source={playableSource(rawUrl) as object}
+                            style={videoFillStyle}
                             pointerEvents="none"
-                            resizeMode="contain"
+                            resizeMode="cover"
                             repeat
                             paused={paused}
                             muted={muted || outputVolume <= 0}
@@ -230,13 +239,13 @@ export default function ScenesMediaPlayer({
                                         {renderSlide(slide, i)}
                                         {slideActive ? renderTapCapture(true) : null}
                                     </>
-                                ) : slide.type === 'video' && slideActive && canPlayVideo ? (
+                                ) : slide.type === 'video' && slideActive && canPlayVideo && playableSource(slide.url) ? (
                                     <View style={[styles.slide, { width, height }]}>
                                         <Video
                                             ref={videoRef}
-                                            source={scenesVideoSource(slide.url)}
-                                            style={{ width, height }}
-                                            resizeMode="contain"
+                                            source={playableSource(slide.url) as object}
+                                            style={videoFillStyle}
+                                            resizeMode="cover"
                                             repeat
                                             paused={paused}
                                             muted={muted || outputVolume <= 0}
@@ -268,13 +277,13 @@ export default function ScenesMediaPlayer({
             ) : slides.length === 1 ? (
                 slides[0].type === 'text' ? (
                     renderSlide(slides[0], 0)
-                ) : slides[0].type === 'video' && canPlayVideo ? (
+                ) : slides[0].type === 'video' && canPlayVideo && playableSource(slides[0].url) ? (
                     <View style={[styles.slide, { width, height }]}>
                         <Video
                             ref={videoRef}
-                            source={scenesVideoSource(slides[0].url)}
-                            style={{ width, height }}
-                            resizeMode="contain"
+                            source={playableSource(slides[0].url) as object}
+                            style={videoFillStyle}
+                            resizeMode="cover"
                             repeat
                             paused={paused}
                             muted={muted || outputVolume <= 0}

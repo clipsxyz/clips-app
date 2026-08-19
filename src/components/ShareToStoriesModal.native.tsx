@@ -27,9 +27,19 @@ type Props = {
     post: Post | null;
     onClose: () => void;
     onShareSuccess?: (postId: string) => void;
+    /** Pin feed scroll — mounting/unmounting this Modal jumps FlatList on Android. */
+    onShow?: () => void;
+    onDismiss?: () => void;
 };
 
-export default function ShareToStoriesModal({ visible, post, onClose, onShareSuccess }: Props) {
+export default function ShareToStoriesModal({
+    visible,
+    post,
+    onClose,
+    onShareSuccess,
+    onShow,
+    onDismiss,
+}: Props) {
     const { user } = useAuth();
     const [isSharing, setIsSharing] = useState(false);
     const textCaptureRef = useRef<ShareTextStoryCaptureHandle>(null);
@@ -136,12 +146,19 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
         }
     };
 
-    if (!visible || !post) return null;
-
     return (
         <View pointerEvents="box-none">
             <ShareTextStoryCapture ref={textCaptureRef} />
-        <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+        <Modal
+            visible={Boolean(visible && post)}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+            hardwareAccelerated
+            onRequestClose={onClose}
+            onShow={onShow}
+            onDismiss={onDismiss}
+        >
             <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.card} onPress={() => {}}>
                     <PassportSheetCanvas contentStyle={styles.cardInner}>

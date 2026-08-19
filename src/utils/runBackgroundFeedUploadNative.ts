@@ -140,11 +140,21 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
     let videoPosterUrl: string | undefined;
 
     if (live && job.localMediaUri && job.mediaType) {
+        const overlay = getUploadOverlayForJob(job.tempId);
         const preparedMedia = await prepareMediaForPostNative({
             mediaUrl: job.localMediaUri,
             mediaType: job.mediaType,
             filterInfo: job.filterForExport,
             videoCoverTime: job.videoCoverTime,
+            onStage: (stage) => {
+                if (stage === 'compress') {
+                    overlay?.progress('This may take a moment.', 'Posting your clip…');
+                } else if (stage === 'poster') {
+                    overlay?.progress('Almost there…', 'Posting your clip…');
+                } else {
+                    overlay?.progress('Sharing to your feed…', 'Posting your clip…');
+                }
+            },
         });
         if (preparedMedia.filterExportFailed && job.filterForExport) {
             console.warn('runBackgroundFeedUploadNative: filter bake partially failed');

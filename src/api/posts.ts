@@ -1253,14 +1253,21 @@ export function transformLaravelPost(response: any): Post {
   resolvedMediaUrl = rewriteMediaUrlForNetwork(resolvedMediaUrl);
   const resolvedMediaType = response.media_type || response.mediaType || firstItemType || undefined;
   const resolvedVideoFrameMode = (response.video_frame_mode || response.videoFrameMode || 'crop') as Post['videoFrameMode'];
-  const resolvedVideoPosterUrl = response.video_poster_url || response.videoPosterUrl || undefined;
+  const firstItemPoster =
+    firstItem && (firstItem.poster_url || firstItem.posterUrl || firstItem.thumbnail_url || firstItem.thumbnailUrl);
+  const resolvedVideoPosterUrl =
+    response.video_poster_url ||
+    response.videoPosterUrl ||
+    (typeof firstItemPoster === 'string' ? firstItemPoster : undefined) ||
+    undefined;
 
   // Rewrite mediaItems URLs for network access
   let processedMediaItems = mediaItems;
   if (Array.isArray(mediaItems) && mediaItems.length > 0) {
     processedMediaItems = mediaItems.map((item: any) => {
       if (!item) return item;
-      const rawPoster = item.poster_url || item.posterUrl;
+      const rawPoster =
+        item.poster_url || item.posterUrl || item.thumbnail_url || item.thumbnailUrl;
       const posterUrl =
         rawPoster && typeof rawPoster === 'string'
           ? rewriteMediaUrlForNetwork(String(rawPoster))

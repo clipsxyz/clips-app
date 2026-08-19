@@ -3603,13 +3603,16 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Feed images: force Instagram-style 4:5 frame so cards are consistently tall.
-    // Still images open in Threads-style fullscreen; only videos open Scenes.
+    // Images stay Instagram 4:5. Videos default to 4:5 (vertical) or 16:9 (landscape).
     if (currentItem?.type === 'image') {
+      const imageRatio = hasMultipleItems
+        ? (carouselFrameAspectRatio ?? aspectRatio)
+        : aspectRatio;
+      const isLandscape = imageRatio != null && imageRatio < 1;
       return {
         width: '100%',
-        height: window.innerWidth * FEED_TARGET_ASPECT,
-        maxHeight: '82vh',
+        height: window.innerWidth * (isLandscape ? 9 / 16 : FEED_TARGET_ASPECT),
+        maxHeight: '58vh',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3618,19 +3621,35 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Portrait-first feed policy:
-    // - keep tall media at 4:5 max
-    // - keep normal/square media near natural height
-    // - lift very wide media to at least 3:4 so cards still feel immersive
+    const FEED_VIDEO_LANDSCAPE_ASPECT = 9 / 16;
     const activeAspectRatio = hasMultipleItems
       ? (carouselFrameAspectRatio ?? aspectRatio)
       : aspectRatio;
+    if (currentItem?.type === 'video') {
+      const isLandscape = activeAspectRatio != null && activeAspectRatio < 1;
+      const feedAspect = isLandscape ? FEED_VIDEO_LANDSCAPE_ASPECT : FEED_TARGET_ASPECT;
+      return {
+        width: '100%',
+        height: window.innerWidth * feedAspect,
+        maxHeight: '58vh',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box'
+      };
+    }
+
+    // Portrait-first feed policy for remaining media:
+    // - keep tall media at 4:5 max
+    // - keep normal/square media near natural height
+    // - lift very wide media to at least 3:4 so cards still feel immersive
     if (activeAspectRatio) {
       const feedAspect = Math.min(Math.max(activeAspectRatio, FEED_MIN_ASPECT), FEED_TARGET_ASPECT);
       return {
         width: '100%',
         height: window.innerWidth * feedAspect,
-        maxHeight: '82vh',
+        maxHeight: '58vh',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3639,10 +3658,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Default while loading: Instagram-like 4:5 frame.
+    // Default while loading: Instagram-like 4:5 frame, capped to one screen.
     return {
       aspectRatio: '4/5',
-      maxHeight: '82vh',
+      maxHeight: '58vh',
       width: '100%',
       position: 'relative',
       display: 'flex',
@@ -3862,7 +3881,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             );
           }
 
-          // Match create post page exactly - use object-cover in fixed aspect container
+          // Full-frame video in the feed — contain so vertical overlays are not cropped.
           const hasValidVideoSrc = currentItem.type === 'video' && currentItem.url && currentItem.url.trim().length > 0;
           let mediaElement = hasValidVideoSrc ? (
             <video

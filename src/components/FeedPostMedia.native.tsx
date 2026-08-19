@@ -15,11 +15,10 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
-import type { StickerOverlay } from '../types';
+import type { Post, PostMediaItem, StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { type VideoRef } from 'react-native-video';
-import type { Post } from '../types';
 import {
     getActiveFeedVideoPostId,
     subscribeActiveFeedVideo,
@@ -47,6 +46,31 @@ import { FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
 import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
+
+function firstMediaUri(...vals: unknown[]): string | undefined {
+    for (const v of vals) {
+        if (typeof v === 'string' && v.trim() && !/^data:text\//i.test(v.trim())) {
+            return v.trim();
+        }
+    }
+    return undefined;
+}
+
+function resolveFeedVideoPosterUri(
+    item: PostMediaItem | undefined,
+    post: Post,
+): string | undefined {
+    const extra = item as { thumbnailUrl?: string; thumbnail_url?: string } | undefined;
+    const postExtra = post as { thumbnailUrl?: string; thumbnail_url?: string };
+    return firstMediaUri(
+        extra?.posterUrl,
+        extra?.thumbnailUrl,
+        extra?.thumbnail_url,
+        post.videoPosterUrl,
+        postExtra.thumbnailUrl,
+        postExtra.thumbnail_url,
+    );
+}
 
 export type FeedPostMediaHandle = {
     toggleVideoMute: () => void;
@@ -133,6 +157,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() =>
         getActiveFeedVideoPostId(),
     );
+    const [isLandscapeMedia, setIsLandscapeMedia] = useState(false);
 
     const resetPosterCover = useCallback(() => {
         mediaRevealRef.current?.stop();
@@ -235,20 +260,20 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         lastEmittedIndexRef.current = 0;
         setPlayFailed(false);
         setVideoUrlFallbackByRaw({});
+        setIsLandscapeMedia(false);
     }, [post.id]);
 
     // Prefetch video posters so placeholders paint instantly on re-scroll.
     useEffect(() => {
         const uris = new Set<string>();
-        if (typeof post.videoPosterUrl === 'string' && post.videoPosterUrl.trim()) {
-            uris.add(post.videoPosterUrl.trim());
-        }
+        const rootPoster = resolveFeedVideoPosterUri(undefined, post);
+        if (rootPoster) uris.add(rootPoster);
         for (const item of post.mediaItems || []) {
-            const poster =
-                (item as { posterUrl?: string; thumbnailUrl?: string } | undefined)?.posterUrl ||
-                (item as { thumbnailUrl?: string } | undefined)?.thumbnailUrl;
-            if (typeof poster === 'string' && poster.trim() && /^https?:\/\//i.test(poster.trim())) {
-                uris.add(poster.trim());
+            const poster = resolveFeedVideoPosterUri(item, post);
+            if (poster && /^https?:\/\//i.test(poster)) {
+                uris.add(poster);
+            } else if (poster && isPlayableLocalMediaUri(poster)) {
+                uris.add(poster);
             }
         }
         for (const uri of uris) {
@@ -568,10 +593,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
 
-    const mediaAspect = width > 0 && height > 0 ? width / height : 4 / 5;
+    const frameHeight =
+        isLandscapeMedia && width > 0 ? Math.min(width * (9 / 16), height) : height;
+    const mediaAspect = width > 0 && frameHeight > 0 ? width / frameHeight : 4 / 5;
     const frameStyle = {
         width,
-        height,
+        height: frameHeight,
         aspectRatio: mediaAspect,
         backgroundColor: '#121212',
         overflow: 'hidden' as const,
@@ -590,23 +617,21 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         const slideIsVideo = item?.type === 'video' || (!item && isVideoPost(post));
         const slideVideo = !textOnly && slideIsVideo;
 
-        const slidePosterRaw =
-            (item as { posterUrl?: string; thumbnailUrl?: string } | undefined)?.posterUrl ||
-            (item as { thumbnailUrl?: string } | undefined)?.thumbnailUrl ||
-            (typeof post.videoPosterUrl === 'string' ? post.videoPosterUrl : undefined) ||
-            undefined;
-        // Accept any non-empty poster/thumbnail URI (mock, local, remote) — do not filter.
-        const slidePosterUri =
-            typeof slidePosterRaw === 'string' && slidePosterRaw.trim()
-                ? slidePosterRaw.trim()
-                : undefined;
+        const slidePosterRaw = resolveFeedVideoPosterUri(
+            item as PostMediaItem | undefined,
+            post,
+        );
+        const slidePosterUri = slidePosterRaw;
 
         const slideIsCurrent = slideIndex === currentIndex;
+        // Keep the player mounted (paused) while the cell is on-screen so the
+        // first frame / poster is ready before autoplay. Unmount only for
+        // overlay suspend (Android TextureView punch-through) or play failure.
         const slideMountVideo =
             slideVideo &&
             slideIsCurrent &&
             !playFailed &&
-            (mode === 'detail' || (mode === 'feed' && isFeedAutoplayActive && !suspendNativeVideo));
+            (mode === 'detail' || (mode === 'feed' && !suspendNativeVideo));
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
@@ -614,13 +639,20 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                     <Image
                         source={{ uri: slideUrl }}
-                        style={styles.stillImage}
+                        style={[styles.stillImage, { width: '100%', height: '100%' }]}
                         resizeMode="cover"
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         progressiveRenderingEnabled={false}
                         pointerEvents={mediaPointerEvents}
                         onLoadStart={() => beginUrlLoad(slideRawUrl)}
-                        onLoad={() => markUrlLoaded(slideRawUrl)}
+                        onLoad={(e) => {
+                            markUrlLoaded(slideRawUrl);
+                            if (!slideIsCurrent) return;
+                            const src = e.nativeEvent.source;
+                            if (src && Number(src.width) > 0 && Number(src.height) > 0) {
+                                setIsLandscapeMedia(Number(src.width) > Number(src.height));
+                            }
+                        }}
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />
                     {renderFeedTapOverlay()}
@@ -640,7 +672,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                 {slideMountVideo ? (
                     <Animated.View
-                        style={[styles.videoFill, { opacity: videoOpacity }]}
+                        style={styles.videoFill}
                         pointerEvents={mediaPointerEvents}
                         collapsable={false}
                     >
@@ -648,7 +680,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                             key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
                             ref={feedVideoRef}
                             source={cachedVideoSource as object}
-                            style={styles.videoFill}
+                            style={[styles.videoFill, { width: '100%', height: '100%' }]}
                             resizeMode="cover"
                             controls={false}
                             paused={
@@ -685,7 +717,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                             {...androidListSafeVideoProps()}
                             pointerEvents="none"
                             onLoadStart={() => {
-                                resetPosterCover();
                                 beginUrlLoad(slideRawUrl);
                             }}
                             onReadyForDisplay={onFirstFrameReady}
@@ -705,7 +736,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                                         /* ignore */
                                     }
                                 }
-                                void meta;
+                                const ns = meta?.naturalSize;
+                                if (ns && Number(ns.width) > Number(ns.height)) {
+                                    setIsLandscapeMedia(true);
+                                } else if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
+                                    setIsLandscapeMedia(false);
+                                }
                             }}
                             onProgress={(e) => {
                                 if (mode !== 'feed' || !isFeedAutoplayActive) return;
@@ -714,6 +750,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                                     setFeedVideoHandoff(String(post.id), {
                                         currentTime: t,
                                         muted: !soundOn,
+                                        mediaUrl: slideRawUrl,
                                     });
                                 }
                             }}
@@ -722,30 +759,19 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     </Animated.View>
                 ) : null}
 
-                {showBufferCover ? (
-                    slidePosterUri ? (
-                        <Animated.Image
-                            source={{ uri: slidePosterUri }}
-                            style={[
-                                styles.posterCover,
-                                { opacity: slideMountVideo ? posterOpacity : 1 },
-                            ]}
-                            resizeMode="cover"
-                            resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                            pointerEvents="none"
-                            onLoad={() => markUrlLoaded(slideRawUrl)}
-                            onError={() => markUrlLoaded(slideRawUrl)}
-                        />
-                    ) : (
-                        <Animated.View
-                            style={[
-                                styles.posterCover,
-                                styles.posterPlaceholder,
-                                { opacity: slideMountVideo ? posterOpacity : 1 },
-                            ]}
-                            pointerEvents="none"
-                        />
-                    )
+                {slidePosterUri && showBufferCover ? (
+                    <Animated.Image
+                        source={{ uri: slidePosterUri }}
+                        style={[
+                            styles.posterCover,
+                            { opacity: slideMountVideo ? posterOpacity : 1 },
+                        ]}
+                        resizeMode="cover"
+                        resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                        pointerEvents="none"
+                        onLoad={() => markUrlLoaded(slideRawUrl)}
+                        onError={() => markUrlLoaded(slideRawUrl)}
+                    />
                 ) : null}
 
                 {renderFeedTapOverlay()}
@@ -777,19 +803,19 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     decelerationRate="fast"
                     scrollEventThrottle={16}
                     onMomentumScrollEnd={onCarouselScrollEnd}
-                    style={{ width, height, aspectRatio: mediaAspect }}
+                    style={{ width, height: frameHeight, aspectRatio: mediaAspect }}
                 >
                     {carouselItems.map((item, index) => (
                         <View
                             key={`${post.id}-carousel-${index}-${item.url}`}
-                            style={[styles.mediaFrame, { width, height, aspectRatio: mediaAspect }]}
+                            style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}
                         >
                             {renderSlide(item, index)}
                         </View>
                     ))}
                 </ScrollView>
             ) : (
-                <View style={[styles.mediaFrame, { width, height, aspectRatio: mediaAspect }]}>
+                <View style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}>
                     {inner}
                 </View>
             )}
@@ -801,7 +827,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             style={[
                 styles.wrap,
                 styles.mediaFrame,
-                { width, height, aspectRatio: mediaAspect },
+                { width, height: frameHeight, aspectRatio: mediaAspect },
                 style,
             ]}
             collapsable={false}
@@ -809,7 +835,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             {feedTapCapture && hasCarousel ? (
                 <GestureDetector gesture={mediaTapGesture}>
                     <View
-                        style={[styles.mediaFrame, { width, height, aspectRatio: mediaAspect }]}
+                        style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}
                         collapsable={false}
                     >
                         {mediaBody}
@@ -828,7 +854,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 <FeedStickerOverlays
                     stickers={stickers}
                     containerWidth={width}
-                    containerHeight={height}
+                    containerHeight={frameHeight}
                 />
             ) : null}
             {renderFeedTapOverlay()}
@@ -882,6 +908,7 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     stillImage: {
+        ...StyleSheet.absoluteFillObject,
         width: '100%',
         height: '100%',
         opacity: 1,

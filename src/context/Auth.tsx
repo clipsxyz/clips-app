@@ -26,13 +26,17 @@ async function hydrateUserFromNativeStorage(): Promise<void> {
   }
 }
 
-function persistUserToNativeStorage(userJson: string | null): void {
-  void import('@react-native-async-storage/async-storage')
-    .then(({ default: AsyncStorage }) => {
-      if (userJson == null) return AsyncStorage.removeItem(USER_STORAGE_KEY);
-      return AsyncStorage.setItem(USER_STORAGE_KEY, userJson);
-    })
-    .catch(() => {});
+async function persistUserToNativeStorage(userJson: string | null): Promise<void> {
+  try {
+    const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+    if (userJson == null) {
+      await AsyncStorage.removeItem(USER_STORAGE_KEY);
+      return;
+    }
+    await AsyncStorage.setItem(USER_STORAGE_KEY, userJson);
+  } catch {
+    // web / unavailable
+  }
 }
 
 function setSentryUser(user: { id: string; username?: string } | null) {
@@ -325,9 +329,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       toStore.avatarUrl = undefined;
     }
     localStorage.setItem('user', JSON.stringify(toStore));
-    persistUserToNativeStorage(JSON.stringify(toStore));
 
     void (async () => {
+      try {
+        await persistUserToNativeStorage(JSON.stringify(toStore));
+      } catch {
+        // continue even if native storage persist fails
+      }
       try {
         await Promise.all([hydrateFollowsStorage(u.id), hydratePrivacyStorage()]);
       } catch {
@@ -360,20 +368,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     authRefreshGenRef.current += 1;
     const prevId = user?.id;
-    // Disconnect Socket.IO when user logs out
     disconnectSocket();
-    import('../services/notifications')
-      .then(({ clearNotificationSession }) => clearNotificationSession?.())
-      .catch(() => {});
+    // Clear UI immediately, but keep Sanctum + AsyncStorage user until FCM unregister finishes.
     setUser(null);
     if (prevId) clearUserState(prevId);
     localStorage.removeItem('user');
-    persistUserToNativeStorage(null);
-    void clearAuthToken();
     try {
       localStorage.removeItem('clips_app_stable_uid');
     } catch (_) {}
     setSentryUser(null);
+    void (async () => {
+      try {
+        const { clearNotificationSession } = await import('../services/notifications');
+        await clearNotificationSession?.();
+      } catch {
+        // still drop local credentials
+      }
+      await persistUserToNativeStorage(null);
+      await clearAuthToken();
+    })();
   };
 
   return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;

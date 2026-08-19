@@ -61,7 +61,7 @@ import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
-import { FEED_UI } from '../constants/feedUiTokens';
+import { FEED_UI, feedCardMediaHeight } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
@@ -79,6 +79,7 @@ import {
 import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScenesHandoffNative';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
     isScenesViewerActive,
@@ -158,6 +159,7 @@ import FeedPostTagRow from '../components/FeedPostTagRow.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
 import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
+import { setImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
 import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
@@ -996,10 +998,10 @@ const FeedCard = React.memo(function FeedCard({
     onRegisterDmAnchor,
     onOpenImageFullscreen,
     onOpenScenes,
-    onShareSuccess,
     onOpenLikesSheet,
     onOpenTaggedSheet,
     onLikeBurst,
+    onShareToStories,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -1026,11 +1028,12 @@ const FeedCard = React.memo(function FeedCard({
     viewerUserId?: string;
     onOpenDM?: (handle: string, postId: string) => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
-    onShareSuccess?: (postId: string) => void;
     onOpenLikesSheet?: () => void;
     onOpenTaggedSheet?: () => void;
     /** Window coords — parent keeps one Modal so Android doesn't jump the FlatList. */
     onLikeBurst?: (windowX: number, windowY: number) => void;
+    /** Parent-owned share modal — per-card Modal show/hide jumps FlatList on Android. */
+    onShareToStories?: () => void;
 }) {
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
@@ -1048,7 +1051,6 @@ const FeedCard = React.memo(function FeedCard({
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
     const [carouselIndex, setCarouselIndex] = React.useState(0);
     const likeButtonRef = React.useRef<View>(null);
-    const [shareToStoriesVisible, setShareToStoriesVisible] = React.useState(false);
     const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
     const [boostMetricsActive, setBoostMetricsActive] = React.useState(Boolean(post.isBoosted));
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
@@ -1074,19 +1076,22 @@ const FeedCard = React.memo(function FeedCard({
         },
         [onLikeBurst],
     );
-    const { width: windowWidth } = useWindowDimensions();
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
-    // Fixed 4:5 (height/width) feed frame — measuring poster/image aspect on enter
-    // reflows the card and reads as a shake when scrolling post-to-post.
-    const MEDIA_MAX_ASPECT = FEED_UI.media.maxAspect;
-    const mediaFrameHeight = cardMediaWidth * MEDIA_MAX_ASPECT;
+    // 4:5 portrait (default) or 16:9 landscape, capped to ~58% of the screen so
+    // header + media + likes/comments/share fit without scrolling one post.
+    const mediaFrameHeight = feedCardMediaHeight(
+        cardMediaWidth,
+        safePositiveLayoutNumber(windowHeight, 720),
+        postHasVideoMedia(post),
+    );
     const imageStyle = React.useMemo(
         () => ({
             width: cardMediaWidth,
             height: mediaFrameHeight,
             ...FEED_CARD_MEDIA_FRAME,
         }),
-        [MEDIA_MAX_ASPECT, cardMediaWidth, mediaFrameHeight],
+        [cardMediaWidth, mediaFrameHeight],
     );
 
     // Auto-detect image dimensions if not provided
@@ -1346,7 +1351,7 @@ const FeedCard = React.memo(function FeedCard({
                             if (post.stats.likes > 0) onOpenLikesSheet?.();
                         }}
                         onComment={onComment}
-                        onShareToStories={() => setShareToStoriesVisible(true)}
+                        onShareToStories={() => onShareToStories?.()}
                         onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
                         reclipDisabled={isCurrentUser}
                         onSave={() => { void onBookmark(); }}
@@ -1369,15 +1374,6 @@ const FeedCard = React.memo(function FeedCard({
             {showBoostMetrics ? (
                 <BoostMetricsPanel post={post} isOpen={isMetricsOpen} />
             ) : null}
-
-            <ShareToStoriesModal
-                visible={shareToStoriesVisible}
-                post={post}
-                onClose={() => setShareToStoriesVisible(false)}
-                onShareSuccess={() => {
-                    onShareSuccess?.(post.id);
-                }}
-            />
 
             {post.bannerText ? <FeedNewsTicker text={post.bannerText} /> : null}
 
@@ -1594,6 +1590,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         Boolean(imageFullscreenPost);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
+    const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
     const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
     const [feedGazetteerAlert, setFeedGazetteerAlert] = useState<{
         title: string;
@@ -1659,6 +1656,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
+    const pinFeedScrollSoon = useCallback((explicitY?: number | null) => {
+        const y = explicitY ?? feedScrollYRef.current;
+        const apply = () => {
+            flatListRef.current?.scrollToOffset({ offset: y, animated: false });
+        };
+        apply();
+        requestAnimationFrame(() => {
+            apply();
+            requestAnimationFrame(apply);
+        });
+    }, []);
     /** One feed-level burst Modal — per-card Modal show/hide jumps FlatList on Android. */
     const [feedLikeBurst, setFeedLikeBurst] = useState<{ x: number; y: number; key: number } | null>(
         null,
@@ -1667,19 +1675,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const showFeedLikeBurst = useCallback((windowX: number, windowY: number) => {
         const y = feedScrollYRef.current;
         setFeedLikeBurst({ x: windowX, y: windowY, key: Date.now() });
-        requestAnimationFrame(() => {
-            flatListRef.current?.scrollToOffset({ offset: y, animated: false });
-        });
+        pinFeedScrollSoon(y);
         if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
         feedLikeBurstClearRef.current = setTimeout(() => {
             const pinY = feedScrollYRef.current;
             setFeedLikeBurst(null);
-            requestAnimationFrame(() => {
-                flatListRef.current?.scrollToOffset({ offset: pinY, animated: false });
-            });
+            pinFeedScrollSoon(pinY);
             feedLikeBurstClearRef.current = null;
         }, 750);
-    }, []);
+    }, [pinFeedScrollSoon]);
     useEffect(
         () => () => {
             if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
@@ -2093,41 +2097,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
             if (scenesReturn?.postId || pinnedY != null) {
                 suppressFeedViewabilityRef.current = true;
+                pinFeedScrollSoon(pinnedY ?? feedScrollYRef.current);
                 requestAnimationFrame(() => {
-                    if (scenesReturn?.postId) {
-                        const rows = flatForRenderRef.current;
-                        const idx = rows.findIndex(
-                            (row) =>
-                                row.kind === 'post' &&
-                                String(row.post.id) === String(scenesReturn.postId),
-                        );
-                        if (idx >= 0) {
-                            try {
-                                flatListRef.current?.scrollToIndex({
-                                    index: idx,
-                                    animated: false,
-                                    viewPosition: 0.12,
-                                });
-                            } catch {
-                                if (pinnedY != null) {
-                                    flatListRef.current?.scrollToOffset({
-                                        offset: pinnedY,
-                                        animated: false,
-                                    });
-                                }
-                            }
-                        } else if (pinnedY != null) {
-                            flatListRef.current?.scrollToOffset({
-                                offset: pinnedY,
-                                animated: false,
-                            });
-                        }
-                    } else if (pinnedY != null) {
-                        flatListRef.current?.scrollToOffset({
-                            offset: pinnedY,
-                            animated: false,
-                        });
-                    }
+                    pinFeedScrollSoon(pinnedY ?? feedScrollYRef.current);
                     finishRestore();
                 });
             } else {
@@ -2145,7 +2117,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 activeVideoPostIdRef.current = null;
                 setActiveFeedVideoPostId(null);
             };
-        }, [])
+        }, [pinFeedScrollSoon])
     );
 
     // Custom Gazetteer search must win over Following: otherwise the UI can show "Wembley Stadium"
@@ -2433,6 +2405,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [updatePost],
     );
 
+    const openShareToStoriesForPost = React.useCallback(
+        (post: Post) => {
+            pinFeedScrollSoon();
+            setShareToStoriesPost(post);
+        },
+        [pinFeedScrollSoon],
+    );
+
     const tryReclipPost = React.useCallback(
         async (p: Post) => {
             const norm = (h?: string) => String(h || '').trim().toLowerCase();
@@ -2657,13 +2637,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             ),
         );
         // Keep the same viewport after post patches remount/remeasure rows.
-        requestAnimationFrame(() => {
-            flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
-            requestAnimationFrame(() => {
-                flatListRef.current?.scrollToOffset({ offset: pinnedY, animated: false });
-            });
-        });
-    }, []);
+        pinFeedScrollSoon(pinnedY);
+    }, [pinFeedScrollSoon]);
 
     useEffect(() => subscribeScenesPostUpdates(applyScenesPostUpdates), [applyScenesPostUpdates]);
 
@@ -3253,12 +3228,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             .map((x) => x.item);
         const business = posts.filter((p) => p.userAccountType === 'business');
         const source = business.length > 0 ? business : posts;
-        const shuffled = [...source];
-        for (let i = shuffled.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        return shuffled.slice(0, 8);
+        return [...source]
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+            .slice(0, 8);
     }, [flatStream]);
 
     const previewSuggestedPlaces = React.useMemo((): PlaceMatchedPost[] => {
@@ -3272,24 +3244,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             includePosterRegionalNational: suggestedPlacesPrefs.includePosterLocale,
         });
         if (matched.length > 0) {
-            const shuffledMatched = [...matched];
-            for (let i = shuffledMatched.length - 1; i > 0; i -= 1) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [shuffledMatched[i], shuffledMatched[j]] = [shuffledMatched[j], shuffledMatched[i]];
-            }
-            return shuffledMatched.slice(0, 3);
+            return [...matched]
+                .sort((a, b) => String(a.post.id).localeCompare(String(b.post.id)))
+                .slice(0, 3);
         }
-        const shuffledPosts = [...posts];
-        for (let i = shuffledPosts.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffledPosts[i], shuffledPosts[j]] = [shuffledPosts[j], shuffledPosts[i]];
-        }
-        return shuffledPosts.slice(0, 3).map((post) => ({
-            post,
-            matchedPlace: post.venue || post.landmark || post.locationLabel || user.local || 'Your area',
-            reason: 'home_area' as const,
-            confidence: 'medium' as const,
-        }));
+        return [...posts]
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+            .slice(0, 3)
+            .map((post) => ({
+                post,
+                matchedPlace: post.venue || post.landmark || post.locationLabel || user.local || 'Your area',
+                reason: 'home_area' as const,
+                confidence: 'medium' as const,
+            }));
     }, [flatStream, user, suggestedPlacesPrefs.includePosterLocale]);
 
     const flatForRender = React.useMemo((): FeedListRow[] => {
@@ -3929,7 +3896,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                   userLiked: live.userLiked ?? mergedPost.userLiked,
                               }
                             : mergedPost;
-                        setImageFullscreenPost(decorateForUser(userId, latest));
+                        const snapshot = decorateForUser(userId, latest);
+                        setImageFullscreenLaunch({ post: snapshot, startIndex });
+                        setImageFullscreenPost(snapshot);
                     }}
                     onOpenScenes={() => {
                         if (isPendingUpload) return;
@@ -3947,9 +3916,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         const scenesPosts = videoPostsForScenes.some((p) => p.id === mergedPost.id)
                             ? videoPostsForScenes
                             : [mergedPost, ...videoPostsForScenes];
-                        navigation.navigate('Scenes', {
+                        setScenesLaunchPayload({
                             initialPostId: mergedPost.id,
                             posts: scenesPosts,
+                            initialVideoTime: handoff?.currentTime,
+                            initialMuted: handoff?.muted ?? feedVideoMuted,
+                            feedLabel: scenesFeedLabel,
+                        });
+                        navigation.navigate('Scenes', {
+                            initialPostId: mergedPost.id,
                             initialVideoTime: handoff?.currentTime,
                             initialMuted: handoff?.muted ?? feedVideoMuted,
                             feedLabel: scenesFeedLabel,
@@ -4005,7 +3980,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         const { promptReportPostNative } = await import('../utils/promptReportPostNative');
                         promptReportPostNative(mergedPost.id);
                     }}
-                    onShareSuccess={handleShareToStoriesSuccess}
+                    onShareToStories={() => openShareToStoriesForPost(mergedPost)}
                     isCurrentUser={user?.handle === mergedPost.userHandle}
                     viewerHandle={user?.handle}
                     viewerUserId={userId}
@@ -4024,6 +3999,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             currentFilter,
             navigation,
             handleShareToStoriesSuccess,
+            openShareToStoriesForPost,
             updatePost,
             loadMore,
             savedByPostId,
@@ -4054,11 +4030,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const closeCommentsSheet = React.useCallback(() => {
         commentsModalOpenRef.current = false;
+        const y = feedScrollYRef.current;
         setCommentsModalOpen(false);
         setSelectedPostId(null);
         setSelectedPostForComments(null);
         restoreFeedVideoAfterOverlay();
-    }, [restoreFeedVideoAfterOverlay]);
+        pinFeedScrollSoon(y);
+    }, [restoreFeedVideoAfterOverlay, pinFeedScrollSoon]);
 
     return (
         <View style={styles.container}>
@@ -4096,25 +4074,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 style={styles.feedList}
                 data={flatForRender}
                 renderItem={renderItem}
-                keyExtractor={(item, index) => {
-                    const baseKey =
-                        item.kind === 'interests' || item.kind === 'stories24'
-                            ? item.id
-                            : item.kind === 'suggested_follower'
-                              ? `suggested-follower-${item.suggestion.userHandle}`
-                              : item.kind === 'ad'
-                                ? `ad-${item.ad.id}`
-                                : item.kind === 'local_business'
-                                  ? `local-business-${item.posts.map((p) => p.id).join('-')}`
-                                  : item.kind === 'suggested_places'
-                                    ? `suggested-places-${item.bundleKey}`
-                                    : item.post.id;
-                    if (item.kind === 'post') {
-                        return `post:${baseKey}`;
+                keyExtractor={(item) => {
+                    if (item.kind === 'post') return `post:${item.post.id}`;
+                    if (item.kind === 'interests' || item.kind === 'stories24') {
+                        return `${item.kind}:${item.id}`;
                     }
-                    return `${item.kind}:${baseKey}:${index}`;
+                    if (item.kind === 'suggested_follower') {
+                        return `suggested-follower:${item.suggestion.userHandle}`;
+                    }
+                    if (item.kind === 'ad') return `ad:${item.ad.id}`;
+                    if (item.kind === 'local_business') {
+                        return `local-business:${item.posts.map((p) => p.id).join('-')}`;
+                    }
+                    if (item.kind === 'suggested_places') {
+                        return `suggested-places:${item.bundleKey}`;
+                    }
+                    return 'feed-row';
                 }}
-                extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${isFeedFocused}-${scenesViewerActive}`}
+                extraData={`${pendingUploadTick}-${refreshing}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 // Keep the render window tight for max FPS while flinging; clip offscreen cells.
                 initialNumToRender={2}
@@ -4201,11 +4178,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         loadMore();
                     }
                 }}
-                onScrollToIndexFailed={(info) => {
-                    flatListRef.current?.scrollToOffset({
-                        offset: Math.max(0, info.averageItemLength * info.index),
-                        animated: true,
-                    });
+                onScrollToIndexFailed={() => {
+                    pinFeedScrollSoon();
                 }}
                 onEndReachedThreshold={0.5}
                 ListFooterComponent={
@@ -4373,10 +4347,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 originRect={imageFullscreenOrigin}
                 onClose={() => {
                     imageFullscreenOpenRef.current = false;
+                    const y = feedScrollYRef.current;
                     setImageFullscreenPost(null);
                     setImageFullscreenStartIndex(0);
                     setImageFullscreenOrigin(null);
                     restoreFeedVideoAfterOverlay();
+                    pinFeedScrollSoon(y);
                 }}
                 onLike={
                     imageFullscreenPost
@@ -4473,14 +4449,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }
             />
 
-            {commentsModalOpen && selectedPostId ? (
-                <Modal
-                    visible
-                    transparent
-                    animationType="slide"
-                    statusBarTranslucent
-                    onRequestClose={closeCommentsSheet}
-                >
+            <Modal
+                visible={commentsModalOpen && Boolean(selectedPostId)}
+                transparent
+                animationType="slide"
+                statusBarTranslucent
+                hardwareAccelerated
+                onRequestClose={closeCommentsSheet}
+                onShow={() => pinFeedScrollSoon()}
+            >
                     <View style={styles.fullscreenOverlayRoot}>
                         <Pressable
                             style={styles.fullscreenOverlayBackdrop}
@@ -4488,6 +4465,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             accessibilityLabel="Dismiss comments"
                         />
                         <View style={styles.fullscreenCommentsSheet}>
+                            {selectedPostId ? (
                             <PostCommentsSheet
                                 variant="scenesEmbed"
                                 postId={selectedPostId}
@@ -4509,10 +4487,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 }}
                                 onClose={closeCommentsSheet}
                             />
+                            ) : null}
                         </View>
                     </View>
                 </Modal>
-            ) : null}
 
             {likesSheetPost && likesSheetPost.stats.likes > 0 ? (
                 <FeedLikesSheet
@@ -4545,8 +4523,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     post={selectedPostForShare}
                     isOpen
                     onClose={() => {
+                        const y = feedScrollYRef.current;
                         setShareModalOpen(false);
                         setSelectedPostForShare(null);
+                        pinFeedScrollSoon(y);
                     }}
                     onShareSuccess={handleShareToStoriesSuccess}
                 />
@@ -4860,6 +4840,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     </View>
                 </View>
             </Modal>
+
+            {/* Feed-level share-to-stories. Per-card Modal mount/unmount jumps FlatList on Android. */}
+            <ShareToStoriesModal
+                visible={shareToStoriesPost != null}
+                post={shareToStoriesPost}
+                onClose={() => {
+                    const y = feedScrollYRef.current;
+                    setShareToStoriesPost(null);
+                    pinFeedScrollSoon(y);
+                }}
+                onShareSuccess={handleShareToStoriesSuccess}
+                onShow={() => pinFeedScrollSoon()}
+                onDismiss={() => pinFeedScrollSoon()}
+            />
 
             {/* Feed-level burst (not per-card). Pin scroll when it opens/closes — Android
                 Modal visibility changes otherwise nudge FlatList content. */}
