@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use App\Services\VideoThumbnailService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
@@ -108,6 +109,7 @@ class ProcessRenderJob implements ShouldQueue
             // Step 3: Update post and job as completed
             $post->final_video_url = $finalUrl;
             $post->save();
+            app(VideoThumbnailService::class)->ensureForPost($post->fresh() ?? $post);
 
             $job->status = 'completed';
             $job->final_video_url = $finalUrl;

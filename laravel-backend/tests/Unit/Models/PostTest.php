@@ -123,5 +123,30 @@ class PostTest extends TestCase
 
         $this->assertTrue($post->fresh()->isFollowingAuthor($follower));
     }
+
+    public function test_resolved_thumbnail_url_prefers_column_then_media_items_poster(): void
+    {
+        $user = User::factory()->create();
+        $fromColumn = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => 'https://example.com/from-column.jpg',
+        ]);
+        $fromItems = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => null,
+            'media_items' => [[
+                'url' => 'https://example.com/clip.mp4',
+                'type' => 'video',
+                'posterUrl' => 'https://example.com/from-items.jpg',
+            ]],
+        ]);
+
+        $this->assertSame('https://example.com/from-column.jpg', $fromColumn->resolvedThumbnailUrl());
+        $this->assertSame('https://example.com/from-items.jpg', $fromItems->resolvedThumbnailUrl());
+    }
 }
 

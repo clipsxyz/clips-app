@@ -1,6 +1,43 @@
-import type { Post } from '../types';
+import type { Post, PostMediaItem } from '../types';
 
 const VIDEO_URL_RE = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
+
+function firstUri(...vals: unknown[]): string | undefined {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim() && !/^data:text\//i.test(v.trim())) {
+      return v.trim();
+    }
+  }
+  return undefined;
+}
+
+/** MP4 / playback URI for a post or carousel slide (Laravel video_url, media_url, or mapped fields). */
+export function resolvePostPlaybackUri(
+  post: Post,
+  item?: PostMediaItem | null,
+): string | undefined {
+  const extra = post as Post & {
+    video_url?: string;
+    videoUrl?: string;
+    media_url?: string;
+    final_video_url?: string;
+  };
+  const slide = item as
+    | (PostMediaItem & { video_url?: string; videoUrl?: string; media_url?: string })
+    | null
+    | undefined;
+  if (slide) {
+    return firstUri(slide.video_url, slide.videoUrl, slide.media_url, slide.url);
+  }
+  return firstUri(
+    extra.video_url,
+    extra.videoUrl,
+    extra.finalVideoUrl,
+    extra.final_video_url,
+    extra.media_url,
+    post.mediaUrl,
+  );
+}
 
 /** True when a post has playable video (Scenes mode is video-only). */
 export function postHasVideoMedia(post: Post): boolean {
@@ -10,8 +47,10 @@ export function postHasVideoMedia(post: Post): boolean {
     );
   }
   if (post.mediaType === 'video') return true;
-  if (post.mediaUrl && VIDEO_URL_RE.test(post.mediaUrl)) return true;
-  return false;
+  const extra = post as Post & { video_url?: string; videoUrl?: string };
+  if (extra.video_url || extra.videoUrl || post.finalVideoUrl) return true;
+  const uri = resolvePostPlaybackUri(post);
+  return Boolean(uri && VIDEO_URL_RE.test(uri));
 }
 
 /** True when the active feed carousel slide (or sole media) is video. */

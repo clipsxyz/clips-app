@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Notification;
 use App\Services\BoostAnalyticsService;
+use App\Services\VideoThumbnailService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -42,148 +43,39 @@ class UserController extends Controller
     }
 
     /**
-     * Get user profile
+     * Get user profile + first page of posts.
+     * Identifier may be handle (case-insensitive, optional @) or user UUID.
      */
     public function show(Request $request, string $handle): JsonResponse
     {
-        $validator = Validator::make(array_merge($request->all(), ['handle' => $handle]), [
-            'handle' => 'required|string|exists:users,handle',
-            'postsCursor' => 'nullable|string',
-            'postsLimit' => 'nullable|integer|min:1|max:50',
-            'sourcePostId' => 'nullable|uuid|exists:posts,id',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+        $user = $this->resolveProfileUser($handle);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
         }
 
-        $userId = $request->get('userId');
-        $hasViewer = !empty($userId);
-        $user = User::where('handle', $handle)->firstOrFail();
-        $postsLimit = (int) $request->get('postsLimit', 20);
-        $postsLimit = max(1, min($postsLimit, 50));
-        $postsCursor = $this->decodePostsCursor((string) $request->get('postsCursor', ''));
-
-        $query = $user->posts()
-            ->notReclipped()
-            ->select([
-                'posts.id',
-                'posts.user_id',
-                'posts.user_handle',
-                'posts.text_content',
-                'posts.media_url',
-                'posts.media_type',
-                'posts.location_label',
-                'posts.venue',
-                'posts.landmark',
-                'posts.social_format',
-                'posts.tags',
-                'posts.likes_count',
-                'posts.views_count',
-                'posts.comments_count',
-                'posts.shares_count',
-                'posts.reclips_count',
-                'posts.is_reclipped',
-                'posts.original_post_id',
-                'posts.original_user_handle',
-                'posts.reclipped_by',
-                'posts.banner_text',
-                'posts.stickers',
-                'posts.template_id',
-                'posts.media_items',
-                'posts.caption',
-                'posts.image_text',
-                'posts.text_style',
-                'posts.video_captions_enabled',
-                'posts.video_caption_text',
-                'posts.subtitles_enabled',
-                'posts.subtitle_text',
-                'posts.created_at',
-                'posts.updated_at',
-            ])
-            ->withCount(['likes', 'comments', 'shares', 'views', 'reclips'])
-            ->orderBy('created_at', 'desc')
-            ->orderBy('id', 'desc');
-
-        if ($postsCursor['created_at'] && $postsCursor['id']) {
-            $query->where(function ($q) use ($postsCursor) {
-                $q->where('posts.created_at', '<', $postsCursor['created_at'])
-                    ->orWhere(function ($q2) use ($postsCursor) {
-                        $q2->where('posts.created_at', '=', $postsCursor['created_at'])
-                            ->where('posts.id', '<', $postsCursor['id']);
-                    });
-            });
-        }
-
-        if ($hasViewer) {
-            $query->withExists([
-                'likes as user_liked' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                },
-                'bookmarks as is_bookmarked' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                },
-                'reclips as user_reclipped' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                },
-            ]);
-        }
-
-        $posts = $query->limit($postsLimit + 1)->get();
-        $postsHasMore = $posts->count() > $postsLimit;
-        if ($postsHasMore) {
-            $posts = $posts->take($postsLimit)->values();
-        }
-        $lastPost = $posts->last();
-        $postsNextCursor = null;
-        if ($postsHasMore && $lastPost) {
-            $postsNextCursor = $this->encodePostsCursor(
-                $lastPost->created_at->format('Y-m-d H:i:s'),
-                (string) $lastPost->id
-            );
-        }
-        $viewer = $hasViewer ? User::find($userId) : null;
-
-        if ($viewer && $viewer->id !== $user->id) {
-            BoostAnalyticsService::recordProfileVisitForUser(
-                (string) $user->id,
-                (string) $viewer->id,
-                $request->get('sourcePostId')
-            );
-        }
-
-        // Transform posts using precomputed exists flags when available.
-        $transformedPosts = $posts->map(function ($post) use ($viewer) {
-            $postData = $post->toArray();
-            $attrs = $post->getAttributes();
-
-            $postData['user_liked'] = $viewer
-                ? (array_key_exists('user_liked', $attrs) ? (bool) $attrs['user_liked'] : false)
-                : false;
-            $postData['is_bookmarked'] = $viewer
-                ? (array_key_exists('is_bookmarked', $attrs) ? (bool) $attrs['is_bookmarked'] : false)
-                : false;
-            $postData['user_reclipped'] = $viewer
-                ? (array_key_exists('user_reclipped', $attrs) ? (bool) $attrs['user_reclipped'] : false)
-                : false;
-
-            return $postData;
-        });
-        
-        // Check if viewer can access this profile
-        $canView = $viewer ? $user->canViewProfile($viewer) : true;
-        
-        if (!$canView) {
+        $viewer = Auth::user() ?: $this->resolveViewer($request);
+        if ($viewer && !$user->canViewProfile($viewer)) {
             return response()->json([
                 'error' => 'Profile is private',
                 'is_private' => true,
                 'can_view' => false,
-                'requires_follow' => true
+                'requires_follow' => true,
             ], 403);
         }
 
+        $page = $this->paginateProfilePosts($request, $user, $viewer instanceof User ? $viewer : null);
+
+        if ($viewer instanceof User && $viewer->id !== $user->id) {
+            $sourcePostId = (string) $request->get('sourcePostId', '');
+            BoostAnalyticsService::recordProfileVisitForUser(
+                (string) $user->id,
+                (string) $viewer->id,
+                Str::isUuid($sourcePostId) ? $sourcePostId : null
+            );
+        }
+
         $userData = $user->toArray();
-        $viewerId = $viewer?->id;
+        $viewerId = $viewer instanceof User ? $viewer->id : null;
         $userData['is_following'] = $viewerId
             ? DB::table('user_follows')
                 ->where('follower_id', $viewerId)
@@ -198,12 +90,51 @@ class UserController extends Controller
                 ->where('status', 'pending')
                 ->exists()
             : false;
-        $userData['posts'] = $transformedPosts;
-        $userData['postsNextCursor'] = $postsNextCursor;
-        $userData['postsHasMore'] = $postsHasMore;
+        $userData['posts'] = $page['posts'];
+        $userData['postsNextCursor'] = $page['postsNextCursor'];
+        $userData['postsHasMore'] = $page['postsHasMore'];
+        $userData['posts_count'] = $page['posts_count'];
         $userData['can_view'] = true;
+        $userData['likes_count'] = (int) $user->posts()->sum('likes_count');
+        $userData['views_count'] = (int) $user->posts()->sum('views_count');
+        $userData['stats'] = [
+            'likes' => $userData['likes_count'],
+            'likes_count' => $userData['likes_count'],
+            'views' => $userData['views_count'],
+            'views_count' => $userData['views_count'],
+            'followers' => (int) ($userData['followers_count'] ?? 0),
+            'following' => (int) ($userData['following_count'] ?? 0),
+        ];
 
         return response()->json($userData);
+    }
+
+    /**
+     * GET /api/users/{id}/posts — profile grid. {id} is handle or user UUID.
+     * Query: tab=all|videos|photos|text, postsLimit, postsCursor, userId (viewer).
+     */
+    public function posts(Request $request, string $handle): JsonResponse
+    {
+        $user = $this->resolveProfileUser($handle);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        $viewer = Auth::user() ?: $this->resolveViewer($request);
+        if ($viewer instanceof User && !$user->canViewProfile($viewer)) {
+            return response()->json([
+                'error' => 'Profile is private',
+                'is_private' => true,
+                'can_view' => false,
+                'requires_follow' => true,
+            ], 403);
+        }
+
+        return response()->json($this->paginateProfilePosts(
+            $request,
+            $user,
+            $viewer instanceof User ? $viewer : null
+        ));
     }
 
     /**
@@ -499,6 +430,263 @@ class UserController extends Controller
             'nextCursor' => $nextCursor,
             'hasMore' => $nextCursor !== null
         ]);
+    }
+
+    /**
+     * Resolve profile owner by UUID or handle (case-insensitive, optional leading @).
+     */
+    private function resolveProfileUser(string $identifier): ?User
+    {
+        $raw = urldecode(trim($identifier));
+        if ($raw === '') {
+            return null;
+        }
+
+        if (Str::isUuid($raw)) {
+            $byId = User::find($raw);
+            if ($byId) {
+                return $byId;
+            }
+        }
+
+        $withoutAt = ltrim($raw, '@');
+        $withAt = '@' . $withoutAt;
+        $candidates = array_values(array_unique(array_filter([$raw, $withoutAt, $withAt])));
+
+        foreach ($candidates as $handle) {
+            $user = User::whereRaw('LOWER(handle) = ?', [mb_strtolower($handle)])->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveViewer(Request $request): ?User
+    {
+        $viewer = Auth::user();
+        if ($viewer instanceof User) {
+            return $viewer;
+        }
+        $userId = (string) $request->get('userId', '');
+        if ($userId !== '' && Str::isUuid($userId)) {
+            return User::find($userId);
+        }
+        return null;
+    }
+
+    /**
+     * Indexed user_id query + eager-loaded author. Media lives on the post row (media_url / media_items).
+     *
+     * @return array{posts: \Illuminate\Support\Collection, postsNextCursor: ?string, postsHasMore: bool, posts_count: int, likes_count: int, views_count: int, stats: array{likes: int, views: int, followers: int, following: int}}
+     */
+    private function paginateProfilePosts(Request $request, User $user, ?User $viewer): array
+    {
+        $postsLimit = max(1, min((int) $request->get('postsLimit', 20), 50));
+        $postsCursor = $this->decodePostsCursor((string) $request->get('postsCursor', ''));
+        $tab = strtolower(trim((string) $request->get('tab', 'all')));
+        if (!in_array($tab, ['all', 'videos', 'photos', 'text'], true)) {
+            $tab = 'all';
+        }
+
+        $query = \App\Models\Post::query()
+            ->where('posts.user_id', $user->id)
+            ->notReclipped()
+            ->with([
+                'user:id,handle,display_name,username,avatar_url,location_local,location_regional,location_national',
+            ])
+            ->withCount(\App\Models\Post::engagementWithCounts())
+            ->select([
+                'posts.id',
+                'posts.user_id',
+                'posts.user_handle',
+                'posts.text_content',
+                'posts.media_url',
+                'posts.media_type',
+                'posts.thumbnail_url',
+                'posts.location_label',
+                'posts.venue',
+                'posts.landmark',
+                'posts.social_format',
+                'posts.tags',
+                'posts.likes_count',
+                'posts.views_count',
+                'posts.comments_count',
+                'posts.shares_count',
+                'posts.reclips_count',
+                'posts.is_reclipped',
+                'posts.original_post_id',
+                'posts.original_user_handle',
+                'posts.reclipped_by',
+                'posts.banner_text',
+                'posts.stickers',
+                'posts.template_id',
+                'posts.media_items',
+                'posts.caption',
+                'posts.image_text',
+                'posts.text_style',
+                'posts.video_captions_enabled',
+                'posts.video_caption_text',
+                'posts.subtitles_enabled',
+                'posts.subtitle_text',
+                'posts.created_at',
+                'posts.updated_at',
+            ])
+            ->orderBy('posts.created_at', 'desc')
+            ->orderBy('posts.id', 'desc');
+
+        $this->applyProfilePostsTab($query, $tab);
+
+        if ($postsCursor['created_at'] && $postsCursor['id']) {
+            $query->where(function ($q) use ($postsCursor) {
+                $q->where('posts.created_at', '<', $postsCursor['created_at'])
+                    ->orWhere(function ($q2) use ($postsCursor) {
+                        $q2->where('posts.created_at', '=', $postsCursor['created_at'])
+                            ->where('posts.id', '<', $postsCursor['id']);
+                    });
+            });
+        }
+
+        $viewerId = $viewer?->id;
+        if ($viewerId) {
+            $query->withExists([
+                'likes as user_liked' => function ($q) use ($viewerId) {
+                    $q->where('users.id', $viewerId);
+                },
+                'bookmarks as is_bookmarked' => function ($q) use ($viewerId) {
+                    $q->where('users.id', $viewerId);
+                },
+                'reclips as user_reclipped' => function ($q) use ($viewerId) {
+                    $q->where('users.id', $viewerId);
+                },
+            ]);
+        }
+
+        $posts = $query->limit($postsLimit + 1)->get();
+        $thumbService = app(VideoThumbnailService::class);
+        $generated = 0;
+        foreach ($posts as $post) {
+            if ($generated >= 8) {
+                break;
+            }
+            if ($post->resolvedThumbnailUrl()) {
+                continue;
+            }
+            if ($post->media_type !== 'video') {
+                continue;
+            }
+            if ($thumbService->ensureForPost($post)) {
+                $generated++;
+            }
+        }
+
+        $postsHasMore = $posts->count() > $postsLimit;
+        if ($postsHasMore) {
+            $posts = $posts->take($postsLimit)->values();
+        }
+        $lastPost = $posts->last();
+        $postsNextCursor = null;
+        if ($postsHasMore && $lastPost) {
+            $postsNextCursor = $this->encodePostsCursor(
+                $lastPost->created_at->format('Y-m-d H:i:s'),
+                (string) $lastPost->id
+            );
+        }
+
+        $transformedPosts = $posts->map(function ($post) use ($viewer, $user) {
+            $postData = $post->toArray();
+            $attrs = $post->getAttributes();
+            $author = $post->user;
+
+            $postData['user_handle'] = $postData['user_handle']
+                ?: ($author?->handle ?? $user->handle);
+            $postData['user'] = $author ? [
+                'id' => $author->id,
+                'handle' => $author->handle,
+                'display_name' => $author->display_name,
+                'avatar_url' => $author->avatar_url,
+                'local' => $author->location_local,
+                'regional' => $author->location_regional,
+                'national' => $author->location_national,
+            ] : [
+                'id' => $user->id,
+                'handle' => $user->handle,
+                'display_name' => $user->display_name,
+                'avatar_url' => $user->avatar_url,
+                'local' => $user->location_local,
+                'regional' => $user->location_regional,
+                'national' => $user->location_national,
+            ];
+            $postData['user_liked'] = $viewer
+                ? (array_key_exists('user_liked', $attrs) ? (bool) $attrs['user_liked'] : false)
+                : false;
+            $postData['is_bookmarked'] = $viewer
+                ? (array_key_exists('is_bookmarked', $attrs) ? (bool) $attrs['is_bookmarked'] : false)
+                : false;
+            $postData['user_reclipped'] = $viewer
+                ? (array_key_exists('user_reclipped', $attrs) ? (bool) $attrs['user_reclipped'] : false)
+                : false;
+
+            $postData = \App\Models\Post::applyEngagementCounts($postData, $attrs);
+
+            $poster = $post->resolvedThumbnailUrl();
+            $postData['thumbnail_url'] = $poster;
+            $postData['video_poster_url'] = $poster;
+            $postData['poster_url'] = $poster;
+
+            return $postData;
+        });
+
+        $likesTotal = (int) $user->posts()->sum('likes_count');
+        $viewsTotal = (int) $user->posts()->sum('views_count');
+
+        return [
+            'posts' => $transformedPosts,
+            'postsNextCursor' => $postsNextCursor,
+            'postsHasMore' => $postsHasMore,
+            'posts_count' => (int) \App\Models\Post::query()
+                ->where('user_id', $user->id)
+                ->notReclipped()
+                ->count(),
+            'likes_count' => $likesTotal,
+            'views_count' => $viewsTotal,
+            'stats' => [
+                'likes' => $likesTotal,
+                'likes_count' => $likesTotal,
+                'views' => $viewsTotal,
+                'views_count' => $viewsTotal,
+                'followers' => (int) $user->followers_count,
+                'following' => (int) $user->following_count,
+            ],
+        ];
+    }
+
+    private function applyProfilePostsTab($query, string $tab): void
+    {
+        if ($tab === 'videos') {
+            $query->where(function ($q) {
+                $q->where('posts.media_type', 'video')
+                    ->orWhere('posts.media_items', 'like', '%"type":"video"%');
+            });
+            return;
+        }
+        if ($tab === 'photos') {
+            $query->where(function ($q) {
+                $q->where('posts.media_type', 'image')
+                    ->orWhere('posts.media_items', 'like', '%"type":"image"%');
+            });
+            return;
+        }
+        if ($tab === 'text') {
+            $query->where(function ($q) {
+                $q->where(function ($inner) {
+                    $inner->whereNull('posts.media_type')->orWhere('posts.media_type', '');
+                })->where(function ($inner) {
+                    $inner->whereNull('posts.media_url')->orWhere('posts.media_url', '');
+                });
+            });
+        }
     }
 
     private function decodeConnectionsCursor(?string $cursor): array

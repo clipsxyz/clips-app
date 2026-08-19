@@ -218,6 +218,14 @@ export function isFrontendOnlyPostId(id: string): boolean {
   return isMockPostId(id) || id.startsWith('mock-scenes-');
 }
 
+function shouldUseLivePostApi(id: string): boolean {
+  // Match the feed: live mode is EXPO_PUBLIC_USE_MOCK=false. Do not use
+  // isLaravelApiEnabled() here — a single timeout used to flip that off for
+  // the whole session, so likes/comments/shares stayed in memory while Home
+  // reloaded zeros from Laravel.
+  return !isMockMode() && !isViteDevMode() && !isFrontendOnlyPostId(String(id));
+}
+
 /** One comment bucket per Ava demo post (feed may use ava-normal-* or ava-normal-ireland-demo). */
 function resolveCommentsPostId(postId: string): string {
   const id = String(postId);
@@ -1150,9 +1158,14 @@ export function decorateForUser(userId: string, p: Post): Post {
   const fromApi = p.isFollowing === true;
   const isFollowing = hasExplicitFollowState(s.follows, p.userHandle) ? fromLocal : fromApi;
   const idKey = String(p.id);
+  const localLiked = Object.prototype.hasOwnProperty.call(s.likes, idKey)
+    ? !!s.likes[idKey]
+    : Object.prototype.hasOwnProperty.call(s.likes, String(p.id))
+      ? !!s.likes[String(p.id)]
+      : undefined;
   const decorated = {
     ...p,
-    userLiked: !!s.likes[idKey] || !!s.likes[p.id],
+    userLiked: localLiked !== undefined ? localLiked : p.userLiked === true,
     isBookmarked: !!s.bookmarks[idKey] || !!s.bookmarks[p.id],
     isFollowing,
     userReclipped: !!s.reclips[idKey] || !!s.reclips[p.id],
@@ -1165,6 +1178,36 @@ export function decorateForUser(userId: string, p: Post): Post {
   };
   // Preserve taggedUsers for template posts (used by Media for tag display)
   return decorated;
+}
+
+export function mergeEngagementStats(
+  incoming?: Post['stats'],
+  previous?: Post['stats'],
+): Post['stats'] {
+  const a = incoming ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
+  const b = previous ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
+  return {
+    likes: Math.max(Number(a.likes) || 0, Number(b.likes) || 0),
+    views: Math.max(Number(a.views) || 0, Number(b.views) || 0),
+    comments: Math.max(Number(a.comments) || 0, Number(b.comments) || 0),
+    shares: Math.max(Number(a.shares) || 0, Number(b.shares) || 0),
+    reclips: Math.max(Number(a.reclips) || 0, Number(b.reclips) || 0),
+  };
+}
+
+/** After a live fetch, adopt server likes without wiping a just-tapped like when the API omitted the viewer flag. */
+function syncLocalLikesFromApi(
+  userId: string,
+  rows: Post[],
+  opts?: { allowUnlike?: boolean },
+): void {
+  if (!userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  for (const p of rows) {
+    const id = String(p.id);
+    if (p.userLiked === true) s.likes[id] = true;
+    else if (opts?.allowUnlike) s.likes[id] = false;
+  }
 }
 
 function normalizeCaptionFields<T extends Post>(post: T): T {
@@ -1243,7 +1286,12 @@ function rewriteMediaUrlForNetwork(url: string): string {
 // Transform Laravel API post response to frontend Post format
 export function transformLaravelPost(response: any): Post {
   const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
-  const originalMediaUrl = response.media_url || response.mediaUrl || '';
+  const originalMediaUrl =
+    response.video_url ||
+    response.videoUrl ||
+    response.media_url ||
+    response.mediaUrl ||
+    '';
   const mediaItems = response.media_items || response.mediaItems;
   // Still-image posts often have media only in media_items; ensure we have a single mediaUrl for display
   const firstItem = Array.isArray(mediaItems) && mediaItems.length > 0 ? mediaItems[0] : null;
@@ -1256,10 +1304,17 @@ export function transformLaravelPost(response: any): Post {
   const firstItemPoster =
     firstItem && (firstItem.poster_url || firstItem.posterUrl || firstItem.thumbnail_url || firstItem.thumbnailUrl);
   const resolvedVideoPosterUrl =
+    response.thumbnail_url ||
+    response.thumbnailUrl ||
     response.video_poster_url ||
     response.videoPosterUrl ||
+    response.poster_url ||
+    response.posterUrl ||
     (typeof firstItemPoster === 'string' ? firstItemPoster : undefined) ||
     undefined;
+  const rewrittenPoster = resolvedVideoPosterUrl
+    ? rewriteMediaUrlForNetwork(String(resolvedVideoPosterUrl))
+    : undefined;
 
   // Rewrite mediaItems URLs for network access
   let processedMediaItems = mediaItems;
@@ -1276,10 +1331,10 @@ export function transformLaravelPost(response: any): Post {
         return {
           ...item,
           url: rewriteMediaUrlForNetwork(String(item.url)),
-          ...(posterUrl ? { posterUrl } : {}),
+          ...(posterUrl ? { posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : {}),
         };
       }
-      return posterUrl ? { ...item, posterUrl } : item;
+      return posterUrl ? { ...item, posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : item;
     });
   }
 
@@ -1316,7 +1371,8 @@ export function transformLaravelPost(response: any): Post {
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
     finalVideoUrl: rewriteMediaUrlForNetwork(finalVideoUrl || '') || undefined,
-    videoPosterUrl: resolvedVideoPosterUrl ? rewriteMediaUrlForNetwork(String(resolvedVideoPosterUrl)) : undefined,
+    videoPosterUrl: rewrittenPoster || undefined,
+    thumbnailUrl: rewrittenPoster || undefined,
     mediaType: resolvedMediaType,
     videoFrameMode: resolvedVideoFrameMode,
     mediaItems: processedMediaItems ?? mediaItems,
@@ -1330,13 +1386,16 @@ export function transformLaravelPost(response: any): Post {
       const ts = raw ? new Date(raw).getTime() : Date.now();
       return Number.isFinite(ts) ? ts : Date.now();
     })(),
-    stats: {
-      likes: response.likes_count || response.stats?.likes || 0,
-      views: response.views_count || response.stats?.views || 0,
-      comments: response.comments_count || response.stats?.comments || 0,
-      shares: response.shares_count || response.stats?.shares || 0,
-      reclips: response.reclips_count || response.stats?.reclips || 0,
-    },
+    stats: mergeEngagementStats(
+      {
+        likes: Number(response.likes_count ?? response.stats?.likes ?? 0) || 0,
+        views: Number(response.views_count ?? response.stats?.views ?? 0) || 0,
+        comments: Number(response.comments_count ?? response.stats?.comments ?? 0) || 0,
+        shares: Number(response.shares_count ?? response.stats?.shares ?? 0) || 0,
+        reclips: Number(response.reclips_count ?? response.stats?.reclips ?? 0) || 0,
+      },
+      existing?.stats,
+    ),
     isBookmarked: response.is_bookmarked || false,
     isFollowing: response.is_following || false,
     authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
@@ -1827,6 +1886,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
       const uid = userId || 'me';
+      syncLocalLikesFromApi(uid, items, { allowUnlike: true });
       items = items.map(p => decorateForUser(uid, p));
 
       return {
@@ -2175,18 +2235,51 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
 export async function toggleLike(userId: string, id: string, currentPost?: Post): Promise<Post> {
   // In dev/mock mode, skip backend entirely and update the in-memory posts only.
-  const useLaravelAPI = isLaravelApiEnabled() && !isViteDevMode();
+  const livePost = shouldUseLivePostApi(id);
 
-  if (useLaravelAPI) {
+  if (livePost) {
     try {
       const response = await apiClient.toggleLike(id);
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
+      const liked =
+        typeof response?.user_liked === 'boolean'
+          ? response.user_liked
+          : typeof response?.liked === 'boolean'
+            ? response.liked
+            : undefined;
+      const parsedCount = Number(response?.likes_count ?? response?.likesCount);
+      const hasCount = Number.isFinite(parsedCount);
+      const base =
+        currentPost ||
+        posts.find((x) => String(x.id) === String(id));
+      // Like endpoint returns { liked, likes_count, id } — not a full post.
+      if (base && liked !== undefined) {
+        const nextLikes = hasCount
+          ? Math.max(0, parsedCount)
+          : Math.max(0, (base.stats?.likes ?? 0) + (liked === base.userLiked ? 0 : liked ? 1 : -1));
+        const s = getState(userId);
+        s.likes[String(id)] = liked;
+        const next: Post = {
+          ...base,
+          userLiked: liked,
+          stats: { ...base.stats, likes: nextLikes },
+        };
+        const idx = posts.findIndex((x) => String(x.id) === String(id));
+        if (idx >= 0) {
+          posts[idx] = { ...posts[idx], ...next };
+          if (!isMockPostId(String(id))) savePostsToStorage(posts);
+        }
+        return decorateForUser(userId, next);
       }
-      // Fall through to mock implementation
+      if (response?.id && (response.user_handle || response.userHandle)) {
+        return transformLaravelPost(response);
+      }
+      throw new Error('Invalid like response');
+    } catch (error: any) {
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel like failed:', error);
+      }
+      // Live posts must not fall through to mock likes — that leaves a filled icon with count 0.
+      throw error;
     }
   }
 
@@ -2434,23 +2527,25 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
     return { id, userHandle: 'Unknown', locationLabel: '', tags: [], createdAt: Date.now(), stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 }, isBookmarked: false, isFollowing: false, userLiked: false };
   }
 
-  const useLaravelAPI = isLaravelApiEnabled();
-
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.incrementView(id);
-      // Laravel returns { success, views } not a full post - return minimal for merge (avoids id: undefined)
-      if (response && typeof response.views === 'number' && (response.id == null || response.user_handle == null)) {
-        return { id, stats: { likes: 0, views: response.views, comments: 0, shares: 0, reclips: 0 } } as Post;
-      }
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
+  if (shouldUseLivePostApi(id)) {
+    const response = await apiClient.incrementView(id);
+    const nextViews =
+      typeof response?.views === 'number'
+        ? Math.max(0, Number(response.views))
+        : typeof response?.views_count === 'number'
+          ? Math.max(0, Number(response.views_count))
+          : undefined;
+    const base = posts.find((x) => String(x.id) === String(id));
+    if (base && nextViews !== undefined) {
+      const next: Post = { ...base, stats: { ...base.stats, views: nextViews } };
+      const idx = posts.findIndex((x) => String(x.id) === String(id));
+      if (idx >= 0) posts[idx] = next;
+      return decorateForUser(userId, next);
     }
+    if (response && typeof response.views === 'number' && (response.id == null || response.user_handle == null)) {
+      return { id, stats: { likes: 0, views: response.views, comments: 0, shares: 0, reclips: 0 } } as Post;
+    }
+    return transformLaravelPost(response);
   }
 
   // Ava demo posts can be referenced by multiple ids across tabs/surfaces.
@@ -2534,20 +2629,9 @@ export function wasViewedRecently(userId: string, postId: string, timeWindowMs: 
 }
 
 export async function incrementShares(userId: string, id: string): Promise<Post> {
-  // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = isLaravelApiEnabled();
-
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.sharePost(id);
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
-    }
+  if (shouldUseLivePostApi(id)) {
+    const response = await apiClient.sharePost(id);
+    return transformLaravelPost(response);
   }
 
   // Mock implementation (fallback)
@@ -2868,6 +2952,12 @@ export async function regeneratePublicShareToken(postId: string): Promise<{ toke
 }
 
 export async function fetchComments(postId: string): Promise<Comment[]> {
+  const resolvedPostId = resolveCommentsPostId(postId);
+  if (shouldUseLivePostApi(resolvedPostId)) {
+    const response = await apiClient.fetchComments(postId);
+    const rows = Array.isArray(response) ? response : Array.isArray(response?.items) ? response.items : [];
+    return rows.map(mapLaravelCommentToComment);
+  }
   await delay(200);
   return listTopLevelCommentsForPost(postId);
 }
@@ -2977,53 +3067,86 @@ export async function fetchCommentsPage(
   return { items: [], nextCursor: null, hasMore: false };
 }
 
-export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
-  await delay(150);
+export function mapLaravelProfilePosts(raw: unknown): Post[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => {
+      try {
+        if (item && typeof item.userHandle === 'string' && item.userHandle.trim() && item.stats) {
+          return item as Post;
+        }
+        return transformLaravelPost(item);
+      } catch (err) {
+        console.warn('[mapLaravelProfilePosts] skip malformed post', item?.id, err);
+        return null;
+      }
+    })
+    .filter((x: Post | null): x is Post => x !== null);
+}
 
-  // Live mode: profile grid comes from Laravel GET /users/{handle}?postsLimit=
+export async function fetchPostsByUser(
+  userHandle: string,
+  limit = 30,
+  viewerUserId?: string,
+  tab: string = 'all',
+): Promise<Post[]> {
+  // Live mode: profile grid comes from Laravel GET /users/{handle|id}/posts?tab=
   if (!isMockMode()) {
     try {
-      console.log('[fetchPostsByUser] live fetch', { userHandle, limit });
-      const profile = await apiClient.fetchUserProfile(userHandle, undefined, null, limit);
-      const raw = Array.isArray(profile?.posts) ? profile.posts : [];
-      console.log('[fetchPostsByUser] live ok', {
-        handle: profile?.handle || userHandle,
-        posts_count: profile?.posts_count ?? profile?.postsCount,
-        items: raw.length,
+      const identifier = String(userHandle || '').trim();
+      console.log('[fetchPostsByUser] live fetch', { identifier, limit, tab, viewerUserId });
+      const payload = await apiClient.fetchUserPosts(identifier, {
+        viewerId: viewerUserId,
+        postsLimit: limit,
+        tab: tab || 'all',
       });
-      const transformed = raw
-        .map((item: any) => {
-          try {
-            return transformLaravelPost(item);
-          } catch (err) {
-            console.warn('[fetchPostsByUser] skip malformed post', item?.id, err);
-            return null;
-          }
-        })
-        .filter((x: Post | null): x is Post => x !== null);
+      const transformed = mapLaravelProfilePosts(payload?.posts);
+      console.log('[fetchPostsByUser] live ok', {
+        handle: payload?.handle || identifier,
+        posts_count: payload?.posts_count ?? payload?.postsCount,
+        items: transformed.length,
+      });
 
-      // Keep local cache in sync for other screens.
       try {
         for (const p of transformed) {
           const idx = posts.findIndex((existing) => String(existing.id) === String(p.id));
-          if (idx >= 0) posts[idx] = { ...posts[idx], ...p };
-          else posts.unshift(p);
+          if (idx >= 0) {
+            const prev = posts[idx];
+            posts[idx] = {
+              ...prev,
+              ...p,
+              stats: mergeEngagementStats(p.stats, prev.stats),
+              userLiked: p.userLiked === true || prev.userLiked === true,
+            };
+          } else posts.unshift(p);
         }
         if (transformed.length > 0) savePostsToStorage(posts);
       } catch {
-        /* ignore */
+        /* ignore cache sync */
       }
 
-      return transformed.slice(0, limit);
+      const uid = viewerUserId || 'me';
+      syncLocalLikesFromApi(uid, transformed, { allowUnlike: Boolean(viewerUserId) });
+      return transformed.slice(0, limit).map((p) => {
+        const cached = posts.find((existing) => String(existing.id) === String(p.id));
+        return decorateForUser(uid, {
+          ...p,
+          stats: mergeEngagementStats(p.stats, cached?.stats),
+          userLiked: p.userLiked === true || cached?.userLiked === true,
+        });
+      });
     } catch (error: any) {
-      console.log('[fetchPostsByUser] live error — returning empty (no mock seed)', {
+      console.error('[fetchPostsByUser] live error', {
         name: error?.name,
         message: error?.message,
         status: error?.status,
+        response: error?.response,
       });
-      return [];
+      throw error;
     }
   }
+
+  await delay(150);
 
   // Keep in-memory list synchronized with persisted user-created posts so profile/my feed
   // can always see newly created posts even after route transitions on mobile browsers.
@@ -3051,31 +3174,21 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
   const resolvedPostId = resolveCommentsPostId(postId);
-  const useLaravelAPI = isLaravelApiEnabled();
 
-  if (!isFrontendOnlyPostId(resolvedPostId) && useLaravelAPI) {
-    try {
-      const response = await apiClient.addComment(postId, text);
-      const moderation = evaluateCommentModeration(response.text || response.text_content || text);
-      // Transform Laravel comment response to frontend format
-      return {
-        id: response.id,
-        postId: response.post_id || response.postId || postId,
-        userHandle: response.user_handle || response.userHandle || userHandle,
-        text: response.text || response.text_content,
-        userLiked: false,
-        createdAt: new Date(response.created_at || response.createdAt).getTime(),
-        likes: response.likes_count || response.likes || 0,
-        moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
-        moderationReason: moderation.matched[0]
-      };
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
-    }
+  if (shouldUseLivePostApi(resolvedPostId)) {
+    const response = await apiClient.addComment(postId, text);
+    const moderation = evaluateCommentModeration(response.text || response.text_content || text);
+    return {
+      id: response.id,
+      postId: response.post_id || response.postId || postId,
+      userHandle: response.user_handle || response.userHandle || userHandle,
+      text: response.text || response.text_content,
+      userLiked: false,
+      createdAt: new Date(response.created_at || response.createdAt).getTime(),
+      likes: response.likes_count || response.likes || 0,
+      moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+      moderationReason: moderation.matched[0]
+    };
   }
 
   // Mock implementation (fallback)

@@ -1844,6 +1844,11 @@ export default function ViewProfilePage() {
 
                 // Always create profile data, even if no posts found
                 // This ensures the profile page shows even for users with no posts
+                const likesFromApi =
+                    apiProfileData?.likes_count ??
+                    apiProfileData?.stats?.likes_count ??
+                    apiProfileData?.stats?.likes;
+                const viewsFromApi = apiProfileData?.stats?.views ?? apiProfileData?.views_count;
                 const profileData = {
                     handle: decodedHandle,
                     name: decodedHandle.split('@')[0],
@@ -1855,8 +1860,8 @@ export default function ViewProfilePage() {
                     stats: {
                         following: followingCount,
                         followers: followersCount,
-                        likes: totalLikes || 0,
-                        views: totalViews || 0
+                        likes: likesFromApi != null ? Number(likesFromApi) || 0 : totalLikes || 0,
+                        views: viewsFromApi != null ? Number(viewsFromApi) || 0 : totalViews || 0
                     }
                 };
 

@@ -94,7 +94,6 @@ export function getConfiguredApiEnvUrl(): string | undefined {
 }
 
 export function isLaravelApiEnabled(): boolean {
-  if (laravelUnreachableThisSession) return false;
   // Migration flag: keep mock data when EXPO_PUBLIC_USE_MOCK=true.
   if (isMockMode()) return false;
   const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');

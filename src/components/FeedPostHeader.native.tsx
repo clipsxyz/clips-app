@@ -55,7 +55,16 @@ export default function FeedPostHeader({
     const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
 
     const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
-    const metadataItems = useMemo(() => buildPostMetadataItems(post), [post]);
+    const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
+    const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
+    const metadataItems = useMemo(() => {
+        const items = buildPostMetadataItems(post);
+        const hasLocation = items.some((item) => item.type === 'location');
+        if (hasLocation) return items;
+        const raw = String(post.locationLabel || '').trim();
+        const label = raw && raw !== 'Unknown Location' ? raw : 'Gazetteer';
+        return [{ label, type: 'location' as const }, ...items];
+    }, [post]);
     const socialSourceLabel = getPostSocialSourceLabel(post);
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const isFollowing = post.isFollowing === true;
@@ -64,13 +73,13 @@ export default function FeedPostHeader({
         !isCurrentUser &&
             !isFollowing &&
             viewer &&
-            isProfilePrivate(profileHandle) &&
-            hasPendingFollowRequest(viewer, profileHandle),
+            isProfilePrivate(safeProfileHandle) &&
+            hasPendingFollowRequest(viewer, safeProfileHandle),
     );
 
     const avatarSrc = isCurrentUser
         ? user?.avatarUrl
-        : getAvatarForHandle(profileHandle);
+        : getAvatarForHandle(safeProfileHandle);
 
     const verifiedAccountType = resolveVerifiedAccountType(
         isCurrentUser ? user?.accountType : post.userAccountType,
@@ -84,10 +93,10 @@ export default function FeedPostHeader({
         let cancelled = false;
         async function checkStory() {
             try {
-                const anyStory = await userHasStoriesByHandle(profileHandle);
+                const anyStory = await userHasStoriesByHandle(safeProfileHandle);
                 let ring = anyStory;
                 if (!isCurrentUser) {
-                    ring = await userHasUnviewedStoriesByHandle(profileHandle);
+                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle);
                 }
                 if (!cancelled) {
                     setHasStory(ring);
@@ -101,7 +110,7 @@ export default function FeedPostHeader({
         return () => {
             cancelled = true;
         };
-    }, [profileHandle, isCurrentUser, onHasStoryChange]);
+    }, [safeProfileHandle, isCurrentUser, onHasStoryChange]);
 
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -123,14 +132,14 @@ export default function FeedPostHeader({
             style={styles.avatarWrap}
             ref={(r) => {
                 onRegisterDmAnchor?.(`post:${post.id}`, r);
-                onRegisterDmAnchor?.(`handle:${post.userHandle}`, r);
+                onRegisterDmAnchor?.(`handle:${post.userHandle || safeHandle}`, r);
             }}
             collapsable={false}
         >
             <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
                 <Avatar
                     src={avatarSrc}
-                    name={displayHandle.split('@')[0]}
+                    name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
                     size={FEED_UI.icon.avatar}
                     hasStory={hasStory}
                 />
@@ -148,7 +157,7 @@ export default function FeedPostHeader({
             {!isCurrentUser && isMutualFollow && onOpenDM ? (
                 <TouchableOpacity
                     style={styles.dmButton}
-                    onPress={() => onOpenDM(post.userHandle, post.id)}
+                    onPress={() => onOpenDM(post.userHandle || safeHandle, post.id)}
                 >
                     <Icon name="paper-plane" size={10} color="#EF4444" />
                 </TouchableOpacity>
@@ -164,7 +173,7 @@ export default function FeedPostHeader({
     const handleRow = (
         <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85} style={styles.handleBtn}>
             <Text style={[styles.handleText, { color: textPrimary }]} numberOfLines={1}>
-                {displayHandle}
+                {safeHandle}
             </Text>
             <VerifiedBadge accountType={verifiedAccountType} size={FEED_UI.icon.flag} />
         </TouchableOpacity>
@@ -179,7 +188,7 @@ export default function FeedPostHeader({
                         <View style={styles.reclipRow}>
                             <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
                             <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                                {post.userHandle} reclipped
+                                {String(post.userHandle || safeHandle).trim() || 'User'} reclipped
                             </Text>
                         </View>
                     ) : null}
@@ -256,9 +265,15 @@ export default function FeedPostHeader({
 const styles = StyleSheet.create({
     // Web PostHeader: `px-3 pt-3 pb-2`
     wrap: {
+        position: 'relative',
+        width: '100%',
+        minHeight: 56,
         paddingHorizontal: 12,
         paddingTop: 12,
         paddingBottom: 8,
+        justifyContent: 'center',
+        backgroundColor: '#030712',
+        overflow: 'hidden',
     },
     wrapOverlaid: {
         position: 'absolute',

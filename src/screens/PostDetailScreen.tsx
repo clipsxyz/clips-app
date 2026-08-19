@@ -174,9 +174,8 @@ export default function PostDetailScreen({ route, navigation }: any) {
         try {
             let loadedPost: Post | null = null;
 
-            // Prefer the collection grid snapshot when present — getPostById can return a
-            // thinner/stale in-memory row for videos after save-time caching.
-            if (fromCollection && initialPost && String(initialPost.id) === String(postId)) {
+            // Prefer the grid snapshot so MP4 URLs from the profile list are not lost.
+            if (initialPost && String(initialPost.id) === String(postId)) {
                 loadedPost = initialPost as Post;
             }
             if (!loadedPost) {
@@ -187,9 +186,23 @@ export default function PostDetailScreen({ route, navigation }: any) {
             }
             if (loadedPost) {
                 upsertLocalPost(loadedPost);
-                // Re-decorate after upsert so like/bookmark flags stay correct.
                 const fresh = await getPostById(postId, userId);
-                if (fresh) loadedPost = fresh;
+                if (fresh) {
+                    const snapshot = initialPost && String(initialPost.id) === String(postId)
+                        ? (initialPost as Post)
+                        : loadedPost;
+                    loadedPost = {
+                        ...fresh,
+                        mediaUrl: fresh.mediaUrl || snapshot.mediaUrl,
+                        mediaType: fresh.mediaType || snapshot.mediaType,
+                        mediaItems:
+                            fresh.mediaItems && fresh.mediaItems.length > 0
+                                ? fresh.mediaItems
+                                : snapshot.mediaItems,
+                        finalVideoUrl: fresh.finalVideoUrl || snapshot.finalVideoUrl,
+                        videoPosterUrl: fresh.videoPosterUrl || snapshot.videoPosterUrl,
+                    };
+                }
             }
 
             setPost(loadedPost);
@@ -387,6 +400,8 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                     }
                                     height={detailMediaHeight}
                                     mode="detail"
+                                    isActive
+                                    muted={false}
                                     onPress={() => setImageFullscreenOpen(true)}
                                 />
                             </View>

@@ -58,15 +58,127 @@ class UserControllerTest extends TestCase
             ->assertJsonFragment(['can_view' => false]);
     }
 
-    public function test_returns_400_for_nonexistent_handle(): void
+    public function test_returns_404_for_nonexistent_handle(): void
     {
         $viewer = User::factory()->create();
 
         $response = $this->actingAs($viewer, 'sanctum')
             ->getJson('/api/users/@nonexistentuser12345');
 
-        $response->assertStatus(400)
-            ->assertJsonStructure(['errors']);
+        $response->assertStatus(404)
+            ->assertJsonFragment(['error' => 'User not found']);
+    }
+
+    public function test_profile_returns_posts_and_accepts_user_id_or_handle_case(): void
+    {
+        $user = User::factory()->create([
+            'is_private' => false,
+            'handle' => 'Sarah@Artane',
+        ]);
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'is_reclipped' => false,
+        ]);
+        $viewer = User::factory()->create();
+
+        $byHandle = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode('sarah@artane') . '?tab=all&postsLimit=20');
+        $byHandle->assertStatus(200);
+        $this->assertCount(1, $byHandle->json('posts'));
+        $this->assertSame($post->id, $byHandle->json('posts.0.id'));
+        $this->assertSame(1, $byHandle->json('posts_count'));
+
+        $byId = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . $user->id . '/posts?tab=all&postsLimit=20');
+        $byId->assertStatus(200);
+        $this->assertCount(1, $byId->json('posts'));
+        $this->assertSame($post->id, $byId->json('posts.0.id'));
+    }
+
+    public function test_profile_sums_likes_and_views_across_all_posts(): void
+    {
+        $user = User::factory()->create(['is_private' => false]);
+        Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'likes_count' => 3,
+            'views_count' => 10,
+            'is_reclipped' => false,
+        ]);
+        Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'likes_count' => 5,
+            'views_count' => 20,
+            'is_reclipped' => false,
+        ]);
+        $viewer = User::factory()->create();
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($user->handle) . '?tab=all&postsLimit=20');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('stats.likes', 8)
+            ->assertJsonPath('stats.likes_count', 8)
+            ->assertJsonPath('stats.views', 30)
+            ->assertJsonPath('likes_count', 8)
+            ->assertJsonPath('views_count', 30);
+
+        $postsOnly = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($user->handle) . '/posts?tab=all&postsLimit=20');
+        $postsOnly->assertStatus(200)
+            ->assertJsonPath('stats.likes', 8)
+            ->assertJsonPath('stats.likes_count', 8)
+            ->assertJsonPath('stats.views', 30)
+            ->assertJsonPath('likes_count', 8)
+            ->assertJsonPath('views_count', 30);
+    }
+
+    public function test_profile_posts_include_thumbnail_url_for_video(): void
+    {
+        $user = User::factory()->create(['is_private' => false]);
+        $poster = 'https://example.com/frame.jpg';
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => $poster,
+            'media_items' => [[
+                'url' => 'https://example.com/clip.mp4',
+                'type' => 'video',
+                'posterUrl' => $poster,
+            ]],
+            'is_reclipped' => false,
+        ]);
+        $viewer = User::factory()->create();
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($user->handle) . '?tab=all&postsLimit=20');
+
+        $response->assertStatus(200);
+        $this->assertSame($post->id, $response->json('posts.0.id'));
+        $this->assertSame($poster, $response->json('posts.0.thumbnail_url'));
+        $this->assertSame($poster, $response->json('posts.0.video_poster_url'));
+    }
+
+    public function test_invalid_source_post_id_does_not_fail_profile(): void
+    {
+        $user = User::factory()->create(['is_private' => false]);
+        Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+        $viewer = User::factory()->create();
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($user->handle) . '?sourcePostId=not-a-uuid&tab=all');
+
+        $response->assertStatus(200)
+            ->assertJsonCount(1, 'posts');
     }
 
     public function test_can_follow_and_unfollow_public_user(): void

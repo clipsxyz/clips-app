@@ -74,6 +74,8 @@ export type Post = {
   finalVideoUrl?: string; // Final rendered video URL from backend (after processing)
   /** Stable preview frame used as `<video poster>` in feeds. */
   videoPosterUrl?: string;
+  /** JPEG grid thumbnail from API (`thumbnail_url`). */
+  thumbnailUrl?: string;
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
   /** Video framing preference chosen at upload time. */
   videoFrameMode?: 'crop' | 'fit' | 'original';

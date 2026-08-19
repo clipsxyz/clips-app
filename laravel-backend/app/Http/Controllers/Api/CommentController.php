@@ -158,6 +158,7 @@ class CommentController extends Controller
             // Update post comment count
             Post::find($postId)->increment('comments_count');
             BoostAnalyticsService::incrementForPost($postId, 'comments_count');
+            Post::bumpFeedCache();
 
             return $comment;
         });
@@ -211,6 +212,7 @@ class CommentController extends Controller
             // Update post comment count
             Post::find($parentComment->post_id)->increment('comments_count');
             BoostAnalyticsService::incrementForPost($parentComment->post_id, 'comments_count');
+            Post::bumpFeedCache();
 
             return $reply;
         });

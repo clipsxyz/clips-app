@@ -25,6 +25,10 @@ import TaggedUsersBottomSheet from './TaggedUsersBottomSheet.native';
 import BoostMetricsPanel from './BoostMetricsPanel.native';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
+import {
+    FEED_CARD_BODY,
+    FEED_CARD_HEADER_WRAP,
+} from './FeedPageLayout.native';
 
 type Props = {
     post: Post;
@@ -101,7 +105,14 @@ export default function MyFeedPostCard({
                     onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (
-                <View>
+                <View style={FEED_CARD_BODY}>
+                    <View style={FEED_CARD_HEADER_WRAP}>
+                        <FeedPostHeader
+                            post={post}
+                            viewerHandle={user?.handle}
+                            isCurrentUser={isCurrentUser}
+                        />
+                    </View>
                     {hasFeedMedia ? (
                         <View style={styles.mediaWrap}>
                             <FeedPostMedia
@@ -113,20 +124,8 @@ export default function MyFeedPostCard({
                                 height={mediaHeight}
                                 mode="feed"
                             />
-                            <FeedPostHeader
-                                post={post}
-                                viewerHandle={user?.handle}
-                                isCurrentUser={isCurrentUser}
-                                isOverlaid
-                            />
                         </View>
-                    ) : (
-                        <FeedPostHeader
-                            post={post}
-                            viewerHandle={user?.handle}
-                            isCurrentUser={isCurrentUser}
-                        />
-                    )}
+                    ) : null}
                     {carouselThumbItems.length > 1 ? (
                         <FeedMediaCarouselThumbs
                             items={carouselThumbItems}
@@ -234,6 +233,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.06)',
+        flexDirection: 'column',
     },
     sponsoredBadge: {
         paddingHorizontal: 12,
@@ -247,6 +247,8 @@ const styles = StyleSheet.create({
     },
     mediaWrap: {
         position: 'relative',
+        overflow: 'hidden',
+        width: '100%',
     },
     captionWrap: {
         paddingHorizontal: 12,

@@ -6,6 +6,7 @@ import {
     ScrollView,
     Image,
     TouchableOpacity,
+    Pressable,
     ActivityIndicator,
     Alert,
     Modal,
@@ -24,7 +25,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts, transformLaravelPost } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
 import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -208,9 +209,38 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 }
             }
 
-            // Fast path: local/mock posts (instant). Paint immediately, then optionally enrich from API.
-            let userPosts = await fetchPostsByUser(decodedHandle, 20);
-            if (cancelled()) return;
+            let userPosts: Post[] = [];
+            let profileData: any;
+
+            if (isLaravelApiEnabled()) {
+                try {
+                    profileData = await fetchUserProfile(
+                        decodedHandle,
+                        user?.id,
+                        null,
+                        20,
+                        typeof sourcePostId === 'string' ? sourcePostId : undefined,
+                        'all',
+                    );
+                    if (cancelled()) return;
+                    userPosts = mapLaravelProfilePosts(profileData?.posts);
+                } catch (error: any) {
+                    console.error('[ViewProfile] profile fetch error', {
+                        name: error?.name,
+                        message: error?.message,
+                        status: error?.status,
+                        response: error?.response,
+                        mockMode: isMockMode(),
+                    });
+                    if (error?.status === 403 && !cancelled()) {
+                        setCanView(false);
+                        setProfileIsPrivate(true);
+                    }
+                }
+            } else {
+                userPosts = await fetchPostsByUser(decodedHandle, 20);
+                if (cancelled()) return;
+            }
 
             const isOwn = Boolean(user?.handle && decodedHandle === user.handle);
             const paintLocalProfile = (apiData?: any) => {
@@ -279,65 +309,49 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     accountType: resolvedAccountType,
                 });
                 setPosts(userPosts);
+                const handleKey = decodedHandle.trim().toLowerCase();
+                const localHandlePosts = allPosts.filter(
+                    (p) => String(p.userHandle || '').trim().toLowerCase() === handleKey,
+                );
+                const localLikes = localHandlePosts.reduce((sum, p) => sum + (p.stats?.likes ?? 0), 0);
+                const localViews = localHandlePosts.reduce((sum, p) => sum + (p.stats?.views ?? 0), 0);
+                const likesFromApi =
+                    apiData?.likes_count ??
+                    apiData?.stats?.likes_count ??
+                    apiData?.stats?.likes;
+                const viewsFromApi =
+                    apiData?.views_count ??
+                    apiData?.stats?.views_count ??
+                    apiData?.stats?.views;
                 setStats({
                     following: followingCount,
                     followers: followersCount,
-                    likes: apiData?.stats?.likes ?? aggregateLikes,
-                    views: apiData?.stats?.views ?? aggregateViews,
+                    likes: Math.max(
+                        Number(likesFromApi) || 0,
+                        aggregateLikes,
+                        localLikes,
+                    ),
+                    views: Math.max(
+                        Number(viewsFromApi) || 0,
+                        aggregateViews,
+                        localViews,
+                    ),
                 });
                 setProfilePostsCursor(apiData?.postsNextCursor ?? null);
                 setProfilePostsHasMore(Boolean(apiData?.postsHasMore) || userPosts.length >= 20);
             };
 
-            paintLocalProfile();
-            setLoading(false);
+            paintLocalProfile(profileData);
+            if (!cancelled()) setLoading(false);
 
             void userHasStoriesByHandle(decodedHandle)
                 .then((has) => {
                     if (!cancelled()) setHasStory(has);
                 })
-                .catch(() => {
+                .catch((err) => {
+                    console.error('[ViewProfile] stories lookup failed', err);
                     if (!cancelled()) setHasStory(false);
                 });
-
-            if (isLaravelApiEnabled()) {
-                try {
-                    const profileData = await fetchUserProfile(
-                        decodedHandle,
-                        user?.id,
-                        null,
-                        20,
-                        typeof sourcePostId === 'string' ? sourcePostId : undefined,
-                    );
-                    if (cancelled()) return;
-                    if (Array.isArray(profileData?.posts)) {
-                        // Live mode: trust API list even when empty (fixes stale local/mock "0 Posts").
-                        userPosts = profileData.posts.map((item: any) => {
-                            try {
-                                return item?.userHandle ? item : transformLaravelPost(item);
-                            } catch (err) {
-                                console.warn('[ViewProfile] skip malformed profile post', item?.id, err);
-                                return null;
-                            }
-                        }).filter(Boolean) as Post[];
-                    }
-                    paintLocalProfile(profileData);
-                } catch (error: any) {
-                    const isConnectionError =
-                        error?.name === 'ConnectionRefused' ||
-                        error?.message === 'CONNECTION_REFUSED' ||
-                        error?.message?.includes('Failed to fetch');
-                    console.log('[ViewProfile] profile fetch error', {
-                        name: error?.name,
-                        message: error?.message,
-                        status: error?.status,
-                        mockMode: isMockMode(),
-                    });
-                    if (!isConnectionError) {
-                        console.warn('View profile API failed; using local posts:', error);
-                    }
-                }
-            }
         } catch (error) {
             console.error('Error loading profile:', error);
             if (!cancelled()) {
@@ -753,12 +767,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         }
     };
 
-    const handlePostPress = (postId: string) => {
+    const onSelectPost = (item: Post) => {
         if (suppressGridOpenClickRef.current) {
             suppressGridOpenClickRef.current = false;
             return;
         }
-        setSelectedPostId(postId);
+        setSelectedPostId(item.id);
         setShowPostsSheet(true);
     };
 
@@ -775,8 +789,27 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     };
 
     const syncPeekPost = (updated: Post) => {
-        setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-        setGridPeekPost((prev) => (prev?.id === updated.id ? updated : prev));
+        applyPostLikeUpdate(updated);
+        setGridPeekPost((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+    };
+
+    const applyPostLikeUpdate = (updated: Post) => {
+        setPosts((prev) => {
+            const current = prev.find((p) => String(p.id) === String(updated.id));
+            const next = prev.map((p) =>
+                String(p.id) === String(updated.id) ? { ...p, ...updated, stats: { ...p.stats, ...updated.stats } } : p,
+            );
+            const wasLiked = current?.userLiked === true;
+            const nowLiked = updated.userLiked === true;
+            const delta = wasLiked === nowLiked ? 0 : nowLiked ? 1 : -1;
+            if (delta !== 0) {
+                setStats((st) => ({ ...st, likes: Math.max(0, st.likes + delta) }));
+            } else {
+                const sum = next.reduce((acc, p) => acc + (p.stats?.likes ?? 0), 0);
+                setStats((st) => ({ ...st, likes: Math.max(st.likes, sum) }));
+            }
+            return next;
+        });
     };
 
     const handlePeekLike = async () => {
@@ -840,13 +873,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         if (profilePostsHasMore && profilePostsCursor != null) {
             setProfilePostsLoadingMore(true);
             try {
-                const nextProfile = await fetchUserProfile(decoded, user?.id, profilePostsCursor, 20);
-                const rawItems = Array.isArray(nextProfile?.posts) ? nextProfile.posts : [];
-                if (rawItems.length > 0) {
+                const nextProfile = await fetchUserProfile(decoded, user?.id, profilePostsCursor, 20, undefined, 'all');
+                const appended = mapLaravelProfilePosts(nextProfile?.posts);
+                if (appended.length > 0) {
                     setPosts((prev) => {
                         const seen = new Set(prev.map((p) => String(p.id)));
-                        const appended = rawItems.filter((p: Post) => !seen.has(String(p.id)));
-                        return [...prev, ...appended];
+                        return [...prev, ...appended.filter((p) => !seen.has(String(p.id)))];
                     });
                 }
                 setProfilePostsCursor((nextProfile as any)?.postsNextCursor ?? null);
@@ -974,7 +1006,11 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.content} stickyHeaderIndices={[6]}>
+            <ScrollView
+                style={styles.content}
+                stickyHeaderIndices={[6]}
+                keyboardShouldPersistTaps="handled"
+            >
                 <View style={styles.passportTitleBlock}>
                     <Text style={styles.passportTitle}>Passport</Text>
                     <Text style={styles.passportEyebrow}>
@@ -1222,15 +1258,32 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     ) : (
                         <View style={styles.postsGrid}>
                             {filteredPosts.map((item) => (
-                                <TouchableOpacity
+                                <Pressable
                                     key={item.id}
-                                    onPress={() => handlePostPress(item.id)}
+                                    onPress={() => onSelectPost(item)}
                                     onLongPress={() => openGridPeek(item)}
                                     delayLongPress={450}
-                                    style={styles.postThumbnail}
+                                    style={{
+                                        width: '33.33%',
+                                        height: 120,
+                                        overflow: 'hidden',
+                                        borderRadius: 8,
+                                        position: 'relative',
+                                        padding: FEED_UI.spacing.hairlineGap,
+                                    }}
                                 >
-                                    <ProfileGridThumb post={item} />
-                                </TouchableOpacity>
+                                    <View
+                                        style={{
+                                            flex: 1,
+                                            overflow: 'hidden',
+                                            borderRadius: 8,
+                                            position: 'relative',
+                                        }}
+                                        pointerEvents="none"
+                                    >
+                                        <ProfileGridThumb post={item} />
+                                    </View>
+                                </Pressable>
                             ))}
                         </View>
                     )}
@@ -1432,6 +1485,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 profileName={profileDisplayName}
                 profileHandle={decodedHandle}
                 navigation={navigation}
+                onPostUpdated={applyPostLikeUpdate}
             />
 
             <ProfileGridPeekSheet
@@ -1886,7 +1940,6 @@ const styles = StyleSheet.create({
     },
     postThumbnail: {
         width: '33.33%',
-        aspectRatio: 1,
         padding: FEED_UI.spacing.hairlineGap,
     },
     thumbnailImage: {

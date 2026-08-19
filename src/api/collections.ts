@@ -205,28 +205,47 @@ function isFakeVideoPosterUrl(url: string | undefined): boolean {
 export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     if (!post) return undefined;
     const looksLikeVideo = (url?: string) =>
-        !!url && /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+        !!url && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
     const usableImage = (url?: string) => {
         const compact = compactPersistedMediaUrl(url);
         if (!compact || looksLikeVideo(compact) || isFakeVideoPosterUrl(compact)) return undefined;
         return compact;
     };
 
+    const extra = post as Partial<Post> & {
+        thumbnail_url?: string;
+        poster_url?: string;
+        posterUrl?: string;
+        media_url?: string;
+    };
     const firstMediaItem =
         Array.isArray(post.mediaItems) && post.mediaItems.length > 0
             ? post.mediaItems.find((item) => (item?.type === 'image' || item?.type === 'video') && !!item.url) ||
               post.mediaItems[0]
             : undefined;
+    const slide = firstMediaItem as
+        | { posterUrl?: string; poster_url?: string; thumbnailUrl?: string; thumbnail_url?: string; url?: string; type?: string }
+        | undefined;
 
-    const fromPoster = usableImage(post.videoPosterUrl);
-    if (fromPoster) return fromPoster;
-
-    if (firstMediaItem?.type === 'image') {
-        const img = usableImage(firstMediaItem.url);
+    const candidates = [
+        extra.thumbnail_url,
+        extra.thumbnailUrl,
+        extra.poster_url,
+        extra.posterUrl,
+        post.videoPosterUrl,
+        slide?.thumbnail_url,
+        slide?.thumbnailUrl,
+        slide?.poster_url,
+        slide?.posterUrl,
+        slide?.type === 'image' ? slide.url : undefined,
+        extra.media_url,
+        post.mediaUrl,
+        slide?.url,
+    ];
+    for (const candidate of candidates) {
+        const img = usableImage(typeof candidate === 'string' ? candidate : undefined);
         if (img) return img;
     }
-    const slidePoster = usableImage((firstMediaItem as { posterUrl?: string } | undefined)?.posterUrl);
-    if (slidePoster) return slidePoster;
 
     const media = compactPersistedMediaUrl(post.mediaUrl || firstMediaItem?.url);
     if (media && looksLikeVideo(media)) {
@@ -240,9 +259,8 @@ export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
         } catch {
             /* ignore */
         }
-        return undefined;
     }
-    return usableImage(media);
+    return undefined;
 }
 
 /** List-row thumbnail: prefer live post URL so blobs/API paths stay valid after creating a collection. */

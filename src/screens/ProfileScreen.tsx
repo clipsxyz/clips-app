@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
     View,
     Text,
@@ -17,6 +17,7 @@ import {
     Platform,
     DeviceEventEmitter,
     useWindowDimensions,
+    type ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -93,6 +94,8 @@ import {
 import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 
 type ProfileAlertConfig = {
     title: string;
@@ -119,6 +122,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
     const [myFeedOpen, setMyFeedOpen] = useState(false);
+    const [myFeedActiveVideoPostId, setMyFeedActiveVideoPostId] = useState<string | null>(null);
     const [myFeedOverflowPost, setMyFeedOverflowPost] = useState<Post | null>(null);
     const [myFeedOverflowVisible, setMyFeedOverflowVisible] = useState(false);
     const [myFeedOverflowSaved, setMyFeedOverflowSaved] = useState(false);
@@ -189,6 +193,41 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         loadData();
     }, [user?.handle]);
+
+    const myFeedActiveVideoPostIdRef = useRef<string | null>(null);
+    myFeedActiveVideoPostIdRef.current = myFeedActiveVideoPostId;
+
+    const activateMyFeedVideo = useCallback((postId: string | null) => {
+        const next = postId ? String(postId) : null;
+        myFeedActiveVideoPostIdRef.current = next;
+        setMyFeedActiveVideoPostId(next);
+        setActiveFeedVideoPostId(next);
+    }, []);
+
+    useEffect(() => {
+        if (!myFeedOpen) {
+            activateMyFeedVideo(null);
+            return;
+        }
+        if (myFeedActiveVideoPostIdRef.current) return;
+        const firstVideo = posts.find((p) => postHasVideoMedia(p));
+        activateMyFeedVideo(firstVideo ? String(firstVideo.id) : null);
+    }, [activateMyFeedVideo, myFeedOpen, posts]);
+
+    const myFeedViewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 60,
+        minimumViewTime: 80,
+    }).current;
+
+    const onMyFeedViewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+            const visibleVideos = viewableItems
+                .filter((token) => token.isViewable && token.item && postHasVideoMedia(token.item as Post))
+                .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+            const next = visibleVideos[0]?.item as Post | undefined;
+            if (next) activateMyFeedVideo(String(next.id));
+        },
+    ).current;
 
     // Hydrate Push Notification toggles from AsyncStorage (survive restarts in mock mode).
     useEffect(() => {
@@ -296,26 +335,48 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     }, []);
 
     const loadData = async () => {
-        if (!user?.handle) return;
+        if (!user?.handle && !user?.id) return;
         setLoading(true);
         try {
-            const [userPosts, userCollections, userDrafts, followingHandles] = await Promise.all([
-                fetchPostsByUser(user.handle, 50),
-                getUserCollections(user.id || 'me'),
-                getDrafts().catch(() => []),
-                user?.id ? getFollowedUsers(String(user.id)).catch(() => []) : Promise.resolve([]),
-            ]);
+            const identifier = String(user.handle || user.id);
+            const userPosts = await fetchPostsByUser(identifier, 50, user.id, 'all');
             setPosts(userPosts);
+        } catch (error) {
+            console.error('Error loading profile posts:', error);
+        } finally {
+            setLoading(false);
+        }
+
+        try {
+            const [userCollections, userDrafts, followingHandles] = await Promise.all([
+                getUserCollections(user.id || 'me').catch((err) => {
+                    console.error('Error loading collections:', err);
+                    return [] as Collection[];
+                }),
+                getDrafts().catch((err) => {
+                    console.error('Error loading drafts:', err);
+                    return [];
+                }),
+                user?.id
+                    ? getFollowedUsers(String(user.id)).catch((err) => {
+                          console.error('Error loading following list:', err);
+                          return [] as string[];
+                      })
+                    : Promise.resolve([] as string[]),
+            ]);
             setCollections(userCollections);
             setDrafts(userDrafts);
 
             let followers = user?.followers_count ?? 0;
-            if (isLaravelApiEnabled()) {
+            if (isLaravelApiEnabled() && user?.handle) {
                 try {
-                    const res: any = await fetchFollowers(user.handle, 0, 200);
-                    const list = Array.isArray(res?.data) ? res.data : res?.followers ?? [];
-                    followers = list.length;
-                } catch {
+                    const res: any = await fetchFollowers(user.handle, 0, 20);
+                    const list = Array.isArray(res?.data) ? res.data : res?.followers ?? res?.items ?? [];
+                    if (typeof res?.total === 'number') followers = res.total;
+                    else if (typeof user?.followers_count === 'number') followers = user.followers_count;
+                    else followers = list.length;
+                } catch (err) {
+                    console.error('Error loading followers count:', err);
                     followers = user?.followers_count ?? 0;
                 }
             }
@@ -324,9 +385,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 following: followingHandles.length,
             });
         } catch (error) {
-            console.error('Error loading profile:', error);
-        } finally {
-            setLoading(false);
+            console.error('Error loading profile extras:', error);
         }
     };
 
@@ -1083,7 +1142,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             {posts.map((item) => (
                                 <TouchableOpacity
                                     key={item.id}
-                                    onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
+                                    onPress={() =>
+                                        navigation.navigate('PostDetail', {
+                                            postId: item.id,
+                                            initialPost: item,
+                                        })
+                                    }
                                     style={styles.postItem}
                                 >
                                     <ProfileGridThumb post={item} />
@@ -1531,7 +1595,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 visible={myFeedOpen}
                 animationType="slide"
                 transparent={false}
-                onRequestClose={() => setMyFeedOpen(false)}
+                onRequestClose={() => {
+                    activateMyFeedVideo(null);
+                    setMyFeedOpen(false);
+                }}
             >
                 <SafeAreaView style={styles.myFeedScreen}>
                     <View style={styles.myFeedHeader}>
@@ -1539,7 +1606,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
                             <Text style={styles.myFeedTitle}>My feed</Text>
                         </View>
-                        <TouchableOpacity onPress={() => setMyFeedOpen(false)} style={styles.myFeedCloseButton}>
+                        <TouchableOpacity
+                            onPress={() => {
+                                activateMyFeedVideo(null);
+                                setMyFeedOpen(false);
+                            }}
+                            style={styles.myFeedCloseButton}
+                        >
                             <Icon name="close" size={ox(22)} color="#FFFFFF" />
                         </TouchableOpacity>
                     </View>
@@ -1548,12 +1621,19 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         data={posts}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.myFeedListContent}
+                        extraData={myFeedActiveVideoPostId}
+                        viewabilityConfig={myFeedViewabilityConfig}
+                        onViewableItemsChanged={onMyFeedViewableItemsChanged}
                         renderItem={({ item }) => (
                             <FeedCard
                                 post={item}
                                 isCurrentUser
                                 viewerHandle={user?.handle}
                                 viewerUserId={user?.id}
+                                isVideoActive={
+                                    postHasVideoMedia(item) &&
+                                    String(myFeedActiveVideoPostId) === String(item.id)
+                                }
                                 onLike={async () => {
                                     if (!user?.id) return;
                                     const updated = await toggleLike(user.id, item.id, item);
@@ -1582,7 +1662,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     );
                                 }}
                                 onPostPress={() =>
-                                    navigation.navigate('PostDetail', { postId: item.id })
+                                    navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
                                 }
                                 onShareToStoriesSuccess={(postId) => {
                                     setPosts((prev) =>

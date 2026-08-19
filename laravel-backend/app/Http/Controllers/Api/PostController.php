@@ -10,6 +10,7 @@ use App\Jobs\ProcessRenderJob;
 use App\Services\BoostAnalyticsService;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
+use App\Services\VideoThumbnailService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -116,6 +117,13 @@ class PostController extends Controller
             $postData['user_reclipped'] = false;
         }
 
+        $poster = $post->resolvedThumbnailUrl();
+        $postData['thumbnail_url'] = $poster;
+        $postData['video_poster_url'] = $poster;
+        $postData['poster_url'] = $poster;
+
+        $postData = Post::applyEngagementCounts($postData, $attrs);
+
         return $postData;
     }
 
@@ -155,15 +163,9 @@ class PostController extends Controller
             }
             $cursorState = $this->decodeFeedCursor($cursor);
 
-            // Include feed version so cache is invalidated when any post is updated (e.g. edit location/venue)
-            $feedVersion = Cache::get('feed_version', 0);
-            $cacheCursor = $cursor !== '' ? $cursor : 'start';
-            $cacheKey = 'feed:v' . $feedVersion . ':' . ($filter ?? 'all') . ':' . ($userId ?? 'guest') . ':' . $cacheCursor . ':' . $limit;
-            $ttlSeconds = 300; // 5 minutes
-
-            $response = Cache::remember($cacheKey, $ttlSeconds, function () use ($limit, $filter, $userId, $cursorState) {
-                return $this->buildFeedResponse($cursorState, $limit, $filter, $userId);
-            });
+            // Do not cache feed pages: likes/views/comments/shares change constantly,
+            // and Home refetches this endpoint. A 5-minute cache served stale zeros.
+            $response = $this->buildFeedResponse($cursorState, $limit, $filter, $userId);
 
             return response()->json($response);
         } catch (\Throwable $e) {
@@ -186,7 +188,7 @@ class PostController extends Controller
             // Location feeds: only original posts from that location.
             $query = Post::query()
                 ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
-                ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
+                ->withCount(Post::engagementWithCounts());
 
             if ($filter === 'Following' && $userId) {
                 $query->following($userId);
@@ -201,13 +203,13 @@ class PostController extends Controller
             if ($hasViewer) {
                 $query->withExists([
                     'likes as user_liked' => function ($q) use ($userId) {
-                        $q->where('user_id', $userId);
+                        $q->where('users.id', $userId);
                     },
                     'bookmarks as is_bookmarked' => function ($q) use ($userId) {
-                        $q->where('user_id', $userId);
+                        $q->where('users.id', $userId);
                     },
                     'reclips as user_reclipped' => function ($q) use ($userId) {
-                        $q->where('user_id', $userId);
+                        $q->where('users.id', $userId);
                     },
                 ])
                 ->selectRaw(
@@ -316,18 +318,18 @@ class PostController extends Controller
         $hasViewer = !empty($userId);
         
         $query = Post::with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
-            ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
+            ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
             $query->withExists([
                 'likes as user_liked' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
+                    $q->where('users.id', $userId);
                 },
                 'bookmarks as is_bookmarked' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
+                    $q->where('users.id', $userId);
                 },
                 'reclips as user_reclipped' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
+                    $q->where('users.id', $userId);
                 },
             ])
             ->selectRaw(
@@ -356,13 +358,15 @@ class PostController extends Controller
 
         $post = Post::query()
             ->with(['user:id,handle,display_name,avatar_url'])
-            ->withCount(['likes', 'comments', 'shares', 'views', 'reclips'])
+            ->withCount(Post::engagementWithCounts())
             ->where('public_share_token', $token)
             ->first();
 
         if (!$post) {
             return response()->json(['error' => 'Post not found'], 404);
         }
+
+        $counts = Post::applyEngagementCounts($post->toArray(), $post->getAttributes());
 
         // Public preview payload only (safe guest fields).
         return response()->json([
@@ -380,11 +384,11 @@ class PostController extends Controller
             'location_label' => $post->location_label,
             'venue' => $post->venue,
             'landmark' => $post->landmark,
-            'likes_count' => (int) $post->likes_count,
-            'comments_count' => (int) $post->comments_count,
-            'shares_count' => (int) $post->shares_count,
-            'views_count' => (int) $post->views_count,
-            'reclips_count' => (int) $post->reclips_count,
+            'likes_count' => $counts['likes_count'],
+            'comments_count' => $counts['comments_count'],
+            'shares_count' => $counts['shares_count'],
+            'views_count' => $counts['views_count'],
+            'reclips_count' => $counts['reclips_count'],
             'created_at' => optional($post->created_at)->toISOString(),
         ]);
     }
@@ -473,12 +477,37 @@ class PostController extends Controller
         $post = DB::transaction(function () use ($request, $user) {
             $geo = $this->resolvePostGeoFields($request);
 
+            $mediaItems = $request->mediaItems;
+            $posterUrl = is_string($request->videoPosterUrl) ? trim($request->videoPosterUrl) : '';
+            if ((!is_array($mediaItems) || $mediaItems === []) && $request->mediaUrl) {
+                $mediaItems = [[
+                    'url' => $request->mediaUrl,
+                    'type' => $request->mediaType ?: 'image',
+                ]];
+            }
+            if ($posterUrl !== '' && is_array($mediaItems)) {
+                foreach ($mediaItems as $index => $item) {
+                    if (!is_array($item)) {
+                        continue;
+                    }
+                    $type = $item['type'] ?? null;
+                    if ($type === 'video' || ($index === 0 && $type !== 'image')) {
+                        $mediaItems[$index]['posterUrl'] = $item['posterUrl'] ?? $posterUrl;
+                        $mediaItems[$index]['poster_url'] = $item['poster_url'] ?? $posterUrl;
+                        $mediaItems[$index]['thumbnail_url'] = $item['thumbnail_url'] ?? $posterUrl;
+                        $mediaItems[$index]['thumbnailUrl'] = $item['thumbnailUrl'] ?? $posterUrl;
+                        break;
+                    }
+                }
+            }
+
             $post = Post::create([
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
                 'text_content' => $request->text,
                 'media_url' => $request->mediaUrl,
                 'media_type' => $request->mediaType,
+                'thumbnail_url' => $posterUrl !== '' ? $posterUrl : null,
                 'location_label' => $geo['location_label'] ?? $request->location,
                 'place_id' => $geo['place_id'],
                 'latitude' => $geo['latitude'],
@@ -491,7 +520,7 @@ class PostController extends Controller
                 'banner_text' => $request->bannerText,
                 'stickers' => $request->stickers,
                 'template_id' => $request->templateId,
-                'media_items' => $request->mediaItems,
+                'media_items' => is_array($mediaItems) ? $mediaItems : $request->mediaItems,
                 'text_style' => $request->textStyle,
                 'video_captions_enabled' => $request->videoCaptionsEnabled ?? false,
                 'video_caption_text' => $request->videoCaptionText,
@@ -551,6 +580,10 @@ class PostController extends Controller
             return $post;
         });
 
+        app(VideoThumbnailService::class)->ensureForPost($post);
+        $post->refresh();
+        $post->load(['user', 'taggedUsers']);
+
         \Log::info('posts.store created', [
             'post_id' => $post->id,
             'user_id' => $post->user_id,
@@ -561,6 +594,10 @@ class PostController extends Controller
         // Transform taggedUsers to array of handles for frontend compatibility
         $postData = $post->toArray();
         $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
+        $poster = $post->resolvedThumbnailUrl();
+        $postData['thumbnail_url'] = $poster;
+        $postData['video_poster_url'] = $poster;
+        $postData['poster_url'] = $poster;
         
         // Include render_job_id if a render job was created
         if ($post->render_job_id) {
@@ -719,7 +756,15 @@ class PostController extends Controller
             }
         }
 
-        return response()->json($result);
+        $post->refresh();
+        Post::bumpFeedCache();
+
+        return response()->json([
+            'id' => $post->id,
+            'liked' => (bool) ($result['liked'] ?? false),
+            'user_liked' => (bool) ($result['liked'] ?? false),
+            'likes_count' => (int) $post->likes_count,
+        ]);
     }
 
     /**
@@ -834,6 +879,8 @@ class PostController extends Controller
                 // no-op
             }
 
+            Post::bumpFeedCache();
+
             return response()->json([
                 'success' => true,
                 'views' => $views
@@ -877,7 +924,8 @@ class PostController extends Controller
         });
 
         $post->load(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url']);
-        $post->loadCount(['likes', 'comments', 'shares', 'views', 'reclips']);
+        $post->loadCount(Post::engagementWithCounts());
+        Post::bumpFeedCache();
         $postData = self::toApiArray($post, $user instanceof User ? $user : null);
         $postData['public_share_url'] = $this->buildPublicShareUrl($post->public_share_token);
         $postData['success'] = true;
@@ -968,6 +1016,7 @@ class PostController extends Controller
 
             // Update original post reclip count
             $originalPost->increment('reclips_count');
+            Post::bumpFeedCache();
 
             return $reclippedPost;
         });

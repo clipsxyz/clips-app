@@ -41,16 +41,27 @@ export const FEED_POST_CARD_STYLE = {
     backgroundColor: FEED_CARD_BG,
     borderBottomWidth: 1,
     borderBottomColor: FEED_CARD_BORDER_COLOR,
-    marginBottom: 8, // mb-2
-    overflow: 'visible' as const,
+    position: 'relative' as const,
+    overflow: 'hidden' as const,
+    flexDirection: 'column' as const,
 };
 
-/** Web FeedCard inner body: relative w-full overflow-visible. */
+/** Header → media → footer. Clip media so TextureView cannot bleed. */
 export const FEED_CARD_BODY = {
     position: 'relative' as const,
     width: '100%' as const,
-    overflow: 'visible' as const,
+    overflow: 'hidden' as const,
+    flexDirection: 'column' as const,
 };
+
+/** Reserved chrome above media so the player cannot collapse into the next card. */
+export const FEED_CARD_HEADER_WRAP = {
+    position: 'relative' as const,
+    width: '100%' as const,
+    minHeight: 56,
+    zIndex: 2,
+    backgroundColor: FEED_CARD_BG,
+} as const;
 
 /** Default media frame while sizing / for letterboxing. */
 export const FEED_CARD_MEDIA_FRAME = {
@@ -79,12 +90,14 @@ export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
     borderTopColor: FEED_PAGE_BG,
 } as const;
 
-/** Full-bleed media column (black, overlaid PostHeader). */
+/** Full-bleed media column below the stacked post header. */
 export const FEED_CARD_MEDIA_WRAP = {
     width: '100%' as const,
     backgroundColor: FEED_CARD_MEDIA_BG,
     position: 'relative' as const,
     overflow: 'hidden' as const,
+    // Android only clips TextureView children when overflow:hidden is paired with a radius.
+    borderRadius: 1,
 };
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
@@ -98,17 +111,10 @@ export const FEED_CARD_MEDIA_FX_LAYER = {
     elevation: Platform.OS === 'android' ? 45 : 0,
 } as const;
 
-/** Space left clear above the still-tap layer for overlaid PostHeader chrome. */
-export const FEED_CARD_MEDIA_TAP_LAYER_TOP = 72;
-
-/** Transparent tap layer above media (below header + chrome controls).
- * No elevation — Android elevation would sit above the overlaid PostHeader
- * (zIndex-only) and steal overflow / avatar taps into fullscreen open.
- * Top inset leaves PostHeader chrome hit-testable even under RNGH.
- */
+/** Transparent tap layer above media (header is stacked above this frame). */
 export const FEED_CARD_MEDIA_TAP_LAYER = {
     position: 'absolute' as const,
-    top: FEED_CARD_MEDIA_TAP_LAYER_TOP,
+    top: 0,
     left: 0,
     right: 0,
     // Leave bottom chrome clear for Scenes CTA + mute (external tap layer sits above media).

@@ -88,6 +88,29 @@ class PostControllerTest extends TestCase
         ]);
     }
 
+    public function test_create_video_post_persists_thumbnail_url_from_poster(): void
+    {
+        $user = User::factory()->create();
+        $poster = 'https://example.com/poster.jpg';
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/posts', [
+                'text' => 'Video clip',
+                'location' => 'Dublin',
+                'mediaUrl' => 'https://example.com/clip.mp4',
+                'mediaType' => 'video',
+                'videoPosterUrl' => $poster,
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('thumbnail_url', $poster);
+
+        $this->assertDatabaseHas('posts', [
+            'user_id' => $user->id,
+            'thumbnail_url' => $poster,
+        ]);
+    }
+
     public function test_can_get_posts_with_pagination(): void
     {
         $user = User::factory()->create();
@@ -189,6 +212,35 @@ class PostControllerTest extends TestCase
         $first = $items->firstWhere('handle', 'Liker1@Dublin');
         $this->assertNotNull($first);
         $this->assertTrue($first['is_following']);
+    }
+
+    public function test_toggle_like_returns_likes_count(): void
+    {
+        $author = User::factory()->create();
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'likes_count' => 0,
+        ]);
+
+        $liked = $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/like");
+        $liked->assertStatus(200)
+            ->assertJsonPath('liked', true)
+            ->assertJsonPath('user_liked', true)
+            ->assertJsonPath('likes_count', 1);
+
+        $this->assertDatabaseHas('posts', [
+            'id' => $post->id,
+            'likes_count' => 1,
+        ]);
+
+        $unliked = $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/like");
+        $unliked->assertStatus(200)
+            ->assertJsonPath('liked', false)
+            ->assertJsonPath('likes_count', 0);
     }
 
     public function test_share_assigns_public_token_and_returns_public_url(): void

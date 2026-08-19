@@ -282,6 +282,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     // Users routes
     Route::prefix('users')->group(function () {
         Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe']);
+        Route::get('/{handle}/posts', [UserController::class, 'posts']);
         Route::get('/{handle}', [UserController::class, 'show']);
         Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
         Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);

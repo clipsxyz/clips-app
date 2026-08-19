@@ -41,7 +41,9 @@ export function isVideoPost(post: Post): boolean {
     );
     const type = first?.type || post.mediaType;
     if (type === 'video') return true;
-    const url = (first?.url || post.mediaUrl || '').toLowerCase();
+    const extra = post as Post & { video_url?: string; videoUrl?: string };
+    if (extra.video_url || extra.videoUrl || post.finalVideoUrl) return true;
+    const url = (first?.url || post.mediaUrl || extra.video_url || '').toLowerCase();
     return /\.(mp4|mov|m4v|webm)(\?|$)/i.test(url);
 }
 

@@ -34,7 +34,7 @@ import {
     isTextOnlyPost,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
-import { postHasVideoMedia } from '../utils/postMedia';
+import { postHasVideoMedia, resolvePostPlaybackUri } from '../utils/postMedia';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
@@ -54,6 +54,36 @@ function firstMediaUri(...vals: unknown[]): string | undefined {
         }
     }
     return undefined;
+}
+
+/** Same URI → same source object so like re-renders don't reload the MP4. */
+const FEED_VIDEO_SOURCE_CACHE = new Map<string, object>();
+
+function buildFeedVideoSource(uri: string, rawUrl?: string): object {
+    const sourceUri = uri || rawUrl || '';
+    const cacheKey = `${rawUrl || ''}|${sourceUri}`;
+    const cached = FEED_VIDEO_SOURCE_CACHE.get(cacheKey);
+    if (cached) return cached;
+
+    let source: object;
+    if (isPlayableLocalMediaUri(rawUrl) || isPlayableLocalMediaUri(uri)) {
+        source = { uri: rawUrl && isPlayableLocalMediaUri(rawUrl) ? rawUrl : uri };
+    } else if (rawUrl && isMockDemoVideoPath(rawUrl)) {
+        source = mockFeedVideoSource(rawUrl) as object;
+    } else if (isMockDemoVideoPath(uri)) {
+        source = mockFeedVideoSource(uri) as object;
+    } else {
+        const lower = sourceUri.toLowerCase();
+        if (lower.includes('.m3u8')) {
+            source = withFeedVideoCache({ uri: sourceUri, type: 'm3u8' as const });
+        } else if (lower.includes('.webm')) {
+            source = withFeedVideoCache({ uri: sourceUri, type: 'webm' as const });
+        } else {
+            source = withFeedVideoCache({ uri: sourceUri });
+        }
+    }
+    FEED_VIDEO_SOURCE_CACHE.set(cacheKey, source);
+    return source;
 }
 
 function resolveFeedVideoPosterUri(
@@ -110,7 +140,8 @@ type Props = {
     onOpenScenes?: () => void;
 };
 
-const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function FeedPostMedia(
+const FeedPostMedia = React.memo(
+    React.forwardRef<FeedPostMediaHandle, Props>(function FeedPostMedia(
     {
         post,
         carouselIndex = 0,
@@ -123,7 +154,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         stickers,
         onMediaLoad,
         mode = 'feed',
-        isActive: _isActiveProp = false,
+        isActive = false,
         suspendNativeVideo = false,
         muted = true,
         style,
@@ -135,6 +166,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
     const pendingSeekRef = useRef<number | null>(null);
+    const playbackTimeRef = useRef(0);
     /** Per-raw-URL remote fallback after local/demo path fails (mirrors web Media). */
     const [videoUrlFallbackByRaw, setVideoUrlFallbackByRaw] = useState<Record<string, string>>({});
     const [soundOn, setSoundOn] = useState(!muted);
@@ -197,10 +229,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         return subscribeActiveFeedVideo(setStoreActivePostId);
     }, [mode]);
 
-    const isFeedAutoplayActive =
+    const isViewable =
         mode === 'feed' &&
         !suspendNativeVideo &&
         String(storeActivePostId) === String(post.id);
+    const isFeedAutoplayActive = isViewable;
 
     // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
     const [playerEpoch, setPlayerEpoch] = useState(0);
@@ -300,7 +333,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         carouselItems.length > 0
             ? carouselItems[Math.min(currentIndex, maxCarouselIndex)]
             : undefined;
-    const rawMediaUrl = activeItem?.url || post.mediaUrl;
+    const rawMediaUrl = resolvePostPlaybackUri(post, activeItem);
     const getPlaybackUrl = (raw: string) => {
         if (videoUrlFallbackByRaw[raw]) return videoUrlFallbackByRaw[raw];
         // Device uploads / temp storage — never run through demo remapping.
@@ -371,6 +404,13 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     );
 
     useEffect(() => {
+        if (mode !== 'detail' || !video) return;
+        setPaused(false);
+        setPlayFailed(false);
+        if (mediaUrl) beginUrlLoad(mediaUrl);
+    }, [beginUrlLoad, mediaUrl, mode, post.id, video]);
+
+    useEffect(() => {
         if (mode !== 'feed' || !video) return;
         setPlayFailed(false);
         if (mediaUrl) beginUrlLoad(mediaUrl);
@@ -379,30 +419,49 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
         if (isFeedAutoplayActive && !suspendNativeVideo) {
-            resetPosterCover();
+            // Resume in place — do not cover/seek to 0 (double-tap like re-renders the card).
             setPaused(false);
             setPlayFailed(false);
             const handoff = consumeFeedVideoHandoff(String(post.id));
-            if (handoff && Number.isFinite(handoff.currentTime) && handoff.currentTime > 0.05) {
-                pendingSeekRef.current = handoff.currentTime;
+            const resumeAt =
+                handoff && Number.isFinite(handoff.currentTime) && handoff.currentTime > 0.05
+                    ? handoff.currentTime
+                    : playbackTimeRef.current > 0.05
+                      ? playbackTimeRef.current
+                      : null;
+            if (resumeAt != null) {
+                pendingSeekRef.current = resumeAt;
             }
             return;
         }
 
-        // Leaving view / overlay / blur: hard-stop native player so audio cannot leak.
+        // Pause only. Seek to 0 only when a *different* post became active
+        // (scroll away). Overlays / like burst must not restart this clip.
         setPaused(true);
-        pendingSeekRef.current = null;
-        resetPosterCover();
+        const stillThisPost = String(storeActivePostId) === String(post.id);
         const player = feedVideoRef.current as
             | (VideoRef & { pause?: () => void; seek?: (t: number) => void })
             | null;
         try {
             player?.pause?.();
-            player?.seek?.(0);
+            if (!stillThisPost) {
+                pendingSeekRef.current = null;
+                playbackTimeRef.current = 0;
+                resetPosterCover();
+                player?.seek?.(0);
+            }
         } catch {
             /* ignore */
         }
-    }, [isFeedAutoplayActive, mode, post.id, resetPosterCover, suspendNativeVideo, video]);
+    }, [
+        isFeedAutoplayActive,
+        mode,
+        post.id,
+        resetPosterCover,
+        storeActivePostId,
+        suspendNativeVideo,
+        video,
+    ]);
 
     // Unmount / remount safety — always stop ExoPlayer audio.
     useEffect(() => {
@@ -441,7 +500,10 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
     const mediaPointerEvents = feedTapCapture ? ('none' as const) : undefined;
 
+    const lastDoubleTapAtRef = useRef(0);
+
     const handleFullscreen = useCallback(() => {
+        if (Date.now() - lastDoubleTapAtRef.current < 500) return;
         if (onPress && !onDoubleLike && !onSingleTap) {
             onPress();
             return;
@@ -451,24 +513,24 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const handleLikeAt = useCallback(
         (x: number, y: number) => {
-            // Non-carousel tap layer is inset from media top — map into media-local coords.
-            // Carousel GestureDetector wraps the full media frame, so e.x/e.y are already local.
+            lastDoubleTapAtRef.current = Date.now();
             const localX = Number.isFinite(x) ? x : width / 2;
             const insetTop =
                 !hasCarousel && typeof FEED_CARD_MEDIA_TAP_LAYER.top === 'number'
                     ? FEED_CARD_MEDIA_TAP_LAYER.top
                     : 0;
             const localY = Number.isFinite(y) ? y + insetTop : height / 2;
-            // Parent renders window-level burst (Android TextureView-safe).
+            fireBurstAt(localX, localY);
             onDoubleLike?.(localX, localY);
         },
-        [hasCarousel, height, onDoubleLike, width],
+        [fireBurstAt, hasCarousel, height, onDoubleLike, width],
     );
 
     const mediaTapGesture = useMemo(() => {
         const doubleTap = Gesture.Tap()
             .numberOfTaps(2)
-            .maxDuration(250)
+            .maxDuration(400)
+            .maxDelay(300)
             .onEnd((e, success) => {
                 'worklet';
                 if (!success) return;
@@ -476,15 +538,14 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             });
         const singleTap = Gesture.Tap()
             .numberOfTaps(1)
+            .maxDuration(250)
             .onEnd((_e, success) => {
                 'worklet';
                 if (!success) return;
                 runOnJS(handleFullscreen)();
             });
-        // Delay single until double fails (RNGH: requireExternalGestureToFail ≈ requireToFail).
         singleTap.requireExternalGestureToFail(doubleTap);
         const exclusive = Gesture.Exclusive(doubleTap, singleTap);
-        // Carousel: allow horizontal ScrollView pans alongside Exclusive taps.
         if (hasCarousel) {
             return Gesture.Simultaneous(Gesture.Native(), exclusive);
         }
@@ -536,29 +597,6 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         return null;
     }
 
-    const videoSource = (uri: string, rawUrl?: string) => {
-        const sourceUri = uri || rawUrl || '';
-        if (isPlayableLocalMediaUri(rawUrl) || isPlayableLocalMediaUri(uri)) {
-            return { uri: rawUrl && isPlayableLocalMediaUri(rawUrl) ? rawUrl : uri };
-        }
-        // Demo MP4s: pass bundled/mapped require — URI from resolveAssetSource often fails on device.
-        if (rawUrl && isMockDemoVideoPath(rawUrl)) {
-            return mockFeedVideoSource(rawUrl);
-        }
-        if (isMockDemoVideoPath(uri)) {
-            return mockFeedVideoSource(uri);
-        }
-        const lower = sourceUri.toLowerCase();
-        if (lower.includes('.m3u8')) {
-            return withFeedVideoCache({ uri: sourceUri, type: 'm3u8' as const });
-        }
-        if (lower.includes('.webm')) {
-            return withFeedVideoCache({ uri: sourceUri, type: 'webm' as const });
-        }
-        // Remote MP4s: enable disk cache so re-scrolling reuses buffered media.
-        return withFeedVideoCache({ uri: sourceUri });
-    };
-
     const setFeedSoundOn = (nextSoundOn: boolean) => {
         setSoundOn(nextSoundOn);
         void setGlobalVideoMutedNative(!nextSoundOn);
@@ -608,7 +646,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
         item: (typeof carouselItems)[number],
         slideIndex: number,
     ) => {
-        const slideRawUrl = item?.url || post.mediaUrl;
+        const slideRawUrl = resolvePostPlaybackUri(post, item) || item?.url || post.mediaUrl;
         if (!slideRawUrl) {
             return <View style={[styles.mediaFrame, frameStyle]} collapsable={false} />;
         }
@@ -666,13 +704,16 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             markUrlLoaded(slideRawUrl);
             fadeOutPosterCover();
         };
-        const cachedVideoSource = videoSource(slideUrl, slideRawUrl);
+        const cachedVideoSource = buildFeedVideoSource(slideUrl, slideRawUrl);
 
         return (
             <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                 {slideMountVideo ? (
-                    <Animated.View
-                        style={styles.videoFill}
+                    <View
+                        style={[
+                            styles.videoClip,
+                            { width, height: frameHeight },
+                        ]}
                         pointerEvents={mediaPointerEvents}
                         collapsable={false}
                     >
@@ -680,26 +721,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                             key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
                             ref={feedVideoRef}
                             source={cachedVideoSource as object}
-                            style={[styles.videoFill, { width: '100%', height: '100%' }]}
+                            style={{ width, height: frameHeight }}
                             resizeMode="cover"
                             controls={false}
-                            paused={
-                                mode === 'detail'
-                                    ? paused
-                                    : !isFeedAutoplayActive || suspendNativeVideo || paused
-                            }
-                            muted={
-                                mode === 'feed'
-                                    ? !soundOn || !isFeedAutoplayActive || suspendNativeVideo
-                                    : false
-                            }
-                            volume={
-                                mode === 'feed'
-                                    ? soundOn && isFeedAutoplayActive && !suspendNativeVideo
-                                        ? 1
-                                        : 0
-                                    : 1
-                            }
+                            paused={mode === 'detail' ? paused : !isViewable}
+                            muted={mode === 'feed' ? !soundOn : false}
+                            volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
                             repeat={mode === 'feed'}
                             playInBackground={false}
                             playWhenInactive={false}
@@ -722,7 +749,9 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                             onReadyForDisplay={onFirstFrameReady}
                             onLoad={(meta) => {
                                 onFirstFrameReady();
-                                const seekTo = pendingSeekRef.current;
+                                const seekTo =
+                                    pendingSeekRef.current ??
+                                    (playbackTimeRef.current > 0.05 ? playbackTimeRef.current : null);
                                 if (
                                     seekTo != null &&
                                     Number.isFinite(seekTo) &&
@@ -744,8 +773,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                                 }
                             }}
                             onProgress={(e) => {
-                                if (mode !== 'feed' || !isFeedAutoplayActive) return;
                                 const t = e?.currentTime;
+                                if (typeof t === 'number' && Number.isFinite(t)) {
+                                    playbackTimeRef.current = t;
+                                }
+                                if (mode !== 'feed' || !isFeedAutoplayActive) return;
                                 if (typeof t === 'number' && Number.isFinite(t)) {
                                     setFeedVideoHandoff(String(post.id), {
                                         currentTime: t,
@@ -756,7 +788,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                             }}
                             onError={(e) => onVideoError(slideRawUrl, e)}
                         />
-                    </Animated.View>
+                    </View>
                 ) : null}
 
                 {slidePosterUri && showBufferCover ? (
@@ -894,18 +926,46 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
             ) : null}
         </View>
     );
-});
+    }),
+    function feedPostMediaPropsAreEqual(prev: Props, next: Props) {
+        const a = prev.post;
+        const b = next.post;
+        return (
+            a.id === b.id &&
+            a.mediaUrl === b.mediaUrl &&
+            a.finalVideoUrl === b.finalVideoUrl &&
+            a.mediaType === b.mediaType &&
+            a.videoPosterUrl === b.videoPosterUrl &&
+            a.thumbnailUrl === b.thumbnailUrl &&
+            prev.width === next.width &&
+            prev.height === next.height &&
+            prev.mode === next.mode &&
+            prev.muted === next.muted &&
+            prev.suspendNativeVideo === next.suspendNativeVideo &&
+            prev.carouselIndex === next.carouselIndex &&
+            JSON.stringify(a.mediaItems) === JSON.stringify(b.mediaItems)
+        );
+    },
+);
 
 export default FeedPostMedia;
 
 const styles = StyleSheet.create({
     wrap: {
         position: 'relative',
+        overflow: 'hidden',
     },
     mediaFrame: {
         overflow: 'hidden',
         backgroundColor: '#121212',
         position: 'relative',
+        borderRadius: 1,
+    },
+    videoClip: {
+        overflow: 'hidden',
+        position: 'relative',
+        borderRadius: 1,
+        backgroundColor: '#121212',
     },
     stillImage: {
         ...StyleSheet.absoluteFillObject,
@@ -960,9 +1020,6 @@ const styles = StyleSheet.create({
     },
     mediaFill: {
         ...StyleSheet.absoluteFillObject,
-    },
-    videoClip: {
-        overflow: 'hidden',
     },
     textOnlyCard: {
         borderRadius: 16,

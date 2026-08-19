@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Video from 'react-native-video';
 import type { Post } from '../types';
 import {
     getPostBodyText,
@@ -10,6 +11,8 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import { resolvePostThumbnail } from '../api/collections';
+import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
+import { resolvePostPlaybackUri } from '../utils/postMedia';
 
 type Props = {
     post: Post;
@@ -19,6 +22,45 @@ function getPostLocationLabel(post: Post): string | undefined {
     const label = post.locationLabel || post.venue;
     const trimmed = typeof label === 'string' ? label.trim() : '';
     return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function looksLikeVideoUri(url: string): boolean {
+    return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+}
+
+function resolveGridImageUri(post: Post): string | undefined {
+    const extra = post as Post & {
+        thumbnail_url?: string;
+        thumbnailUrl?: string;
+        poster_url?: string;
+        posterUrl?: string;
+        media_url?: string;
+    };
+    const item = (post.mediaItems || []).find(
+        (entry) => entry?.type === 'image' || entry?.type === 'video',
+    );
+    const candidates = [
+        extra.thumbnail_url,
+        extra.thumbnailUrl,
+        extra.poster_url,
+        extra.posterUrl,
+        post.videoPosterUrl,
+        item?.thumbnail_url,
+        item?.thumbnailUrl,
+        (item as { poster_url?: string } | undefined)?.poster_url,
+        item?.posterUrl,
+        resolvePostThumbnail(post),
+        extra.media_url,
+        post.mediaUrl,
+        item?.url,
+    ];
+    for (const raw of candidates) {
+        if (typeof raw !== 'string') continue;
+        const uri = raw.trim();
+        if (!uri || looksLikeVideoUri(uri)) continue;
+        return uri;
+    }
+    return undefined;
 }
 
 export default function ProfileGridThumb({ post }: Props) {
@@ -41,8 +83,45 @@ export default function ProfileGridThumb({ post }: Props) {
     );
 
     const bodyText = getPostBodyText(post);
-    const poster = resolvePostThumbnail(post);
-    if (isTextOnlyPost(post) || (bodyText && !poster && !isVideoPost(post))) {
+    const imageUri = resolveGridImageUri(post);
+
+    if (imageUri) {
+        return (
+            <View style={styles.cell}>
+                <Image
+                    source={{ uri: imageUri }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
+                {locationBadge}
+                {isVideoPost(post) ? videoOverlays : null}
+            </View>
+        );
+    }
+
+    const videoUri = isVideoPost(post) ? resolvePostPlaybackUri(post) : undefined;
+    if (isPlayableVideoUri(videoUri)) {
+        return (
+            <View style={styles.cell}>
+                <Video
+                    source={{ uri: videoUri }}
+                    style={{ width: '100%', height: '100%' }}
+                    paused
+                    muted
+                    repeat={false}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                    poster={post.videoPosterUrl || post.thumbnailUrl}
+                    {...androidListSafeVideoProps()}
+                />
+                {locationBadge}
+                {videoOverlays}
+            </View>
+        );
+    }
+
+    if (isTextOnlyPost(post) || (bodyText && !isVideoPost(post))) {
         return (
             <View style={[styles.cell, { backgroundColor: getTextOnlyBackgroundColor(post) }]}>
                 {locationBadge}
@@ -56,70 +135,31 @@ export default function ProfileGridThumb({ post }: Props) {
         );
     }
 
-    // Image-only thumbs — never mount react-native-video in grid cells (Android steals taps).
-    // Never use BBB rainbow poster for demos — dark cell + play affordance instead.
-    if (isVideoPost(post)) {
-        const posterLooksLikeImage =
-            !!poster &&
-            !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(poster) &&
-            !poster.startsWith('/demo-videos/') &&
-            !poster.includes('bbb-poster');
-        if (posterLooksLikeImage) {
-            return (
-                <View style={styles.cell}>
-                    <Image source={{ uri: poster }} style={styles.image} resizeMode="cover" />
-                    {locationBadge}
-                    {videoOverlays}
-                </View>
-            );
-        }
-        return (
-            <View style={[styles.cell, styles.placeholder]}>
-                {locationBadge}
-                {videoOverlays}
-            </View>
-        );
-    }
-
-    if (!poster) {
-        return (
-            <View style={[styles.cell, styles.placeholder]}>
-                {locationBadge}
-                {bodyText ? (
-                    <Text style={[styles.textThumb, { color: '#E5E7EB' }]} numberOfLines={4}>
-                        {bodyText}
-                    </Text>
-                ) : (
-                    <Icon name="image-outline" size={22} color="#6B7280" />
-                )}
-            </View>
-        );
-    }
-
     return (
-        <View style={styles.cell}>
-            <Image source={{ uri: poster }} style={styles.image} resizeMode="cover" />
+        <View style={[styles.cell, styles.placeholder]}>
             {locationBadge}
+            {isVideoPost(post) ? videoOverlays : bodyText ? (
+                <Text style={[styles.textThumb, { color: '#E5E7EB' }]} numberOfLines={4}>
+                    {bodyText}
+                </Text>
+            ) : (
+                <Icon name="image-outline" size={22} color="#6B7280" />
+            )}
         </View>
     );
 }
 
 const styles = StyleSheet.create({
     cell: {
+        flex: 1,
         width: '100%',
         height: '100%',
         backgroundColor: '#111827',
         overflow: 'hidden',
         borderRadius: 8,
+        position: 'relative',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
-    },
-    image: {
-        width: '100%',
-        height: '100%',
-    },
-    videoPlaceholder: {
-        backgroundColor: '#0B1220',
     },
     placeholder: {
         alignItems: 'center',

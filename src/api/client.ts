@@ -1,20 +1,21 @@
 /// <reference types="vite/client" />
-import { isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import { clearLaravelUnreachable, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl } from './apiBaseUrl';
 import { isMockMode } from './apiMode';
 
 function throwMockConnectionRefused(): never {
-    markLaravelUnreachable();
+    // Mock mode / allowlist miss is not a downed server. Never poison the session
+    // (that made likes/views/comments save only in memory while the feed still loaded from Laravel).
     const connectionError = new Error('CONNECTION_REFUSED');
     connectionError.name = 'ConnectionRefused';
     throw connectionError;
 }
 
 /**
- * Gradual Laravel migration allowlist for `apiRequest`.
- * Login / feed / createPost / profile / locations use dedicated helpers that bypass this set
- * or match paths below. Unlisted paths still throw CONNECTION_REFUSED → local mock fallback.
+ * `apiRequest` allowlist. Login / feed / createPost / profile GET use dedicated fetch helpers
+ * that skip this. Anything else must match here or it throws CONNECTION_REFUSED and the caller
+ * falls back to in-memory mock (likes/views/comments looking saved, then resetting on refresh).
  */
 const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/posts',
@@ -26,14 +27,36 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/search/places/details',
     '/search/places/summary',
     '/notifications/fcm-token',
+    '/collections',
+    '/chat-groups',
+    '/messages/send',
+    '/messages/conversations',
+    '/notifications/unread-count',
+    '/notifications/mark-all-read',
+    '/users/privacy/toggle',
+    '/users/check-follows-me',
 ]);
+
+/** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
+const LIVE_API_PATH_PREFIXES = [
+    '/posts/',
+    '/users/',
+    '/comments/',
+    '/auth/',
+    '/messages/',
+    '/notifications/',
+    '/chat-groups/',
+    '/stories/',
+    '/collections/',
+    '/boost/',
+    '/render-jobs/',
+    '/public/posts/',
+] as const;
 
 function isMigratedApiRequestPath(endpoint: string): boolean {
     const path = (endpoint.split('?')[0] || '').replace(/\/$/, '') || '/';
     if (LIVE_API_REQUEST_PATHS.has(path)) return true;
-    // Profile grid: GET /users/{handle}
-    if (/^\/users\/[^/]+$/.test(path)) return true;
-    return false;
+    return LIVE_API_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
@@ -74,6 +97,7 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         }
 
         const text = await response.text();
+        clearLaravelUnreachable();
         if (!text) return null;
         try {
             return JSON.parse(text);
@@ -85,13 +109,16 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         clearTimeout(timeoutId);
         // Suppress connection refused errors when backend isn't running
         // Check for various connection error patterns
+        const isAbort = error?.name === 'AbortError';
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
             (error?.name === 'TypeError' && error?.message?.includes('fetch'));
 
+        if (isAbort) {
+            throw error;
+        }
         if (isConnectionError) {
             // Re-throw with a specific error type that can be caught and handled gracefully
             markLaravelUnreachable();
@@ -513,8 +540,14 @@ export async function fetchPostsPage(
             throw error;
         }
 
-        if (!text) return { items: [], nextCursor: null };
-        if (payload && typeof payload === 'object') return payload;
+        if (!text) {
+            clearLaravelUnreachable();
+            return { items: [], nextCursor: null };
+        }
+        if (payload && typeof payload === 'object') {
+            clearLaravelUnreachable();
+            return payload;
+        }
         const preview = text.slice(0, 80).replace(/\s+/g, ' ');
         throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
     } catch (error: any) {
@@ -527,11 +560,13 @@ export async function fetchPostsPage(
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
+        if (error?.name === 'AbortError') {
+            throw error;
+        }
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
             (error?.name === 'TypeError' && error?.message?.includes('fetch'));
         if (isConnectionError) {
             markLaravelUnreachable();
@@ -829,30 +864,32 @@ export async function toggleCommentLike(commentId: string) {
     });
 }
 
-// Users API
-export async function fetchUserProfile(
-    handle: string,
-    userId?: string,
-    postsCursor?: string | number | null,
-    postsLimit?: number,
-    sourcePostId?: string,
-) {
+function encodeUserIdentifier(raw: string): string {
+    let value = String(raw || '').trim();
+    try {
+        value = decodeURIComponent(value).trim();
+    } catch {
+        /* already decoded */
+    }
+    return encodeURIComponent(value);
+}
+
+function isProfileUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.trim(),
+    );
+}
+
+async function laravelUsersGet(pathAndQuery: string): Promise<any> {
     if (isMockMode()) {
-        console.log('[fetchUserProfile/client] IS_MOCK=true → skip Laravel');
+        console.log('[laravelUsersGet] IS_MOCK=true → skip Laravel', pathAndQuery);
         throwMockConnectionRefused();
     }
 
-    const params = new URLSearchParams();
-    if (userId) params.append('userId', userId);
-    if (postsCursor != null) params.append('postsCursor', String(postsCursor));
-    if (postsLimit != null) params.append('postsLimit', String(postsLimit));
-    if (sourcePostId) params.append('sourcePostId', sourcePostId);
-    const encoded = encodeURIComponent(handle);
-    const qs = params.toString();
     const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
-    const url = `${API_BASE_URL}/users/${encoded}${qs ? `?${qs}` : ''}`;
+    const url = `${API_BASE_URL}${pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`}`;
     const authHeader = await getAuthorizationHeader();
-    console.log('[fetchUserProfile/client] GET', url, { hasAuth: Boolean(authHeader.Authorization) });
+    console.log('[laravelUsersGet] GET', url, { hasAuth: Boolean(authHeader.Authorization) });
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -875,17 +912,17 @@ export async function fetchUserProfile(
         } catch {
             payload = text;
         }
-        console.log('[fetchUserProfile/client] response status=', response.status, {
-            handle: payload?.handle,
-            posts_count: payload?.posts_count ?? payload?.postsCount,
-            postsLen: Array.isArray(payload?.posts) ? payload.posts.length : 0,
-            error: payload?.error,
-        });
         if (!response.ok) {
             const errorMessage =
                 payload?.error ||
                 payload?.message ||
                 (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            console.error('[laravelUsersGet] API error', {
+                url,
+                status: response.status,
+                error: errorMessage,
+                payload,
+            });
             const error = new Error(errorMessage);
             (error as any).status = response.status;
             (error as any).response = payload;
@@ -894,7 +931,8 @@ export async function fetchUserProfile(
         return payload;
     } catch (error: any) {
         clearTimeout(timeoutId);
-        console.log('[fetchUserProfile/client] fetch error=', {
+        console.error('[laravelUsersGet] fetch error', {
+            url,
             name: error?.name,
             message: error?.message,
             status: error?.status,
@@ -902,11 +940,13 @@ export async function fetchUserProfile(
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
+        if (error?.name === 'AbortError') {
+            throw error;
+        }
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
             (error?.name === 'TypeError' && error?.message?.includes('fetch'));
         if (isConnectionError) {
             markLaravelUnreachable();
@@ -916,6 +956,64 @@ export async function fetchUserProfile(
         }
         throw error;
     }
+}
+
+// Users API
+export async function fetchUserProfile(
+    handle: string,
+    userId?: string,
+    postsCursor?: string | number | null,
+    postsLimit?: number,
+    sourcePostId?: string,
+    tab: string = 'all',
+) {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (postsCursor != null && String(postsCursor) !== '') {
+        params.append('postsCursor', String(postsCursor));
+    }
+    if (postsLimit != null) params.append('postsLimit', String(postsLimit));
+    params.append('tab', tab || 'all');
+    if (sourcePostId && isProfileUuid(sourcePostId)) {
+        params.append('sourcePostId', sourcePostId);
+    }
+    const encoded = encodeUserIdentifier(handle);
+    const qs = params.toString();
+    const payload = await laravelUsersGet(`/users/${encoded}${qs ? `?${qs}` : ''}`);
+    console.log('[fetchUserProfile/client] ok', {
+        handle: payload?.handle,
+        posts_count: payload?.posts_count ?? payload?.postsCount,
+        postsLen: Array.isArray(payload?.posts) ? payload.posts.length : 0,
+    });
+    return payload;
+}
+
+export async function fetchUserPosts(
+    identifier: string,
+    options: {
+        viewerId?: string;
+        postsCursor?: string | number | null;
+        postsLimit?: number;
+        tab?: string;
+    } = {},
+) {
+    const params = new URLSearchParams();
+    if (options.viewerId) params.append('userId', options.viewerId);
+    if (options.postsCursor != null && String(options.postsCursor) !== '') {
+        params.append('postsCursor', String(options.postsCursor));
+    }
+    if (options.postsLimit != null) params.append('postsLimit', String(options.postsLimit));
+    params.append('tab', options.tab || 'all');
+    const encoded = encodeUserIdentifier(identifier);
+    const qs = params.toString();
+    const payload = await laravelUsersGet(`/users/${encoded}/posts${qs ? `?${qs}` : ''}`);
+    console.log('[fetchUserPosts/client] ok', {
+        identifier,
+        posts_count: payload?.posts_count ?? payload?.postsCount,
+        postsLen: Array.isArray(payload?.posts) ? payload.posts.length : 0,
+        tab: options.tab || 'all',
+    });
+    return payload;
 }
 
 export async function toggleFollow(handle: string) {

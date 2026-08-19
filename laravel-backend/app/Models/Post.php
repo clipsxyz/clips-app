@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -34,6 +35,7 @@ class Post extends Model
         'text_content',
         'media_url',
         'media_type',
+        'thumbnail_url',
         'location_label',
         'place_id',
         'latitude',
@@ -89,6 +91,67 @@ class Post extends Model
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
     ];
+
+    /**
+     * JPEG poster for video grid tiles: stored column, then media_items poster, then image URL.
+     */
+    public function resolvedThumbnailUrl(): ?string
+    {
+        if (is_string($this->thumbnail_url) && trim($this->thumbnail_url) !== '') {
+            return $this->thumbnail_url;
+        }
+
+        $items = is_array($this->media_items) ? $this->media_items : [];
+        $first = is_array($items[0] ?? null) ? $items[0] : null;
+        if (is_array($first)) {
+            foreach (['posterUrl', 'poster_url', 'thumbnail_url', 'thumbnailUrl'] as $key) {
+                if (!empty($first[$key]) && is_string($first[$key])) {
+                    return $first[$key];
+                }
+            }
+        }
+
+        if ($this->media_type === 'image' && is_string($this->media_url) && $this->media_url !== '') {
+            return $this->media_url;
+        }
+
+        return null;
+    }
+
+    /** withCount aliases so they do not collide with posts.likes_count columns. */
+    public static function engagementWithCounts(): array
+    {
+        return [
+            'likes as likes_rel_count',
+            'comments as comments_rel_count',
+            'shares as shares_rel_count',
+            'views as views_rel_count',
+            'reclips as reclips_rel_count',
+        ];
+    }
+
+    /** Home tab refetches the feed; bump this so stale cached zeros are not served. */
+    public static function bumpFeedCache(): void
+    {
+        Cache::put('feed_version', (int) Cache::get('feed_version', 0) + 1);
+    }
+
+    /**
+     * Prefer the greater of the denormalized column and the relationship count.
+     *
+     * @param  array<string, mixed>  $postData
+     * @param  array<string, mixed>  $attrs
+     * @return array<string, mixed>
+     */
+    public static function applyEngagementCounts(array $postData, array $attrs): array
+    {
+        foreach (['likes', 'comments', 'shares', 'views', 'reclips'] as $metric) {
+            $col = $metric . '_count';
+            $rel = $metric . '_rel_count';
+            $postData[$col] = max((int) ($attrs[$col] ?? $postData[$col] ?? 0), (int) ($attrs[$rel] ?? 0));
+        }
+        return $postData;
+    }
 
     // Relationships
     public function user()
