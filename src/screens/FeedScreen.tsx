@@ -171,7 +171,6 @@ import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
-import { userHasStoriesByHandle } from '../api/stories';
 import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
@@ -338,32 +337,10 @@ function PillTabs({
 }) {
     const { user } = useAuth();
     const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
-    const [passportHasStory, setPassportHasStory] = React.useState(false);
     const onHeaderPlacePickRef = useRef(onHeaderPlacePick);
     const onSearchLocationRef = useRef(onSearchLocation);
     onHeaderPlacePickRef.current = onHeaderPlacePick;
     onSearchLocationRef.current = onSearchLocation;
-
-    useEffect(() => {
-        if (!user?.handle) {
-            setPassportHasStory(false);
-            return undefined;
-        }
-        let cancelled = false;
-        const check = () => {
-            void userHasStoriesByHandle(user.handle).then((has) => {
-                if (!cancelled) setPassportHasStory(has);
-            }).catch(() => {
-                if (!cancelled) setPassportHasStory(false);
-            });
-        };
-        check();
-        const unsub = subscribeStoriesRefresh(check);
-        return () => {
-            cancelled = true;
-            unsub();
-        };
-    }, [user?.handle]);
 
     type HeaderSuggestion = {
         name: string;
@@ -974,31 +951,16 @@ function PillTabs({
                         accessibilityLabel="My Passport"
                     >
                         <View style={styles.feedHeaderNotifWrap}>
-                            {passportHasStory ? (
-                                <PassportTravelingBorder borderRadius={12} borderWidth={2}>
-                                    <View style={[FEED_HEADER_PASSPORT_AVATAR, { borderWidth: 0 }]}>
-                                        {user?.avatarUrl ? (
-                                            <Image
-                                                source={{ uri: user.avatarUrl }}
-                                                style={styles.feedHeaderPassportAvatarImage}
-                                            />
-                                        ) : (
-                                            <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
-                                        )}
-                                    </View>
-                                </PassportTravelingBorder>
-                            ) : (
-                                <View style={FEED_HEADER_PASSPORT_AVATAR}>
-                                    {user?.avatarUrl ? (
-                                        <Image
-                                            source={{ uri: user.avatarUrl }}
-                                            style={styles.feedHeaderPassportAvatarImage}
-                                        />
-                                    ) : (
-                                        <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
-                                    )}
-                                </View>
-                            )}
+                            <View style={FEED_HEADER_PASSPORT_AVATAR}>
+                                {user?.avatarUrl ? (
+                                    <Image
+                                        source={{ uri: user.avatarUrl }}
+                                        style={styles.feedHeaderPassportAvatarImage}
+                                    />
+                                ) : (
+                                    <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
+                                )}
+                            </View>
                             <Text style={FEED_HEADER_SIDE_LABEL}>Passport</Text>
                         </View>
                     </TouchableOpacity>
