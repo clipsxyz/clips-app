@@ -83,6 +83,8 @@ type Props = {
     commentAuthorHandle: string;
     currentUserHandle?: string;
     onAfterClose?: () => void;
+    /** Called whenever the visible comment count changes so feed/profile cards stay in sync. */
+    onCommentCountChange?: (comments: number) => void;
     /** `scenesEmbed` — no Modal; parent positions sheet (Scenes viewer). */
     variant?: 'modal' | 'scenesEmbed';
 };
@@ -487,6 +489,7 @@ export default function PostCommentsSheet({
     commentAuthorHandle,
     currentUserHandle,
     onAfterClose,
+    onCommentCountChange,
     variant = 'modal',
 }: Props) {
     const isScenesEmbed = variant === 'scenesEmbed';
@@ -518,6 +521,19 @@ export default function PostCommentsSheet({
         Boolean(postIdStr) && (isFrontendOnlyPostId(postIdStr) || Boolean(user?.id));
     const postPropRef = useRef(postProp);
     postPropRef.current = postProp;
+    const loadGenRef = useRef(0);
+    const onCommentCountChangeRef = useRef(onCommentCountChange);
+    onCommentCountChangeRef.current = onCommentCountChange;
+
+    const emitCommentCount = useCallback((next: number, mode: 'max' | 'set' = 'max') => {
+        const n = Math.max(0, Math.floor(Number(next) || 0));
+        setPost((prev) => {
+            if (!prev) return prev;
+            const comments = mode === 'set' ? n : Math.max(prev.stats.comments || 0, n);
+            return { ...prev, stats: { ...prev.stats, comments } };
+        });
+        onCommentCountChangeRef.current?.(n);
+    }, []);
 
     const onMentionPress = useCallback(
         (handle: string) => {
@@ -540,10 +556,11 @@ export default function PostCommentsSheet({
         }
 
         let cancelled = false;
+        const req = ++loadGenRef.current;
+        setComments([]);
         (async () => {
             setLoading(true);
             setPost(postPropRef.current ?? null);
-            setComments([]);
             setCommentsCursor(null);
             setCommentsHasMore(false);
             setCommentsLoadingMore(false);
@@ -552,26 +569,38 @@ export default function PostCommentsSheet({
                     getPostById(postId, user?.id),
                     fetchCommentsPage(postId, null, 30, 5, user?.id),
                 ]);
-                if (cancelled) return;
+                if (cancelled || req !== loadGenRef.current) return;
                 setPost(fetchedPost ?? postPropRef.current ?? null);
-                setComments(fetchedPage.items);
+                setComments((prev) => {
+                    const temps = prev.filter((c) => String(c.id).startsWith('temp-'));
+                    const seen = new Set(fetchedPage.items.map((c) => String(c.id)));
+                    const merged = [...fetchedPage.items];
+                    for (const t of temps) {
+                        if (!seen.has(String(t.id))) merged.push(t);
+                    }
+                    return merged;
+                });
                 setCommentsCursor(fetchedPage.nextCursor);
                 setCommentsHasMore(fetchedPage.hasMore);
+                const apiCount = Number(fetchedPost?.stats?.comments);
+                const listCount = fetchedPage.items.length;
+                emitCommentCount(
+                    Number.isFinite(apiCount) ? Math.max(apiCount, listCount) : listCount,
+                );
             } catch (err) {
                 console.error('Failed to load comments sheet:', err);
-                if (!cancelled) {
+                if (!cancelled && req === loadGenRef.current) {
                     setPost(postPropRef.current ?? null);
-                    setComments([]);
                 }
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!cancelled && req === loadGenRef.current) setLoading(false);
             }
         })();
 
         return () => {
             cancelled = true;
         };
-    }, [isOpen, postId, canLoadComments, user?.id]);
+    }, [isOpen, postId, canLoadComments, user?.id, emitCommentCount]);
 
     const sortedComments = useMemo(() => {
         const next = [...comments];
@@ -671,12 +700,17 @@ export default function PostCommentsSheet({
             moderationReason: moderation.matched[0],
         };
         setComments((prev) => [...prev, optimisticComment]);
+        const prevCount = post?.stats.comments ?? 0;
+        emitCommentCount(prevCount + 1, 'set');
         setSubmitting(true);
         try {
             const newComment = await addComment(postId, handle, text);
             setComments((prev) => prev.map((c) => (c.id === optimisticComment.id ? newComment : c)));
+            emitCommentCount(prevCount + 1, 'max');
         } catch (err) {
             console.error('Failed to add comment:', err);
+            setComments((prev) => prev.filter((c) => c.id !== optimisticComment.id));
+            emitCommentCount(prevCount, 'set');
             Alert.alert('Error', 'Failed to add comment');
         } finally {
             setSubmitting(false);
@@ -760,6 +794,7 @@ export default function PostCommentsSheet({
                     };
                 }),
             );
+            emitCommentCount((post?.stats.comments ?? 0) + 1, 'max');
             return true;
         } catch (err) {
             console.error('Failed to add reply:', err);

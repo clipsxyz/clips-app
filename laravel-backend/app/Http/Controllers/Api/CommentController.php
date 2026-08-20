@@ -27,7 +27,7 @@ class CommentController extends Controller
             'cursor' => 'nullable|string',
             'limit' => 'nullable|integer|min:1|max:100',
             'repliesLimit' => 'nullable|integer|min:1|max:25',
-            'paged' => 'nullable|boolean',
+            'paged' => 'nullable',
         ]);
 
         if ($validator->fails()) {
@@ -163,21 +163,28 @@ class CommentController extends Controller
             return $comment;
         });
 
-        $post = Post::find($postId);
+        $comment->load(['user:id,handle,display_name,avatar_url']);
+        $post = Post::query()->select('id', 'user_id', 'comments_count')->find($postId);
         if ($post && $post->user_id && $post->user_id !== $user->id) {
             $owner = User::find($post->user_id);
             if ($owner) {
-                (new InteractionPushService)->notifyComment(
-                    $user,
-                    $owner,
-                    (string) $post->id,
-                    (string) $comment->id,
-                    (string) $request->text
-                );
+                try {
+                    (new InteractionPushService)->notifyComment(
+                        $user,
+                        $owner,
+                        (string) $post->id,
+                        (string) $comment->id,
+                        (string) $request->text
+                    );
+                } catch (\Throwable $e) {
+                    \Log::warning('comment notify failed: '.$e->getMessage());
+                }
             }
         }
 
-        return response()->json($comment, 201);
+        return response()->json(array_merge($comment->toArray(), [
+            'comments_count' => (int) ($post?->comments_count ?? 0),
+        ]), 201);
     }
 
     /**
@@ -217,40 +224,48 @@ class CommentController extends Controller
             return $reply;
         });
 
+        $reply->load(['user:id,handle,display_name,avatar_url']);
+        $post = Post::query()->select('id', 'user_id', 'comments_count')->find($parentComment->post_id);
+
         // Notify parent comment author (reply) and post owner when different.
         $push = new InteractionPushService;
-        if ($parentComment->user_id && $parentComment->user_id !== $user->id) {
-            $parentAuthor = User::find($parentComment->user_id);
-            if ($parentAuthor) {
-                $push->notifyComment(
-                    $user,
-                    $parentAuthor,
-                    (string) $parentComment->post_id,
-                    (string) $reply->id,
-                    (string) $request->text
-                );
+        try {
+            if ($parentComment->user_id && $parentComment->user_id !== $user->id) {
+                $parentAuthor = User::find($parentComment->user_id);
+                if ($parentAuthor) {
+                    $push->notifyComment(
+                        $user,
+                        $parentAuthor,
+                        (string) $parentComment->post_id,
+                        (string) $reply->id,
+                        (string) $request->text
+                    );
+                }
             }
-        }
-        $post = Post::find($parentComment->post_id);
-        if (
-            $post
-            && $post->user_id
-            && $post->user_id !== $user->id
-            && $post->user_id !== $parentComment->user_id
-        ) {
-            $owner = User::find($post->user_id);
-            if ($owner) {
-                $push->notifyComment(
-                    $user,
-                    $owner,
-                    (string) $post->id,
-                    (string) $reply->id,
-                    (string) $request->text
-                );
+            if (
+                $post
+                && $post->user_id
+                && $post->user_id !== $user->id
+                && $post->user_id !== $parentComment->user_id
+            ) {
+                $owner = User::find($post->user_id);
+                if ($owner) {
+                    $push->notifyComment(
+                        $user,
+                        $owner,
+                        (string) $post->id,
+                        (string) $reply->id,
+                        (string) $request->text
+                    );
+                }
             }
+        } catch (\Throwable $e) {
+            \Log::warning('comment reply notify failed: '.$e->getMessage());
         }
 
-        return response()->json($reply, 201);
+        return response()->json(array_merge($reply->toArray(), [
+            'comments_count' => (int) ($post?->comments_count ?? 0),
+        ]), 201);
     }
 
     /**

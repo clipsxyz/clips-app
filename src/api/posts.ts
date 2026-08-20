@@ -226,6 +226,24 @@ function shouldUseLivePostApi(id: string): boolean {
   return !isMockMode() && !isViteDevMode() && !isFrontendOnlyPostId(String(id));
 }
 
+function bumpLocalPostCommentCount(postId: string, nextCount?: number, delta = 1): number {
+  const id = String(postId);
+  const idx = posts.findIndex((p) => String(p.id) === id);
+  if (idx < 0) {
+    return typeof nextCount === 'number' && Number.isFinite(nextCount) ? Math.max(0, nextCount) : 0;
+  }
+  const current = Number(posts[idx].stats?.comments) || 0;
+  const comments =
+    typeof nextCount === 'number' && Number.isFinite(nextCount)
+      ? Math.max(current, nextCount)
+      : Math.max(0, current + delta);
+  posts[idx] = {
+    ...posts[idx],
+    stats: { ...posts[idx].stats, comments },
+  };
+  return comments;
+}
+
 /** One comment bucket per Ava demo post (feed may use ava-normal-* or ava-normal-ireland-demo). */
 function resolveCommentsPostId(postId: string): string {
   const id = String(postId);
@@ -2842,58 +2860,65 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Optional userId: when provided and we fetch from Laravel, we get user_liked etc. and decorate.
 export async function getPostById(postId: string, userId?: string): Promise<Post | null> {
   await delay(0);
-  const local = posts.find(p => p.id === postId);
-  if (local) return userId ? decorateForUser(userId, local) : local;
+  const local = posts.find((p) => String(p.id) === String(postId));
+  const decorate = (row: Post) => (userId ? decorateForUser(userId, row) : row);
 
   // Frontend-only mock posts (mock-scenes-*, Ava demo, etc.) – resolve locally, never call Laravel (API expects UUID)
   if (postId.startsWith('mock-scenes-')) {
     const mockPosts = getMockScenesVideoPosts();
-    const mock = mockPosts.find(p => p.id === postId);
-    if (mock) return userId ? decorateForUser(userId, mock) : mock;
-    return null;
+    const mock = mockPosts.find((p) => p.id === postId);
+    if (mock) return decorate(mock);
+    return local ? decorate(local) : null;
   }
 
-  if (isMockPostId(postId)) {
+  if (isMockPostId(postId) || !shouldUseLivePostApi(postId)) {
     if (postId === 'ava-normal-ireland-demo' || postId.startsWith('ava-normal-')) {
       const avaPost = getAvaNormalPost();
       if (!posts.find((p) => p.id === avaPost.id)) {
         posts.push(avaPost);
       }
-      return userId ? decorateForUser(userId, avaPost) : avaPost;
+      return decorate(avaPost);
     }
     if (postId === 'ava-boosted-discover-demo' || postId.startsWith('ava-boosted-demo-')) {
       const boosted = getAvaBoostedPost();
       if (!posts.find((p) => p.id === boosted.id)) {
         posts.push(boosted);
       }
-      return userId ? decorateForUser(userId, boosted) : boosted;
+      return decorate(boosted);
     }
-    return null;
+    return local ? decorate(local) : null;
   }
 
   // Laravel post ID must be a UUID – don't call API for non-UUID IDs (avoids 400 Bad Request)
-  if (!UUID_REGEX.test(postId)) return null;
-
-  const useLaravelAPI = isLaravelApiEnabled();
-  if (!useLaravelAPI) return null;
+  if (!UUID_REGEX.test(postId)) return local ? decorate(local) : null;
 
   try {
     const uuidLike = typeof userId === 'string' && UUID_REGEX.test(userId);
     const response = await apiClient.fetchPost(postId, uuidLike ? userId : undefined);
     const transformed = transformLaravelPost(response);
-    if (!posts.find(p => p.id === transformed.id)) {
-      posts.push(transformed);
+    const idx = posts.findIndex((p) => String(p.id) === String(transformed.id));
+    if (idx >= 0) {
+      const prev = posts[idx];
+      posts[idx] = {
+        ...prev,
+        ...transformed,
+        stats: mergeEngagementStats(transformed.stats, prev.stats),
+        userLiked: transformed.userLiked === true || prev.userLiked === true,
+      };
+    } else {
+      posts.unshift(transformed);
     }
+    const next = posts.find((p) => String(p.id) === String(transformed.id)) || transformed;
     if (userId) {
-      return decorateForUser(userId, transformed);
+      return decorateForUser(userId, next);
     }
-    markPendingCreatedPost(transformed);
-    return transformed;
+    markPendingCreatedPost(next);
+    return next;
   } catch (e: any) {
     if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
       console.warn('getPostById API fallback failed:', postId, e);
     }
-    return null;
+    return local ? decorate(local) : null;
   }
 }
 
@@ -3023,7 +3048,7 @@ export async function fetchCommentsPage(
 ): Promise<CommentsPage> {
   const resolvedPostId = resolveCommentsPostId(postId);
   // Demo / seed posts (e.g. Ava@galway) are not in Laravel — always use in-memory comments.
-  if (isFrontendOnlyPostId(resolvedPostId)) {
+  if (isFrontendOnlyPostId(resolvedPostId) || !shouldUseLivePostApi(resolvedPostId)) {
     const all = await fetchComments(resolvedPostId);
     if (!cursor) {
       const slice = all.slice(0, limit);
@@ -3037,34 +3062,17 @@ export async function fetchCommentsPage(
     return { items: [], nextCursor: null, hasMore: false };
   }
 
-  const useLaravelAPI = isLaravelApiEnabled();
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.fetchCommentsPage(postId, cursor, limit, userId, repliesLimit);
-      const itemsRaw = Array.isArray(response?.items) ? response.items : [];
-      return {
-        items: itemsRaw.map(mapLaravelCommentToComment),
-        nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
-        hasMore: !!response?.hasMore,
-      };
-    } catch (error: any) {
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('fetchCommentsPage API failed, falling back to mock:', error);
-      }
-    }
-  }
-
-  const all = await fetchComments(postId);
-  if (!cursor) {
-    const slice = all.slice(0, limit);
-    const hasMore = all.length > limit;
-    return {
-      items: slice,
-      nextCursor: hasMore ? 'mock:1' : null,
-      hasMore,
-    };
-  }
-  return { items: [], nextCursor: null, hasMore: false };
+  const response = await apiClient.fetchCommentsPage(postId, cursor, limit, userId, repliesLimit);
+  const itemsRaw = Array.isArray(response?.items)
+    ? response.items
+    : Array.isArray(response)
+      ? response
+      : [];
+  return {
+    items: itemsRaw.map(mapLaravelCommentToComment),
+    nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
+    hasMore: !!response?.hasMore,
+  };
 }
 
 export function mapLaravelProfilePosts(raw: unknown): Post[] {
@@ -3177,17 +3185,25 @@ export async function addComment(postId: string, userHandle: string, text: strin
 
   if (shouldUseLivePostApi(resolvedPostId)) {
     const response = await apiClient.addComment(postId, text);
-    const moderation = evaluateCommentModeration(response.text || response.text_content || text);
+    const parsedCount = Number(response?.comments_count ?? response?.commentsCount);
+    if (Number.isFinite(parsedCount)) {
+      bumpLocalPostCommentCount(postId, parsedCount);
+    } else {
+      bumpLocalPostCommentCount(postId, undefined, 1);
+    }
+    const mapped = mapLaravelCommentToComment({
+      ...response,
+      user_handle: response.user_handle || response.userHandle || userHandle,
+      text_content: response.text_content || response.text || text,
+      post_id: response.post_id || response.postId || postId,
+    });
+    const moderation = evaluateCommentModeration(mapped.text || text);
     return {
-      id: response.id,
-      postId: response.post_id || response.postId || postId,
-      userHandle: response.user_handle || response.userHandle || userHandle,
-      text: response.text || response.text_content,
-      userLiked: false,
-      createdAt: new Date(response.created_at || response.createdAt).getTime(),
-      likes: response.likes_count || response.likes || 0,
+      ...mapped,
+      userHandle: mapped.userHandle || userHandle,
+      text: mapped.text || text,
       moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
-      moderationReason: moderation.matched[0]
+      moderationReason: moderation.matched[0],
     };
   }
 
@@ -3306,6 +3322,32 @@ export async function toggleReplyLike(parentCommentId: string, replyId: string):
 }
 
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {
+  if (shouldUseLivePostApi(postId)) {
+    const response = await apiClient.addReply(parentId, text);
+    const parsedCount = Number(response?.comments_count ?? response?.commentsCount);
+    if (Number.isFinite(parsedCount)) {
+      bumpLocalPostCommentCount(postId, parsedCount);
+    } else {
+      bumpLocalPostCommentCount(postId, undefined, 1);
+    }
+    const mapped = mapLaravelCommentToComment({
+      ...response,
+      user_handle: response.user_handle || response.userHandle || userHandle,
+      text_content: response.text_content || response.text || text,
+      post_id: response.post_id || response.postId || postId,
+      parent_id: response.parent_id || response.parentId || parentId,
+    });
+    const moderation = evaluateCommentModeration(mapped.text || text);
+    return {
+      ...mapped,
+      userHandle: mapped.userHandle || userHandle,
+      text: mapped.text || text,
+      parentId: mapped.parentId || parentId,
+      moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+      moderationReason: moderation.matched[0],
+    };
+  }
+
   await delay(300);
   const moderation = evaluateCommentModeration(text);
   const reply: Comment = {

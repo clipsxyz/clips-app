@@ -496,12 +496,27 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             variant="scenesEmbed"
                             commentAuthorHandle={user?.handle ?? ''}
                             currentUserHandle={user?.handle}
+                            onCommentCountChange={(n) => {
+                                setPost((p) => {
+                                    const next = p
+                                        ? { ...p, stats: { ...p.stats, comments: Math.max(0, n) } }
+                                        : null;
+                                    syncPostOut(next);
+                                    return next;
+                                });
+                            }}
                             onAfterClose={() => {
                                 fetchComments(post.id)
                                     .then((list) =>
                                         setPost((p) => {
                                             const next = p
-                                                ? { ...p, stats: { ...p.stats, comments: list.length } }
+                                                ? {
+                                                      ...p,
+                                                      stats: {
+                                                          ...p.stats,
+                                                          comments: Math.max(p.stats.comments || 0, list.length),
+                                                      },
+                                                  }
                                                 : null;
                                             syncPostOut(next);
                                             return next;

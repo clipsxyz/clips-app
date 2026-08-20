@@ -4,7 +4,7 @@ import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import GazetteerAmbientBackground from './GazetteerAmbientBackground.native';
 import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
-import type { DiscoverAmbientVariant } from '../utils/discoverAmbientPalette';
+import { PASSPORT_CANVAS_WASH, type DiscoverAmbientVariant } from '../utils/discoverAmbientPalette';
 
 type GazetteerScreenShellProps = {
     children: React.ReactNode;
@@ -17,7 +17,6 @@ type GazetteerScreenShellProps = {
 
 const DISCOVER_WASH = ['#0b0711', '#201138', '#3a1528', '#201138', '#0b0711'] as const;
 const GOLD_WASH = ['#0a1323', '#1a1530', '#2a2410', '#1a1530', '#0a1323'] as const;
-const PASSPORT_WASH = ['#060d16', '#0f2430', '#1a3f3c', '#12263a', '#060d16'] as const;
 
 /**
  * Ambient strategy:
@@ -37,7 +36,7 @@ export default function GazetteerScreenShell({
         ambientVariant === 'goldChrome'
             ? GOLD_WASH
             : ambientVariant === 'passport'
-              ? PASSPORT_WASH
+              ? PASSPORT_CANVAS_WASH
               : DISCOVER_WASH;
 
     if (!ambient) {

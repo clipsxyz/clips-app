@@ -238,6 +238,22 @@ export default function ViewProfilePostsSheet({
                 onClose={() => setCommentsPost(null)}
                 commentAuthorHandle={user?.handle || ''}
                 currentUserHandle={user?.handle}
+                onCommentCountChange={(n) => {
+                    const pid = commentsPost?.id;
+                    if (!pid) return;
+                    const patch = (p: Post) =>
+                        String(p.id) === String(pid)
+                            ? { ...p, stats: { ...p.stats, comments: Math.max(0, n) } }
+                            : p;
+                    setCommentsPost((prev) => (prev ? patch(prev) : prev));
+                    setFeedPosts((prev) => prev.map(patch));
+                    if (commentsPost) {
+                        onPostUpdated?.({
+                            ...commentsPost,
+                            stats: { ...commentsPost.stats, comments: Math.max(0, n) },
+                        });
+                    }
+                }}
             />
 
             <FeedShareModal

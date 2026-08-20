@@ -3,6 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { userHasStoriesByHandle } from '../api/stories';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getAvatarForHandle } from '../api/users';
 import { useAuth } from '../context/Auth';
 import { useMutualFollow } from '../hooks/useMutualFollow';
@@ -76,13 +77,18 @@ export default function FeedTextOnlyFeedLayout({
 
     useEffect(() => {
         let cancelled = false;
-        userHasStoriesByHandle(profileHandle)
-            .then((v) => {
-                if (!cancelled) setHasStory(v);
-            })
-            .catch(() => {});
+        const check = () => {
+            userHasStoriesByHandle(profileHandle)
+                .then((v) => {
+                    if (!cancelled) setHasStory(v);
+                })
+                .catch(() => {});
+        };
+        check();
+        const unsub = subscribeStoriesRefresh(check);
         return () => {
             cancelled = true;
+            unsub();
         };
     }, [profileHandle]);
 

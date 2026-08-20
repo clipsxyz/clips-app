@@ -39,6 +39,7 @@ class CommentControllerTest extends TestCase
             ->assertJson([
                 'text_content' => 'First comment',
                 'user_id' => $user->id,
+                'comments_count' => 1,
             ]);
 
         $this->assertDatabaseHas('comments', [
@@ -46,6 +47,16 @@ class CommentControllerTest extends TestCase
             'user_id' => $user->id,
             'text_content' => 'First comment',
         ]);
+        $this->assertDatabaseHas('posts', [
+            'id' => $post->id,
+            'comments_count' => 1,
+        ]);
+
+        $list = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/comments/post/{$post->id}?paged=true");
+        $list->assertStatus(200)
+            ->assertJsonPath('items.0.text_content', 'First comment')
+            ->assertJsonPath('hasMore', false);
     }
 
     public function test_can_add_reply_to_comment(): void

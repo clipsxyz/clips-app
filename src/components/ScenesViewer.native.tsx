@@ -1143,6 +1143,12 @@ export default function ScenesViewer({
                                 commentAuthorHandle={viewerHandle ?? ''}
                                 currentUserHandle={viewerHandle}
                                 onClose={closeComments}
+                                onCommentCountChange={(n) => {
+                                    patchPost(activePost.id, (p) => ({
+                                        ...p,
+                                        stats: { ...p.stats, comments: Math.max(0, n) },
+                                    }));
+                                }}
                             />
                         </View>
                     </View>
