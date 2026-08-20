@@ -101,6 +101,7 @@ export async function publishMediaStory24(options: {
         options.taggedUsersPositions?.length ? options.taggedUsersPositions : undefined,
         undefined,
         options.venue,
+        undefined,
         options.audience ?? 'public',
     );
     notifyStoryCreated(options.userHandle);
@@ -124,7 +125,7 @@ export async function publishTextStory24(options: {
     audience?: 'public' | 'close_friends' | 'only_me';
 }): Promise<Story> {
     const textStyle = options.textStyle;
-    return createStory(
+    const story = await createStory(
         options.userId,
         options.userHandle,
         undefined,
@@ -142,8 +143,11 @@ export async function publishTextStory24(options: {
         undefined,
         undefined,
         options.venue || options.landmark,
+        undefined,
         options.audience ?? 'public',
     );
+    notifyStoryCreated(options.userHandle);
+    return story;
 }
 
 export async function publishPollStory24(options: {
@@ -162,8 +166,9 @@ export async function publishPollStory24(options: {
         options.userHandle,
         options.backgroundUri,
         options.backgroundUri ? 'image' : undefined,
-        undefined,
+        options.question,
         options.location,
+        undefined,
         undefined,
         undefined,
         undefined,
@@ -176,6 +181,7 @@ export async function publishPollStory24(options: {
             option2: options.option2,
             option3: options.option3,
         },
+        undefined,
         undefined,
         undefined,
         undefined,

@@ -35,6 +35,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/notifications/mark-all-read',
     '/users/privacy/toggle',
     '/users/check-follows-me',
+    '/stories',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
@@ -743,6 +744,105 @@ export async function createPost(postData: {
     }
 }
 
+export async function createStory(storyData: Record<string, unknown>) {
+    if (isMockMode()) {
+        console.log('[createStory/client] IS_MOCK=true → skip Laravel');
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/stories`;
+    const authHeader = await getAuthorizationHeader();
+    if (!authHeader.Authorization) {
+        console.log('[createStory/client] missing Sanctum token → 401');
+        const error = new Error(
+            'Not signed in to the server. Log out and register/log in again so stories can sync.',
+        );
+        (error as any).status = 401;
+        throw error;
+    }
+
+    console.log('[createStory/client] POST', url, {
+        hasAuth: Boolean(authHeader.Authorization),
+        mediaType: storyData.media_type,
+        hasMediaUrl: Boolean(storyData.media_url),
+        hasText: Boolean(storyData.text),
+        stickerCount: Array.isArray(storyData.stickers) ? storyData.stickers.length : 0,
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            body: JSON.stringify(storyData),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+        let payload: any = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[createStory/client] response status=', response.status, {
+            id: payload?.id,
+            user_id: payload?.user_id,
+            user_handle: payload?.user_handle,
+            errors: payload?.errors,
+            error: payload?.error,
+        });
+
+        if (!response.ok) {
+            const errorMessage =
+                payload?.error ||
+                payload?.message ||
+                (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = payload;
+            throw error;
+        }
+
+        return payload;
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        console.log('[createStory/client] fetch error=', {
+            url,
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error(
+                `CONNECTION_REFUSED creating story at ${url}: ${error?.message || 'network error'}`,
+            );
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
+}
+
 export async function toggleLike(postId: string) {
     return apiRequest(`/posts/${postId}/like`, {
         method: 'POST',
@@ -835,7 +935,7 @@ export async function fetchCommentsPage(
     repliesLimit: number = 5,
 ) {
     const params = new URLSearchParams({
-        paged: 'true',
+        paged: '1',
         limit: String(limit),
         repliesLimit: String(repliesLimit),
     });

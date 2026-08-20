@@ -105,6 +105,7 @@ export function isLaravelApiEnabled(): boolean {
   }
   if (isReactNativeRuntime()) {
     // Legacy default: stay on mock unless explicitly enabled above.
+    // Do not flip this to true — nativeFeedLoader uses it and an empty walk wipes Home.
     return false;
   }
   return true;

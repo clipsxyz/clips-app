@@ -96,6 +96,8 @@ import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import { userHasStoriesByHandle } from '../api/stories';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 
 type ProfileAlertConfig = {
     title: string;
@@ -145,6 +147,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [isTogglingPrivacy, setIsTogglingPrivacy] = useState(false);
     const [profileAlert, setProfileAlert] = useState<ProfileAlertConfig | null>(null);
+    const [hasStory, setHasStory] = useState(false);
 
     const showProfileAlert = React.useCallback((config: ProfileAlertConfig) => {
         setProfileAlert(config);
@@ -518,6 +521,29 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     }, [collectionsOpen]);
 
     useEffect(() => {
+        if (!user?.handle) {
+            setHasStory(false);
+            return undefined;
+        }
+        let cancelled = false;
+        const check = () => {
+            void userHasStoriesByHandle(user.handle)
+                .then((has) => {
+                    if (!cancelled) setHasStory(has);
+                })
+                .catch(() => {
+                    if (!cancelled) setHasStory(false);
+                });
+        };
+        check();
+        const unsub = subscribeStoriesRefresh(check);
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [user?.handle]);
+
+    useEffect(() => {
         if (!user?.id) return undefined;
         const uid = String(user.id).trim();
         const sub = DeviceEventEmitter.addListener(
@@ -848,6 +874,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         src={user?.avatarUrl}
                         name={user?.name || 'User'}
                         size={ox(32)}
+                        hasStory={hasStory}
                     />
                     <View style={styles.headerAvatarBadge}>
                         <Icon name="add" size={ox(14)} color="#FFFFFF" />
@@ -1062,6 +1089,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 coverUrl={user?.profileBackgroundUrl}
                 avatarUrl={user?.avatarUrl}
                 name={user?.name || user?.handle || 'User'}
+                hasStory={hasStory}
                 showChangeCover
                 onPressChangeCover={() => navigation.navigate('ProfileCover')}
                 onAvatarPress={() => setShowProfilePictureModal(true)}

@@ -52,9 +52,11 @@ export default function StoryViewerHeader({
 }: Props) {
     const [metaIndex, setMetaIndex] = useState(0);
 
+    const metaKey = metadataItems.map((m) => `${m.type}:${m.label}`).join('|');
+
     useEffect(() => {
         setMetaIndex(0);
-    }, [metadataItems.map((m) => m.label).join('|')]);
+    }, [metaKey]);
 
     useEffect(() => {
         if (metadataItems.length <= 1) return;

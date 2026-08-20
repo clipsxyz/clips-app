@@ -48,17 +48,26 @@ export const PASSPORT_BRASS = '#c4a574';
 export const PASSPORT_BRASS_LIGHT = '#e8d5a3';
 
 /**
- * Conic / traveling border stops for the feed switcher pill
- * (Instagram-style motion, passport ink — not IG purple/magenta).
+ * Android View Profile canvas (GazetteerScreenShell wash).
+ * Deep navy + muted teal — not Instagram purple, not brass/gold.
+ */
+export const PASSPORT_CANVAS_WASH = ['#060d16', '#0f2430', '#1a3f3c', '#12263a', '#060d16'] as const;
+
+/** Accent red for the feed-switcher traveling ring. */
+export const PASSPORT_INK_RED = '#d91b5c';
+
+/**
+ * Traveling ring on the feed-switcher pill — View Profile navy/teal plus a red beat.
  */
 export const PASSPORT_TRAVELING_BORDER_COLORS = [
-    '#3d9b8f',
-    PASSPORT_BRASS,
-    '#12263a',
-    '#3d9b8f',
-    PASSPORT_BRASS_LIGHT,
-    PASSPORT_ABYSS,
-    '#3d9b8f',
+    PASSPORT_PALETTE.wavePrimary,
+    PASSPORT_INK_RED,
+    PASSPORT_CANVAS_WASH[2],
+    PASSPORT_PALETTE.wavePrimary,
+    PASSPORT_CANVAS_WASH[1],
+    PASSPORT_INK_RED,
+    PASSPORT_CANVAS_WASH[3],
+    PASSPORT_PALETTE.wavePrimary,
 ] as const;
 
 export function getAmbientPalette(variant: DiscoverAmbientVariant): AmbientPalette {

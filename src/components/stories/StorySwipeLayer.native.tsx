@@ -1,11 +1,16 @@
-import React, { useRef } from 'react';
-import { View, PanResponder, StyleSheet, type ViewProps } from 'react-native';
+import React, { useCallback, useMemo, useRef } from 'react';
+import { StyleSheet, View, type ViewProps } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 
 const SWIPE_THRESHOLD = 40;
-const HOLD_DELAY_MS = 140;
+const HOLD_DELAY_MS = 380;
+const TAP_LEFT_RATIO = 0.35;
 
 type Props = ViewProps & {
     enabled: boolean;
+    /** Regular stories: tap left/right to go prev/next. Off for shared postcards so the card stays tappable. */
+    captureTaps?: boolean;
     onSwipeLeft: () => void;
     onSwipeRight: () => void;
     onHoldStart?: () => void;
@@ -14,12 +19,12 @@ type Props = ViewProps & {
 };
 
 /**
- * Horizontal swipe + hold-to-pause.
- * Do NOT claim the responder on touch start — that steals taps from shared-post cards
- * (and loses to Android TextureView). Only claim after a clear horizontal move.
+ * Same pattern as Scenes: the gesture wrapper CONTAINS the video, it does not sit on top of it.
+ * An overlay with elevation hides Android TextureView (audio, no picture).
  */
 export default function StorySwipeLayer({
     enabled,
+    captureTaps = true,
     onSwipeLeft,
     onSwipeRight,
     onHoldStart,
@@ -28,36 +33,37 @@ export default function StorySwipeLayer({
     style,
     ...rest
 }: Props) {
-    const startX = useRef<number | null>(null);
-    const startY = useRef<number | null>(null);
     const enabledRef = useRef(enabled);
+    const captureTapsRef = useRef(captureTaps);
     const onSwipeLeftRef = useRef(onSwipeLeft);
     const onSwipeRightRef = useRef(onSwipeRight);
     const onHoldStartRef = useRef(onHoldStart);
     const onHoldEndRef = useRef(onHoldEnd);
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const holdingRef = useRef(false);
+    const layoutWidthRef = useRef(1);
     enabledRef.current = enabled;
+    captureTapsRef.current = captureTaps;
     onSwipeLeftRef.current = onSwipeLeft;
     onSwipeRightRef.current = onSwipeRight;
     onHoldStartRef.current = onHoldStart;
     onHoldEndRef.current = onHoldEnd;
 
-    const clearHoldTimer = () => {
+    const clearHoldTimer = useCallback(() => {
         if (holdTimerRef.current) {
             clearTimeout(holdTimerRef.current);
             holdTimerRef.current = null;
         }
-    };
+    }, []);
 
-    const endHold = () => {
+    const endHold = useCallback(() => {
         clearHoldTimer();
         if (!holdingRef.current) return;
         holdingRef.current = false;
         onHoldEndRef.current?.();
-    };
+    }, [clearHoldTimer]);
 
-    const beginHoldTimer = () => {
+    const beginHoldTimer = useCallback(() => {
         if (!enabledRef.current) return;
         clearHoldTimer();
         holdTimerRef.current = setTimeout(() => {
@@ -66,51 +72,67 @@ export default function StorySwipeLayer({
             holdingRef.current = true;
             onHoldStartRef.current?.();
         }, HOLD_DELAY_MS);
-    };
+    }, [clearHoldTimer]);
 
-    const panResponder = useRef(
-        PanResponder.create({
-            onStartShouldSetPanResponder: () => false,
-            onStartShouldSetPanResponderCapture: () => false,
-            onMoveShouldSetPanResponder: (_, g) =>
-                enabledRef.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy),
-            onMoveShouldSetPanResponderCapture: (_, g) =>
-                enabledRef.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy),
-            onPanResponderGrant: (_, gesture) => {
-                clearHoldTimer();
-                startX.current = gesture.x0;
-                startY.current = gesture.y0;
-            },
-            onPanResponderRelease: (_, gesture) => {
-                endHold();
-                if (startX.current == null || startY.current == null) return;
-                const dx = gesture.moveX - startX.current;
-                const dy = gesture.moveY - startY.current;
-                startX.current = null;
-                startY.current = null;
-                if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy)) return;
-                if (dx < 0) onSwipeLeftRef.current();
-                else onSwipeRightRef.current();
-            },
-            onPanResponderTerminate: () => {
-                endHold();
-                startX.current = null;
-                startY.current = null;
-            },
-        }),
-    ).current;
+    const fireLeft = useCallback(() => {
+        if (!enabledRef.current) return;
+        endHold();
+        onSwipeLeftRef.current();
+    }, [endHold]);
+
+    const fireRight = useCallback(() => {
+        if (!enabledRef.current) return;
+        endHold();
+        onSwipeRightRef.current();
+    }, [endHold]);
+
+    const onTapX = useCallback(
+        (x: number) => {
+            if (!enabledRef.current || !captureTapsRef.current || holdingRef.current) return;
+            const width = layoutWidthRef.current || 1;
+            if (x < width * TAP_LEFT_RATIO) fireRight();
+            else fireLeft();
+        },
+        [fireLeft, fireRight],
+    );
+
+    const composed = useMemo(() => {
+        const pan = Gesture.Pan()
+            .enabled(enabled)
+            .activeOffsetX([-18, 18])
+            .onEnd((e) => {
+                if (Math.abs(e.translationX) < SWIPE_THRESHOLD) return;
+                if (Math.abs(e.translationY) >= Math.abs(e.translationX)) return;
+                if (e.translationX < 0) runOnJS(fireLeft)();
+                else runOnJS(fireRight)();
+            });
+
+        const tap = Gesture.Tap()
+            .enabled(enabled && captureTaps)
+            .maxDuration(280)
+            .onEnd((e) => {
+                runOnJS(onTapX)(e.x);
+            });
+
+        return Gesture.Exclusive(pan, tap);
+    }, [captureTaps, enabled, fireLeft, fireRight, onTapX]);
 
     return (
-        <View
-            style={[styles.fill, style]}
-            {...rest}
-            onTouchStart={() => beginHoldTimer()}
-            onTouchEnd={() => endHold()}
-            onTouchCancel={() => endHold()}
-            {...(enabled ? panResponder.panHandlers : {})}
-        >
-            {children}
-        </View>
+        <GestureDetector gesture={composed}>
+            <View
+                style={[styles.fill, style]}
+                collapsable={false}
+                onLayout={(e) => {
+                    layoutWidthRef.current = e.nativeEvent.layout.width || 1;
+                }}
+                onTouchStart={() => beginHoldTimer()}
+                onTouchEnd={() => endHold()}
+                onTouchCancel={() => endHold()}
+                {...rest}
+            >
+                {children}
+            </View>
+        </GestureDetector>
     );
 }
 

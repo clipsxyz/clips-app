@@ -19,7 +19,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { type VideoRef } from 'react-native-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isMockMode } from '../config/runtimeEnv';
 import { hapticLight } from '../utils/hapticsNative';
 import StickerOverlayNative from '../components/StickerOverlay.native';
 import StoryModalShell from '../components/StoryModalShell.native';
@@ -340,7 +340,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                 let remoteUrl = mediaUrl;
                 let remoteType = mediaType;
 
-                if (isLaravelApiEnabled()) {
+                if (!isMockMode()) {
                     const prepared = await prepareMediaForPostNative({
                         mediaUrl,
                         mediaType,

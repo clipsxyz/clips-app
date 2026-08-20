@@ -29,7 +29,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import PassportTravelingBorder from '../components/PassportTravelingBorder.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { PASSPORT_ABYSS, PASSPORT_CANVAS_WASH, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -171,6 +171,7 @@ import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
+import { userHasStoriesByHandle } from '../api/stories';
 import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
@@ -291,9 +292,6 @@ import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
 import { ox } from '../constants/nativeOpticalScale';
 
-/** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
-const FEED_SWITCH_PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
-
 type Tab = string;
 
 function PillTabs({
@@ -340,10 +338,32 @@ function PillTabs({
 }) {
     const { user } = useAuth();
     const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
+    const [passportHasStory, setPassportHasStory] = React.useState(false);
     const onHeaderPlacePickRef = useRef(onHeaderPlacePick);
     const onSearchLocationRef = useRef(onSearchLocation);
     onHeaderPlacePickRef.current = onHeaderPlacePick;
     onSearchLocationRef.current = onSearchLocation;
+
+    useEffect(() => {
+        if (!user?.handle) {
+            setPassportHasStory(false);
+            return undefined;
+        }
+        let cancelled = false;
+        const check = () => {
+            void userHasStoriesByHandle(user.handle).then((has) => {
+                if (!cancelled) setPassportHasStory(has);
+            }).catch(() => {
+                if (!cancelled) setPassportHasStory(false);
+            });
+        };
+        check();
+        const unsub = subscribeStoriesRefresh(check);
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [user?.handle]);
 
     type HeaderSuggestion = {
         name: string;
@@ -913,7 +933,7 @@ function PillTabs({
                                     }
                                     return (
                                         <LinearGradient
-                                            colors={[...FEED_SWITCH_PASSPORT_WASH]}
+                                            colors={[...PASSPORT_CANVAS_WASH]}
                                             locations={[0, 0.28, 0.55, 0.78, 1]}
                                             start={{ x: 0.1, y: 1 }}
                                             end={{ x: 0.9, y: 0 }}
@@ -954,16 +974,31 @@ function PillTabs({
                         accessibilityLabel="My Passport"
                     >
                         <View style={styles.feedHeaderNotifWrap}>
-                            <View style={FEED_HEADER_PASSPORT_AVATAR}>
-                                {user?.avatarUrl ? (
-                                    <Image
-                                        source={{ uri: user.avatarUrl }}
-                                        style={styles.feedHeaderPassportAvatarImage}
-                                    />
-                                ) : (
-                                    <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
-                                )}
-                            </View>
+                            {passportHasStory ? (
+                                <PassportTravelingBorder borderRadius={12} borderWidth={2}>
+                                    <View style={[FEED_HEADER_PASSPORT_AVATAR, { borderWidth: 0 }]}>
+                                        {user?.avatarUrl ? (
+                                            <Image
+                                                source={{ uri: user.avatarUrl }}
+                                                style={styles.feedHeaderPassportAvatarImage}
+                                            />
+                                        ) : (
+                                            <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
+                                        )}
+                                    </View>
+                                </PassportTravelingBorder>
+                            ) : (
+                                <View style={FEED_HEADER_PASSPORT_AVATAR}>
+                                    {user?.avatarUrl ? (
+                                        <Image
+                                            source={{ uri: user.avatarUrl }}
+                                            style={styles.feedHeaderPassportAvatarImage}
+                                        />
+                                    ) : (
+                                        <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
+                                    )}
+                                </View>
+                            )}
                             <Text style={FEED_HEADER_SIDE_LABEL}>Passport</Text>
                         </View>
                     </TouchableOpacity>
@@ -1804,14 +1839,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     React.useEffect(() => {
         if (!user?.id || customLocation || showFollowingFeed) {
-            setStories24Items([]);
             return;
         }
         let cancelled = false;
         const load = () => {
-            void buildStories24RailItems(user.id, user.handle).then((items) => {
-                if (!cancelled) setStories24Items(items);
-            });
+            void buildStories24RailItems(user.id, user.handle)
+                .then((items) => {
+                    if (!cancelled) setStories24Items(items);
+                })
+                .catch((err) => {
+                    console.warn('Stories 24 rail load failed; keeping current items', err);
+                });
         };
         load();
         const pollMs = getStoriesRailPollMs();
@@ -1827,7 +1865,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id || customLocation || showFollowingFeed) return;
-            void buildStories24RailItems(user.id, user.handle).then(setStories24Items);
+            void buildStories24RailItems(user.id, user.handle)
+                .then(setStories24Items)
+                .catch((err) => {
+                    console.warn('Stories 24 rail focus load failed; keeping current items', err);
+                });
         }, [user?.id, user?.handle, customLocation, showFollowingFeed]),
     );
 
@@ -2205,9 +2247,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     // Helper to update a post in pages
     const updatePost = (postId: string, updater: (post: Post) => Post) => {
-        setPages(prev => prev.map(page =>
-            page.map(p => p.id === postId ? updater(p) : p)
-        ));
+        const id = String(postId);
+        setPages((prev) =>
+            prev.map((page) => page.map((p) => (String(p.id) === id ? updater(p) : p))),
+        );
     };
 
     const recordFeedView = useCallback(
@@ -2925,14 +2968,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         refreshingLockRef.current = true;
         setRefreshing(true);
         try {
-            await reloadFeedFromStartRef.current({ quiet: true });
+            await Promise.all([
+                reloadFeedFromStartRef.current({ quiet: true }),
+                (async () => {
+                    if (!user?.id || customLocation || showFollowingFeed) return;
+                    try {
+                        const items = await buildStories24RailItems(user.id, user.handle);
+                        setStories24Items(items);
+                    } catch (err) {
+                        console.warn('Stories 24 rail refresh failed; keeping current items', err);
+                    }
+                })(),
+            ]);
         } catch (err) {
             console.error('Feed pull-to-refresh failed:', err);
         } finally {
             refreshingLockRef.current = false;
             setRefreshing(false);
         }
-    }, []);
+    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
 
     const handleTabChange = (tab: Tab) => {
         setError(null);
@@ -4502,6 +4556,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 isOpen={commentsModalOpen}
                                 commentAuthorHandle={user?.handle ?? ''}
                                 currentUserHandle={user?.handle}
+                                onCommentCountChange={(n) => {
+                                    const pid = selectedPostId;
+                                    if (!pid) return;
+                                    updatePost(pid, (p) => ({
+                                        ...p,
+                                        stats: { ...p.stats, comments: Math.max(0, n) },
+                                    }));
+                                }}
                                 onAfterClose={() => {
                                     const pid = selectedPostId;
                                     if (!pid) return;
@@ -4509,7 +4571,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                         .then((list) =>
                                             updatePost(pid, (p) => ({
                                                 ...p,
-                                                stats: { ...p.stats, comments: list.length },
+                                                stats: {
+                                                    ...p.stats,
+                                                    comments: Math.max(p.stats.comments || 0, list.length),
+                                                },
                                             })),
                                         )
                                         .catch(() => {});

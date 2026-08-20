@@ -21,7 +21,7 @@ type Props = {
 };
 
 /**
- * Instagram-style traveling gradient ring (passport sea-glass + brass).
+ * Instagram-style traveling gradient ring — same navy / sea-glass as View Profile canvas.
  * Clips only the ring layer so sibling badges outside this view stay visible.
  */
 export default function PassportTravelingBorder({
@@ -57,7 +57,7 @@ export default function PassportTravelingBorder({
         const loop = Animated.loop(
             Animated.timing(spin, {
                 toValue: 1,
-                duration: 4000,
+                duration: 9000,
                 easing: Easing.linear,
                 useNativeDriver: true,
             })

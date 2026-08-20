@@ -236,6 +236,22 @@ video {
   }
 }
 
+@keyframes gazetteer-story-ring-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gazetteer-story-ring {
+    animation: none !important;
+  }
+}
+
 /* Animated gradient border shine */
 @keyframes rotateGradient {
   0% {

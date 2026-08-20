@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
+import { PASSPORT_TRAVELING_BORDER_COLORS } from '../utils/discoverAmbientPalette';
 
 export default function Avatar({
     src,
@@ -56,14 +57,14 @@ export default function Avatar({
         ? (e: React.MouseEvent<HTMLButtonElement>) => onClick(e)
         : undefined;
 
-    // Gold + silver metallic palette for "has story" ring.
     const storyRingStyle = {
-        background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)',
+        background: `conic-gradient(${PASSPORT_TRAVELING_BORDER_COLORS.join(', ')})`,
+        animation: 'gazetteer-story-ring-spin 9s linear infinite',
     };
 
     const inner = hasStory ? (
         <>
-            <div className="absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
+            <div className="gazetteer-story-ring absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
                 <div className="w-full h-full rounded-full bg-black" />
             </div>
             <div

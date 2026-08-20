@@ -1,3 +1,5 @@
+import { invalidateStoryPresenceCache } from '../api/stories';
+
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
@@ -8,6 +10,7 @@ export function subscribeStoriesRefresh(listener: Listener): () => void {
 }
 
 export function emitStoriesRefresh(): void {
+    invalidateStoryPresenceCache();
     listeners.forEach((fn) => {
         try {
             fn();
@@ -17,7 +20,7 @@ export function emitStoriesRefresh(): void {
     });
 }
 
-/** After native story publish — refreshes Stories 24 rail on the feed. */
+/** After native story publish — refreshes Stories 24 rail and avatar rings. */
 export function notifyStoryCreated(_userHandle: string): void {
     emitStoriesRefresh();
 }

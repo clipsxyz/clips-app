@@ -7,6 +7,7 @@ import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
@@ -96,7 +97,7 @@ export default function FeedPostHeader({
                 const anyStory = await userHasStoriesByHandle(safeProfileHandle);
                 let ring = anyStory;
                 if (!isCurrentUser) {
-                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle);
+                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle, user?.id);
                 }
                 if (!cancelled) {
                     setHasStory(ring);
@@ -107,10 +108,14 @@ export default function FeedPostHeader({
             }
         }
         checkStory();
+        const unsub = subscribeStoriesRefresh(() => {
+            void checkStory();
+        });
         return () => {
             cancelled = true;
+            unsub();
         };
-    }, [safeProfileHandle, isCurrentUser, onHasStoryChange]);
+    }, [safeProfileHandle, isCurrentUser, onHasStoryChange, user?.id]);
 
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | undefined;

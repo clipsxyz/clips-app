@@ -272,6 +272,9 @@ function App(): React.JSX.Element {
             component={StoriesScreen}
             options={({ route }) => ({
               presentation: 'fullScreenModal',
+              // Story viewer owns horizontal swipe — don't let the stack steal it.
+              gestureEnabled: false,
+              fullScreenGestureEnabled: false,
               // From Stories 24 rail: no native transition — card morph hands off to fullscreen.
               animation: (route.params as { fromStories24Rail?: boolean } | undefined)
                 ?.fromStories24Rail

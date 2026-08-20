@@ -45,12 +45,13 @@ export default function StorySafeVideo({
     const [failed, setFailed] = useState(false);
     const [ready, setReady] = useState(false);
     const notifiedReadyRef = React.useRef(false);
+    const sourceKey = typeof source === 'number' ? `n:${source}` : source?.uri || '';
 
     useEffect(() => {
         setFailed(false);
         setReady(false);
         notifiedReadyRef.current = false;
-    }, [source]);
+    }, [sourceKey]);
 
     if (failed && posterSource) {
         return <Image source={posterSource} style={style as object} resizeMode="cover" />;
@@ -61,10 +62,9 @@ export default function StorySafeVideo({
     }
 
     const markReady = () => {
-        if (!notifiedReadyRef.current) {
-            notifiedReadyRef.current = true;
-            onReadyForDisplay?.();
-        }
+        if (notifiedReadyRef.current) return;
+        notifiedReadyRef.current = true;
+        onReadyForDisplay?.();
         setReady(true);
     };
 

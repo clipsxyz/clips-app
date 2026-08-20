@@ -332,7 +332,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     Route::prefix('stories')->group(function () {
         Route::get('/', [StoryController::class, 'index']);
         Route::get('/paged', [StoryController::class, 'paged']);
-        Route::get('/user/{handle}', [StoryController::class, 'getUserStories']);
+        Route::get('/user/{handle}', [StoryController::class, 'getUserStories'])->where('handle', '[^/]+');
         Route::post('/', [StoryController::class, 'store']);
         Route::post('/{id}/view', [StoryController::class, 'view']);
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);

@@ -36,6 +36,7 @@ export const ENDPOINT_AUTH_EXPECTATIONS: EndpointAuthExpectation[] = [
 
     { method: 'GET', path: '/messages/conversations', auth: 'auth', area: 'messages' },
     { method: 'POST', path: '/messages/send', auth: 'auth', area: 'messages' },
+    { method: 'GET', path: '/stories', auth: 'auth', area: 'stories' },
     { method: 'GET', path: '/stories/paged', auth: 'auth', area: 'stories' },
     { method: 'POST', path: '/stories', auth: 'auth', area: 'stories' },
     { method: 'GET', path: '/collections', auth: 'auth', area: 'collections' },

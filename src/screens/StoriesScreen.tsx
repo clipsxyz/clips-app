@@ -22,7 +22,7 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
@@ -43,7 +43,6 @@ import { useAuth } from '../context/Auth';
 import { 
     fetchFollowedUsersStoryGroups,
     fetchStoryGroupByHandle,
-    fetchUserStories, 
     markStoryViewed, 
     incrementStoryViews,
     addStoryReaction,
@@ -121,6 +120,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
     }, [openUserHandle]);
     const { user } = useAuth();
+    const isFocused = useIsFocused();
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
     const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
@@ -128,6 +128,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [viewingStories, setViewingStories] = useState(false);
     const [stories24OpenFromFeedRail, setStories24OpenFromFeedRail] = useState(fromStories24Rail === true);
     const [stories24HoldMinReady, setStories24HoldMinReady] = useState(false);
+    const [stories24HoldConsumed, setStories24HoldConsumed] = useState(false);
     const [progress, setProgress] = useState(0);
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
@@ -167,6 +168,10 @@ export default function StoriesScreen({ route, navigation }: any) {
     const showInlineReplyComposerRef = useRef(false);
     const isSendingReplyRef = useRef(false);
     const pausedRef = useRef(false);
+    const viewingStoriesRef = useRef(false);
+    const screenFocusedRef = useRef(true);
+    const suspendStoryMediaRef = useRef(false);
+    const nextStoryRef = useRef<() => void>(() => {});
     const dismissingRef = useRef(false);
     const dismissProgress = useSharedValue(0);
     const screenHSv = useSharedValue(Dimensions.get('window').height);
@@ -218,7 +223,17 @@ export default function StoriesScreen({ route, navigation }: any) {
         handles.forEach((handle) => {
             updates[handle] = getAvatarForHandle(handle);
         });
-        setInsightsAvatarMap((prev) => ({ ...prev, ...updates }));
+        setInsightsAvatarMap((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            Object.keys(updates).forEach((handle) => {
+                if (next[handle] !== updates[handle]) {
+                    next[handle] = updates[handle];
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
     }, [storyGroups, currentGroupIndex, currentStoryIndex]);
 
     useEffect(() => {
@@ -240,8 +255,8 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         if (!viewingStories || !currentStory?.sharedFromPost || !user?.id) {
-            setOriginalPost(null);
-            setSharedPostFetchFailed(false);
+            setOriginalPost((prev) => (prev === null ? prev : null));
+            setSharedPostFetchFailed((prev) => (prev === false ? prev : false));
             return;
         }
         setSharedPostFetchFailed(false);
@@ -277,13 +292,13 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         if (!viewingStories || !currentGroup?.userHandle || !user?.id) {
-            setIsFollowingStoryUser(false);
-            setStoryFollowRequested(false);
+            setIsFollowingStoryUser((prev) => (prev === false ? prev : false));
+            setStoryFollowRequested((prev) => (prev === false ? prev : false));
             return;
         }
         if (currentGroup.userHandle === user.handle) {
-            setIsFollowingStoryUser(false);
-            setStoryFollowRequested(false);
+            setIsFollowingStoryUser((prev) => (prev === false ? prev : false));
+            setStoryFollowRequested((prev) => (prev === false ? prev : false));
             return;
         }
         if (user?.id) {
@@ -303,6 +318,18 @@ export default function StoriesScreen({ route, navigation }: any) {
         pausedRef.current = paused;
     }, [paused]);
 
+    useEffect(() => {
+        viewingStoriesRef.current = viewingStories;
+    }, [viewingStories]);
+
+    useEffect(() => {
+        screenFocusedRef.current = isFocused;
+    }, [isFocused]);
+
+    useEffect(() => {
+        suspendStoryMediaRef.current = suspendStoryMedia;
+    }, [suspendStoryMedia]);
+
     const storyPauseLocked = Boolean(
         showInsightsSheet ||
             showStoryShareModal ||
@@ -315,12 +342,13 @@ export default function StoriesScreen({ route, navigation }: any) {
             deliveryFx ||
             showInlineReplyComposer ||
             isSendingReply ||
-            isHoldingToPause,
+            isHoldingToPause ||
+            suspendStoryMedia,
     );
 
     useEffect(() => {
         if (!viewingStories) return;
-        setPaused(storyPauseLocked);
+        setPaused((prev) => (prev === storyPauseLocked ? prev : storyPauseLocked));
     }, [viewingStories, storyPauseLocked]);
 
     useEffect(() => {
@@ -377,6 +405,10 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [forceRefreshAt, fromStories24Rail, normalizedOpenUserHandle]);
 
     useEffect(() => {
+        setStories24HoldConsumed((prev) => (prev === false ? prev : false));
+    }, [forceRefreshAt, normalizedOpenUserHandle]);
+
+    useEffect(() => {
         if (!stories24OpenFromFeedRail || !normalizedOpenUserHandle) {
             setStories24HoldMinReady(false);
             return;
@@ -388,20 +420,27 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const stories24ContentReady = !loading && viewingStories;
     const showStories24HoldScreen =
+        !stories24HoldConsumed &&
         stories24OpenFromFeedRail &&
         !!normalizedOpenUserHandle &&
         (!stories24ContentReady || !stories24HoldMinReady);
+
+    useEffect(() => {
+        if (stories24ContentReady && stories24HoldMinReady) {
+            setStories24HoldConsumed((prev) => (prev === true ? prev : true));
+        }
+    }, [stories24ContentReady, stories24HoldMinReady]);
 
     useEffect(() => {
         loadStories();
     }, [user?.id, normalizedOpenUserHandle, railHandlesKey]);
 
     useEffect(() => {
-        if (normalizedOpenUserHandle && storyGroups.length > 0) {
-            const targetGroup = storyGroups.find(g => g.userHandle === normalizedOpenUserHandle);
-            if (targetGroup) {
-                startViewingStories(targetGroup, openStoryId);
-            }
+        if (!normalizedOpenUserHandle || storyGroups.length === 0) return;
+        if (viewingStoriesRef.current) return;
+        const targetGroup = storyGroups.find(g => g.userHandle === normalizedOpenUserHandle);
+        if (targetGroup) {
+            void startViewingStories(targetGroup, openStoryId);
         }
     }, [normalizedOpenUserHandle, openStoryId, storyGroups.length]);
 
@@ -487,38 +526,23 @@ export default function StoriesScreen({ route, navigation }: any) {
     const startViewingStories = async (group: StoryGroup, preferredStoryId?: string) => {
         if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
 
-        if (isGazetteerWorldGroup(group)) {
-            const groupIndex = storyGroups.findIndex((g) => isGazetteerWorldGroup(g));
-            if (groupIndex === -1) return;
-            const initialStoryIndex = preferredStoryId
-                ? Math.max(0, (group.stories || []).findIndex((s) => s.id === preferredStoryId))
-                : 0;
-            setCurrentGroupIndex(groupIndex);
-            setCurrentStoryIndex(initialStoryIndex);
-            setViewingStories(true);
-            setProgress(0);
-            setPaused(false);
-            progressRef.current = 0;
-            startProgress();
-            return;
-        }
-
-        const followedUserHandles = await getFollowedUsers(user.id);
-        const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
-        if (!stories || stories.length === 0) return;
-
-        const groupIndex = storyGroups.findIndex(g => g.userId === group.userId);
+        // Same fast path as web: use stories already on the group.
+        // Refetching via fetchUserStories (followed-feed) was dropping the shared postcard.
+        const groups = storyGroupsRef.current;
+        const groupIndex = isGazetteerWorldGroup(group)
+            ? groups.findIndex((g) => isGazetteerWorldGroup(g))
+            : groups.findIndex(
+                  (g) => g.userId === group.userId || g.userHandle === group.userHandle,
+              );
         if (groupIndex === -1) return;
 
-        setStoryGroups(prev => {
-            const updated = [...prev];
-            updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
-            return updated;
-        });
-
         const initialStoryIndex = preferredStoryId
-            ? Math.max(0, stories.findIndex((s) => s.id === preferredStoryId))
+            ? Math.max(0, group.stories.findIndex((s) => s.id === preferredStoryId))
             : 0;
+
+        viewingStoriesRef.current = true;
+        currentGroupIndexRef.current = groupIndex;
+        currentStoryIndexRef.current = initialStoryIndex;
         setCurrentGroupIndex(groupIndex);
         setCurrentStoryIndex(initialStoryIndex);
         setViewingStories(true);
@@ -541,12 +565,16 @@ export default function StoriesScreen({ route, navigation }: any) {
             setProgress(newProgress);
 
             if (newProgress >= 100) {
-                nextStory();
+                nextStoryRef.current();
             }
         }, 50);
     };
 
-    const nextStory = () => {
+    const goToNextStory = (source: 'user' | 'timer') => {
+        if (dismissingRef.current) return;
+        if (source === 'timer' && (!screenFocusedRef.current || suspendStoryMediaRef.current)) {
+            return;
+        }
         if (timerRef.current) {
             clearInterval(timerRef.current);
         }
@@ -578,6 +606,8 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
     };
 
+    const nextStory = () => goToNextStory('user');
+
     const previousStory = () => {
         if (timerRef.current) {
             clearInterval(timerRef.current);
@@ -607,6 +637,8 @@ export default function StoriesScreen({ route, navigation }: any) {
             startProgress();
         }
     };
+
+    nextStoryRef.current = () => goToNextStory('timer');
 
     const finalizeCloseNavigation = useCallback(() => {
         setViewingStories(false);
@@ -1252,8 +1284,16 @@ export default function StoriesScreen({ route, navigation }: any) {
             {currentStory && currentGroup && (
                 <>
                     <StorySwipeLayer
-                        enabled={!showInlineReplyComposer && !deliveryFx && !showStoryProfileCard}
+                        enabled={
+                            !showInlineReplyComposer &&
+                            !deliveryFx &&
+                            !showStoryProfileCard &&
+                            !showSharedPostModal &&
+                            !imageFullscreenPost &&
+                            !suspendStoryMedia
+                        }
                         style={styles.mediaLayer}
+                        captureTaps={!currentStory.sharedFromPost}
                         onSwipeLeft={nextStory}
                         onSwipeRight={previousStory}
                         onHoldStart={pauseForHold}
@@ -1589,6 +1629,17 @@ export default function StoriesScreen({ route, navigation }: any) {
                 isOpen={fullscreenCommentsPost !== null}
                 commentAuthorHandle={user?.handle || ''}
                 currentUserHandle={user?.handle}
+                onCommentCountChange={(n) => {
+                    const closed = fullscreenCommentsPost;
+                    if (!closed?.id) return;
+                    syncFullscreenPost({
+                        ...closed,
+                        stats: {
+                            ...closed.stats,
+                            comments: Math.max(0, n),
+                        },
+                    });
+                }}
                 onClose={() => {
                     const closed = fullscreenCommentsPost;
                     setFullscreenCommentsPost(null);
@@ -1600,7 +1651,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                 ...closed,
                                 stats: {
                                     ...closed.stats,
-                                    comments: list.length,
+                                    comments: Math.max(closed.stats.comments || 0, list.length),
                                 },
                             });
                         })

@@ -77,15 +77,16 @@ class Story extends Model
         return $this->hasMany(StoryView::class);
     }
 
-    // Scopes
+    // Scopes — 24h window in UTC so SQLite/MySQL timezone offsets cannot
+    // treat a just-created story as already expired.
     public function scopeActive($query)
     {
-        return $query->where('expires_at', '>', now());
+        return $query->where('created_at', '>=', now('UTC')->subHours(24));
     }
 
     public function scopeExpired($query)
     {
-        return $query->where('expires_at', '<=', now());
+        return $query->where('created_at', '<', now('UTC')->subHours(24));
     }
 
     public function scopeForUser($query, $userId)
@@ -101,12 +102,12 @@ class Story extends Model
     // Helper methods
     public function isActive()
     {
-        return $this->expires_at > now();
+        return $this->created_at && $this->created_at->gte(now('UTC')->subHours(24));
     }
 
     public function isExpired()
     {
-        return $this->expires_at <= now();
+        return !$this->isActive();
     }
 
     public function hasBeenViewedBy(User $user)

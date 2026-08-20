@@ -30,6 +30,7 @@ import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client'
 import { followOrRequest } from '../utils/followOrRequest';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { userHasStoriesByHandle } from '../api/stories';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import {
     isProfilePrivate,
     canViewProfile,
@@ -174,6 +175,26 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             cancelled = true;
         };
     }, [handle]);
+
+    useEffect(() => {
+        if (!decodedHandle) return;
+        let cancelled = false;
+        const check = () => {
+            void userHasStoriesByHandle(decodedHandle)
+                .then((has) => {
+                    if (!cancelled) setHasStory(has);
+                })
+                .catch(() => {
+                    if (!cancelled) setHasStory(false);
+                });
+        };
+        check();
+        const unsub = subscribeStoriesRefresh(check);
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [decodedHandle]);
 
     const loadProfile = async (isCancelled?: () => boolean) => {
         if (!handle) return;
@@ -1510,6 +1531,17 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 onClose={() => setPeekCommentsPost(null)}
                 commentAuthorHandle={user?.handle || ''}
                 currentUserHandle={user?.handle}
+                onCommentCountChange={(n) => {
+                    const pid = peekCommentsPost?.id;
+                    if (!pid) return;
+                    const patch = (p: Post) =>
+                        String(p.id) === String(pid)
+                            ? { ...p, stats: { ...p.stats, comments: Math.max(0, n) } }
+                            : p;
+                    setPeekCommentsPost((prev) => (prev ? patch(prev) : prev));
+                    setPosts((prev) => prev.map(patch));
+                    setGridPeekPost((prev) => (prev ? patch(prev) : prev));
+                }}
             />
 
             <FeedShareModal
