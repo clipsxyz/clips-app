@@ -1,11 +1,19 @@
 import type { Post } from '../types';
 
+export type ScenesOriginRect = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
+
 export type ScenesLaunchPayload = {
     initialPostId: string;
     posts: Post[];
     initialVideoTime?: number;
     initialMuted?: boolean;
     feedLabel?: string;
+    originRect?: ScenesOriginRect | null;
 };
 
 let launchPayload: ScenesLaunchPayload | null = null;
@@ -21,6 +29,12 @@ export function setScenesLaunchPayload(payload: ScenesLaunchPayload): void {
         initialVideoTime: payload.initialVideoTime,
         initialMuted: payload.initialMuted,
         feedLabel: payload.feedLabel,
+        originRect:
+            payload.originRect &&
+            payload.originRect.width > 8 &&
+            payload.originRect.height > 8
+                ? { ...payload.originRect }
+                : null,
     };
 }
 

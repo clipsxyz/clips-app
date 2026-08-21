@@ -8,24 +8,27 @@ import {
     Platform,
     Alert,
     Modal,
+    BackHandler,
     type GestureResponderEvent,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
     Easing,
+    interpolate,
     runOnJS,
     useAnimatedReaction,
     useAnimatedStyle,
     useSharedValue,
     withTiming,
+    cancelAnimation,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import LinearGradient from 'react-native-linear-gradient';
-import { type OnProgressData, type VideoRef } from 'react-native-video';
+import Video, { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
-import { postHasVideoMedia } from '../utils/postMedia';
-import { getScenesMediaSlides } from '../utils/scenesMediaNative';
+import { postHasVideoMedia, resolvePostPlaybackUri } from '../utils/postMedia';
+import { getScenesMediaSlides, scenesVideoSource } from '../utils/scenesMediaNative';
+import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { buildPostMetadataItems } from '../utils/feedPostMeta';
 import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
@@ -55,6 +58,7 @@ import {
 } from '../utils/globalVideoMuteNative';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import { setScenesViewerActive } from '../utils/scenesViewerActiveNative';
+import type { ScenesOriginRect } from '../utils/scenesLaunchNative';
 import {
     toggleLike,
     toggleFollowForPost,
@@ -109,12 +113,51 @@ function metadataIcon(type: MetadataItem['type']): string {
     return 'location-outline';
 }
 
+function samePostId(a: unknown, b: unknown): boolean {
+    const left = String(a ?? '').trim();
+    const right = String(b ?? '').trim();
+    return left.length > 0 && left === right;
+}
+
+function indexOfPostId(list: Post[], postId: unknown): number {
+    return list.findIndex((p) => samePostId(p.id, postId));
+}
+
+function ScenesRailAction({
+    count,
+    disabled,
+    label,
+    onPress,
+    children,
+}: {
+    count: string | number;
+    disabled?: boolean;
+    label: string;
+    onPress: () => void;
+    children: React.ReactNode;
+}) {
+    return (
+        <View style={styles.actionCol}>
+            <Pressable
+                style={[styles.actionBtn, disabled ? styles.actionBtnDisabled : null]}
+                onPress={onPress}
+                disabled={disabled}
+                accessibilityLabel={label}
+            >
+                <View style={styles.chromeCircle}>{children}</View>
+            </Pressable>
+            <Text style={styles.actionCount}>{count}</Text>
+        </View>
+    );
+}
+
 export type ScenesViewerProps = {
     posts: Post[];
     initialPostId: string;
     initialVideoTime?: number;
     initialMuted?: boolean;
     feedLabel?: string;
+    originRect?: ScenesOriginRect | null;
     viewerUserId: string;
     viewerHandle?: string;
     /** Auth profile photo — required for own posts (handle map often has no entry yet). */
@@ -124,6 +167,12 @@ export type ScenesViewerProps = {
     onPostsChange?: (posts: Post[]) => void;
     navigation?: { navigate: (route: string, params?: object) => void };
     onBoost?: () => void;
+    /**
+     * Feed postcard player stays mounted; this viewer is chrome only for the
+     * opening post (no second ExoPlayer).
+     */
+    embedFeedPlayer?: boolean;
+    onExternalPausedChange?: (paused: boolean) => void;
 };
 
 export default function ScenesViewer({
@@ -132,6 +181,7 @@ export default function ScenesViewer({
     initialVideoTime,
     initialMuted,
     feedLabel,
+    originRect = null,
     viewerUserId,
     viewerHandle,
     viewerAvatarUrl,
@@ -140,11 +190,24 @@ export default function ScenesViewer({
     onPostsChange,
     navigation,
     onBoost,
+    embedFeedPlayer = false,
+    onExternalPausedChange,
 }: ScenesViewerProps) {
     const insets = useSafeAreaInsets();
     const windowHeight = Dimensions.get('window').height;
     const windowWidth = Dimensions.get('window').width;
     const mediaHeightSv = useSharedValue(windowHeight);
+    const enterProgress = useSharedValue(0);
+    const originX = useSharedValue(originRect?.x ?? 0);
+    const originY = useSharedValue(originRect?.y ?? 0);
+    const originW = useSharedValue(originRect?.width ?? windowWidth);
+    const originH = useSharedValue(originRect?.height ?? windowHeight);
+    const hasOrigin = useSharedValue(
+        originRect && originRect.width > 8 && originRect.height > 8 ? 1 : 0,
+    );
+    const screenW = useSharedValue(windowWidth);
+    const closingRef = useRef(false);
+    const closedOnceRef = useRef(false);
 
     // Keep handle→avatar map warm so own + other chrome can resolve the photo.
     useEffect(() => {
@@ -156,16 +219,22 @@ export default function ScenesViewer({
     // Android Video surfaces ignore overflow clipping — drive the player height explicitly
     // so the MP4 actually becomes a Reels-style mini viewport above the sheet.
     const [mediaViewportHeight, setMediaViewportHeight] = useState(windowHeight);
+    const startPostId = String(initialPostId ?? '').trim();
     const posts = useMemo(() => {
         const filtered = postsProp.filter(postHasVideoMedia);
+        const tapped =
+            postsProp.find((p) => samePostId(p.id, startPostId)) ??
+            filtered.find((p) => samePostId(p.id, startPostId));
+        if (tapped && indexOfPostId(filtered, startPostId) < 0) {
+            return [tapped, ...filtered];
+        }
         if (filtered.length > 0) return filtered;
-        // Keep the tapped post playable even if filter missed (bad mediaType / URL).
-        const initial = postsProp.find((p) => p.id === initialPostId);
-        return initial ? [initial] : [];
-    }, [initialPostId, postsProp]);
+        return tapped ? [tapped] : [];
+    }, [postsProp, startPostId]);
 
-    const initialIndex = Math.max(0, posts.findIndex((p) => p.id === initialPostId));
+    const initialIndex = Math.max(0, indexOfPostId(posts, startPostId));
     const [activeIndex, setActiveIndex] = useState(initialIndex);
+    const userMovedFromInitialRef = useRef(false);
     const [muted, setMuted] = useState(initialMuted ?? true);
     const [paused, setPaused] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -195,7 +264,7 @@ export default function ScenesViewer({
     const videoRef = useRef<VideoRef>(null);
     const topMetaHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const likeButtonRef = useRef<View>(null);
-    const currentTimeRef = useRef(0);
+    const currentTimeRef = useRef(Math.max(0, initialVideoTime ?? 0));
     const timesByPostId = useRef<Map<string, number>>(new Map());
     const didSeekInitialRef = useRef(false);
     /** Resume play after comments only if we were playing when the sheet opened. */
@@ -229,13 +298,44 @@ export default function ScenesViewer({
     );
 
     useEffect(() => {
-        // Kill any feed ExoPlayer still under this fullScreenModal (focus blur is unreliable).
+        screenW.value = windowWidth;
+    }, [screenW, windowWidth]);
+
+    useEffect(() => {
+        closingRef.current = false;
+        closedOnceRef.current = false;
+        const rect =
+            originRect && originRect.width > 8 && originRect.height > 8 ? originRect : null;
+        if (rect) {
+            originX.value = rect.x;
+            originY.value = rect.y;
+            originW.value = rect.width;
+            originH.value = rect.height;
+            hasOrigin.value = 1;
+        } else {
+            hasOrigin.value = 0;
+        }
+        cancelAnimation(enterProgress);
+        enterProgress.value = 1;
+    }, [
+        embedFeedPlayer,
+        enterProgress,
+        hasOrigin,
+        originH,
+        originRect,
+        originW,
+        originX,
+        originY,
+    ]);
+
+    useEffect(() => {
+        if (embedFeedPlayer) return;
         setActiveFeedVideoPostId(null);
         setScenesViewerActive(true);
         return () => {
             setScenesViewerActive(false);
         };
-    }, []);
+    }, [embedFeedPlayer]);
 
     useEffect(() => {
         if (initialMuted !== undefined) {
@@ -251,9 +351,20 @@ export default function ScenesViewer({
 
     useEffect(() => {
         if (initialVideoTime != null && initialVideoTime > 0) {
-            timesByPostId.current.set(initialPostId, initialVideoTime);
+            timesByPostId.current.set(startPostId, initialVideoTime);
+            currentTimeRef.current = initialVideoTime;
         }
-    }, [initialPostId, initialVideoTime]);
+    }, [initialVideoTime, startPostId]);
+
+    useEffect(() => {
+        userMovedFromInitialRef.current = false;
+    }, [startPostId]);
+
+    useEffect(() => {
+        if (userMovedFromInitialRef.current) return;
+        const next = indexOfPostId(posts, startPostId);
+        if (next >= 0) setActiveIndex(next);
+    }, [posts, startPostId]);
 
     useEffect(() => {
         didSeekInitialRef.current = false;
@@ -316,8 +427,38 @@ export default function ScenesViewer({
         [applyMediaViewportHeight],
     );
 
-    const mediaLayerAnimStyle = useAnimatedStyle(() => ({
-        height: mediaHeightSv.value,
+    const mediaLayerAnimStyle = useAnimatedStyle(() => {
+        const p = enterProgress.value;
+        const sh = Math.max(1, mediaHeightSv.value);
+        const sw = Math.max(1, screenW.value);
+        if (hasOrigin.value < 1) {
+            return {
+                position: 'absolute' as const,
+                top: 0,
+                left: 0,
+                width: sw,
+                height: sh,
+                opacity: 1,
+            };
+        }
+        const ow = Math.max(1, originW.value);
+        const oh = Math.max(1, originH.value);
+        return {
+            position: 'absolute' as const,
+            top: 0,
+            left: 0,
+            width: interpolate(p, [0, 1], [ow, sw]),
+            height: interpolate(p, [0, 1], [oh, sh]),
+            transform: [
+                { translateX: interpolate(p, [0, 1], [originX.value, 0]) },
+                { translateY: interpolate(p, [0, 1], [originY.value, 0]) },
+            ],
+        };
+    });
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity: hasOrigin.value
+            ? interpolate(enterProgress.value, [0, 0.55, 1], [0, 0.85, 1])
+            : interpolate(enterProgress.value, [0, 1], [0.35, 1]),
     }));
 
     const activeMediaSlides = useMemo(
@@ -377,8 +518,11 @@ export default function ScenesViewer({
         });
     }, []);
 
-    const handleBack = useCallback(() => {
-        const post = posts[activeIndex];
+    const invokeClose = useCallback(() => {
+        if (closedOnceRef.current) return;
+        closedOnceRef.current = true;
+        closingRef.current = true;
+        const post = postsRef.current[activeIndex] ?? posts[activeIndex];
         if (post) {
             onClose(currentTimeRef.current, post.id, muted);
         } else {
@@ -386,10 +530,27 @@ export default function ScenesViewer({
         }
     }, [activeIndex, muted, onClose, posts]);
 
+    const handleBack = useCallback(() => {
+        if (closedOnceRef.current || closingRef.current) return;
+        closingRef.current = true;
+        setDismissPull(0);
+        invokeClose();
+    }, [invokeClose]);
+
+    useEffect(() => {
+        if (embedFeedPlayer) return;
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            handleBack();
+            return true;
+        });
+        return () => sub.remove();
+    }, [embedFeedPlayer, handleBack]);
+
     const goToPost = useCallback((nextIndex: number) => {
         if (nextIndex < 0 || nextIndex >= posts.length) return;
         setActiveIndex((prev) => {
             if (prev === nextIndex) return prev;
+            userMovedFromInitialRef.current = true;
             const prevPost = postsRef.current[prev];
             if (prevPost) {
                 timesByPostId.current.set(prevPost.id, currentTimeRef.current);
@@ -438,7 +599,7 @@ export default function ScenesViewer({
             activeIndex === initialIndex
                 ? (initialVideoTime ?? timesByPostId.current.get(activePost.id) ?? 0)
                 : (timesByPostId.current.get(activePost.id) ?? 0);
-        if (t > 0) {
+        if (t > 0.05) {
             videoRef.current?.seek(t);
             currentTimeRef.current = t;
         }
@@ -740,6 +901,7 @@ export default function ScenesViewer({
 
     const onVerticalPanUpdate = useCallback(
         (translationY: number) => {
+            if (closingRef.current) return;
             if (translationY > 0 && activeIndexRef.current === 0) {
                 setDismissPull(Math.min(translationY, windowHeight * 0.45));
             }
@@ -749,6 +911,7 @@ export default function ScenesViewer({
 
     const onVerticalPanEnd = useCallback(
         (translationY: number) => {
+            if (closingRef.current) return;
             setDismissPull(0);
             const threshold = windowHeight * 0.12;
             const idx = activeIndexRef.current;
@@ -787,9 +950,25 @@ export default function ScenesViewer({
         [onVerticalPanEnd, onVerticalPanUpdate],
     );
 
+    const hideEmbeddedPlayer = embedFeedPlayer && activeIndex === initialIndex;
+
+    useEffect(() => {
+        onExternalPausedChange?.(
+            hideEmbeddedPlayer
+                ? paused || commentsOpen || commentsAudioLocked
+                : true,
+        );
+    }, [
+        commentsAudioLocked,
+        commentsOpen,
+        hideEmbeddedPlayer,
+        onExternalPausedChange,
+        paused,
+    ]);
+
     if (!posts.length || !activePost) {
         return (
-            <View style={styles.root}>
+            <View style={[styles.root, styles.emptyRoot]}>
                 <Pressable
                     style={[styles.backBtn, { top: insets.top + 8 }]}
                     onPress={() => onClose(0, initialPostId, muted)}
@@ -812,6 +991,11 @@ export default function ScenesViewer({
         : getAvatarForHandle(profileHandle);
     const dismissOpacity = Math.max(0.55, 1 - dismissPull / (windowHeight * 0.45));
     const captionLong = caption.length > 50;
+    const likesCount = Math.max(0, Number(activePost.stats?.likes) || 0);
+    const commentsCount = Math.max(0, Number(activePost.stats?.comments) || 0);
+    const sharesCount = Math.max(0, Number(activePost.stats?.shares) || 0);
+    const reclipsCount = Math.max(0, Number(activePost.stats?.reclips) || 0);
+    const isLiked = activePost.userLiked === true;
 
     const renderCaptionMentions = (text: string) => {
         const parts = parseStoryMentionParts(text);
@@ -834,57 +1018,262 @@ export default function ScenesViewer({
         activeMediaSlides.length > 1 ||
         activeMediaSlides.some((s) => s.type === 'video' || s.type === 'text');
 
+    const playbackRaw =
+        activeMediaSlides[mediaSlideIndex]?.url ||
+        resolvePostPlaybackUri(activePost) ||
+        activePost.mediaUrl ||
+        '';
+    const playbackSrc = playbackRaw ? scenesVideoSource(playbackRaw) : null;
+    const playbackSource =
+        typeof playbackSrc === 'number'
+            ? playbackSrc
+            : playbackSrc && isPlayableVideoUri(playbackSrc.uri)
+              ? playbackSrc
+              : null;
+
     return (
-        <GestureHandlerRootView style={styles.root}>
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
             <View
                 style={[
-                    styles.rootInner,
-                    {
-                        transform: [{ translateY: dismissPull }],
-                        opacity: dismissPull > 0 ? dismissOpacity : 1,
-                    },
+                    { flex: 1, backgroundColor: '#000000' },
+                    dismissPull > 0
+                        ? { transform: [{ translateY: dismissPull }], opacity: dismissOpacity }
+                        : null,
                 ]}
             >
-                    <Animated.View style={[styles.mediaLayer, mediaLayerAnimStyle]}>
-                        <GestureDetector gesture={mediaGestures}>
-                            <View style={styles.mediaGestureHost}>
-                                <ScenesMediaPlayer
-                                    key={activePost.id}
-                                    post={activePost}
-                                    isActive
-                                    suspendPlayback={commentsSuspendVideo}
-                                    paused={paused || commentsOpen || commentsAudioLocked}
-                                    muted={muted || commentsOpen || commentsAudioLocked}
-                                    volume={
-                                        muted || commentsOpen || commentsAudioLocked ? 0 : 1
-                                    }
-                                    width={windowWidth}
-                                    height={mediaViewportHeight}
-                                    videoRef={videoRef}
-                                    onVideoLoad={onVideoLoad}
-                                    onVideoProgress={onVideoProgress}
-                                    onSlideProgress={setMediaSlideProgress}
-                                    onSlideIndexChange={setMediaSlideIndex}
-                                    showPauseOverlay={!commentsOpen && !commentsSuspendVideo}
-                                    onMediaPress={commentsOpen ? undefined : handleMediaPress}
+                {hideEmbeddedPlayer || commentsSuspendVideo || !playbackSource ? null : (
+                    <View
+                        collapsable={false}
+                        pointerEvents="none"
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: windowWidth,
+                            height: windowHeight,
+                        }}
+                    >
+                        <Video
+                            ref={videoRef}
+                            source={playbackSource as object}
+                            style={{ width: windowWidth, height: windowHeight }}
+                            resizeMode="cover"
+                            repeat
+                            paused={paused || commentsOpen || commentsAudioLocked}
+                            muted={muted || commentsOpen || commentsAudioLocked}
+                            volume={
+                                muted || commentsOpen || commentsAudioLocked ? 0 : 1
+                            }
+                            pointerEvents="none"
+                            onLoad={onVideoLoad}
+                            onProgress={onVideoProgress}
+                            {...androidListSafeVideoProps()}
+                            useTextureView
+                            hideShutterView
+                            shutterColor="transparent"
+                        />
+                    </View>
+                )}
+
+                <GestureDetector gesture={mediaGestures}>
+                    <Pressable
+                        style={[StyleSheet.absoluteFillObject, { backgroundColor: 'transparent' }]}
+                        onPress={commentsOpen ? undefined : handleMediaPress}
+                    />
+                </GestureDetector>
+
+            <View
+                pointerEvents="box-none"
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: windowWidth,
+                    height: windowHeight,
+                    backgroundColor: 'transparent',
+                }}
+            >
+            <View
+                pointerEvents="box-none"
+                style={{
+                    backgroundColor: 'transparent',
+                    paddingTop: insets.top,
+                }}
+            >
+            <View style={[styles.topHeader, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
+                <Pressable onPress={handleBack} hitSlop={8}>
+                    <View style={styles.chromeCircle}>
+                        <Icon name="chevron-back" size={18} color="#FFFFFF" />
+                    </View>
+                </Pressable>
+                <View style={[styles.topHeaderCenter, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
+                    {showSegmentedProgress ? (
+                        <ScenesMediaProgressBar
+                            slides={activeMediaSlides}
+                            activeIndex={mediaSlideIndex}
+                            videoProgress={mediaSlideProgress || progress}
+                            style={styles.progressRowInset}
+                        />
+                    ) : (
+                        <View style={styles.singleProgressTrack}>
+                            <View
+                                style={[
+                                    styles.progressFill,
+                                    { width: `${Math.min(100, (mediaSlideProgress || progress) * 100)}%` },
+                                ]}
+                            />
+                        </View>
+                    )}
+                </View>
+                {!commentsOpen ? (
+                    <Pressable onPress={toggleMute} hitSlop={8}>
+                        <View style={styles.chromeCircle}>
+                            <Icon name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#FFFFFF" />
+                        </View>
+                    </Pressable>
+                ) : (
+                    <View style={styles.chromeCircle} />
+                )}
+            </View>
+            </View>
+
+            {!commentsOpen ? (
+            <View
+                pointerEvents="box-none"
+                style={{
+                    position: 'absolute',
+                    left: 0,
+                    bottom: 0,
+                    width: windowWidth,
+                    backgroundColor: 'transparent',
+                    paddingBottom: insets.bottom,
+                }}
+            >
+            <View style={[styles.bottomBlock, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
+                <View style={[styles.bottomRow, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
+                    <View style={[styles.captionCol, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
+                        <View style={styles.profileRow}>
+                            <Pressable
+                                style={styles.avatarBtn}
+                                onPress={() => onVisitProfile(profileHandle)}
+                            >
+                                <Avatar
+                                    src={authorAvatarSrc}
+                                    name={displayHandle.split('@')[0]}
+                                    size={36}
                                 />
-                                {commentsOpen || commentsSuspendVideo ? (
-                                    // Opaque cover while sheet is up — blocks TextureView punch-through
-                                    // without leaving a live ExoPlayer under the Modal.
-                                    <View
-                                        style={[
-                                            styles.commentsVideoCover,
-                                            {
-                                                width: windowWidth,
-                                                height: mediaViewportHeight,
-                                            },
-                                        ]}
-                                        pointerEvents="none"
-                                    />
+                            </Pressable>
+                            {!activePost.isFollowing && !isOwn && !hasPendingRequest ? (
+                                <Pressable style={styles.followPlus} onPress={() => void handleFollow()}>
+                                    <Icon name="add" size={12} color="#FFFFFF" />
+                                </Pressable>
+                            ) : !activePost.isFollowing && hasPendingRequest && !isOwn ? (
+                                <View style={styles.requestedPill}>
+                                    <Text style={styles.requestedPillText}>Requested</Text>
+                                </View>
+                            ) : activePost.isFollowing && !isOwn ? (
+                                <Pressable
+                                    style={styles.followingPill}
+                                    onPress={() => void handleFollow()}
+                                >
+                                    <Text style={styles.followingPillText}>Following</Text>
+                                </Pressable>
+                            ) : null}
+                            <View style={styles.profileTextCol}>
+                                <Pressable onPress={() => onVisitProfile(profileHandle)}>
+                                    <View style={styles.handleWithBadge}>
+                                        <Text style={styles.handleText} numberOfLines={1}>
+                                            {displayHandle.replace(/^@/, '')}
+                                        </Text>
+                                        <VerifiedBadge accountType={activePost.userAccountType} size={12} />
+                                    </View>
+                                </Pressable>
+                                {activePost.locationLabel ? (
+                                    <View style={styles.locationRow}>
+                                        <Icon name="location-outline" size={11} color="rgba(255,255,255,0.75)" />
+                                        <Text style={styles.locationText} numberOfLines={1}>
+                                            {activePost.locationLabel}
+                                        </Text>
+                                    </View>
                                 ) : null}
                             </View>
-                        </GestureDetector>
-                    </Animated.View>
+                        </View>
+                        {caption ? (
+                            <View style={styles.captionRow}>
+                                <Text style={styles.caption} numberOfLines={2}>
+                                    {renderCaptionMentions(caption)}
+                                </Text>
+                                {captionLong ? (
+                                    <Pressable onPress={openComments} hitSlop={8}>
+                                        <Text style={styles.captionMore}>more</Text>
+                                    </Pressable>
+                                ) : null}
+                            </View>
+                        ) : null}
+                    </View>
+                    <View style={[styles.actionRail, { backgroundColor: 'transparent' }]} pointerEvents="box-none" collapsable={false}>
+                        <View ref={likeButtonRef} collapsable={false}>
+                            <ScenesRailAction
+                                count={likesCount}
+                                label={isLiked ? 'Unlike' : 'Like'}
+                                onPress={() => void handleLike()}
+                            >
+                                <FeedLikeThumbsIcon
+                                    size={22}
+                                    color="#FFFFFF"
+                                    filled={isLiked}
+                                />
+                            </ScenesRailAction>
+                        </View>
+                        <ScenesRailAction
+                            count={commentsCount}
+                            label="Comments"
+                            onPress={openComments}
+                        >
+                            <Icon name="chatbubble-outline" size={20} color="#FFFFFF" />
+                        </ScenesRailAction>
+                        <ScenesRailAction
+                            count={sharesCount}
+                            label="Share"
+                            onPress={() => setSharePost(activePost)}
+                        >
+                            <Icon name="paper-plane-outline" size={20} color="#FFFFFF" />
+                        </ScenesRailAction>
+                        <ScenesRailAction
+                            count={isSaved ? 'Saved' : 'Save'}
+                            label="Save to collection"
+                            onPress={() => setSaveModalOpen(true)}
+                        >
+                            <Icon
+                                name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                                size={20}
+                                color="#FFFFFF"
+                            />
+                        </ScenesRailAction>
+                        <ScenesRailAction
+                            count={reclipsCount}
+                            disabled={!canReclip}
+                            label={activePost.userReclipped ? 'Already reclipped' : 'Reclip'}
+                            onPress={() => void handleReclip()}
+                        >
+                            <Icon
+                                name="repeat"
+                                size={20}
+                                color={activePost.userReclipped ? '#4ADE80' : '#FFFFFF'}
+                            />
+                        </ScenesRailAction>
+                    </View>
+                </View>
+                <ScenesFooterBar
+                    bottomInset={0}
+                    isOwnPost={isOwn}
+                    onAddComment={openComments}
+                    onDirectMessage={() => void handleDirectMessage()}
+                    onMore={() => setOverflowVisible(true)}
+                />
+            </View>
+            </View>
+            ) : null}
 
             {lastTapDebug && (
                 <View style={styles.tapDebug}>
@@ -892,219 +1281,11 @@ export default function ScenesViewer({
                 </View>
             )}
 
-            <View style={[styles.progressTrack, { top: insets.top }]} pointerEvents="none">
-                {showSegmentedProgress ? (
-                    <ScenesMediaProgressBar
-                        slides={activeMediaSlides}
-                        activeIndex={mediaSlideIndex}
-                        videoProgress={mediaSlideProgress || progress}
-                        style={styles.progressRowInset}
-                    />
-                ) : (
-                    <View style={styles.singleProgressTrack}>
-                        <View
-                            style={[
-                                styles.progressFill,
-                                { width: `${Math.min(100, (mediaSlideProgress || progress) * 100)}%` },
-                            ]}
-                        />
-                    </View>
-                )}
-            </View>
-
-            <Pressable style={[styles.backBtn, { top: insets.top + 14 }]} onPress={handleBack}>
-                <View style={styles.chromeCircle}>
-                    <Icon name="chevron-back" size={18} color="#FFFFFF" />
-                </View>
-            </Pressable>
-
-            <View style={[styles.topRight, { top: insets.top + 14 }]}>
-                {!commentsOpen && topMetaVisible && metadataItems.length > 0 ? (
-                    <View style={styles.metaPill}>
-                        <Icon
-                            name={metadataIcon(metadataItems[metadataIndex]?.type ?? 'feed')}
-                            size={11}
-                            color="#FFFFFF"
-                        />
-                        <Text style={styles.metaPillText} numberOfLines={1}>
-                            {metadataItems[metadataIndex]?.label}
-                        </Text>
-                    </View>
-                ) : null}
-            </View>
-
-            {!commentsOpen ? (
-                <Pressable style={[styles.muteBtn, { top: insets.top + 14 }]} onPress={toggleMute}>
-                    <View style={styles.chromeCircle}>
-                        <Icon name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#FFFFFF" />
-                    </View>
-                </Pressable>
-            ) : null}
-
-            {!commentsOpen ? (
-            <View style={[styles.actionRail, { bottom: insets.bottom + 96 }]}>
-                <View style={styles.actionCol}>
-                    <View ref={likeButtonRef} collapsable={false}>
-                        <Pressable
-                            style={styles.actionBtn}
-                            onPress={() => void handleLike()}
-                            accessibilityLabel={activePost.userLiked ? 'Unlike' : 'Like'}
-                        >
-                            <FeedLikeThumbsIcon
-                                size={26}
-                                color="#FFFFFF"
-                                filled={activePost.userLiked}
-                            />
-                        </Pressable>
-                    </View>
-                    <Text style={styles.actionCount}>{activePost.stats.likes}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={styles.actionBtn}
-                        onPress={openComments}
-                        accessibilityLabel="Comments"
-                    >
-                        <Icon name="chatbubble-outline" size={26} color="#FFFFFF" />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{activePost.stats.comments}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={styles.actionBtn}
-                        onPress={() => setSharePost(activePost)}
-                        accessibilityLabel="Share"
-                    >
-                        <Icon name="paper-plane-outline" size={26} color="#FFFFFF" />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{activePost.stats.shares}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={styles.actionBtn}
-                        onPress={() => setSaveModalOpen(true)}
-                        accessibilityLabel="Save to collection"
-                    >
-                        <Icon
-                            name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                            size={26}
-                            color="#FFFFFF"
-                        />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{isSaved ? 'Saved' : 'Save'}</Text>
-                </View>
-                <View style={styles.actionCol}>
-                    <Pressable
-                        style={[styles.actionBtn, !canReclip && styles.actionBtnDisabled]}
-                        onPress={() => void handleReclip()}
-                        accessibilityLabel={
-                            activePost.userReclipped ? 'Already reclipped' : 'Reclip'
-                        }
-                    >
-                        <Icon
-                            name="repeat"
-                            size={26}
-                            color={activePost.userReclipped ? '#4ADE80' : '#FFFFFF'}
-                        />
-                    </Pressable>
-                    <Text style={styles.actionCount}>{activePost.stats.reclips}</Text>
-                </View>
-            </View>
-            ) : null}
-
-            {!commentsOpen ? (
-            <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.72)']}
-                locations={[0, 0.4, 1]}
-                style={[
-                    styles.bottomChrome,
-                    { paddingBottom: insets.bottom + 52 },
-                ]}
-                pointerEvents="box-none"
-            >
-                <View style={styles.profileRow}>
-                    <Pressable
-                        style={styles.avatarBtn}
-                        onPress={() => onVisitProfile(profileHandle)}
-                    >
-                        <Avatar
-                            src={authorAvatarSrc}
-                            name={displayHandle.split('@')[0]}
-                            size={36}
-                        />
-                    </Pressable>
-                    {!activePost.isFollowing && !isOwn && !hasPendingRequest ? (
-                        <Pressable style={styles.followPlus} onPress={() => void handleFollow()}>
-                            <Icon name="add" size={12} color="#FFFFFF" />
-                        </Pressable>
-                    ) : !activePost.isFollowing && hasPendingRequest && !isOwn ? (
-                        <View style={styles.requestedPill}>
-                            <Text style={styles.requestedPillText}>Requested</Text>
-                        </View>
-                    ) : activePost.isFollowing && !isOwn ? (
-                        <Pressable
-                            style={styles.followingPill}
-                            onPress={() => void handleFollow()}
-                        >
-                            <Text style={styles.followingPillText}>Following</Text>
-                        </Pressable>
-                    ) : null}
-                    <View style={styles.profileTextCol}>
-                        <Pressable onPress={() => onVisitProfile(profileHandle)}>
-                            <View style={styles.handleWithBadge}>
-                                <Text style={styles.handleText} numberOfLines={1}>
-                                    {displayHandle.replace(/^@/, '')}
-                                </Text>
-                                <VerifiedBadge accountType={activePost.userAccountType} size={12} />
-                            </View>
-                        </Pressable>
-                        {activePost.locationLabel ? (
-                            <View style={styles.locationRow}>
-                                <Icon name="location-outline" size={11} color="rgba(255,255,255,0.75)" />
-                                <Text style={styles.locationText} numberOfLines={1}>
-                                    {activePost.locationLabel}
-                                </Text>
-                            </View>
-                        ) : null}
-                    </View>
-                </View>
-                {caption ? (
-                    <View style={styles.captionRow}>
-                        <Text style={styles.caption} numberOfLines={2}>
-                            {renderCaptionMentions(caption)}
-                        </Text>
-                        {captionLong ? (
-                            <Pressable onPress={openComments} hitSlop={8}>
-                                <Text style={styles.captionMore}>more</Text>
-                            </Pressable>
-                        ) : null}
-                    </View>
-                ) : null}
-                <Pressable onPress={openComments} style={styles.commentsLink}>
-                    <Text style={styles.commentsLinkText}>
-                        {activePost.stats.comments > 0
-                            ? `View all ${activePost.stats.comments} comments`
-                            : 'Add a comment…'}
-                    </Text>
-                </Pressable>
-            </LinearGradient>
-            ) : null}
-
-            {!commentsOpen ? (
-                <ScenesFooterBar
-                    bottomInset={insets.bottom}
-                    isOwnPost={isOwn}
-                    onAddComment={openComments}
-                    onDirectMessage={() => void handleDirectMessage()}
-                    onMore={() => setOverflowVisible(true)}
-                />
-            ) : null}
-
-            <View style={styles.fxLayer} pointerEvents="none">
+            <View style={[styles.fxLayer, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
                 {burstAt ? (
                     <FeedDoubleTapLikeBurst
-                        x={burstAt.x}
-                        y={burstAt.y}
+                        x={burstAt?.x ?? 0}
+                        y={burstAt?.y ?? 0}
                         onDone={() => setBurstAt(null)}
                     />
                 ) : null}
@@ -1116,6 +1297,8 @@ export default function ScenesViewer({
                     targetRef={likeButtonRef}
                     onComplete={() => setHeartDrop(null)}
                 />
+            </View>
+            </View>
             </View>
 
             {/* Modal (same as feed) — absolute Reels dock + adjustResize was crushing
@@ -1358,29 +1541,75 @@ export default function ScenesViewer({
                 onClose={() => setInviteGroupHandle(null)}
             />
 
-            </View>
         </GestureHandlerRootView>
     );
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: '#000' },
-    rootInner: { flex: 1, backgroundColor: '#000' },
+    root: { flex: 1, width: '100%', height: '100%', backgroundColor: '#000000' },
+    emptyRoot: { backgroundColor: '#000000' },
+    topHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingTop: 8,
+        paddingHorizontal: 16,
+    },
+    topHeaderCenter: {
+        flex: 1,
+        marginHorizontal: 12,
+        justifyContent: 'center',
+    },
+    bottomBlock: {
+        width: '100%',
+    },
+    bottomRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        paddingHorizontal: 8,
+    },
+    captionCol: {
+        flex: 1,
+        paddingRight: 8,
+        paddingBottom: 4,
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
+    },
+    rootInner: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#000000',
+    },
+    chromeLayer: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 9999,
+        elevation: 0,
+        backgroundColor: 'transparent',
+    },
     mediaLayer: {
         position: 'absolute',
         top: 0,
         left: 0,
-        right: 0,
-        backgroundColor: '#000',
-        overflow: 'hidden',
-        // Keep below the comments sheet so the sheet can dock under the mini video.
-        zIndex: 10,
-    },
-    mediaGestureHost: {
         width: '100%',
         height: '100%',
-        backgroundColor: '#000',
-        overflow: 'hidden',
+        backgroundColor: 'transparent',
+        zIndex: 1,
+    },
+    mediaLayerClear: {
+        backgroundColor: 'transparent',
+    },
+    embedHitFill: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: 'transparent',
+    },
+    mediaGestureHost: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
+        backgroundColor: 'transparent',
         position: 'relative',
     },
     commentsVideoCover: {
@@ -1413,6 +1642,7 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 0,
         right: 0,
+        top: 8,
         zIndex: 30,
     },
     progressRowInset: {
@@ -1452,7 +1682,9 @@ const styles = StyleSheet.create({
     backBtn: {
         position: 'absolute',
         left: 10,
-        zIndex: 25,
+        top: 8,
+        zIndex: 9999,
+        elevation: Platform.OS === 'android' ? 24 : 0,
     },
     emptyScenesText: {
         marginTop: 120,
@@ -1464,7 +1696,9 @@ const styles = StyleSheet.create({
     muteBtn: {
         position: 'absolute',
         right: 10,
-        zIndex: 25,
+        top: 8,
+        zIndex: 9999,
+        elevation: Platform.OS === 'android' ? 24 : 0,
     },
     chromeCircle: {
         width: 34,
@@ -1479,9 +1713,9 @@ const styles = StyleSheet.create({
     topRight: {
         position: 'absolute',
         right: 52,
+        top: 8,
         zIndex: 25,
         alignItems: 'flex-end',
-        gap: 6,
         maxWidth: 160,
     },
     metaPill: {
@@ -1503,26 +1737,26 @@ const styles = StyleSheet.create({
         flexShrink: 1,
     },
     actionRail: {
-        position: 'absolute',
-        right: 6,
-        zIndex: 28,
         alignItems: 'center',
-        gap: 14,
-        // Only the icon buttons capture taps — gaps stay swipeable for next post / slide.
-        pointerEvents: 'box-none',
+        paddingBottom: 4,
+        paddingLeft: 4,
     },
     actionCol: {
         alignItems: 'center',
-        gap: 3,
+        marginBottom: 14,
         minWidth: 44,
-        pointerEvents: 'box-none',
     },
     actionBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    footerDock: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999,
+        elevation: Platform.OS === 'android' ? 24 : 0,
         backgroundColor: 'transparent',
     },
     actionBtnDisabled: {
@@ -1541,9 +1775,10 @@ const styles = StyleSheet.create({
         left: 0,
         right: 56,
         bottom: 0,
-        zIndex: 15,
+        zIndex: 9999,
+        elevation: Platform.OS === 'android' ? 20 : 0,
         paddingHorizontal: 14,
-        paddingTop: 56,
+        paddingTop: 32,
         backgroundColor: 'transparent',
     },
     profileRow: {
@@ -1701,6 +1936,7 @@ const styles = StyleSheet.create({
     commentsModalRoot: {
         flex: 1,
         justifyContent: 'flex-end',
+        backgroundColor: 'transparent',
     },
     commentsModalBackdrop: {
         ...StyleSheet.absoluteFill,

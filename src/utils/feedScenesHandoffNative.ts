@@ -12,11 +12,21 @@ const handoffByPostId = new Map<string, FeedVideoHandoff>();
 
 export function setFeedVideoHandoff(postId: string, state: FeedVideoHandoff): void {
     if (!postId) return;
-    handoffByPostId.set(String(postId), {
+    const key = String(postId);
+    const existing = handoffByPostId.get(key);
+    // Remounted feed ExoPlayer reports t≈0 before seek — never clobber a Scenes return time.
+    if (
+        existing?.fromScenes &&
+        !state.fromScenes &&
+        Number(state.currentTime) + 0.45 < Number(existing.currentTime)
+    ) {
+        return;
+    }
+    handoffByPostId.set(key, {
         currentTime: Math.max(0, state.currentTime),
         muted: state.muted,
         fromScenes: state.fromScenes === true,
-        mediaUrl: state.mediaUrl,
+        mediaUrl: state.mediaUrl ?? existing?.mediaUrl,
     });
 }
 

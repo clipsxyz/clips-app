@@ -61,6 +61,7 @@ export default function ScenesScreen({ route, navigation }: any) {
     const initialVideoTime = launch?.initialVideoTime ?? params.initialVideoTime;
     const initialMuted = launch?.initialMuted ?? params.initialMuted;
     const feedLabel = launch?.feedLabel ?? params.feedLabel;
+    const [originRect] = useState(() => launch?.originRect ?? null);
     const [posts, setPosts] = useState<Post[]>(() => resolveScenesPosts(params));
     const openingPostsRef = useRef(posts);
 
@@ -75,10 +76,12 @@ export default function ScenesScreen({ route, navigation }: any) {
                 }
             }
             if (postId != null) {
+                const closed = posts.find((p) => String(p.id) === String(postId));
                 setFeedVideoHandoff(postId, {
                     currentTime: Math.max(0, savedTime ?? 0),
                     muted: mutedState ?? initialMuted ?? true,
                     fromScenes: true,
+                    mediaUrl: closed?.mediaUrl,
                 });
             }
             clearScenesLaunchPayload();
@@ -99,6 +102,7 @@ export default function ScenesScreen({ route, navigation }: any) {
                 initialVideoTime={initialVideoTime}
                 initialMuted={initialMuted}
                 feedLabel={feedLabel}
+                originRect={originRect}
                 viewerUserId={user?.id ?? 'anon'}
                 viewerHandle={user?.handle}
                 viewerAvatarUrl={user?.avatarUrl}

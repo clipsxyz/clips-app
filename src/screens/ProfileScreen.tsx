@@ -42,7 +42,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, getFollowedUsers } from '../api/posts';
+import { fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply } from '../api/posts';
 import {
     getCollectionThumbnailUrl,
     getUserCollections,
@@ -54,7 +54,7 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, fetchFollowers, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
@@ -116,7 +116,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [postsLoading, setPostsLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'posts' | 'collections'>('posts');
     const [collectionsOpen, setCollectionsOpen] = useState(false);
     const [brokenCollectionThumbs, setBrokenCollectionThumbs] = useState<Record<string, true>>({});
@@ -164,7 +164,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [isPrivate, setIsPrivate] = useState(() =>
         getEffectiveProfilePrivate(user?.handle, user?.is_private)
     );
-    const [audienceCounts, setAudienceCounts] = useState({ followers: 0, following: 0 });
+    const [audienceCounts, setAudienceCounts] = useState({
+        followers: user?.followers_count ?? 0,
+        following: user?.following_count ?? 0,
+    });
     const [securityModalOpen, setSecurityModalOpen] = useState(false);
     const [securityStep, setSecurityStep] = useState<'phone' | 'code'>('phone');
     const [securityBusy, setSecurityBusy] = useState(false);
@@ -193,9 +196,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         [windowHeight]
     );
 
-    useEffect(() => {
-        loadData();
-    }, [user?.handle]);
+    const userRef = useRef(user);
+    userRef.current = user;
+    const postsLoadedRef = useRef(false);
+    const loadLockRef = useRef<Promise<void> | null>(null);
+    const loadGenRef = useRef(0);
 
     const myFeedActiveVideoPostIdRef = useRef<string | null>(null);
     myFeedActiveVideoPostIdRef.current = myFeedActiveVideoPostId;
@@ -270,20 +275,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
     }, [user?.handle, user?.is_private]);
 
-    useFocusEffect(
-        React.useCallback(() => {
-            void loadData();
-            // Do not auto-open security phone prompt when entering Passport.
-            setSecurityModalOpen(false);
-            setSecurityStep('phone');
-            setSecurityBusy(false);
-            setPhoneCountryCode('+353');
-            setPhoneInput('');
-            setOtpInput('');
-            setPendingPhoneNumber('');
-        }, [])
-    );
-
     useEffect(() => {
         const loop = Animated.loop(
             Animated.sequence([
@@ -337,22 +328,31 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         setPendingPhoneNumber('');
     }, []);
 
-    const loadData = async () => {
-        if (!user?.handle && !user?.id) return;
-        setLoading(true);
-        try {
-            const identifier = String(user.handle || user.id);
-            const userPosts = await fetchPostsByUser(identifier, 50, user.id, 'all');
-            setPosts(userPosts);
-        } catch (error) {
-            console.error('Error loading profile posts:', error);
-        } finally {
-            setLoading(false);
-        }
+    const loadData = useCallback(async () => {
+        const u = userRef.current;
+        if (!u?.handle && !u?.id) return;
+        if (loadLockRef.current) return loadLockRef.current;
 
-        try {
-            const [userCollections, userDrafts, followingHandles] = await Promise.all([
-                getUserCollections(user.id || 'me').catch((err) => {
+        const run = (async () => {
+            const gen = ++loadGenRef.current;
+            const identifier = String(u.handle || u.id);
+            if (!postsLoadedRef.current) setPostsLoading(true);
+
+            const postsTask = fetchPostsByUser(identifier, 50, u.id, 'all')
+                .then((userPosts) => {
+                    if (gen !== loadGenRef.current) return;
+                    setPosts(userPosts);
+                    postsLoadedRef.current = true;
+                })
+                .catch((error) => {
+                    console.error('Error loading profile posts:', error);
+                })
+                .finally(() => {
+                    if (gen === loadGenRef.current) setPostsLoading(false);
+                });
+
+            const extrasTask = Promise.all([
+                getUserCollections(u.id || 'me').catch((err) => {
                     console.error('Error loading collections:', err);
                     return [] as Collection[];
                 }),
@@ -360,37 +360,45 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     console.error('Error loading drafts:', err);
                     return [];
                 }),
-                user?.id
-                    ? getFollowedUsers(String(user.id)).catch((err) => {
-                          console.error('Error loading following list:', err);
-                          return [] as string[];
-                      })
-                    : Promise.resolve([] as string[]),
-            ]);
-            setCollections(userCollections);
-            setDrafts(userDrafts);
-
-            let followers = user?.followers_count ?? 0;
-            if (isLaravelApiEnabled() && user?.handle) {
-                try {
-                    const res: any = await fetchFollowers(user.handle, 0, 20);
-                    const list = Array.isArray(res?.data) ? res.data : res?.followers ?? res?.items ?? [];
-                    if (typeof res?.total === 'number') followers = res.total;
-                    else if (typeof user?.followers_count === 'number') followers = user.followers_count;
-                    else followers = list.length;
-                } catch (err) {
-                    console.error('Error loading followers count:', err);
-                    followers = user?.followers_count ?? 0;
-                }
-            }
-            setAudienceCounts({
-                followers,
-                following: followingHandles.length,
+            ]).then(([userCollections, userDrafts]) => {
+                if (gen !== loadGenRef.current) return;
+                setCollections(userCollections);
+                setDrafts(userDrafts);
+                setAudienceCounts({
+                    followers: u.followers_count ?? 0,
+                    following: u.following_count ?? 0,
+                });
+            }).catch((error) => {
+                console.error('Error loading profile extras:', error);
             });
-        } catch (error) {
-            console.error('Error loading profile extras:', error);
+
+            await Promise.all([postsTask, extrasTask]);
+        })();
+
+        loadLockRef.current = run;
+        try {
+            await run;
+        } finally {
+            if (loadLockRef.current === run) loadLockRef.current = null;
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        void loadData();
+    }, [loadData, user?.handle]);
+
+    useFocusEffect(
+        React.useCallback(() => {
+            void loadData();
+            setSecurityModalOpen(false);
+            setSecurityStep('phone');
+            setSecurityBusy(false);
+            setPhoneCountryCode('+353');
+            setPhoneInput('');
+            setOtpInput('');
+            setPendingPhoneNumber('');
+        }, [loadData])
+    );
 
     const openMyFeedComments = React.useCallback(async (post: Post) => {
         setMyFeedCommentsPost(post);
@@ -854,7 +862,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
-    if (loading) {
+    if (!user) {
         return (
             <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.loadingShell}>
                 <ActivityIndicator size="large" color="#f472b6" />
@@ -1161,7 +1169,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
 
                 {activeTab === 'posts' ? (
-                    posts.length === 0 ? (
+                    postsLoading && posts.length === 0 ? (
+                        <View style={styles.postsEmptyState}>
+                            <ActivityIndicator size="small" color="#f472b6" />
+                        </View>
+                    ) : posts.length === 0 ? (
                         <View style={styles.postsEmptyState}>
                             <Text style={styles.emptyText}>No posts yet</Text>
                         </View>

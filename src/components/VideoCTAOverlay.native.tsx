@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import Avatar from './Avatar.native';
 import { getAvatarForHandle } from '../api/users';
@@ -68,7 +68,6 @@ const styles = StyleSheet.create({
         left: 8,
         bottom: 8,
         zIndex: 40,
-        elevation: Platform.OS === 'android' ? 40 : 0,
     },
     pillRow: {
         flexDirection: 'row',

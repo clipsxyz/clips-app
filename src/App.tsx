@@ -1933,7 +1933,7 @@ function PostHeader({
     <div className="relative flex items-start justify-between px-3 pt-3 pb-2">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
-        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
+        <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
       )}
 
       {/* Content layer - above scrim */}

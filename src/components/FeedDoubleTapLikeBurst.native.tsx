@@ -5,8 +5,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
 
 const LINE_COUNT = 36;
-const BURST_SIZE = 200;
-const THUMB_SIZE = 96;
+const BURST_SIZE = 220;
+const THUMB_SIZE = 88;
 
 /** Radiating lines — web ShortsLikeBurstLines parity. */
 function BurstLines() {
@@ -45,53 +45,53 @@ function BurstLines() {
 }
 
 type Props = {
-    x: number;
-    y: number;
+    x?: number;
+    y?: number;
+    /** Fill parent and sit in the middle of the media (feed card). */
+    centered?: boolean;
     onDone?: () => void;
 };
 
-/** YouTube Shorts-style double-tap burst at the tap point (same as text-only cards). */
-export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
-    const glowScale = useRef(new Animated.Value(0.4)).current;
-    const glowOpacity = useRef(new Animated.Value(0)).current;
-    const thumbScale = useRef(new Animated.Value(0.3)).current;
-    const thumbOpacity = useRef(new Animated.Value(0)).current;
+/** YouTube Shorts-style double-tap burst at the tap point or media center. */
+export default function FeedDoubleTapLikeBurst({ x = 0, y = 0, centered = false, onDone }: Props) {
+    const glowScale = useRef(new Animated.Value(0.55)).current;
+    const glowOpacity = useRef(new Animated.Value(1)).current;
+    const thumbScale = useRef(new Animated.Value(0.55)).current;
+    const thumbOpacity = useRef(new Animated.Value(1)).current;
 
     const left = safeLayoutNumber(x, 0);
     const top = safeLayoutNumber(y, 0);
-    const canPlace = hasFinitePoint(left, top);
+    const canPlace = centered || hasFinitePoint(left, top);
 
     useEffect(() => {
         if (!canPlace) {
             onDone?.();
             return;
         }
-        // Reset so remounts (new key) always animate from hidden → visible.
-        glowOpacity.setValue(0);
-        glowScale.setValue(0.4);
-        thumbOpacity.setValue(0);
-        thumbScale.setValue(0.3);
+        glowOpacity.setValue(1);
+        glowScale.setValue(0.55);
+        thumbOpacity.setValue(1);
+        thumbScale.setValue(0.55);
 
         Animated.parallel([
             Animated.sequence([
-                Animated.timing(glowOpacity, { toValue: 1, duration: 90, useNativeDriver: true }),
-                Animated.timing(glowOpacity, { toValue: 0, duration: 410, useNativeDriver: true }),
+                Animated.timing(glowOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
+                Animated.timing(glowOpacity, { toValue: 0, duration: 420, useNativeDriver: true }),
             ]),
-            Animated.timing(glowScale, { toValue: 1.15, duration: 500, useNativeDriver: true }),
-            Animated.sequence([
-                Animated.timing(thumbOpacity, { toValue: 1, duration: 60, useNativeDriver: true }),
-                Animated.delay(280),
-                Animated.timing(thumbOpacity, { toValue: 0, duration: 190, useNativeDriver: true }),
-            ]),
+            Animated.timing(glowScale, { toValue: 1.2, duration: 500, useNativeDriver: true }),
             Animated.sequence([
                 Animated.spring(thumbScale, {
                     toValue: 1,
-                    speed: 12,
-                    bounciness: 8,
+                    speed: 14,
+                    bounciness: 10,
                     useNativeDriver: true,
                 }),
-                Animated.delay(280),
-                Animated.timing(thumbScale, { toValue: 0.95, duration: 190, useNativeDriver: true }),
+                Animated.delay(220),
+                Animated.timing(thumbScale, { toValue: 0.9, duration: 180, useNativeDriver: true }),
+            ]),
+            Animated.sequence([
+                Animated.delay(320),
+                Animated.timing(thumbOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
             ]),
         ]).start(({ finished }) => {
             if (finished) onDone?.();
@@ -101,7 +101,23 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
     if (!canPlace) return null;
 
     return (
-        <View style={[styles.root, { left, top }]} pointerEvents="none" collapsable={false}>
+        <View
+            style={
+                centered
+                    ? styles.centeredRoot
+                    : [
+                          styles.root,
+                          {
+                              left: left - BURST_SIZE / 2,
+                              top: top - BURST_SIZE / 2,
+                              width: BURST_SIZE,
+                              height: BURST_SIZE,
+                          },
+                      ]
+            }
+            pointerEvents="none"
+            collapsable={false}
+        >
             <Animated.View
                 style={[
                     styles.glowWrap,
@@ -118,10 +134,9 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
                 ]}
                 pointerEvents="none"
             >
-                {/* Ionicons thumbs-up — same glyph path text-only cards use successfully. */}
                 <Icon
                     name="thumbs-up"
-                    size={64}
+                    size={72}
                     color="#FFFFFF"
                     style={Platform.OS === 'android' ? styles.thumbAndroid : undefined}
                 />
@@ -133,24 +148,30 @@ export default function FeedDoubleTapLikeBurst({ x, y, onDone }: Props) {
 const styles = StyleSheet.create({
     root: {
         position: 'absolute',
-        zIndex: 1000,
-        elevation: Platform.OS === 'android' ? 1000 : 0,
-        width: 0,
-        height: 0,
+        zIndex: 9999,
+        overflow: 'visible',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     glowWrap: {
         position: 'absolute',
         width: BURST_SIZE,
         height: BURST_SIZE,
-        left: -BURST_SIZE / 2,
-        top: -BURST_SIZE / 2,
+        left: 0,
+        top: 0,
+    },
+    centeredRoot: {
+        width: BURST_SIZE,
+        height: BURST_SIZE,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     thumbWrap: {
         position: 'absolute',
         width: THUMB_SIZE,
         height: THUMB_SIZE,
-        left: -THUMB_SIZE / 2,
-        top: -THUMB_SIZE / 2,
+        left: (BURST_SIZE - THUMB_SIZE) / 2,
+        top: (BURST_SIZE - THUMB_SIZE) / 2,
         alignItems: 'center',
         justifyContent: 'center',
     },

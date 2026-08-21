@@ -11,6 +11,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { FEED_UI } from '../constants/feedUiTokens';
+import {
+  isFeedScenesFullscreen,
+  subscribeFeedScenesFullscreen,
+} from '../utils/feedScenesFullscreenNative';
 
 type Props = BottomTabBarProps & {
   inboxBadgeCount: number;
@@ -35,6 +39,11 @@ export default function MainTabBar({
   const insets = useSafeAreaInsets();
   const activeRouteName = state.routes[state.index]?.name;
   const [showContributeCue, setShowContributeCue] = React.useState(false);
+  const [scenesFullscreen, setScenesFullscreen] = React.useState(() =>
+    isFeedScenesFullscreen(),
+  );
+
+  React.useEffect(() => subscribeFeedScenesFullscreen(setScenesFullscreen), []);
 
   React.useEffect(() => {
     if (activeRouteName !== 'Home') {
@@ -51,6 +60,10 @@ export default function MainTabBar({
   }, [activeRouteName]);
 
   const showAddYours = showContributeCue && activeRouteName === 'Home';
+
+  if (scenesFullscreen) {
+    return null;
+  }
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 18 : 8) }]}>

@@ -1,4 +1,4 @@
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isMockMode } from '../api/apiMode';
 import * as apiClient from '../api/client';
 import { setFollowState } from '../api/posts';
 import {
@@ -31,7 +31,7 @@ export async function followOrRequest(opts: {
     if (!nextFollowing) {
         setFollowState(userId, targetHandle, false);
         if (viewer) removeFollowRequest(viewer, targetHandle);
-        if (isLaravelApiEnabled()) {
+        if (!isMockMode()) {
             try {
                 const result = await apiClient.toggleFollow(targetHandle);
                 if (result && typeof result.following === 'boolean') {
@@ -48,7 +48,7 @@ export async function followOrRequest(opts: {
     const profilePrivate = isProfilePrivate(targetHandle);
     if (!profilePrivate) {
         setFollowState(userId, targetHandle, true);
-        if (isLaravelApiEnabled()) {
+        if (!isMockMode()) {
             try {
                 const result = await apiClient.toggleFollow(targetHandle);
                 if (result && typeof result.following === 'boolean') {
@@ -73,7 +73,7 @@ export async function followOrRequest(opts: {
         return { following: false, requested: true };
     }
 
-    if (isLaravelApiEnabled()) {
+    if (!isMockMode()) {
         try {
             const result = await apiClient.toggleFollow(targetHandle);
             if (result?.status === 'pending') {

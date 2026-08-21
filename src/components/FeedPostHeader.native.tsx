@@ -258,7 +258,7 @@ export default function FeedPostHeader({
             {isOverlaid ? (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}
-                    style={StyleSheet.absoluteFill}
+                    style={styles.headerScrim}
                     pointerEvents="none"
                 />
             ) : null}
@@ -286,8 +286,15 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 30,
-        // No elevation — elevated full-width headers steal media taps on Android even with box-none.
-        // Still-image tap layer is inset below this chrome (see FEED_CARD_MEDIA_TAP_LAYER).
+        backgroundColor: 'transparent',
+        overflow: 'hidden',
+    },
+    headerScrim: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        height: 64,
     },
     content: {
         zIndex: 1,

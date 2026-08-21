@@ -48,15 +48,10 @@ export default function ScenesFooterBar({
 
 const styles = StyleSheet.create({
     row: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 50,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
         paddingHorizontal: 12,
+        paddingTop: 6,
     },
     commentPill: {
         flex: 1,
@@ -68,6 +63,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingHorizontal: 14,
         paddingVertical: 8,
+        marginRight: 10,
     },
     commentPillText: {
         color: 'rgba(255,255,255,0.62)',
@@ -83,6 +79,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.22)',
         alignItems: 'center',
         justifyContent: 'center',
+        marginLeft: 4,
     },
     iconChipDisabled: {
         opacity: 0.35,

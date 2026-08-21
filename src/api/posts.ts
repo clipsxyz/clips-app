@@ -1869,19 +1869,25 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       // (optimistic create) — never mock seed handles/ids.
       const uuidRe =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const viewerHandle = String(_currentUserHandle || '').trim().toLowerCase();
       const recentLocal = getPostsFromStorage().filter((p) => {
         if (isMockPostId(p.id) || isDevMockFeedVideoPost(p)) return false;
         if (!uuidRe.test(String(p.id))) return false;
-        const h = String(p.userHandle || '').toLowerCase();
+        const h = String(p.userHandle || '').trim().toLowerCase();
         if (
           h === 'sarah@artane' ||
           h === 'bob@ireland' ||
           h === 'ava@galway' ||
-          h === 'alice@cork'
+          h === 'alice@cork' ||
+          h === 'gazetteer@dublin'
         ) {
           return false;
         }
-        return t === 'discover' ? true : postMatchesLocationTab(p, t);
+        // Following: only optimistic posts you authored. Never other users' cached Dublin feed.
+        if (t === 'discover') {
+          return Boolean(viewerHandle) && h === viewerHandle;
+        }
+        return postMatchesLocationTab(p, t);
       });
       const apiIds = new Set(items.map((p) => String(p.id)));
       const dedupedLocal = recentLocal.filter((p) => !apiIds.has(String(p.id)));
@@ -2428,7 +2434,7 @@ export async function toggleFollowForPost(
       removeFollowRequest(viewer, handle);
       setFollowStateKey(s.follows, handle, false);
       saveFollowsToStorage(userId, s.follows);
-      if (isLaravelApiEnabled()) {
+      if (!isMockMode()) {
         try {
           await apiClient.toggleFollow(handle);
         } catch {
@@ -2449,7 +2455,7 @@ export async function toggleFollowForPost(
       } as Post;
     }
 
-    if (isLaravelApiEnabled()) {
+    if (!isMockMode()) {
       try {
         const result = await apiClient.toggleFollow(handle);
         if (result?.status === 'pending') {
@@ -2515,15 +2521,61 @@ export async function toggleFollowForPost(
     removeFollowRequest(viewer, handle);
   }
 
-  // Follow is per-author: keep every in-memory post for this handle aligned.
-  const handleLower = handle.toLowerCase();
-  for (const post of posts) {
-    if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
-      post.isFollowing = nextFollowing;
+  if (!isMockMode()) {
+    try {
+      const result = await apiClient.toggleFollow(handle);
+      if (result?.status === 'pending') {
+        createFollowRequest(viewer, handle);
+        setFollowStateKey(s.follows, handle, false);
+        saveFollowsToStorage(userId, s.follows);
+        if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+        return {
+          id,
+          userHandle: handle,
+          locationLabel: '',
+          tags: [],
+          createdAt: Date.now(),
+          stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+          isBookmarked: false,
+          isFollowing: false,
+          userLiked: false,
+        } as Post;
+      }
+      if (result?.status === 'unfollowed' || result?.following === false) {
+        setFollowStateKey(s.follows, handle, false);
+        saveFollowsToStorage(userId, s.follows);
+        if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+        return {
+          id,
+          userHandle: handle,
+          locationLabel: '',
+          tags: [],
+          createdAt: Date.now(),
+          stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+          isBookmarked: false,
+          isFollowing: false,
+          userLiked: false,
+        } as Post;
+      }
+      if (result?.status === 'accepted' || result?.following === true) {
+        setFollowStateKey(s.follows, handle, true);
+        saveFollowsToStorage(userId, s.follows);
+      }
+    } catch (err) {
+      console.warn('[toggleFollowForPost] Laravel follow sync failed', err);
     }
   }
 
-  if (p) return { ...decorateForUser(userId, p), isFollowing: nextFollowing };
+  // Follow is per-author: keep every in-memory post for this handle aligned.
+  const followingNow = getFollowState(s.follows, handle);
+  const handleLower = handle.toLowerCase();
+  for (const post of posts) {
+    if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
+      post.isFollowing = followingNow;
+    }
+  }
+
+  if (p) return { ...decorateForUser(userId, p), isFollowing: followingNow };
   // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
   return {
     id,
@@ -2533,7 +2585,7 @@ export async function toggleFollowForPost(
     createdAt: Date.now(),
     stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
     isBookmarked: false,
-    isFollowing: nextFollowing,
+    isFollowing: followingNow,
     userLiked: false
   } as Post;
 }
@@ -3116,9 +3168,10 @@ export async function fetchPostsByUser(
       });
 
       try {
+        const indexById = new Map(posts.map((existing, i) => [String(existing.id), i]));
         for (const p of transformed) {
-          const idx = posts.findIndex((existing) => String(existing.id) === String(p.id));
-          if (idx >= 0) {
+          const idx = indexById.get(String(p.id));
+          if (idx != null) {
             const prev = posts[idx];
             posts[idx] = {
               ...prev,
@@ -3126,7 +3179,9 @@ export async function fetchPostsByUser(
               stats: mergeEngagementStats(p.stats, prev.stats),
               userLiked: p.userLiked === true || prev.userLiked === true,
             };
-          } else posts.unshift(p);
+          } else {
+            posts.unshift(p);
+          }
         }
         if (transformed.length > 0) savePostsToStorage(posts);
       } catch {

@@ -271,8 +271,8 @@ export default function ProfilePassportCards({
         user?.accountType === 'business' ? 'business' : 'personal',
     );
 
-    const [followersCount, setFollowersCount] = useState(0);
-    const [followingCount, setFollowingCount] = useState(0);
+    const [followersCount, setFollowersCount] = useState(() => user?.followers_count ?? 0);
+    const [followingCount, setFollowingCount] = useState(() => user?.following_count ?? 0);
     const [followersList, setFollowersList] = useState<string[]>([]);
     const [followingList, setFollowingList] = useState<string[]>([]);
     const [loadingFollowers, setLoadingFollowers] = useState(false);
@@ -389,9 +389,9 @@ export default function ProfilePassportCards({
     }, [user?.handle]);
 
     useEffect(() => {
-        void refreshFollowing();
-        void refreshFollowers();
-    }, [refreshFollowers, refreshFollowing]);
+        setFollowersCount(user?.followers_count ?? 0);
+        setFollowingCount(user?.following_count ?? 0);
+    }, [user?.followers_count, user?.following_count]);
 
     useEffect(() => {
         if (selectedCard !== 'location') return;

@@ -13,7 +13,7 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
-import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, Pressable as GesturePressable, ScrollView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import type { Post, PostMediaItem, StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
@@ -23,7 +23,7 @@ import {
     getActiveFeedVideoPostId,
     subscribeActiveFeedVideo,
 } from '../utils/feedActiveVideoNative';
-import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { consumeFeedVideoHandoff, peekFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
 import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
@@ -42,10 +42,12 @@ import {
     mockFeedVideoSource,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
-import { FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
 import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
+
+const ANDROID_FEED_VIDEO_PROPS = androidListSafeVideoProps();
+const DOUBLE_TAP_MS = 320;
 
 function firstMediaUri(...vals: unknown[]): string | undefined {
     for (const v of vals) {
@@ -86,6 +88,101 @@ function buildFeedVideoSource(uri: string, rawUrl?: string): object {
     return source;
 }
 
+type FeedPlayingVideoProps = {
+    remountEpoch: number;
+    source: object;
+    paused: boolean;
+    muted: boolean;
+    volume: number;
+    repeat: boolean;
+    posterUri?: string;
+    pointerEvents?: 'none';
+    videoRef: React.Ref<VideoRef>;
+    onLoadStart: () => void;
+    onReady: () => void;
+    onLoad: (meta: { naturalSize?: { width?: number; height?: number } }) => void;
+    onProgress: (e: { currentTime?: number }) => void;
+    onError: (e: unknown) => void;
+    resizeMode?: 'cover' | 'contain';
+};
+
+/** Isolated so like-burst setState on the card does not rebuild ExoPlayer. */
+const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
+    remountEpoch,
+    source,
+    paused,
+    muted,
+    volume,
+    repeat,
+    posterUri,
+    pointerEvents,
+    videoRef,
+    onLoadStart,
+    onReady,
+    onLoad,
+    onProgress,
+    onError,
+    resizeMode = 'cover',
+}: FeedPlayingVideoProps) {
+    const onLoadStartRef = useRef(onLoadStart);
+    const onReadyRef = useRef(onReady);
+    const onLoadRef = useRef(onLoad);
+    const onProgressRef = useRef(onProgress);
+    const onErrorRef = useRef(onError);
+    onLoadStartRef.current = onLoadStart;
+    onReadyRef.current = onReady;
+    onLoadRef.current = onLoad;
+    onProgressRef.current = onProgress;
+    onErrorRef.current = onError;
+
+    const poster = useMemo(
+        () =>
+            posterUri
+                ? { source: { uri: posterUri }, resizeMode: 'cover' as const }
+                : undefined,
+        [posterUri],
+    );
+
+    return (
+        <View style={styles.videoClip} pointerEvents={pointerEvents} collapsable={false}>
+            <Video
+                key={`feed-exo-${remountEpoch}`}
+                ref={videoRef}
+                source={source}
+                style={styles.videoFill}
+                resizeMode={resizeMode}
+                controls={false}
+                paused={paused}
+                muted={muted}
+                volume={volume}
+                repeat={repeat}
+                playInBackground={false}
+                ignoreSilentSwitch="ignore"
+                useTextureView
+                hideShutterView
+                poster={poster}
+                {...ANDROID_FEED_VIDEO_PROPS}
+                playWhenInactive
+                pointerEvents="none"
+                onLoadStart={() => onLoadStartRef.current()}
+                onReadyForDisplay={() => onReadyRef.current()}
+                onLoad={(meta) => onLoadRef.current(meta)}
+                onProgress={(e) => onProgressRef.current(e)}
+                onError={(e) => onErrorRef.current(e)}
+            />
+        </View>
+    );
+}, (prev, next) => (
+    prev.remountEpoch === next.remountEpoch &&
+    prev.source === next.source &&
+    prev.paused === next.paused &&
+    prev.muted === next.muted &&
+    prev.volume === next.volume &&
+    prev.repeat === next.repeat &&
+    prev.posterUri === next.posterUri &&
+    prev.resizeMode === next.resizeMode
+));
+
 function resolveFeedVideoPosterUri(
     item: PostMediaItem | undefined,
     post: Post,
@@ -108,6 +205,8 @@ export type FeedPostMediaHandle = {
     flashMuteControl: () => void;
     /** Parent tap layer can trigger in-media burst at local coords. */
     showLikeBurstAt: (x: number, y: number) => void;
+    /** Flush current MP4 time so Scenes / return-to-postcard can resume. */
+    getPlaybackHandoff: () => { currentTime: number; muted: boolean };
 };
 
 type Props = {
@@ -121,6 +220,8 @@ type Props = {
     onPress?: (event?: GestureResponderEvent) => void;
     /** Feed: double-tap like (web Media / TextCard parity). Optional local tap coords. */
     onDoubleLike?: (x?: number, y?: number) => void;
+    /** Window coords for the feed-level burst portal (TextureView covers in-card FX on Android). */
+    onLikeBurst?: (windowX: number, windowY: number) => void;
     /** Feed: single-tap — image fullscreen or video mute flash (web Media). */
     onSingleTap?: () => void;
     stickers?: StickerOverlay[];
@@ -138,6 +239,10 @@ type Props = {
     style?: StyleProp<ViewStyle>;
     /** Feed video: opens vertical Scenes viewer. */
     onOpenScenes?: () => void;
+    /** Hide mute / Scenes CTA while this card's player is expanded fullscreen. */
+    hideOverlayChrome?: boolean;
+    /** Fill the expanding viewport and letterbox the video (no 4:5 crop-zoom). */
+    fillViewport?: boolean;
 };
 
 const FeedPostMedia = React.memo(
@@ -150,6 +255,7 @@ const FeedPostMedia = React.memo(
         height,
         onPress,
         onDoubleLike,
+        onLikeBurst,
         onSingleTap,
         stickers,
         onMediaLoad,
@@ -159,6 +265,8 @@ const FeedPostMedia = React.memo(
         muted = true,
         style,
         onOpenScenes,
+        hideOverlayChrome = false,
+        fillViewport = false,
     },
     ref,
 ) {
@@ -167,6 +275,8 @@ const FeedPostMedia = React.memo(
     const [playFailed, setPlayFailed] = useState(false);
     const pendingSeekRef = useRef<number | null>(null);
     const playbackTimeRef = useRef(0);
+    /** Don't fade the poster until ExoPlayer has seeked to the Scenes resume time. */
+    const waitingForResumeFrameRef = useRef<number | null>(null);
     /** Per-raw-URL remote fallback after local/demo path fails (mirrors web Media). */
     const [videoUrlFallbackByRaw, setVideoUrlFallbackByRaw] = useState<Record<string, string>>({});
     const [soundOn, setSoundOn] = useState(!muted);
@@ -176,9 +286,11 @@ const FeedPostMedia = React.memo(
     const carouselScrollRef = useRef<ScrollView>(null);
     const feedVideoRef = useRef<VideoRef>(null);
     const lastEmittedIndexRef = useRef(0);
-    const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
     const [burstKey, setBurstKey] = useState(0);
+    const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    /** Sticky Scenes resume time — not overwritten by remount progress at t≈0. */
+    const stickyResumeTimeRef = useRef<number | null>(null);
     /** First decoded frame ready — crossfade video in / poster out. */
     const [videoSurfaceReady, setVideoSurfaceReady] = useState(false);
     const [posterMounted, setPosterMounted] = useState(true);
@@ -349,26 +461,34 @@ const FeedPostMedia = React.memo(
 
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && activeIsVideo && !!mediaUrl;
+    const posterUriForSize = resolveFeedVideoPosterUri(activeItem, post);
+
+    useEffect(() => {
+        if (!posterUriForSize) return;
+        Image.getSize(
+            posterUriForSize,
+            (w, h) => {
+                if (Number(w) > 0 && Number(h) > 0) {
+                    const nextLandscape = Number(w) > Number(h);
+                    setIsLandscapeMedia((prev) => (prev === nextLandscape ? prev : nextLandscape));
+                }
+            },
+            () => {},
+        );
+    }, [posterUriForSize]);
     const showScenesCta =
-        mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
-    const showMuteButton = video && mode === 'feed' && isFeedAutoplayActive;
+        mode === 'feed' &&
+        video &&
+        postHasVideoMedia(post) &&
+        Boolean(onOpenScenes) &&
+        !hideOverlayChrome;
+    const showMuteButton = video && mode === 'feed' && isFeedAutoplayActive && !hideOverlayChrome;
 
     useEffect(() => {
         if (suspendNativeVideo) {
             needsRemountAfterSuspendRef.current = true;
         }
     }, [suspendNativeVideo]);
-
-    useEffect(() => {
-        if (mode !== 'feed' || !video) return;
-        if (!isFeedAutoplayActive || suspendNativeVideo) return;
-        if (!needsRemountAfterSuspendRef.current) return;
-        needsRemountAfterSuspendRef.current = false;
-        setPlayerEpoch((n) => n + 1);
-        resetPosterCover();
-        setPaused(false);
-        setPlayFailed(false);
-    }, [isFeedAutoplayActive, mode, resetPosterCover, suspendNativeVideo, video]);
 
     const fireBurstAt = useCallback((x: number, y: number) => {
         setBurstAt({ x, y });
@@ -379,7 +499,7 @@ const FeedPostMedia = React.memo(
         clearBurstTimerRef.current = setTimeout(() => {
             setBurstAt(null);
             clearBurstTimerRef.current = null;
-        }, 700);
+        }, 900);
     }, []);
 
     useImperativeHandle(
@@ -387,6 +507,7 @@ const FeedPostMedia = React.memo(
         () => ({
             toggleVideoMute: () => {
                 if (!video || mode !== 'feed') return;
+                cancelPendingMediaTap();
                 setFeedSoundOn(!soundOn);
                 setMuteFlash(true);
                 setTimeout(() => setMuteFlash(false), 1100);
@@ -398,9 +519,14 @@ const FeedPostMedia = React.memo(
             },
             showLikeBurstAt: (x: number, y: number) => {
                 fireBurstAt(x, y);
+                onDoubleLike?.(x, y);
             },
+            getPlaybackHandoff: () => ({
+                currentTime: playbackTimeRef.current,
+                muted: !soundOn,
+            }),
         }),
-        [fireBurstAt, mode, soundOn, video],
+        [cancelPendingMediaTap, fireBurstAt, mode, onDoubleLike, soundOn, video],
     );
 
     useEffect(() => {
@@ -418,46 +544,71 @@ const FeedPostMedia = React.memo(
 
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
-        if (isFeedAutoplayActive && !suspendNativeVideo) {
-            // Resume in place — do not cover/seek to 0 (double-tap like re-renders the card).
-            setPaused(false);
-            setPlayFailed(false);
-            const handoff = consumeFeedVideoHandoff(String(post.id));
-            const resumeAt =
-                handoff && Number.isFinite(handoff.currentTime) && handoff.currentTime > 0.05
-                    ? handoff.currentTime
-                    : playbackTimeRef.current > 0.05
-                      ? playbackTimeRef.current
-                      : null;
-            if (resumeAt != null) {
-                pendingSeekRef.current = resumeAt;
+
+        if (suspendNativeVideo) {
+            // Covered by Scenes / comments — pause in place. Never seek to 0.
+            if (playbackTimeRef.current > 0.05) {
+                setFeedVideoHandoff(String(post.id), {
+                    currentTime: playbackTimeRef.current,
+                    muted: !soundOn,
+                    mediaUrl: mediaUrl,
+                });
+            }
+            setPaused(true);
+            return;
+        }
+
+        if (!isFeedAutoplayActive) {
+            setPaused((wasPaused) => (wasPaused ? wasPaused : true));
+            const scrolledToAnotherPost =
+                storeActivePostId != null && String(storeActivePostId) !== String(post.id);
+            if (scrolledToAnotherPost) {
+                pendingSeekRef.current = null;
+                waitingForResumeFrameRef.current = null;
+                stickyResumeTimeRef.current = null;
+                playbackTimeRef.current = 0;
+                resetPosterCover();
+                try {
+                    feedVideoRef.current?.seek?.(0);
+                } catch {
+                    /* ignore */
+                }
             }
             return;
         }
 
-        // Pause only. Seek to 0 only when a *different* post became active
-        // (scroll away). Overlays / like burst must not restart this clip.
-        setPaused(true);
-        const stillThisPost = String(storeActivePostId) === String(post.id);
-        const player = feedVideoRef.current as
-            | (VideoRef & { pause?: () => void; seek?: (t: number) => void })
-            | null;
-        try {
-            player?.pause?.();
-            if (!stillThisPost) {
-                pendingSeekRef.current = null;
-                playbackTimeRef.current = 0;
-                resetPosterCover();
-                player?.seek?.(0);
-            }
-        } catch {
-            /* ignore */
+        const handoff = peekFeedVideoHandoff(String(post.id));
+        const resumeAt =
+            handoff && Number.isFinite(handoff.currentTime) && handoff.currentTime > 0.05
+                ? handoff.currentTime
+                : playbackTimeRef.current > 0.05
+                  ? playbackTimeRef.current
+                  : null;
+        if (resumeAt != null) {
+            pendingSeekRef.current = resumeAt;
+            playbackTimeRef.current = resumeAt;
+            stickyResumeTimeRef.current = resumeAt;
         }
+        if (handoff?.fromScenes) {
+            consumeFeedVideoHandoff(String(post.id));
+        }
+        if (needsRemountAfterSuspendRef.current) {
+            needsRemountAfterSuspendRef.current = false;
+            if (resumeAt != null) {
+                waitingForResumeFrameRef.current = resumeAt;
+                resetPosterCover();
+            }
+            setPlayerEpoch((n) => n + 1);
+        }
+        setPaused(false);
+        setPlayFailed(false);
     }, [
         isFeedAutoplayActive,
+        mediaUrl,
         mode,
         post.id,
         resetPosterCover,
+        soundOn,
         storeActivePostId,
         suspendNativeVideo,
         video,
@@ -500,10 +651,18 @@ const FeedPostMedia = React.memo(
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
     const mediaPointerEvents = feedTapCapture ? ('none' as const) : undefined;
 
-    const lastDoubleTapAtRef = useRef(0);
+    const lastTapAtRef = useRef(0);
+    const pendingMuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const cancelPendingMediaTap = useCallback(() => {
+        if (pendingMuteTimerRef.current) {
+            clearTimeout(pendingMuteTimerRef.current);
+            pendingMuteTimerRef.current = null;
+        }
+        lastTapAtRef.current = 0;
+    }, []);
 
     const handleFullscreen = useCallback(() => {
-        if (Date.now() - lastDoubleTapAtRef.current < 500) return;
         if (onPress && !onDoubleLike && !onSingleTap) {
             onPress();
             return;
@@ -511,75 +670,76 @@ const FeedPostMedia = React.memo(
         onSingleTap?.();
     }, [onDoubleLike, onPress, onSingleTap]);
 
-    const handleLikeAt = useCallback(
-        (x: number, y: number) => {
-            lastDoubleTapAtRef.current = Date.now();
-            const localX = Number.isFinite(x) ? x : width / 2;
-            const insetTop =
-                !hasCarousel && typeof FEED_CARD_MEDIA_TAP_LAYER.top === 'number'
-                    ? FEED_CARD_MEDIA_TAP_LAYER.top
-                    : 0;
-            const localY = Number.isFinite(y) ? y + insetTop : height / 2;
-            fireBurstAt(localX, localY);
+    const handleDoubleLikeAt = useCallback(
+        (localX?: number, localY?: number) => {
+            fireBurstAt(width / 2, height / 2);
             onDoubleLike?.(localX, localY);
         },
-        [fireBurstAt, hasCarousel, height, onDoubleLike, width],
+        [fireBurstAt, height, onDoubleLike, width],
     );
 
-    const mediaTapGesture = useMemo(() => {
-        const doubleTap = Gesture.Tap()
-            .numberOfTaps(2)
-            .maxDuration(400)
-            .maxDelay(300)
-            .onEnd((e, success) => {
-                'worklet';
-                if (!success) return;
-                runOnJS(handleLikeAt)(e.x, e.y);
-            });
-        const singleTap = Gesture.Tap()
-            .numberOfTaps(1)
-            .maxDuration(250)
-            .onEnd((_e, success) => {
-                'worklet';
-                if (!success) return;
-                runOnJS(handleFullscreen)();
-            });
-        singleTap.requireExternalGestureToFail(doubleTap);
-        const exclusive = Gesture.Exclusive(doubleTap, singleTap);
-        if (hasCarousel) {
-            return Gesture.Simultaneous(Gesture.Native(), exclusive);
-        }
-        return exclusive;
-    }, [handleFullscreen, handleLikeAt, hasCarousel]);
+    const handleMediaTap = useCallback(
+        (localX: number, localY: number, _absX: number, _absY: number) => {
+            const tapX = Number.isFinite(localX) ? localX : 0;
+            const tapY = Number.isFinite(localY) ? localY : 0;
+            const frameW = width > 0 ? width : 1;
+            const aspect = isLandscapeMedia ? 16 / 9 : 4 / 5;
+            const frameH = width > 0 ? Math.min(width / aspect, height > 0 ? height : width / aspect) : 1;
+            // Mute control (bottom-right) and Scenes CTA (bottom-left) must not toggle mute.
+            if (tapY > frameH - 56 && (tapX > frameW - 56 || tapX < 160)) {
+                return;
+            }
+            const now = Date.now();
+            if (lastTapAtRef.current > 0 && now - lastTapAtRef.current < DOUBLE_TAP_MS) {
+                cancelPendingMediaTap();
+                handleDoubleLikeAt(tapX, tapY);
+                return;
+            }
+            lastTapAtRef.current = now;
+            if (pendingMuteTimerRef.current) {
+                clearTimeout(pendingMuteTimerRef.current);
+            }
+            pendingMuteTimerRef.current = setTimeout(() => {
+                pendingMuteTimerRef.current = null;
+                handleFullscreen();
+            }, DOUBLE_TAP_MS);
+        },
+        [cancelPendingMediaTap, handleDoubleLikeAt, handleFullscreen, height, isLandscapeMedia, width],
+    );
 
     useEffect(
         () => () => {
-            if (clearBurstTimerRef.current) {
-                clearTimeout(clearBurstTimerRef.current);
+            if (pendingMuteTimerRef.current) {
+                clearTimeout(pendingMuteTimerRef.current);
             }
         },
         [],
     );
 
+    const mediaTapGesture = useMemo(() => {
+        // One Tap recognizer — Exclusive(double, single) fires mute on the first tap on Android.
+        // Wrapper CONTAINS the video (StorySwipeLayer pattern). An overlay with elevation
+        // casts a halo and hides TextureView on ColorOS.
+        const tap = Gesture.Tap()
+            .enabled(feedTapCapture)
+            .numberOfTaps(1)
+            .maxDuration(500)
+            .maxDistance(28)
+            .shouldCancelWhenOutside(false)
+            .onEnd((e, success) => {
+                'worklet';
+                if (!success) return;
+                runOnJS(handleMediaTap)(e.x, e.y, e.absoluteX, e.absoluteY);
+            });
+        if (hasCarousel) {
+            return Gesture.Simultaneous(Gesture.Native(), tap);
+        }
+        return tap;
+    }, [feedTapCapture, handleMediaTap, hasCarousel]);
+
     const handleOpenScenesPress = useCallback(() => {
         onOpenScenes?.();
     }, [onOpenScenes]);
-
-    const renderFeedTapOverlay = () => {
-        // Non-carousel: transparent overlay (Image/Video steal touches on Android).
-        // Carousel: GestureDetector wraps the ScrollView instead (see return).
-        if (!feedTapCapture || hasCarousel) return null;
-        return (
-            <GestureDetector gesture={mediaTapGesture}>
-                <View
-                    style={FEED_CARD_MEDIA_TAP_LAYER}
-                    collapsable={false}
-                    accessibilityRole="button"
-                    accessibilityLabel="Double tap to like"
-                />
-            </GestureDetector>
-        );
-    };
 
     if (textOnly) {
         return (
@@ -631,16 +791,28 @@ const FeedPostMedia = React.memo(
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
 
+    const mediaAspect = isLandscapeMedia ? 16 / 9 : 4 / 5;
     const frameHeight =
-        isLandscapeMedia && width > 0 ? Math.min(width * (9 / 16), height) : height;
-    const mediaAspect = width > 0 && frameHeight > 0 ? width / frameHeight : 4 / 5;
-    const frameStyle = {
-        width,
-        height: frameHeight,
-        aspectRatio: mediaAspect,
-        backgroundColor: '#121212',
-        overflow: 'hidden' as const,
-    };
+        width > 0 ? Math.min(width / mediaAspect, height) : height;
+    const frameStyle = fillViewport
+        ? {
+              width: '100%' as const,
+              height: '100%' as const,
+              alignSelf: 'stretch' as const,
+              overflow: 'hidden' as const,
+              backgroundColor: '#000000',
+              marginRight: 0,
+              paddingHorizontal: 0,
+          }
+        : {
+              width: '100%' as const,
+              alignSelf: 'stretch' as const,
+              aspectRatio: mediaAspect,
+              overflow: 'hidden' as const,
+              backgroundColor: '#121212',
+              marginRight: 0,
+              paddingHorizontal: 0,
+          };
 
     const renderSlide = (
         item: (typeof carouselItems)[number],
@@ -688,12 +860,14 @@ const FeedPostMedia = React.memo(
                             if (!slideIsCurrent) return;
                             const src = e.nativeEvent.source;
                             if (src && Number(src.width) > 0 && Number(src.height) > 0) {
-                                setIsLandscapeMedia(Number(src.width) > Number(src.height));
+                                const nextLandscape = Number(src.width) > Number(src.height);
+                                setIsLandscapeMedia((prev) =>
+                                    prev === nextLandscape ? prev : nextLandscape,
+                                );
                             }
                         }}
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />
-                    {renderFeedTapOverlay()}
                 </View>
             );
         }
@@ -709,86 +883,82 @@ const FeedPostMedia = React.memo(
         return (
             <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                 {slideMountVideo ? (
-                    <View
-                        style={[
-                            styles.videoClip,
-                            { width, height: frameHeight },
-                        ]}
+                    <FeedPlayingVideo
+                        remountEpoch={playerEpoch}
+                        source={cachedVideoSource}
+                        paused={mode === 'detail' ? paused : !isViewable}
+                        muted={mode === 'feed' ? !soundOn : false}
+                        volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
+                        repeat={mode === 'feed'}
+                        posterUri={slidePosterUri}
+                        resizeMode={fillViewport ? 'contain' : 'cover'}
                         pointerEvents={mediaPointerEvents}
-                        collapsable={false}
-                    >
-                        <Video
-                            key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
-                            ref={feedVideoRef}
-                            source={cachedVideoSource as object}
-                            style={{ width, height: frameHeight }}
-                            resizeMode="cover"
-                            controls={false}
-                            paused={mode === 'detail' ? paused : !isViewable}
-                            muted={mode === 'feed' ? !soundOn : false}
-                            volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
-                            repeat={mode === 'feed'}
-                            playInBackground={false}
-                            playWhenInactive={false}
-                            ignoreSilentSwitch="ignore"
-                            useTextureView
-                            hideShutterView
-                            poster={
-                                slidePosterUri
-                                    ? {
-                                          source: { uri: slidePosterUri },
-                                          resizeMode: 'cover' as const,
-                                      }
-                                    : undefined
-                            }
-                            {...androidListSafeVideoProps()}
-                            pointerEvents="none"
-                            onLoadStart={() => {
-                                beginUrlLoad(slideRawUrl);
-                            }}
-                            onReadyForDisplay={onFirstFrameReady}
-                            onLoad={(meta) => {
+                        videoRef={feedVideoRef}
+                        onLoadStart={() => {
+                            beginUrlLoad(slideRawUrl);
+                        }}
+                        onReady={() => {
+                            if (waitingForResumeFrameRef.current != null) return;
+                            onFirstFrameReady();
+                        }}
+                        onLoad={(meta) => {
+                            const seekTo =
+                                pendingSeekRef.current ??
+                                stickyResumeTimeRef.current ??
+                                (playbackTimeRef.current > 0.05 ? playbackTimeRef.current : null);
+                            if (
+                                seekTo != null &&
+                                Number.isFinite(seekTo) &&
+                                seekTo > 0.05 &&
+                                feedVideoRef.current
+                            ) {
+                                pendingSeekRef.current = null;
+                                waitingForResumeFrameRef.current = seekTo;
+                                try {
+                                    feedVideoRef.current.seek(seekTo);
+                                } catch {
+                                    waitingForResumeFrameRef.current = null;
+                                    onFirstFrameReady();
+                                }
+                            } else {
                                 onFirstFrameReady();
-                                const seekTo =
-                                    pendingSeekRef.current ??
-                                    (playbackTimeRef.current > 0.05 ? playbackTimeRef.current : null);
-                                if (
-                                    seekTo != null &&
-                                    Number.isFinite(seekTo) &&
-                                    seekTo > 0.05 &&
-                                    feedVideoRef.current
-                                ) {
-                                    pendingSeekRef.current = null;
-                                    try {
-                                        feedVideoRef.current.seek(seekTo);
-                                    } catch {
-                                        /* ignore */
-                                    }
-                                }
-                                const ns = meta?.naturalSize;
-                                if (ns && Number(ns.width) > Number(ns.height)) {
-                                    setIsLandscapeMedia(true);
-                                } else if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
-                                    setIsLandscapeMedia(false);
-                                }
-                            }}
-                            onProgress={(e) => {
-                                const t = e?.currentTime;
-                                if (typeof t === 'number' && Number.isFinite(t)) {
-                                    playbackTimeRef.current = t;
-                                }
-                                if (mode !== 'feed' || !isFeedAutoplayActive) return;
-                                if (typeof t === 'number' && Number.isFinite(t)) {
-                                    setFeedVideoHandoff(String(post.id), {
-                                        currentTime: t,
-                                        muted: !soundOn,
-                                        mediaUrl: slideRawUrl,
-                                    });
-                                }
-                            }}
-                            onError={(e) => onVideoError(slideRawUrl, e)}
-                        />
-                    </View>
+                            }
+                            const ns = meta?.naturalSize;
+                            if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
+                                const nextLandscape = Number(ns.width) > Number(ns.height);
+                                setIsLandscapeMedia((prev) =>
+                                    prev === nextLandscape ? prev : nextLandscape,
+                                );
+                            }
+                        }}
+                        onProgress={(e) => {
+                            const t = e?.currentTime;
+                            if (typeof t !== 'number' || !Number.isFinite(t)) return;
+                            const resumeAt = stickyResumeTimeRef.current;
+                            // Remount reports t≈0 before seek — ignore until we land near resume.
+                            if (resumeAt != null && resumeAt > 0.05 && t < resumeAt - 0.35) {
+                                return;
+                            }
+                            playbackTimeRef.current = t;
+                            if (resumeAt != null && t >= resumeAt - 0.3) {
+                                stickyResumeTimeRef.current = null;
+                                waitingForResumeFrameRef.current = null;
+                                onFirstFrameReady();
+                            } else if (
+                                waitingForResumeFrameRef.current != null &&
+                                t >= waitingForResumeFrameRef.current - 0.3
+                            ) {
+                                waitingForResumeFrameRef.current = null;
+                                onFirstFrameReady();
+                            }
+                            setFeedVideoHandoff(String(post.id), {
+                                currentTime: t,
+                                muted: !soundOn,
+                                mediaUrl: slideRawUrl,
+                            });
+                        }}
+                        onError={(e) => onVideoError(slideRawUrl, e)}
+                    />
                 ) : null}
 
                 {slidePosterUri && showBufferCover ? (
@@ -805,8 +975,6 @@ const FeedPostMedia = React.memo(
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />
                 ) : null}
-
-                {renderFeedTapOverlay()}
             </View>
         );
     };
@@ -835,41 +1003,35 @@ const FeedPostMedia = React.memo(
                     decelerationRate="fast"
                     scrollEventThrottle={16}
                     onMomentumScrollEnd={onCarouselScrollEnd}
-                    style={{ width, height: frameHeight, aspectRatio: mediaAspect }}
+                    style={frameStyle}
                 >
                     {carouselItems.map((item, index) => (
                         <View
                             key={`${post.id}-carousel-${index}-${item.url}`}
-                            style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}
+                            style={[styles.mediaFrame, frameStyle, width > 0 ? { width } : null]}
                         >
                             {renderSlide(item, index)}
                         </View>
                     ))}
                 </ScrollView>
             ) : (
-                <View style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}>
+                <View style={[styles.mediaFrame, frameStyle]}>
                     {inner}
                 </View>
             )}
         </>
     );
 
-    return (
+    const mediaCard = (
         <View
-            style={[
-                styles.wrap,
-                styles.mediaFrame,
-                { width, height: frameHeight, aspectRatio: mediaAspect },
-                style,
-            ]}
+            style={[styles.wrap, styles.mediaFrame, frameStyle, style]}
             collapsable={false}
+            accessibilityRole={feedTapCapture ? 'button' : undefined}
+            accessibilityLabel={feedTapCapture ? 'Double tap to like' : undefined}
         >
-            {feedTapCapture && hasCarousel ? (
+            {feedTapCapture ? (
                 <GestureDetector gesture={mediaTapGesture}>
-                    <View
-                        style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}
-                        collapsable={false}
-                    >
+                    <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                         {mediaBody}
                     </View>
                 </GestureDetector>
@@ -889,15 +1051,20 @@ const FeedPostMedia = React.memo(
                     containerHeight={frameHeight}
                 />
             ) : null}
-            {renderFeedTapOverlay()}
             {showScenesCta ? (
-                <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={post.userHandle} />
+                <VideoCTAOverlay
+                    onPress={() => {
+                        cancelPendingMediaTap();
+                        handleOpenScenesPress();
+                    }}
+                    userHandle={post.userHandle}
+                />
             ) : null}
             {showMuteButton ? (
-                <Pressable
+                <GesturePressable
                     style={styles.muteButton}
-                    onPress={(e) => {
-                        e.stopPropagation?.();
+                    onPress={() => {
+                        cancelPendingMediaTap();
                         setFeedSoundOn(!soundOn);
                         setMuteFlash(true);
                         setTimeout(() => setMuteFlash(false), 1100);
@@ -905,7 +1072,7 @@ const FeedPostMedia = React.memo(
                     hitSlop={8}
                 >
                     <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={14} color="#FFFFFF" />
-                </Pressable>
+                </GesturePressable>
             ) : null}
             {video && mode === 'detail' && paused ? (
                 <Pressable style={styles.playBadge} onPress={() => setPaused(false)}>
@@ -919,13 +1086,15 @@ const FeedPostMedia = React.memo(
                     <Text style={styles.videoErrorHint}>Tap to retry</Text>
                 </Pressable>
             ) : null}
-            {burstAt ? (
-                <View style={styles.burstLayer} pointerEvents="none">
-                    <FeedDoubleTapLikeBurst key={burstKey} x={burstAt.x} y={burstAt.y} />
-                </View>
-            ) : null}
+            <View style={styles.burstLayer} pointerEvents="none" collapsable={false}>
+                {burstAt ? (
+                    <FeedDoubleTapLikeBurst key={burstKey} centered />
+                ) : null}
+            </View>
         </View>
     );
+
+    return mediaCard;
     }),
     function feedPostMediaPropsAreEqual(prev: Props, next: Props) {
         const a = prev.post;
@@ -942,7 +1111,11 @@ const FeedPostMedia = React.memo(
             prev.mode === next.mode &&
             prev.muted === next.muted &&
             prev.suspendNativeVideo === next.suspendNativeVideo &&
+            prev.hideOverlayChrome === next.hideOverlayChrome &&
+            prev.fillViewport === next.fillViewport &&
             prev.carouselIndex === next.carouselIndex &&
+            Boolean(prev.onLikeBurst) === Boolean(next.onLikeBurst) &&
+            Boolean(prev.onDoubleLike) === Boolean(next.onDoubleLike) &&
             JSON.stringify(a.mediaItems) === JSON.stringify(b.mediaItems)
         );
     },
@@ -952,32 +1125,45 @@ export default FeedPostMedia;
 
 const styles = StyleSheet.create({
     wrap: {
+        width: '100%',
+        alignSelf: 'stretch',
         position: 'relative',
         overflow: 'hidden',
+        marginRight: 0,
+        paddingHorizontal: 0,
     },
     mediaFrame: {
+        width: '100%',
+        alignSelf: 'stretch',
         overflow: 'hidden',
         backgroundColor: '#121212',
         position: 'relative',
-        borderRadius: 1,
+        marginRight: 0,
+        paddingHorizontal: 0,
     },
     videoClip: {
+        width: '100%',
+        height: '100%',
+        alignSelf: 'stretch',
         overflow: 'hidden',
         position: 'relative',
-        borderRadius: 1,
         backgroundColor: '#121212',
+        marginRight: 0,
+        paddingHorizontal: 0,
     },
     stillImage: {
-        ...StyleSheet.absoluteFillObject,
         width: '100%',
         height: '100%',
+        alignSelf: 'stretch',
+        overflow: 'hidden',
         opacity: 1,
     },
-    /** Explicit fill — Android TextureView collapses to 0×0 without width/height. */
+    /** Fill the 16:9 / 4:5 frame — no pixel width (avoids a 1px right gutter on device). */
     videoFill: {
-        ...StyleSheet.absoluteFillObject,
         width: '100%',
         height: '100%',
+        alignSelf: 'stretch',
+        overflow: 'hidden',
     },
     /** Sits above Video until first frame, then faded/unmounted. */
     posterCover: {
@@ -985,7 +1171,6 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         zIndex: 2,
-        elevation: Platform.OS === 'android' ? 2 : 0,
     },
     posterPlaceholder: {
         backgroundColor: '#121212',
@@ -1012,8 +1197,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.55)',
-        zIndex: 25,
-        elevation: Platform.OS === 'android' ? 25 : 0,
+        zIndex: 30,
     },
     videoFallback: {
         backgroundColor: '#121212',
@@ -1055,9 +1239,15 @@ const styles = StyleSheet.create({
         zIndex: 14,
     },
     burstLayer: {
-        ...StyleSheet.absoluteFill,
-        zIndex: 50,
-        elevation: Platform.OS === 'android' ? 50 : 0,
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 999,
+        overflow: 'hidden',
     },
     videoErrorTitle: {
         marginTop: 8,

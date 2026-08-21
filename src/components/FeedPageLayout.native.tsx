@@ -44,12 +44,15 @@ export const FEED_POST_CARD_STYLE = {
     position: 'relative' as const,
     overflow: 'hidden' as const,
     flexDirection: 'column' as const,
+    width: '100%' as const,
+    alignSelf: 'stretch' as const,
 };
 
 /** Header → media → footer. Clip media so TextureView cannot bleed. */
 export const FEED_CARD_BODY = {
     position: 'relative' as const,
     width: '100%' as const,
+    alignSelf: 'stretch' as const,
     overflow: 'hidden' as const,
     flexDirection: 'column' as const,
 };
@@ -93,11 +96,12 @@ export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
 /** Full-bleed media column below the stacked post header. */
 export const FEED_CARD_MEDIA_WRAP = {
     width: '100%' as const,
+    alignSelf: 'stretch' as const,
     backgroundColor: FEED_CARD_MEDIA_BG,
     position: 'relative' as const,
     overflow: 'hidden' as const,
-    // Android only clips TextureView children when overflow:hidden is paired with a radius.
-    borderRadius: 1,
+    marginRight: 0,
+    paddingHorizontal: 0,
 };
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
@@ -108,7 +112,6 @@ export const FEED_CARD_MEDIA_FX_LAYER = {
     top: 0,
     bottom: 0,
     zIndex: 45,
-    elevation: Platform.OS === 'android' ? 45 : 0,
 } as const;
 
 /** Transparent tap layer above media (header is stacked above this frame). */
@@ -117,11 +120,8 @@ export const FEED_CARD_MEDIA_TAP_LAYER = {
     top: 0,
     left: 0,
     right: 0,
-    // Leave bottom chrome clear for Scenes CTA + mute (external tap layer sits above media).
-    bottom: 56,
+    bottom: 0,
     zIndex: 15,
-    // Android skips fully transparent views for hit-testing.
-    backgroundColor: 'rgba(0,0,0,0.01)',
 } as const;
 
 /** Client upload / failure overlay on media. */
@@ -548,6 +548,8 @@ export type FeedPageLayoutProps = {
     error?: string | null;
     onRetry?: () => void;
     style?: StyleProp<ViewStyle>;
+    /** Let an in-cell video scale past the postcard (Scenes overlay). */
+    allowOverflow?: boolean;
 };
 
 export default function FeedPageLayout({
@@ -557,14 +559,21 @@ export default function FeedPageLayout({
     error = null,
     onRetry,
     style,
+    allowOverflow = false,
 }: FeedPageLayoutProps) {
     const insets = useSafeAreaInsets();
 
     return (
-        <View style={[styles.root, style]}>
+        <View style={[styles.root, allowOverflow ? styles.rootOverflow : null, style]}>
             <View style={styles.opaqueBackdrop} pointerEvents="none" />
             {/* Pinned chrome — web: shrink-0 pt-[safe-area] (FeedPageWrapper) */}
-            <View style={[styles.pinnedChrome, { paddingTop: insets.top }]}>
+            <View
+                style={[
+                    styles.pinnedChrome,
+                    { paddingTop: insets.top },
+                    allowOverflow ? styles.pinnedChromeUnderlay : null,
+                ]}
+            >
                 <View style={styles.spacer16} />
 
                 {!online ? (
@@ -600,7 +609,7 @@ export default function FeedPageLayout({
             </View>
 
             {/* Inner scroll host — web: flex-1 min-h-0 overflow-y-auto pb-2 */}
-            <View style={styles.scrollHost}>{children}</View>
+            <View style={[styles.scrollHost, allowOverflow ? styles.scrollHostOverlay : null]}>{children}</View>
         </View>
     );
 }
@@ -610,6 +619,9 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: FEED_PAGE_BG,
         overflow: 'hidden',
+    },
+    rootOverflow: {
+        overflow: 'visible',
     },
     opaqueBackdrop: {
         ...StyleSheet.absoluteFillObject,
@@ -624,6 +636,9 @@ const styles = StyleSheet.create({
             android: { elevation: 0 },
             ios: {},
         }),
+    },
+    pinnedChromeUnderlay: {
+        zIndex: 0,
     },
     spacer16: {
         height: 16, // web h-4
@@ -640,6 +655,10 @@ const styles = StyleSheet.create({
         paddingBottom: 8, // web pb-2
         backgroundColor: FEED_PAGE_BG,
         zIndex: 1,
+    },
+    scrollHostOverlay: {
+        zIndex: 20,
+        overflow: 'visible',
     },
     offlineBanner: {
         marginHorizontal: 12, // mx-3

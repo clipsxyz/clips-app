@@ -64,6 +64,9 @@ import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI, feedCardMediaHeight } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import FeedScenesMediaExpand, {
+    type FeedScenesOrigin,
+} from '../components/FeedScenesMediaExpand.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
@@ -79,11 +82,15 @@ import {
 } from '../utils/feedAutoplayPrefNative';
 import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
-import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScenesHandoffNative';
+import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
+import { setFeedScenesFullscreen } from '../utils/feedScenesFullscreenNative';
+import {
+    setFeedScenesOverlaySession,
+    subscribeFeedScenesOverlaySession,
+} from '../utils/feedScenesOverlayNative';
 import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
 import {
-    isScenesViewerActive,
     setScenesViewerActive,
     subscribeScenesViewerActive,
 } from '../utils/scenesViewerActiveNative';
@@ -93,6 +100,9 @@ import {
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
 import { FlatList, RefreshControl } from 'react-native-gesture-handler';
+import {
+    useSharedValue,
+} from 'react-native-reanimated';
 
 import FeedPageLayout, {
     FEED_CARD_BODY,
@@ -101,7 +111,6 @@ import FeedPageLayout, {
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
     FEED_CARD_ENGAGEMENT_LEFT,
     FEED_CARD_HEADER_WRAP,
-    FEED_CARD_MEDIA_FRAME,
     FEED_CARD_MEDIA_WRAP,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
@@ -999,7 +1008,11 @@ const FeedCard = React.memo(function FeedCard({
     onOpenScenes,
     onOpenLikesSheet,
     onOpenTaggedSheet,
+    onLikeBurst,
     onShareToStories,
+    scenesExpanding = false,
+    scenesExpandProgress,
+    scenesExpandOrigin,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -1011,7 +1024,12 @@ const FeedCard = React.memo(function FeedCard({
     onBookmark: () => Promise<void>;
     onPostPress?: () => void;
     onOpenImageFullscreen?: (startIndex?: number, origin?: ImageFullscreenOrigin | null) => void;
-    onOpenScenes?: () => void;
+    onOpenScenes?: (origin?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }) => void;
     onVisitProfile?: () => void;
     onVisitHandle?: (handle: string) => void;
     onViewStories?: () => void;
@@ -1032,6 +1050,9 @@ const FeedCard = React.memo(function FeedCard({
     onLikeBurst?: (windowX: number, windowY: number) => void;
     /** Parent-owned share modal — per-card Modal show/hide jumps FlatList on Android. */
     onShareToStories?: () => void;
+    scenesExpanding?: boolean;
+    scenesExpandProgress?: import('react-native-reanimated').SharedValue<number>;
+    scenesExpandOrigin?: FeedScenesOrigin | null;
 }) {
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
@@ -1063,14 +1084,6 @@ const FeedCard = React.memo(function FeedCard({
         cardMediaWidth,
         safePositiveLayoutNumber(windowHeight, 720),
         postHasVideoMedia(post),
-    );
-    const imageStyle = React.useMemo(
-        () => ({
-            width: cardMediaWidth,
-            height: mediaFrameHeight,
-            ...FEED_CARD_MEDIA_FRAME,
-        }),
-        [cardMediaWidth, mediaFrameHeight],
     );
 
     // Auto-detect image dimensions if not provided
@@ -1120,14 +1133,36 @@ const FeedCard = React.memo(function FeedCard({
     }, [post.id, isCurrentUser, post.originalUserHandle, post.isBoosted]);
 
     const handleOpenScenesPress = React.useCallback(() => {
-        onOpenScenes?.();
-    }, [onOpenScenes]);
+        const handoff = videoMediaRef.current?.getPlaybackHandoff?.();
+        if (handoff && handoff.currentTime > 0.05) {
+            setFeedVideoHandoff(String(post.id), {
+                currentTime: handoff.currentTime,
+                muted: handoff.muted,
+                mediaUrl: post.mediaUrl,
+            });
+        }
+        const node = mediaWrapRef.current;
+        if (!node?.measureInWindow) {
+            onOpenScenes?.();
+            return;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            if (width > 8 && height > 8) {
+                onOpenScenes?.({ x, y, width, height });
+            } else {
+                onOpenScenes?.();
+            }
+        });
+    }, [onOpenScenes, post.id, post.mediaUrl]);
 
     const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
 
-    const handleMediaDoubleLike = React.useCallback(() => {
-        void onLike();
-    }, [onLike]);
+    const handleMediaDoubleLike = React.useCallback(
+        (_x?: number, _y?: number) => {
+            void onLike();
+        },
+        [onLike],
+    );
 
     const openStillFullscreen = React.useCallback(() => {
         const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
@@ -1158,7 +1193,12 @@ const FeedCard = React.memo(function FeedCard({
     }, [carouselIndex, openStillFullscreen, post]);
 
     return (
-        <View style={FEED_POST_CARD_STYLE}>
+        <View
+            style={[
+                FEED_POST_CARD_STYLE,
+                scenesExpanding ? { overflow: 'visible', zIndex: 9999 } : null,
+            ]}
+        >
             <FeedPostTagRow tags={postTags} />
 
             {post.isBoosted && (
@@ -1190,7 +1230,12 @@ const FeedCard = React.memo(function FeedCard({
                     menuAnchorRef={profileMenuAnchorRef}
                 />
             ) : (
-                <View style={FEED_CARD_BODY}>
+                <View
+                    style={[
+                        FEED_CARD_BODY,
+                        scenesExpanding ? { overflow: 'visible', zIndex: 9999 } : null,
+                    ]}
+                >
                     <View style={FEED_CARD_HEADER_WRAP}>
                         <FeedPostHeader
                             post={post}
@@ -1206,14 +1251,21 @@ const FeedCard = React.memo(function FeedCard({
                         />
                     </View>
                     {hasFeedMedia ? (
+                        <FeedScenesMediaExpand
+                            expanding={scenesExpanding}
+                            progress={scenesExpandProgress}
+                            origin={scenesExpandOrigin ?? null}
+                            screenWidth={windowWidth}
+                            screenHeight={windowHeight}
+                            style={{
+                                ...FEED_CARD_MEDIA_WRAP,
+                                ...(scenesExpanding
+                                    ? { overflow: 'visible' as const }
+                                    : null),
+                            }}
+                        >
                         <View
-                            style={[
-                                FEED_CARD_MEDIA_WRAP,
-                                {
-                                    height: mediaFrameHeight,
-                                    maxHeight: mediaFrameHeight,
-                                },
-                            ]}
+                            style={{ width: '100%' }}
                             ref={mediaWrapRef}
                             collapsable={false}
                         >
@@ -1226,6 +1278,7 @@ const FeedCard = React.memo(function FeedCard({
                                 width={cardMediaWidth}
                                 height={mediaFrameHeight}
                                 onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
+                                onLikeBurst={mediaGesturesEnabled ? onLikeBurst : undefined}
                                 onSingleTap={mediaGesturesEnabled ? handleMediaSingleTap : undefined}
                                 onMediaLoad={
                                     isClientUploading
@@ -1240,8 +1293,12 @@ const FeedCard = React.memo(function FeedCard({
                                 isActive={isVideoActive && !isClientUploading}
                                 suspendNativeVideo={suspendNativeVideo}
                                 muted={feedVideoMuted}
+                                hideOverlayChrome={scenesExpanding}
+                                fillViewport={scenesExpanding}
                                 onOpenScenes={
-                                    mediaGesturesEnabled ? handleOpenScenesPress : undefined
+                                    mediaGesturesEnabled && !scenesExpanding
+                                        ? handleOpenScenesPress
+                                        : undefined
                                 }
                             />
                             {isClientUploading ? (
@@ -1268,6 +1325,7 @@ const FeedCard = React.memo(function FeedCard({
                                 />
                             ) : null}
                         </View>
+                        </FeedScenesMediaExpand>
                     ) : null}
 
                     {carouselThumbItems.length > 1 ? (
@@ -1399,6 +1457,7 @@ const FeedCard = React.memo(function FeedCard({
         prev.isVideoActive === next.isVideoActive &&
         prev.feedVideoMuted === next.feedVideoMuted &&
         prev.suspendNativeVideo === next.suspendNativeVideo &&
+        prev.scenesExpanding === next.scenesExpanding &&
         prev.viewerHandle === next.viewerHandle &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
@@ -1426,7 +1485,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
     const isFeedFocused = useIsFocused();
-    const [scenesViewerActive, setScenesViewerActiveState] = useState(() => isScenesViewerActive());
+    const [scenesViewerActive, setScenesViewerActiveState] = useState(false);
+    const scenesExpandProgress = useSharedValue(0);
+    const [scenesOverlay, setScenesOverlay] = useState(null);
+    useEffect(() => {
+        // Overlay session is module-level and survives Fast Refresh. A leftover
+        // session locks the feed (no scroll, no tab bar) with nothing to close.
+        setFeedScenesOverlaySession(null);
+        setScenesViewerActive(false);
+        setScenesViewerActiveState(false);
+        return subscribeFeedScenesOverlaySession(setScenesOverlay);
+    }, []);
+    useEffect(() => {
+        setFeedScenesFullscreen(Boolean(scenesOverlay));
+        return () => setFeedScenesFullscreen(false);
+    }, [scenesOverlay]);
     useEffect(() => {
         // Keep feed ExoPlayer dead for the whole Scenes session (focus blur is unreliable).
         return subscribeScenesViewerActive((active) => {
@@ -1557,6 +1630,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         commentsModalOpen ||
         !isFeedFocused ||
         scenesViewerActive ||
+        Boolean(scenesOverlay) ||
         Boolean(imageFullscreenPost);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
@@ -1645,17 +1719,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     );
     const feedLikeBurstClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const showFeedLikeBurst = useCallback((windowX: number, windowY: number) => {
-        const y = feedScrollYRef.current;
         setFeedLikeBurst({ x: windowX, y: windowY, key: Date.now() });
-        pinFeedScrollSoon(y);
         if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
         feedLikeBurstClearRef.current = setTimeout(() => {
-            const pinY = feedScrollYRef.current;
             setFeedLikeBurst(null);
-            pinFeedScrollSoon(pinY);
             feedLikeBurstClearRef.current = null;
         }, 750);
-    }, [pinFeedScrollSoon]);
+    }, []);
     useEffect(
         () => () => {
             if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
@@ -1925,6 +1995,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             scheduleActiveFeedVideoRef.current(resumeId, true);
         });
     }, []);
+
+    const hadScenesOverlayRef = useRef(false);
+    useEffect(() => {
+        if (scenesOverlay || scenesViewerActive) {
+            hadScenesOverlayRef.current = true;
+            return;
+        }
+        if (!hadScenesOverlayRef.current) return;
+        hadScenesOverlayRef.current = false;
+        restoreFeedVideoAfterOverlay();
+    }, [restoreFeedVideoAfterOverlay, scenesOverlay, scenesViewerActive]);
 
     useEffect(() => {
         if (!scenesViewerActive && !imageFullscreenPost && !commentsModalOpen) return;
@@ -2496,8 +2577,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     /** Footer Home tab — same as web `goHomeFeed` / `resetFeed`. */
     useEffect(() => {
-        const token = route?.params?.resetHomeFeedAt;
-        if (token == null) return;
+        if (!isFeedFocused && !navigation?.isFocused?.()) return;
+        if (!route?.params || route.params.resetHomeFeedAt == null) return;
         void (async () => {
             await clearPendingLocationFeed();
             setShowFollowingFeed(false);
@@ -2511,9 +2592,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setEnd(false);
             setError(null);
             setReloadTick((t) => t + 1);
+            if (!isFeedFocused && !navigation?.isFocused?.()) return;
+            if (!route?.params || route.params.resetHomeFeedAt == null) return;
             try {
-                navigation?.setParams?.({
-                    resetHomeFeedAt: null,
+                navigation.setParams({
+                    resetHomeFeedAt: undefined,
                     location: undefined,
                     locationLabel: undefined,
                     locationScope: undefined,
@@ -2524,7 +2607,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 // ignore
             }
         })();
-    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational]);
+    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational, isFeedFocused]);
 
     useEffect(() => {
         // A live Home-tab reset token must win; null/undefined means apply location.
@@ -2910,6 +2993,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, 0);
         return () => clearTimeout(t);
     }, [reloadTick, feedFetchFilter, userId]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!showFollowingFeed) return undefined;
+            const t = setTimeout(() => {
+                void reloadFeedFromStartRef.current({ quiet: true });
+            }, 0);
+            return () => clearTimeout(t);
+        }, [showFollowingFeed]),
+    );
 
     const feedPostCount = useMemo(() => pages.flat().length, [pages]);
 
@@ -3579,7 +3672,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
         ({ item }: { item: FeedListRow }) => {
-            const wrapRow = (row: React.ReactElement) => (
+            const wrapRow = (row: React.ReactElement, postId?: string) => (
                 <View
                     collapsable={false}
                     style={styles.feedListRow}
@@ -3767,10 +3860,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     isVideoActive={
                         isFeedFocused &&
                         !scenesViewerActive &&
+                        !scenesOverlay &&
                         isVideoPostRow &&
                         !commentsModalOpen &&
                         String(activeVideoPostId) === String(mergedPost.id)
                     }
+                    scenesExpanding={false}
+                    scenesExpandProgress={scenesExpandProgress}
+                    scenesExpandOrigin={null}
                     feedVideoMuted={feedVideoMuted}
                     suspendNativeVideo={feedNativeVideoSuspended}
                     onLike={async () => {
@@ -3944,31 +4041,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setImageFullscreenLaunch({ post: snapshot, startIndex });
                         setImageFullscreenPost(snapshot);
                     }}
-                    onOpenScenes={() => {
+                    onOpenScenes={(origin) => {
                         if (isPendingUpload) return;
                         scenesReturnScrollYRef.current = feedScrollYRef.current;
-                        // Mark Scenes active before navigate — Feed often stays "focused"
-                        // under fullScreenModal and would otherwise re-arm ExoPlayer.
+                        captureOverlayVideoResume(mergedPost);
+                        const tappedId = String(mergedPost.id);
+                        const handoff = peekFeedVideoHandoff(tappedId);
+                        const scenesFeedLabel = showFollowingFeed
+                            ? 'Following'
+                            : String(active || user?.national || 'Ireland');
+                        const scenesPosts = videoPostsForScenes.some(
+                            (p) => String(p.id) === tappedId,
+                        )
+                            ? videoPostsForScenes
+                            : [mergedPost, ...videoPostsForScenes];
                         setScenesViewerActive(true);
                         setScenesViewerActiveState(true);
                         activeVideoPostIdRef.current = null;
                         setActiveFeedVideoPostId(null);
-                        const handoff = peekFeedVideoHandoff(mergedPost.id);
-                        const scenesFeedLabel = showFollowingFeed
-                            ? 'Following'
-                            : String(active || user?.national || 'Ireland');
-                        const scenesPosts = videoPostsForScenes.some((p) => p.id === mergedPost.id)
-                            ? videoPostsForScenes
-                            : [mergedPost, ...videoPostsForScenes];
                         setScenesLaunchPayload({
-                            initialPostId: mergedPost.id,
+                            initialPostId: tappedId,
                             posts: scenesPosts,
                             initialVideoTime: handoff?.currentTime,
                             initialMuted: handoff?.muted ?? feedVideoMuted,
                             feedLabel: scenesFeedLabel,
+                            originRect:
+                                origin && origin.width > 8 && origin.height > 8 ? origin : null,
                         });
                         navigation.navigate('Scenes', {
-                            initialPostId: mergedPost.id,
+                            initialPostId: tappedId,
                             initialVideoTime: handoff?.currentTime,
                             initialMuted: handoff?.muted ?? feedVideoMuted,
                             feedLabel: scenesFeedLabel,
@@ -4033,6 +4134,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onOpenLikesSheet={() => setLikesSheetPost(mergedPost)}
                     onOpenTaggedSheet={() => setTaggedSheetPost(mergedPost)}
                 />,
+                mergedPost.id,
             );
         },
         [
@@ -4070,6 +4172,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             showFeedLikeBurst,
             syncFullscreenPost,
             captureOverlayVideoResume,
+            scenesOverlay,
         ]
     );
 
@@ -4136,14 +4239,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }
                     return 'feed-row';
                 }}
-                extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}`}
+                extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}-${scenesOverlay?.postId || ''}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 // Keep the render window tight for max FPS while flinging; clip offscreen cells.
                 initialNumToRender={2}
                 maxToRenderPerBatch={2}
                 windowSize={5}
                 updateCellsBatchingPeriod={50}
-                removeClippedSubviews
+                removeClippedSubviews={!scenesOverlay}
+                scrollEnabled={!scenesOverlay}
                 onScrollBeginDrag={() => {
                     feedScrollingRef.current = true;
                     setFeedScrollBusy(true);
@@ -4911,38 +5015,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 onDismiss={() => pinFeedScrollSoon()}
             />
 
-            {/* Feed-level burst (not per-card). Pin scroll when it opens/closes — Android
-                Modal visibility changes otherwise nudge FlatList content. */}
-            <Modal
-                visible={feedLikeBurst != null}
-                transparent
-                animationType="none"
-                statusBarTranslucent
-                hardwareAccelerated
-                onRequestClose={() => setFeedLikeBurst(null)}
-                onShow={() => {
-                    const y = feedScrollYRef.current;
-                    requestAnimationFrame(() => {
-                        flatListRef.current?.scrollToOffset({ offset: y, animated: false });
-                    });
-                }}
-                onDismiss={() => {
-                    const y = feedScrollYRef.current;
-                    requestAnimationFrame(() => {
-                        flatListRef.current?.scrollToOffset({ offset: y, animated: false });
-                    });
-                }}
-            >
-                <View style={styles.mediaBurstPortal} pointerEvents="none">
-                    {feedLikeBurst ? (
-                        <FeedDoubleTapLikeBurst
-                            key={feedLikeBurst.key}
-                            x={feedLikeBurst.x}
-                            y={feedLikeBurst.y}
-                        />
-                    ) : null}
-                </View>
-            </Modal>
+            {/* Above the list; high elevation so Android TextureView does not cover the thumb. */}
+            <View style={styles.mediaBurstPortal} pointerEvents="none" collapsable={false}>
+                {feedLikeBurst ? (
+                    <FeedDoubleTapLikeBurst
+                        key={feedLikeBurst.key}
+                        x={feedLikeBurst.x}
+                        y={feedLikeBurst.y}
+                    />
+                ) : null}
+            </View>
         </View>
     );
 };
@@ -4950,11 +5032,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 const styles = StyleSheet.create({
     mediaBurstPortal: {
         ...StyleSheet.absoluteFillObject,
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        top: 0,
-        bottom: 0,
+        zIndex: 80,
+        overflow: 'visible',
     },
     container: {
         flex: 1,
@@ -4989,6 +5068,8 @@ const styles = StyleSheet.create({
     feedListRow: {
         position: 'relative',
         overflow: 'hidden',
+        width: '100%',
+        alignSelf: 'stretch',
         marginBottom: 16,
         backgroundColor: FEED_PAGE_BG,
     },
