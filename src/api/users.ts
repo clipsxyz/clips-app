@@ -1,3 +1,5 @@
+import { resolvePublicMediaUrl } from './apiBaseUrl';
+
 // Simple mock user directory for avatars by handle
 const handleToAvatar: Record<string, string> = {
     'Sarah@Artane': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop',
@@ -18,6 +20,7 @@ export function getAvatarForHandle(handle: string | undefined | null): string | 
     if (!handle) return undefined;
     if (handleToAvatar[handle]) return handleToAvatar[handle];
     const normalized = handle.toLowerCase();
+    if (handleToAvatar[normalized]) return handleToAvatar[normalized];
     const exact = Object.keys(handleToAvatar).find((k) => k.toLowerCase() === normalized);
     if (exact) return handleToAvatar[exact];
     // Mock feeds reuse first names across places (Bob@Ireland vs Bob@Finglas).
@@ -29,9 +32,22 @@ export function getAvatarForHandle(handle: string | undefined | null): string | 
     return byLocal ? handleToAvatar[byLocal] : undefined;
 }
 
+/** Absolute URI for RN Image / web img — relative `/storage/...` paths fail on device. */
+export function resolveAvatarImageUri(
+    src?: string | null,
+    handle?: string | null,
+): string | undefined {
+    const raw = String(src || getAvatarForHandle(handle) || '').trim();
+    if (!raw) return undefined;
+    return resolvePublicMediaUrl(raw) || raw;
+}
+
 export function setAvatarForHandle(handle: string, url: string): void {
     if (!handle) return;
-    handleToAvatar[handle] = url;
+    const trimmed = String(url || '').trim();
+    if (!trimmed) return;
+    handleToAvatar[handle] = trimmed;
+    handleToAvatar[handle.toLowerCase()] = trimmed;
 }
 
 const handleToFlag: Record<string, string> = {

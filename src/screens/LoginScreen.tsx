@@ -16,9 +16,10 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel } from '../theme/gazetteerAmbientNative';
 import * as ImagePicker from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { persistAuthToken } from '../utils/authTokenBridge';
 import { useAuth } from '../context/Auth';
-import { loginUser, registerUser, mapLaravelUserToAppFields } from '../api/client';
+import { loginUser, registerUser, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
+import { persistAuthToken } from '../utils/authTokenBridge';
+import { resetRootToScreen, rootNavigationRef } from '../navigation/rootNavigationRef';
 import { buildGazetteerHandle } from '../utils/gazetteerHandle';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import Avatar from '../components/Avatar';
@@ -63,7 +64,14 @@ export default function LoginScreen({ navigation, route }: any) {
     const [acceptedGuidelines, setAcceptedGuidelines] = useState(false);
     const [keyboardOpen, setKeyboardOpen] = useState(false);
     const [forgotOpen, setForgotOpen] = useState(false);
+    const [forgotStep, setForgotStep] = useState<1 | 2>(1);
     const [forgotEmail, setForgotEmail] = useState('');
+    const [forgotCode, setForgotCode] = useState('');
+    const [forgotDebugCode, setForgotDebugCode] = useState('');
+    const [forgotPassword, setForgotPassword] = useState('');
+    const [forgotConfirm, setForgotConfirm] = useState('');
+    const [forgotBusy, setForgotBusy] = useState(false);
+    const [forgotError, setForgotError] = useState('');
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -112,16 +120,27 @@ export default function LoginScreen({ navigation, route }: any) {
     }, []);
 
     const goToFeed = () => {
+        if (rootNavigationRef.isReady()) {
+            resetRootToScreen('MainTabs');
+            return;
+        }
         navigation.replace('MainTabs', { screen: 'Home' });
     };
 
     const enterLiveSession = async (nextUser: any) => {
-        login(nextUser);
+        try {
+            login(nextUser);
+        } catch (sessionErr: any) {
+            setErrorText(String(sessionErr?.message || 'Could not start session. Try login again.'));
+            setBusy(false);
+            return;
+        }
         try {
             const { isMockMode } = await import('../api/apiMode');
             if (!isMockMode()) {
-                const { clearLocalFeedPostsStorage } = await import('../api/posts');
-                await clearLocalFeedPostsStorage();
+                void import('../api/postsStorage.native')
+                    .then((m) => m.clearCorruptPostsStorageNative())
+                    .catch(() => {});
             }
         } catch {
             /* ignore */
@@ -242,12 +261,112 @@ export default function LoginScreen({ navigation, route }: any) {
         await AsyncStorage.setItem(LOCAL_REGISTRATIONS_KEY, JSON.stringify(next));
     };
 
+    const sessionUserFromApi = (apiUser: Record<string, unknown>, fallbackEmail: string) => {
+        const mapped = mapLaravelUserToAppFields(apiUser);
+        const fallbackName = String(mapped.name || fallbackEmail.split('@')[0] || 'User');
+        return {
+            name: fallbackName,
+            email: String(mapped.email || fallbackEmail).trim(),
+            password: '',
+            local: String(mapped.local || ''),
+            regional: String(mapped.regional || ''),
+            national: String(mapped.national || ''),
+            handle: String(mapped.handle || `${fallbackName}@Unknown`),
+            countryFlag: String(mapped.countryFlag || ''),
+            id: mapped.id,
+            avatarUrl: mapped.avatarUrl,
+            bio: mapped.bio,
+            socialLinks: mapped.socialLinks,
+            placesTraveled: mapped.placesTraveled,
+            accountType: mapped.accountType,
+            is_private: mapped.is_private,
+        };
+    };
+
+    const handleForgotSendCode = async () => {
+        setForgotError('');
+        const identifier = forgotEmail.trim();
+        if (!identifier) {
+            setForgotError('Enter your email or handle.');
+            return;
+        }
+        setForgotBusy(true);
+        try {
+            const res = await requestPasswordResetCode(identifier);
+            setForgotDebugCode(String(res.debug_code || ''));
+            if (res.debug_code) {
+                setForgotCode(String(res.debug_code));
+            }
+            setForgotStep(2);
+        } catch (err: any) {
+            const msg = String(err?.message || 'Could not send code');
+            const isConnection =
+                err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+            setForgotError(
+                isConnection
+                    ? 'Cannot reach the server. Check Laravel is running.'
+                    : msg,
+            );
+        } finally {
+            setForgotBusy(false);
+        }
+    };
+
+    const handleForgotSubmit = async () => {
+        setForgotError('');
+        const identifier = forgotEmail.trim();
+        const code = forgotCode.replace(/\D/g, '');
+        if (!identifier) {
+            setForgotError('Enter your email or handle.');
+            return;
+        }
+        if (code.length !== 6) {
+            setForgotError('Enter the 6-digit code.');
+            return;
+        }
+        if (forgotPassword.length < 8) {
+            setForgotError('New password must be at least 8 characters.');
+            return;
+        }
+        if (forgotPassword !== forgotConfirm) {
+            setForgotError('Passwords do not match.');
+            return;
+        }
+        setForgotBusy(true);
+        try {
+            const response = await resetPasswordWithCode(identifier, code, forgotPassword);
+            if (response?.token) {
+                await persistAuthToken(response.token);
+            }
+            await saveLocalRegistration(
+                String(response.user?.email || identifier),
+                forgotPassword,
+                sessionUserFromApi(response.user || {}, identifier),
+            );
+            setForgotOpen(false);
+            setLoginEmail(identifier);
+            setLoginPassword(forgotPassword);
+            await enterLiveSession(sessionUserFromApi(response.user || {}, identifier));
+        } catch (err: any) {
+            const msg = String(err?.message || 'Could not reset password');
+            const isConnection =
+                err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+            setForgotError(
+                isConnection
+                    ? 'Cannot reach the server. Check Laravel is running.'
+                    : msg,
+            );
+        } finally {
+            setForgotBusy(false);
+        }
+    };
+
     const handleLoginSubmit = async () => {
         setErrorText('');
         setFieldErrors({});
         const nextErrors: Record<string, string> = {};
         if (!loginEmail || !loginPassword) {
-            if (!loginEmail) nextErrors.loginEmail = 'Email is required.';
+            if (!loginEmail) nextErrors.loginEmail = 'Email or handle is required.';
             if (!loginPassword) nextErrors.loginPassword = 'Password is required.';
         }
         if (Object.keys(nextErrors).length > 0) {
@@ -262,26 +381,7 @@ export default function LoginScreen({ navigation, route }: any) {
                 await persistAuthToken(response.token);
             }
             const apiUser = response?.user || {};
-            const mapped = mapLaravelUserToAppFields(apiUser);
-            const fallbackName = String(mapped.name || loginEmail.split('@')[0] || 'User');
-            const mergedUser = {
-                name: fallbackName,
-                email: loginEmail.trim(),
-                password: '',
-                local: String(mapped.local || ''),
-                regional: String(mapped.regional || ''),
-                national: String(mapped.national || ''),
-                handle: String(mapped.handle || `${fallbackName}@Unknown`),
-                countryFlag: String(mapped.countryFlag || ''),
-                id: mapped.id,
-                avatarUrl: mapped.avatarUrl,
-                bio: mapped.bio,
-                socialLinks: mapped.socialLinks,
-                placesTraveled: mapped.placesTraveled,
-                accountType: mapped.accountType,
-                is_private: mapped.is_private,
-            };
-            await enterLiveSession(mergedUser);
+            await enterLiveSession(sessionUserFromApi(apiUser, loginEmail.trim()));
             return;
         } catch (err: any) {
             // Live Laravel mode: do not silently log in without a Sanctum token (create/upload → 401).
@@ -293,6 +393,13 @@ export default function LoginScreen({ navigation, route }: any) {
                     err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
                 if (isConnection) {
                     setErrorText('Cannot reach the server. Check Laravel is running and try again.');
+                    setBusy(false);
+                    return;
+                }
+                if (err?.status === 401 || msg.toLowerCase().includes('invalid')) {
+                    setErrorText(
+                        'Invalid email or password. Use the Gazetteer password you created (not Gmail), or your handle like Name@Place.',
+                    );
                     setBusy(false);
                     return;
                 }
@@ -366,7 +473,7 @@ export default function LoginScreen({ navigation, route }: any) {
 
                 setErrorText(
                     msg.includes('Invalid')
-                        ? 'Invalid email or password. If this is your first time on the live server, tap Sign up.'
+                        ? 'Invalid email or password. Use the Gazetteer password you created (not Gmail), or your handle like Name@Place.'
                         : msg,
                 );
                 setBusy(false);
@@ -488,8 +595,19 @@ export default function LoginScreen({ navigation, route }: any) {
                 await persistAuthToken(apiResponse.token);
             }
             const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
+            const photoUri = profilePicture;
+            let hostedAvatar = mapped.avatarUrl as string | undefined;
+            if (photoUri) {
+                const { persistLocalAvatarToLaravel } = await import('../utils/syncHostedAvatar');
+                hostedAvatar =
+                    (await Promise.race([
+                        persistLocalAvatarToLaravel(handle, photoUri),
+                        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 12000)),
+                    ])) || hostedAvatar;
+            }
             const mergedUser = {
                 ...userData,
+                password: '',
                 id: mapped.id ?? userData.handle,
                 handle: String(mapped.handle || userData.handle),
                 name: String(mapped.name || userData.name),
@@ -497,12 +615,19 @@ export default function LoginScreen({ navigation, route }: any) {
                 local: String(mapped.local || userData.local || '').trim(),
                 regional: String(mapped.regional || userData.regional || '').trim(),
                 national: String(mapped.national || userData.national || '').trim(),
-                avatarUrl: mapped.avatarUrl || userData.avatarUrl,
+                avatarUrl: hostedAvatar || userData.avatarUrl,
                 accountType: (mapped.accountType as 'personal' | 'business') || userData.accountType,
                 is_private: mapped.is_private,
             };
             await saveLocalRegistration(email.trim(), password, mergedUser);
             await enterLiveSession(mergedUser);
+            if (photoUri && !hostedAvatar) {
+                void import('../utils/syncHostedAvatar').then(({ persistLocalAvatarToLaravel }) =>
+                    persistLocalAvatarToLaravel(handle, photoUri).then((url) => {
+                        if (url) login({ ...mergedUser, avatarUrl: url });
+                    }),
+                );
+            }
             return;
         } catch (err: any) {
             const { isMockMode } = await import('../api/apiMode');
@@ -621,30 +746,45 @@ export default function LoginScreen({ navigation, route }: any) {
                             <TextInput
                                 value={loginEmail}
                                 onChangeText={setLoginEmail}
-                                placeholder="Email"
+                                placeholder="Email or handle"
                                 placeholderTextColor="#9CA3AF"
                                 style={styles.input}
                                 keyboardType="email-address"
                                 autoCapitalize="none"
-                                autoComplete="email"
+                                autoCorrect={false}
+                                autoComplete="off"
+                                textContentType="username"
                             />
                             {!!getFieldError('loginEmail') && <Text style={styles.fieldErrorText}>{getFieldError('loginEmail')}</Text>}
                             <View style={styles.passwordField}>
                                 <TextInput
                                     value={loginPassword}
                                     onChangeText={setLoginPassword}
-                                    placeholder="Password (8+ characters)"
+                                    placeholder="Gazetteer password"
                                     placeholderTextColor="#9CA3AF"
                                     style={[styles.input, styles.passwordInput]}
                                     secureTextEntry={!showLoginPassword}
-                                    autoComplete="password"
+                                    autoComplete="off"
+                                    textContentType="password"
+                                    autoCorrect={false}
                                 />
                                 <TouchableOpacity style={styles.eyeOverlay} onPress={() => setShowLoginPassword((v) => !v)}>
                                     <Icon name={showLoginPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </View>
                             {!!getFieldError('loginPassword') && <Text style={styles.fieldErrorText}>{getFieldError('loginPassword')}</Text>}
-                            <TouchableOpacity onPress={() => setForgotOpen(true)}>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    setForgotEmail(loginEmail.trim());
+                                    setForgotStep(1);
+                                    setForgotCode('');
+                                    setForgotDebugCode('');
+                                    setForgotPassword('');
+                                    setForgotConfirm('');
+                                    setForgotError('');
+                                    setForgotOpen(true);
+                                }}
+                            >
                                 <Text style={styles.forgotText}>Forgot password?</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -1162,28 +1302,88 @@ export default function LoginScreen({ navigation, route }: any) {
             <Modal visible={forgotOpen} transparent animationType="fade" onRequestClose={() => setForgotOpen(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.forgotModalCard}>
-                        <Text style={styles.forgotTitle}>Reset password</Text>
-                        <TextInput
-                            value={forgotEmail}
-                            onChangeText={setForgotEmail}
-                            placeholder="Enter your email"
-                            placeholderTextColor="#9CA3AF"
-                            style={styles.input}
-                            keyboardType="email-address"
-                            autoCapitalize="none"
-                        />
+                        <Text style={styles.forgotTitle}>
+                            {forgotStep === 1 ? 'Forgot password' : 'Enter code'}
+                        </Text>
+                        <Text style={styles.forgotHint}>
+                            {forgotStep === 1
+                                ? 'We’ll send a 6-digit code. Without Mailgun it shows on this screen.'
+                                : forgotDebugCode
+                                  ? `No email yet — your code is ${forgotDebugCode}`
+                                  : 'Enter the 6-digit code, then choose a new password.'}
+                        </Text>
+                        {forgotStep === 1 ? (
+                            <TextInput
+                                value={forgotEmail}
+                                onChangeText={setForgotEmail}
+                                placeholder="Email or handle"
+                                placeholderTextColor="#9CA3AF"
+                                style={styles.input}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                            />
+                        ) : (
+                            <>
+                                <TextInput
+                                    value={forgotCode}
+                                    onChangeText={setForgotCode}
+                                    placeholder="6-digit code"
+                                    placeholderTextColor="#9CA3AF"
+                                    style={styles.input}
+                                    keyboardType="number-pad"
+                                    maxLength={6}
+                                    autoCorrect={false}
+                                />
+                                <TextInput
+                                    value={forgotPassword}
+                                    onChangeText={setForgotPassword}
+                                    placeholder="New password (8+ characters)"
+                                    placeholderTextColor="#9CA3AF"
+                                    style={styles.input}
+                                    secureTextEntry
+                                    autoCapitalize="none"
+                                />
+                                <TextInput
+                                    value={forgotConfirm}
+                                    onChangeText={setForgotConfirm}
+                                    placeholder="Confirm new password"
+                                    placeholderTextColor="#9CA3AF"
+                                    style={styles.input}
+                                    secureTextEntry
+                                    autoCapitalize="none"
+                                />
+                            </>
+                        )}
+                        {!!forgotError && <Text style={styles.errorText}>{forgotError}</Text>}
                         <View style={styles.forgotActions}>
-                            <TouchableOpacity style={styles.backButton} onPress={() => setForgotOpen(false)}>
-                                <Text style={styles.backButtonText}>Cancel</Text>
+                            <TouchableOpacity
+                                style={styles.backButton}
+                                onPress={() => {
+                                    if (forgotStep === 2) {
+                                        setForgotStep(1);
+                                        setForgotError('');
+                                        return;
+                                    }
+                                    setForgotOpen(false);
+                                }}
+                            >
+                                <Text style={styles.backButtonText}>{forgotStep === 2 ? 'Back' : 'Cancel'}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.submitButton}
                                 onPress={() => {
-                                    setForgotOpen(false);
-                                    Alert.alert('Password reset', 'If an account exists, reset instructions were sent.');
+                                    void (forgotStep === 1 ? handleForgotSendCode() : handleForgotSubmit());
                                 }}
+                                disabled={forgotBusy}
                             >
-                                <Text style={styles.submitButtonText}>Send link</Text>
+                                <Text style={styles.submitButtonText}>
+                                    {forgotBusy
+                                        ? 'Please wait…'
+                                        : forgotStep === 1
+                                          ? 'Send code'
+                                          : 'Save and log in'}
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1950,6 +2150,12 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: ox(16),
         fontWeight: '700',
+    },
+    forgotHint: {
+        color: '#9CA3AF',
+        fontSize: ox(12),
+        lineHeight: ox(16),
+        marginBottom: ox(4),
     },
     forgotActions: {
         flexDirection: 'row',

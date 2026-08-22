@@ -140,6 +140,9 @@ Route::get('/search/places/details', [LocationController::class, 'details']);
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/password/reset-local', [AuthController::class, 'resetPasswordLocal']);
+    Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
+    Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 });
 
 // Public music routes (no auth required)

@@ -51,11 +51,81 @@ class AuthControllerTest extends TestCase
         ]);
     }
 
+    public function test_can_register_then_login_with_same_password(): void
+    {
+        $this->postJson('/api/auth/register', [
+            'username' => 'pariscork',
+            'email' => 'Paris.User@example.com',
+            'password' => 'gazetteerpass',
+            'password_confirmation' => 'gazetteerpass',
+            'displayName' => 'Paris',
+            'handle' => 'Paris@CountyCork',
+        ])->assertStatus(201);
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'paris.user@example.com',
+            'password' => 'gazetteerpass',
+        ])->assertOk()->assertJsonPath('user.email', 'paris.user@example.com');
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'Paris@CountyCork',
+            'password' => 'gazetteerpass',
+        ])->assertOk()->assertJsonPath('user.handle', 'Paris@CountyCork');
+    }
+
+    public function test_password_reset_with_code_logs_in(): void
+    {
+        User::factory()->create([
+            'email' => 'otp@example.com',
+            'handle' => 'Otp@Dublin',
+            'password' => 'oldpassword',
+        ]);
+
+        $forgot = $this->postJson('/api/auth/password/forgot', [
+            'email' => 'Otp@Dublin',
+        ]);
+        $forgot->assertOk()->assertJsonStructure(['ok', 'debug_code']);
+        $code = $forgot->json('debug_code');
+        $this->assertMatchesRegularExpression('/^\d{6}$/', (string) $code);
+
+        $this->postJson('/api/auth/password/reset', [
+            'email' => 'otp@example.com',
+            'code' => $code,
+            'password' => 'newpassword',
+            'password_confirmation' => 'newpassword',
+        ])->assertOk()->assertJsonStructure(['user' => ['email'], 'token']);
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'otp@example.com',
+            'password' => 'newpassword',
+        ])->assertOk();
+    }
+
+    public function test_local_password_reset_logs_in(): void
+    {
+        User::factory()->create([
+            'email' => 'resetme@example.com',
+            'handle' => 'Reset@Dublin',
+            'password' => 'oldpassword',
+        ]);
+
+        $this->postJson('/api/auth/password/reset-local', [
+            'email' => 'resetme@example.com',
+            'password' => 'newpassword',
+            'password_confirmation' => 'newpassword',
+        ])->assertOk()->assertJsonStructure(['user' => ['email'], 'token']);
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'Reset@Dublin',
+            'password' => 'newpassword',
+        ])->assertOk();
+    }
+
     public function test_can_login_and_receive_token(): void
     {
         $user = User::factory()->create([
             'email' => 'login@example.com',
-            'password' => bcrypt('secret123'),
+            'password' => 'secret123',
         ]);
 
         $response = $this->postJson('/api/auth/login', [

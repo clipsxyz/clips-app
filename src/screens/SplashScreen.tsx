@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -20,7 +20,7 @@ const EXIT_FADE_MS = 500;
  * Cold-start welcome (native): passport ambient + centered brand + time greeting.
  */
 export default function SplashScreen({ navigation }: { navigation: any }) {
-  const { user } = useAuth();
+  const { user, sessionReady } = useAuth();
   const { width: screenW, height: screenH } = Dimensions.get('window');
   const greeting = useMemo(
     () => getSplashGreetingLine(user?.name ?? null),
@@ -38,22 +38,24 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
   const taglineTranslateY = useRef(new Animated.Value(12)).current;
   const screenOpacity = useRef(new Animated.Value(1)).current;
   const finishedRef = useRef(false);
-  const userRef = useRef(user);
-  userRef.current = user;
+  const [introDone, setIntroDone] = useState(false);
+
+  useEffect(() => {
+    if (!introDone || !sessionReady || finishedRef.current) return;
+    finishedRef.current = true;
+    if (user) {
+      navigation.replace('MainTabs');
+    } else {
+      navigation.replace('Landing');
+    }
+  }, [introDone, sessionReady, user, navigation]);
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     let pulseLoop: Animated.CompositeAnimation | null = null;
 
     const goNext = () => {
-      if (finishedRef.current) return;
-      finishedRef.current = true;
-      pulseLoop?.stop();
-      if (userRef.current) {
-        navigation.replace('MainTabs');
-      } else {
-        navigation.replace('Landing');
-      }
+      setIntroDone(true);
     };
 
     // Brand: rise + scale settle into center

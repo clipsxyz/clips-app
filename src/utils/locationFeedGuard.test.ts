@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { postMatchesLocationTab } from '../api/posts';
+import { postMatchesLocationTab, transformLaravelPost } from '../api/posts';
 import {
     filterPostsForLocationFeed,
     findLocationFeedLeaks,
@@ -107,5 +107,61 @@ describe('locationFeedGuard', () => {
         expect(filterPostsForLocationFeed([finglasVideo], 'dublin')).toHaveLength(1);
         expect(filterPostsForLocationFeed([finglasVideo], 'ireland')).toHaveLength(1);
         expect(findLocationFeedLeaks([finglasVideo], 'dublin')).toEqual([]);
+    });
+
+    it('keeps a Cork author on Ireland news but not Dublin', () => {
+        const corkAuthor = post({
+            id: 'cork-local',
+            userHandle: 'paris@cork',
+            locationLabel: 'Cork',
+            userLocal: 'Cork',
+            userRegional: 'Cork',
+            userNational: 'Ireland',
+        });
+        expect(postMatchesLocationTab(corkAuthor, 'ireland')).toBe(true);
+        expect(postMatchesLocationTab(corkAuthor, 'cork')).toBe(true);
+        expect(postMatchesLocationTab(corkAuthor, 'dublin')).toBe(false);
+        expect(postMatchesLocationTab(corkAuthor, 'paris')).toBe(false);
+        expect(filterPostsForLocationFeed([corkAuthor], 'ireland')).toHaveLength(1);
+    });
+
+    it('keeps a Cork author on Ireland even when national is blank', () => {
+        const corkOnly = post({
+            id: 'cork-blank-national',
+            userHandle: 'paris@cork',
+            locationLabel: 'Cork',
+            userLocal: 'Cork',
+            userRegional: 'Cork',
+            userNational: '',
+        });
+        expect(postMatchesLocationTab(corkOnly, 'ireland')).toBe(true);
+        expect(postMatchesLocationTab(corkOnly, 'dublin')).toBe(false);
+    });
+
+    it('never treats the name before @ as a location', () => {
+        const parisInCork = transformLaravelPost({
+            id: 'name-paris-place-cork',
+            user_handle: 'Paris@Cork',
+        });
+        expect(parisInCork.userLocal).toBe('Cork');
+        expect(parisInCork.userNational).toBe('Ireland');
+        expect(postMatchesLocationTab(parisInCork, 'ireland')).toBe(true);
+        expect(postMatchesLocationTab(parisInCork, 'paris')).toBe(false);
+        expect(postMatchesLocationTab(parisInCork, 'dublin')).toBe(false);
+
+        const irelandInCork = transformLaravelPost({
+            id: 'name-ireland-place-cork',
+            user_handle: 'Ireland@Cork',
+        });
+        expect(irelandInCork.userLocal).toBe('Cork');
+        expect(postMatchesLocationTab(irelandInCork, 'dublin')).toBe(false);
+
+        const dublinInCork = transformLaravelPost({
+            id: 'name-dublin-place-cork',
+            user_handle: 'dublin@cork',
+        });
+        expect(dublinInCork.userLocal).toBe('Cork');
+        expect(postMatchesLocationTab(dublinInCork, 'dublin')).toBe(false);
+        expect(postMatchesLocationTab(dublinInCork, 'cork')).toBe(true);
     });
 });

@@ -284,16 +284,32 @@ class Post extends Model
         }
 
         $needle = $raw;
+        $needleLower = strtolower($needle);
+        $irelandPlaces = [
+            'dublin', 'cork', 'galway', 'limerick', 'waterford', 'kilkenny', 'belfast',
+            'finglas', 'artane', 'ballymun',
+        ];
 
-        return $query->where(function ($q) use ($needle) {
+        return $query->where(function ($q) use ($needle, $needleLower, $irelandPlaces) {
             $q->where('location_label', 'LIKE', "%{$needle}%")
                 ->orWhere('venue', 'LIKE', "%{$needle}%")
                 ->orWhere('landmark', 'LIKE', "%{$needle}%")
                 ->orWhere('place_id', $needle)
-                ->orWhereHas('user', function ($uq) use ($needle) {
+                ->orWhereHas('user', function ($uq) use ($needle, $needleLower, $irelandPlaces) {
                     $uq->where('location_local', 'LIKE', "%{$needle}%")
                         ->orWhere('location_regional', 'LIKE', "%{$needle}%")
                         ->orWhere('location_national', 'LIKE', "%{$needle}%");
+
+                    // Ireland news is national: Cork/Galway authors belong even if
+                    // location_label is only "Cork" and national was left blank.
+                    if ($needleLower === 'ireland') {
+                        $uq->orWhere(function ($irelandQ) use ($irelandPlaces) {
+                            foreach ($irelandPlaces as $place) {
+                                $irelandQ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$place])
+                                    ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$place]);
+                            }
+                        });
+                    }
                 });
         });
     }
@@ -313,10 +329,18 @@ class Post extends Model
         return trim($primary);
     }
 
+    /**
+     * Posts authored (or reclipped) by accounts this viewer follows.
+     * Query user_follows directly — nested whereHas/wherePivot has silently
+     * returned an empty feed across SQLite and handle-mismatch bugs.
+     */
     public function scopeFollowing($query, $userId)
     {
-        return $query->whereHas('user.followers', function ($q) use ($userId) {
-            $q->where('follower_id', $userId);
+        return $query->whereIn('posts.user_id', function ($sub) use ($userId) {
+            $sub->select('following_id')
+                ->from('user_follows')
+                ->where('follower_id', $userId)
+                ->where('status', 'accepted');
         });
     }
 

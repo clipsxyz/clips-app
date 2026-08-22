@@ -9,13 +9,15 @@ import {
 } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { isMockMode } from './apiMode';
-import { getApiBaseUrl } from './apiBaseUrl';
+import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
+import { setAvatarForHandle } from './users';
+import { regionalFromHandle } from '../utils/gazetteerHandle';
 import {
   createFollowRequest,
   hasPendingFollowRequest,
@@ -57,58 +59,35 @@ const AVA_DEMO_TALL_MEDIA_URL = 'https://images.unsplash.com/photo-1514996937319
 
 // Helper function to get user location data from handle
 function getUserLocationFromHandle(userHandle: string): { local: string; regional: string; national: string } {
-  const handleLower = userHandle.toLowerCase();
-
-  // Extract location from handle (check after @ symbol)
-  const afterAt = handleLower.split('@')[1] || '';
-
-  if (afterAt.includes('finglas')) {
-    return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('artane')) {
-    return { local: 'Artane', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('dublin')) {
-    return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('ireland')) {
-    return { local: 'Various', regional: 'Various', national: 'Ireland' };
-  } else if (afterAt.includes('ballymun')) {
-    return { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('newyork') || afterAt.includes('new york')) {
-    return { local: 'New York', regional: 'New York', national: 'USA' };
-  } else if (afterAt.includes('london')) {
-    return { local: 'London', regional: 'London', national: 'UK' };
-  } else if (afterAt.includes('paris')) {
-    return { local: 'Paris', regional: 'Paris', national: 'France' };
-  } else if (afterAt.includes('tokyo')) {
-    return { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' };
-  } else if (afterAt.includes('sydney')) {
-    return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
+  // Name@Place — only the token after @ is a location. Never scan the name
+  // (Paris@Cork is Cork; Ireland@Dublin is Dublin).
+  const place = regionalFromHandle(userHandle)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  if (!place) {
+    return { local: '', regional: '', national: '' };
   }
 
-  // Fallback: check entire handle (for backward compatibility)
-  if (handleLower.includes('finglas')) {
-    return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('artane')) {
-    return { local: 'Artane', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('dublin')) {
-    return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('ireland')) {
-    return { local: 'Various', regional: 'Various', national: 'Ireland' };
-  } else if (handleLower.includes('ballymun')) {
-    return { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('newyork') || handleLower.includes('new york')) {
-    return { local: 'New York', regional: 'New York', national: 'USA' };
-  } else if (handleLower.includes('london')) {
-    return { local: 'London', regional: 'London', national: 'UK' };
-  } else if (handleLower.includes('paris')) {
-    return { local: 'Paris', regional: 'Paris', national: 'France' };
-  } else if (handleLower.includes('tokyo')) {
-    return { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' };
-  } else if (handleLower.includes('sydney')) {
-    return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
-  }
+  const fromPlace: Record<string, { local: string; regional: string; national: string }> = {
+    finglas: { local: 'Finglas', regional: 'Dublin', national: 'Ireland' },
+    artane: { local: 'Artane', regional: 'Dublin', national: 'Ireland' },
+    ballymun: { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' },
+    dublin: { local: 'Dublin', regional: 'Dublin', national: 'Ireland' },
+    cork: { local: 'Cork', regional: 'Cork', national: 'Ireland' },
+    galway: { local: 'Galway', regional: 'Galway', national: 'Ireland' },
+    limerick: { local: 'Limerick', regional: 'Limerick', national: 'Ireland' },
+    waterford: { local: 'Waterford', regional: 'Waterford', national: 'Ireland' },
+    kilkenny: { local: 'Kilkenny', regional: 'Kilkenny', national: 'Ireland' },
+    belfast: { local: 'Belfast', regional: 'Belfast', national: 'Ireland' },
+    ireland: { local: 'Various', regional: 'Various', national: 'Ireland' },
+    newyork: { local: 'New York', regional: 'New York', national: 'USA' },
+    london: { local: 'London', regional: 'London', national: 'UK' },
+    paris: { local: 'Paris', regional: 'Paris', national: 'France' },
+    tokyo: { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' },
+    sydney: { local: 'Sydney', regional: 'NSW', national: 'Australia' },
+  };
 
-  // Default - return empty locations
-  return { local: '', regional: '', national: '' };
+  return fromPlace[place] || { local: '', regional: '', national: '' };
 }
 
 /**
@@ -148,6 +127,18 @@ const LOCATION_CITIES = new Set([
 ]);
 
 const DUBLIN_LOCAL_AREAS = new Set(['finglas', 'artane', 'ballymun']);
+/** Places whose authors belong on the Ireland news tab (not Dublin-only). */
+const IRELAND_AUTHOR_PLACES = new Set([
+  'ireland',
+  'dublin',
+  'cork',
+  'galway',
+  'limerick',
+  'waterford',
+  'kilkenny',
+  'belfast',
+  ...DUBLIN_LOCAL_AREAS,
+]);
 
 function toLocationLabelCase(value?: string): string {
   const trimmed = (value || '').trim();
@@ -187,7 +178,11 @@ function resolveAuthorLocations(input: {
   }
 
   if (!national) {
-    if (regionalLower === 'dublin' || DUBLIN_LOCAL_AREAS.has(localLower)) {
+    if (
+      IRELAND_AUTHOR_PLACES.has(localLower) ||
+      IRELAND_AUTHOR_PLACES.has(regionalLower) ||
+      DUBLIN_LOCAL_AREAS.has(localLower)
+    ) {
       national = 'Ireland';
     } else if (regionalLower === 'new york' || localLower === 'new york') {
       national = 'USA';
@@ -975,6 +970,7 @@ export async function hydrateFollowsStorage(userId: string): Promise<void> {
       // Keep getState() cache in sync — it may already exist before AsyncStorage resolves.
       if (userState[uid]) {
         userState[uid].follows = { ...follows, ...userState[uid].follows };
+        collapseFollowKeys(userState[uid].follows);
       }
     }
   } catch {
@@ -1054,6 +1050,7 @@ export function getState(userId: string): UserState {
       lastViewed: {}
     };
   }
+  collapseFollowKeys(userState[uid].follows);
   return userState[uid];
 }
 
@@ -1065,6 +1062,8 @@ export type Page = {
   fromMock?: boolean;
   /** True when Laravel was skipped because the backend was unreachable this session. */
   laravelBypassed?: boolean;
+  /** Accepted follows for the viewer (Following tab empty-state). */
+  followingCount?: number;
 };
 
 function isFirstFeedPageCursor(cursor: string | number | null): boolean {
@@ -1091,23 +1090,63 @@ export function hasExplicitFollowState(
   return Object.keys(follows).some((k) => k.toLowerCase() === lower);
 }
 
+/** Collapse case-variant keys. Explicit `false` wins so unfollow is not resurrected. */
+function collapseFollowKeys(follows: Record<string, boolean>): void {
+  const byLower = new Map<string, { key: string; on: boolean }>();
+  for (const [raw, val] of Object.entries(follows)) {
+    const key = String(raw || '').trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    const on = val === true;
+    const prev = byLower.get(lower);
+    if (!prev) {
+      byLower.set(lower, { key, on });
+    } else {
+      prev.on = prev.on && on;
+    }
+  }
+  for (const k of Object.keys(follows)) delete follows[k];
+  for (const { key, on } of byLower.values()) {
+    follows[key] = on;
+  }
+}
+
 /** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates.
  *  Unfollow stores `false` (does not delete) so decorateForUser won't fall back to a stale post.isFollowing. */
 function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
-  const lower = handle.toLowerCase();
-  const existingKey = Object.keys(follows).find(k => k.toLowerCase() === lower);
-  if (existingKey) {
-    follows[existingKey] = isFollowing;
-    return;
+  const trimmed = String(handle || '').trim();
+  if (!trimmed) return;
+  const lower = trimmed.toLowerCase();
+  for (const k of Object.keys(follows)) {
+    if (k.toLowerCase() === lower) delete follows[k];
   }
-  follows[handle] = isFollowing;
+  follows[trimmed] = isFollowing;
+}
+
+function emitFollowStateChanged(handle: string, following: boolean): void {
+  try {
+    void import('../utils/dispatchBrowserEvent').then((m) => {
+      m.dispatchBrowserEvent('followStateChanged', { handle, following });
+    });
+  } catch {
+    /* native/web */
+  }
+  // Unfollow: do not refetch the rail — a stale GET can put the postcard back.
+  if (!following) return;
+  try {
+    void import('../utils/storiesRefreshNative').then((m) => {
+      m.emitStoriesRefresh();
+    });
+  } catch {
+    /* rail + avatar rings refresh on follow */
+  }
 }
 
 // Get list of user handles that the current user follows
 export async function getFollowedUsers(userId: string): Promise<string[]> {
   await delay();
   const s = getState(userId);
-  return Object.keys(s.follows).filter(handle => s.follows[handle] === true);
+  return Object.keys(s.follows).filter((handle) => s.follows[handle] === true);
 }
 
 // Explicitly set follow state for a given handle. Persists to localStorage.
@@ -1116,6 +1155,41 @@ export function setFollowState(userId: string, handle: string, isFollowing: bool
   const s = getState(uid);
   setFollowStateKey(s.follows, handle, isFollowing);
   saveFollowsToStorage(uid, s.follows);
+  emitFollowStateChanged(handle, isFollowing);
+}
+
+/** Replace local follow cache with the server list. Laravel is the source of truth. */
+export function replaceFollowsFromHandles(userId: string, handles: string[]): void {
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  const next: Record<string, boolean> = {};
+  for (const raw of handles) {
+    const handle = String(raw || '').trim();
+    if (handle) setFollowStateKey(next, handle, true);
+  }
+  const s = getState(uid);
+  s.follows = next;
+  saveFollowsToStorage(uid, next);
+}
+
+/** Pull accepted follows from Laravel so the Following tab and +/check stay aligned. */
+export async function syncFollowsFromLaravel(userId: string, viewerHandle: string): Promise<void> {
+  if (isMockMode()) return;
+  const handle = String(viewerHandle || '').trim();
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  if (!uid || !handle) return;
+  const collected: string[] = [];
+  let cursor: string | number | null = 0;
+  for (let page = 0; page < 8; page += 1) {
+    const res = await apiClient.fetchFollowing(handle, cursor, 50);
+    const items = Array.isArray(res?.items) ? res.items : [];
+    for (const row of items) {
+      const rowHandle = row?.handle ?? row?.userHandle;
+      if (rowHandle) collected.push(String(rowHandle));
+    }
+    if (!res?.nextCursor || items.length === 0) break;
+    cursor = res.nextCursor;
+  }
+  replaceFollowsFromHandles(uid, collected);
 }
 
 /** Set whether the user has reclipped a post (so decorateForUser shows green). Used for optimistic UI. */
@@ -1228,6 +1302,32 @@ function syncLocalLikesFromApi(
   }
 }
 
+/** Adopt Laravel is_following onto the local map so unfollow sees the same state as the checkmark. */
+function syncLocalFollowsFromApi(userId: string, rows: Post[]): void {
+  if (isMockMode() || !userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  let changed = false;
+  for (const p of rows) {
+    if (!p.userHandle) continue;
+    const apiFollowing = p.isFollowing === true;
+    const localFollowing = getFollowState(s.follows, p.userHandle);
+    const explicit = hasExplicitFollowState(s.follows, p.userHandle);
+    if (apiFollowing) {
+      // Explicit unfollow wins over a stale feed row that still has is_following.
+      if (explicit && !localFollowing) continue;
+      if (localFollowing) continue;
+      setFollowStateKey(s.follows, p.userHandle, true);
+      changed = true;
+      continue;
+    }
+    if (explicit && localFollowing) {
+      setFollowStateKey(s.follows, p.userHandle, false);
+      changed = true;
+    }
+  }
+  if (changed) saveFollowsToStorage(userId, s.follows);
+}
+
 function normalizeCaptionFields<T extends Post>(post: T): T {
   const pick = (...vals: Array<unknown>): string | undefined => {
     for (const v of vals) {
@@ -1256,9 +1356,10 @@ function normalizeCaptionFields<T extends Post>(post: T): T {
   return normalized as T;
 }
 
-/** Rewrite localhost media URLs so they work when opening app from phone on network */
+/** Rewrite localhost / relative media URLs so they load on device. */
 function rewriteMediaUrlForNetwork(url: string): string {
   if (!url || typeof url !== 'string') return url;
+  const resolved = resolvePublicMediaUrl(url) || url;
 
   // RN polyfills `window` without a real `location` — never read `.hostname` blindly.
   let browserHost = '';
@@ -1292,10 +1393,10 @@ function rewriteMediaUrlForNetwork(url: string): string {
 
   // Physical device + adb reverse: keep localhost media URLs as-is.
   if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
-    return url;
+    return resolved;
   }
 
-  return url
+  return resolved
     .replace(/http:\/\/localhost:8000\//g, `http://${targetHost}:8000/`)
     .replace(/https:\/\/localhost:8000\//g, `https://${targetHost}:8000/`)
     .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${targetHost}:8000/`);
@@ -1362,16 +1463,42 @@ export function transformLaravelPost(response: any): Post {
   const existing = posts.find((p) => String(p.id) === String(response.id));
 
   const normalizedLocations = resolveAuthorLocations({
-    userHandle: response.user_handle || response.userHandle,
-    userLocal: response.user?.local || response.userLocal,
-    userRegional: response.user?.regional || response.userRegional,
-    userNational: response.user?.national || response.userNational,
+    userHandle: response.user_handle || response.userHandle || response.user?.handle,
+    userLocal:
+      response.user?.local ||
+      response.user?.location_local ||
+      response.userLocal,
+    userRegional:
+      response.user?.regional ||
+      response.user?.location_regional ||
+      response.userRegional,
+    userNational:
+      response.user?.national ||
+      response.user?.location_national ||
+      response.userNational,
   });
+
+  const authorHandle = String(
+    response.user?.handle || response.user_handle || response.userHandle || '',
+  ).trim();
+  const rawAuthorAvatar =
+    response.user?.avatar_url ||
+    response.user?.avatarUrl ||
+    response.avatar_url ||
+    response.avatarUrl;
+  const authorAvatarUrl =
+    typeof rawAuthorAvatar === 'string' && rawAuthorAvatar.trim()
+      ? rewriteMediaUrlForNetwork(rawAuthorAvatar.trim())
+      : undefined;
+  if (authorHandle && authorAvatarUrl) {
+    setAvatarForHandle(authorHandle, authorAvatarUrl);
+  }
 
   return {
     id: response.id,
     publicShareToken: response.public_share_token || response.publicShareToken,
-    userHandle: response.user_handle || response.userHandle,
+    user_id: response.user_id || response.userId || response.user?.id || existing?.user_id,
+    userHandle: authorHandle || response.user_handle || response.userHandle,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
@@ -1429,6 +1556,7 @@ export function transformLaravelPost(response: any): Post {
     subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled,
     subtitleText: response.subtitle_text || response.subtitleText,
     ...normalizedLocations,
+    userAvatarUrl: authorAvatarUrl,
     userAccountType:
       response.user?.account_type === 'business' || response.user?.account_type === 'personal'
         ? response.user.account_type
@@ -1738,8 +1866,13 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
     if (t === 'dublin') return userRegionalLower === 'dublin' || userLocalLower === 'dublin';
     if (t === 'ireland') {
       if (userNationalLower === 'ireland') return true;
-      // Match mock-feed rules: Dublin-area authors also appear on Ireland tab.
-      if (userRegionalLower === 'dublin' || userLocalLower === 'dublin') return true;
+      // National news: Cork/Galway/Dublin-area authors, not Dublin-only.
+      if (
+        IRELAND_AUTHOR_PLACES.has(userLocalLower) ||
+        IRELAND_AUTHOR_PLACES.has(userRegionalLower)
+      ) {
+        return true;
+      }
       return false;
     }
     return false;
@@ -1831,6 +1964,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined) as Promise<{
           items?: any[];
           nextCursor?: string | number | null;
+          followingCount?: number;
+          following_count?: number;
         }>,
       ]);
 
@@ -1910,13 +2045,20 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
       const uid = userId || 'me';
+      syncLocalFollowsFromApi(uid, items);
       syncLocalLikesFromApi(uid, items, { allowUnlike: true });
       items = items.map(p => decorateForUser(uid, p));
 
       return {
         items: items.map(normalizeCaptionFields),
         nextCursor: response?.nextCursor ?? null,
-        fromMock: false
+        fromMock: false,
+        followingCount:
+          typeof response?.followingCount === 'number'
+            ? response.followingCount
+            : typeof (response as { following_count?: number })?.following_count === 'number'
+              ? (response as { following_count: number }).following_count
+              : undefined,
       };
     } catch (error: any) {
       console.log('[fetchPostsPage/posts] live feed failed — returning empty (no mock fallback)', {
@@ -2043,10 +2185,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       const userRegionalLower = normalize(p.userRegional);
       const userNationalLower = normalize(p.userNational);
 
-      // For Ireland tab in mock mode, treat Dublin regional/local as Ireland when national is missing.
+      // For Ireland tab in mock mode, treat Irish cities as Ireland when national is missing.
       if (t === 'ireland') {
         if (userNationalLower === 'ireland') return true;
-        if (userNationalLower === '' && (userRegionalLower === 'dublin' || userLocalLower === 'dublin')) return true;
+        if (
+          IRELAND_AUTHOR_PLACES.has(userLocalLower) ||
+          IRELAND_AUTHOR_PLACES.has(userRegionalLower)
+        ) {
+          return true;
+        }
       }
 
       if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) return true;
@@ -2218,6 +2365,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       nextCursor: next,
       fromMock: true,
       laravelBypassed: isLaravelUnreachableThisSession(),
+      followingCount: Object.values(getFollowsForDiscover(userId)).filter(Boolean).length,
     };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
@@ -2389,6 +2537,7 @@ export async function toggleFollowForPost(
   id: string,
   userHandle?: string,
   viewerHandle?: string,
+  currentlyFollowing?: boolean,
 ): Promise<Post> {
   await delay(150);
   let p = posts.find(x => x.id === id);
@@ -2406,7 +2555,12 @@ export async function toggleFollowForPost(
     throw new Error('Post not found');
   }
   const s = getState(userId);
-  const wasFollowing = getFollowState(s.follows, handle);
+  // Visible checkmark (feed/API) wins over the local map. If we only used local
+  // state, a Laravel follow looked followed but the tap sent following:true again.
+  const wasFollowing =
+    typeof currentlyFollowing === 'boolean'
+      ? currentlyFollowing
+      : p?.isFollowing === true || getFollowState(s.follows, handle);
   const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
 
   // Private accounts: follow → request (not instant follow). Matches View Profile / Scenes.
@@ -2436,7 +2590,7 @@ export async function toggleFollowForPost(
       saveFollowsToStorage(userId, s.follows);
       if (!isMockMode()) {
         try {
-          await apiClient.toggleFollow(handle);
+          await apiClient.toggleFollow(handle, false);
         } catch {
           // Keep local cancel even if the server call fails.
         }
@@ -2457,7 +2611,7 @@ export async function toggleFollowForPost(
 
     if (!isMockMode()) {
       try {
-        const result = await apiClient.toggleFollow(handle);
+        const result = await apiClient.toggleFollow(handle, true);
         if (result?.status === 'pending') {
           createFollowRequest(viewer, handle);
           setFollowStateKey(s.follows, handle, false);
@@ -2523,7 +2677,7 @@ export async function toggleFollowForPost(
 
   if (!isMockMode()) {
     try {
-      const result = await apiClient.toggleFollow(handle);
+      const result = await apiClient.toggleFollow(handle, nextFollowing);
       if (result?.status === 'pending') {
         createFollowRequest(viewer, handle);
         setFollowStateKey(s.follows, handle, false);
@@ -2563,11 +2717,14 @@ export async function toggleFollowForPost(
       }
     } catch (err) {
       console.warn('[toggleFollowForPost] Laravel follow sync failed', err);
+      setFollowStateKey(s.follows, handle, wasFollowing);
+      saveFollowsToStorage(userId, s.follows);
     }
   }
 
   // Follow is per-author: keep every in-memory post for this handle aligned.
   const followingNow = getFollowState(s.follows, handle);
+  emitFollowStateChanged(handle, followingNow);
   const handleLower = handle.toLowerCase();
   for (const post of posts) {
     if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
@@ -3667,6 +3824,18 @@ export async function createPost(
       // Transform Laravel response using the same helper we use for feeds
       // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
       let transformed = transformLaravelPost(response);
+      const laravelHandle = String(
+        response?.user?.handle || response?.user_handle || response?.userHandle || '',
+      ).trim();
+      const laravelUserId = String(response?.user_id || response?.user?.id || '').trim();
+      if (laravelUserId && laravelUserId !== String(userId)) {
+        console.warn('[createPost/posts] Laravel author does not match local session', {
+          localUserId: userId,
+          localHandle: userHandle,
+          laravelUserId,
+          laravelHandle,
+        });
+      }
 
       // Ensure we preserve/override location from the current user when available,
       // and always keep the venue/landmark that the creator entered so the metadata carousel
@@ -3682,7 +3851,7 @@ export async function createPost(
       };
 
       const normalizedCreatedLocations = resolveAuthorLocations({
-        userHandle,
+        userHandle: laravelHandle || userHandle,
         userLocal: userLocal ?? transformed.userLocal,
         userRegional: userRegional ?? transformed.userRegional,
         userNational: userNational ?? transformed.userNational,
@@ -3690,6 +3859,8 @@ export async function createPost(
 
       transformed = {
         ...transformed,
+        userHandle: laravelHandle || transformed.userHandle || userHandle,
+        user_id: laravelUserId || transformed.user_id || userId,
         // Preserve user-entered copy even if API response omits it on create.
         text: pickNonEmptyString(transformed.text, text),
         caption: pickNonEmptyString(transformed.caption, caption, text),

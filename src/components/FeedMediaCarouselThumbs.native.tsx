@@ -13,7 +13,16 @@ import {
 export type CarouselThumbItem = {
     url: string;
     type: 'image' | 'video' | 'text';
+    posterUrl?: string;
+    thumbnailUrl?: string;
+    thumbnail_url?: string;
 };
+
+function thumbUri(item: CarouselThumbItem): string | undefined {
+    const poster = item.posterUrl || item.thumbnailUrl || item.thumbnail_url;
+    if (item.type === 'video') return poster || undefined;
+    return poster || item.url || undefined;
+}
 
 type Props = {
     items: CarouselThumbItem[];
@@ -35,6 +44,7 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={FEED_CARD_CAROUSEL_RAIL}>
                 {items.map((item, index) => {
                     const active = index === activeIndex;
+                    const uri = thumbUri(item);
                     return (
                         <TouchableOpacity
                             key={`thumb-${index}`}
@@ -42,16 +52,16 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
                             onPress={() => onSelect(index)}
                             activeOpacity={0.9}
                         >
-                            {item.type === 'video' ? (
-                                <View style={styles.thumbImgWrap}>
-                                    <Image source={{ uri: item.url }} style={styles.thumbImg} />
-                                    <View style={styles.vidBadge}>
-                                        <Text style={styles.vidBadgeText}>VID</Text>
-                                    </View>
-                                </View>
+                            {uri ? (
+                                <Image source={{ uri }} style={styles.thumbImg} />
                             ) : (
-                                <Image source={{ uri: item.url }} style={styles.thumbImg} />
+                                <View style={styles.thumbFallback} />
                             )}
+                            {item.type === 'video' ? (
+                                <View style={styles.vidBadge}>
+                                    <Text style={styles.vidBadgeText}>VID</Text>
+                                </View>
+                            ) : null}
                         </TouchableOpacity>
                     );
                 })}
@@ -68,6 +78,11 @@ const styles = StyleSheet.create({
     thumbImg: {
         width: '100%',
         height: '100%',
+    },
+    thumbFallback: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#121212',
     },
     vidBadge: {
         position: 'absolute',

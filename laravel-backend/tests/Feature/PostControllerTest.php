@@ -311,5 +311,93 @@ class PostControllerTest extends TestCase
             'Response should contain error or errors'
         );
     }
+
+    public function test_following_feed_is_empty_when_viewer_follows_nobody(): void
+    {
+        $viewer = User::factory()->create();
+        $author = User::factory()->create(['handle' => 'Paris@CountyCork']);
+        Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=Following&limit=10');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followingCount', 0)
+            ->assertJsonCount(0, 'items');
+    }
+
+    public function test_following_feed_shows_only_followed_authors_after_follow(): void
+    {
+        $viewer = User::factory()->create();
+        $followed = User::factory()->create(['handle' => 'Paris@CountyCork', 'is_private' => false]);
+        $stranger = User::factory()->create(['handle' => 'Gazetteer@Dublin']);
+        $followedPost = Post::factory()->create([
+            'user_id' => $followed->id,
+            'user_handle' => $followed->handle,
+            'text_content' => 'from paris',
+        ]);
+        Post::factory()->create([
+            'user_id' => $stranger->id,
+            'user_handle' => $stranger->handle,
+            'text_content' => 'from gazetteer',
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($followed->handle) . '/follow', [
+                'following' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('following', true);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=Following&limit=10');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followingCount', 1)
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $followedPost->id);
+    }
+
+    public function test_discover_filter_is_following_feed_not_a_location(): void
+    {
+        $viewer = User::factory()->create();
+        $followed = User::factory()->create(['is_private' => false]);
+        $post = Post::factory()->create([
+            'user_id' => $followed->id,
+            'user_handle' => $followed->handle,
+            'location_label' => 'Cork',
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($followed->handle) . '/follow', [
+                'following' => true,
+            ])
+            ->assertOk();
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=discover&limit=10');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followingCount', 1)
+            ->assertJsonPath('items.0.id', $post->id);
+    }
+
+    public function test_guest_following_feed_is_empty(): void
+    {
+        $author = User::factory()->create();
+        Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+        ]);
+
+        $response = $this->getJson('/api/posts?filter=Following&limit=10');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followingCount', 0)
+            ->assertJsonCount(0, 'items');
+    }
 }
 

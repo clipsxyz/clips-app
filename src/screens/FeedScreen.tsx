@@ -50,9 +50,12 @@ import {
     setCommentModerationState,
     decorateForUser,
     getLocalPostById,
+    getFollowState,
+    getState,
     mergeEngagementStats,
     postMatchesLocationTab,
     clearLocalFeedPostsStorage,
+    syncFollowsFromLaravel,
 } from '../api/posts';
 import { isMockMode } from '../api/apiMode';
 import { getUnreadTotal } from '../api/messages';
@@ -1477,7 +1480,7 @@ type FeedListRow =
     | { kind: 'ad'; ad: Ad }
     | { kind: 'local_business'; posts: Post[]; pinnedPaidPostId?: string; useMockPreview?: boolean }
     | { kind: 'suggested_places'; bundleKey: string; suggestions: PlaceMatchedPost[] }
-    | { kind: 'stories24'; id: string }
+    | { kind: 'stories24'; id: string; railItems: Stories24RailItem[]; railKey: string }
     | { kind: 'interests'; id: string }
     | { kind: 'suggested_follower'; suggestion: SuggestedFollowerSuggestion };
 
@@ -1613,6 +1616,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
+    const [followingCount, setFollowingCount] = useState<number | null>(null);
     const [customLocation, setCustomLocation] = useState<string | null>(null);
     const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null);
     const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
@@ -1739,6 +1743,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const pendingFeedScrollRestoreRef = useRef<number | null>(null);
     const pendingStories24CollapseRef = useRef<Stories24RailReturnPayload | null>(null);
     const feedLoadGenRef = useRef(0);
+    const stories24RailGenRef = useRef(0);
+    const stories24ViewerRef = useRef({ userId, handle: user?.handle as string | undefined });
+    stories24ViewerRef.current = { userId, handle: user?.handle };
+    const reloadStories24Rail = React.useCallback(() => {
+        const uid = user?.id;
+        if (!uid) return Promise.resolve();
+        const gen = ++stories24RailGenRef.current;
+        return buildStories24RailItems(uid, user?.handle)
+            .then((items) => {
+                if (gen !== stories24RailGenRef.current) return;
+                setStories24Items(items);
+            })
+            .catch((err) => {
+                console.warn('Stories 24 rail load failed; keeping current items', err);
+            });
+    }, [user?.id, user?.handle]);
     /** Keeps freshly created posts visible if a force-refresh finishes after upload complete. */
     const recentCreatedPostsRef = useRef<Post[]>([]);
     const feedRetryBusyRef = useRef(false);
@@ -1873,36 +1893,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (!user?.id || customLocation || showFollowingFeed) {
             return;
         }
-        let cancelled = false;
-        const load = () => {
-            void buildStories24RailItems(user.id, user.handle)
-                .then((items) => {
-                    if (!cancelled) setStories24Items(items);
-                })
-                .catch((err) => {
-                    console.warn('Stories 24 rail load failed; keeping current items', err);
-                });
-        };
-        load();
+        void reloadStories24Rail();
         const pollMs = getStoriesRailPollMs();
-        const interval = pollMs != null ? setInterval(load, pollMs) : null;
-        const unsubRefresh = subscribeStoriesRefresh(load);
+        const interval = pollMs != null ? setInterval(() => void reloadStories24Rail(), pollMs) : null;
+        const unsubRefresh = subscribeStoriesRefresh(() => {
+            void reloadStories24Rail();
+        });
         return () => {
-            cancelled = true;
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
-    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
+    }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]);
 
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id || customLocation || showFollowingFeed) return;
-            void buildStories24RailItems(user.id, user.handle)
-                .then(setStories24Items)
-                .catch((err) => {
-                    console.warn('Stories 24 rail focus load failed; keeping current items', err);
-                });
-        }, [user?.id, user?.handle, customLocation, showFollowingFeed]),
+            void reloadStories24Rail();
+        }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]),
     );
 
     React.useEffect(() => {
@@ -2336,9 +2343,46 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ),
                 ),
             );
+            if (!isFollowing) {
+                const drop = normalizeStories24Handle(handle || '');
+                stories24RailGenRef.current += 1;
+                const viewer = stories24ViewerRef.current;
+                const follows = getState(viewer.userId).follows;
+                const self = normalizeStories24Handle(viewer.handle || '');
+                setStories24Items((prev) =>
+                    prev.filter((item) => {
+                        if (isStories24AddYoursHandle(item.handle)) return true;
+                        const itemKey = normalizeStories24Handle(item.handle);
+                        if (itemKey === drop) return false;
+                        if (self && itemKey === self) return true;
+                        return getFollowState(follows, item.handle);
+                    }),
+                );
+            }
         },
         [],
     );
+
+    useEffect(() => {
+        const sub = DeviceEventEmitter.addListener(
+            'followStateChanged',
+            (payload: { handle?: string; following?: boolean }) => {
+                const handle = String(payload?.handle || '').trim();
+                if (!handle) return;
+                const following = payload?.following === true;
+                patchFollowForHandle(handle, following);
+                const followingTab =
+                    String(feedFetchCtxRef.current.filter || '').toLowerCase() === 'discover';
+                if (!following && followingTab) {
+                    setReloadTick((t) => t + 1);
+                }
+                if (following) {
+                    void reloadStories24Rail();
+                }
+            },
+        );
+        return () => sub.remove();
+    }, [patchFollowForHandle, reloadStories24Rail]);
 
     useEffect(() => {
         let cancelled = false;
@@ -2756,6 +2800,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     // Avoid leaking another account's just-created posts into this viewer's feed.
     useEffect(() => {
         recentCreatedPostsRef.current = [];
+        setFollowingCount(null);
     }, [userId]);
 
     useEffect(() => {
@@ -2791,7 +2836,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, [userId]);
 
     const applyFeedPageResult = React.useCallback(
-        (items: Post[], nextCursor: string | number | null) => {
+        (items: Post[], nextCursor: string | number | null, nextFollowingCount?: number) => {
+            if (typeof nextFollowingCount === 'number') {
+                setFollowingCount(nextFollowingCount);
+            }
             const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
             const recent = recentCreatedPostsRef.current
                 .map((p) => {
@@ -2874,7 +2922,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         try {
             const result = await Promise.race([runFetch(), firstTimeout.promise]);
             if (gen !== feedLoadGenRef.current) return;
-            applyFeedPageResult(result.items, result.nextCursor);
+            applyFeedPageResult(result.items, result.nextCursor, result.followingCount);
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
             console.error('Error loading feed:', err);
@@ -2909,7 +2957,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             try {
                 const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
                 if (gen !== feedLoadGenRef.current) return;
-                applyFeedPageResult(retryResult.items, retryResult.nextCursor);
+                applyFeedPageResult(retryResult.items, retryResult.nextCursor, retryResult.followingCount);
                 return;
             } catch (retryErr) {
                 console.error('Feed recover retry failed:', retryErr);
@@ -2997,11 +3045,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useFocusEffect(
         useCallback(() => {
             if (!showFollowingFeed) return undefined;
+            let cancelled = false;
             const t = setTimeout(() => {
-                void reloadFeedFromStartRef.current({ quiet: true });
+                void (async () => {
+                    if (user?.id && user?.handle && !isMockMode()) {
+                        try {
+                            await syncFollowsFromLaravel(user.id, user.handle);
+                        } catch {
+                            // Feed still loads from Laravel.
+                        }
+                    }
+                    if (!cancelled) {
+                        void reloadFeedFromStartRef.current({ quiet: true });
+                    }
+                })();
             }, 0);
-            return () => clearTimeout(t);
-        }, [showFollowingFeed]),
+            return () => {
+                cancelled = true;
+                clearTimeout(t);
+            };
+        }, [showFollowingFeed, user?.id, user?.handle]),
     );
 
     const feedPostCount = useMemo(() => pages.flat().length, [pages]);
@@ -3027,12 +3090,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 reloadFeedFromStartRef.current({ quiet: true }),
                 (async () => {
                     if (!user?.id || customLocation || showFollowingFeed) return;
-                    try {
-                        const items = await buildStories24RailItems(user.id, user.handle);
-                        setStories24Items(items);
-                    } catch (err) {
-                        console.warn('Stories 24 rail refresh failed; keeping current items', err);
-                    }
+                    await reloadStories24Rail();
                 })(),
             ]);
         } catch (err) {
@@ -3041,7 +3099,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             refreshingLockRef.current = false;
             setRefreshing(false);
         }
-    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
+    }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]);
 
     const handleTabChange = (tab: Tab) => {
         setError(null);
@@ -3335,8 +3393,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
         if (!target && user?.id) {
             try {
+                const gen = ++stories24RailGenRef.current;
                 items = await buildStories24RailItems(user.id, user.handle);
-                setStories24Items(items);
+                if (gen === stories24RailGenRef.current) {
+                    setStories24Items(items);
+                }
                 target = resolveStories24OpenTarget(items);
             } catch (err) {
                 console.warn('Stories24 header: failed to refresh rail items', err);
@@ -3402,7 +3463,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 out.push({ kind: 'post', post: item.item });
                 postCount += 1;
                 if (!stories24Inserted && showStories24Rail && postCount === 1) {
-                    out.push({ kind: 'stories24', id: 'stories24-feed-rail' });
+                    out.push({
+                        kind: 'stories24',
+                        id: 'stories24-feed-rail',
+                        railItems: stories24Items,
+                        railKey: stories24Items.map((i) => i.handle).join('|'),
+                    });
                     stories24Inserted = true;
                 }
                 if (
@@ -3456,6 +3522,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         showSuggestedFollowerCard,
         suggestedFollowerSuggestion,
         showStories24Rail,
+        stories24Items,
         previewSuggestedCards,
         customLocation,
         previewLocalBusinessPosts,
@@ -3642,7 +3709,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         async (post: Post) => {
             if (!user) return;
             try {
-                const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user.handle);
+                const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user.handle, post.isFollowing === true);
                 const isFollowRequested = Boolean(
                     !updated.isFollowing &&
                         user.handle &&
@@ -3693,6 +3760,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                     post.id,
                                     post.userHandle,
                                     user?.handle,
+                                    post.isFollowing === true,
                                 );
                                 const isFollowRequested = Boolean(
                                     !updated.isFollowing &&
@@ -3730,8 +3798,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (item.kind === 'stories24') {
                 return wrapRow(
                     <Stories24FeedRail
+                        key={item.railKey}
                         ref={stories24RailRef}
-                        items={stories24Items}
+                        items={item.railItems}
                         previewVideosPaused={false}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('Clip')}
@@ -3957,6 +4026,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 mergedPost.id,
                                 mergedPost.userHandle,
                                 user.handle,
+                                mergedPost.isFollowing === true,
                             );
                             const isFollowRequested = Boolean(
                                 !updated.isFollowing &&
@@ -4126,7 +4196,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         promptReportPostNative(mergedPost.id);
                     }}
                     onShareToStories={() => openShareToStoriesForPost(mergedPost)}
-                    isCurrentUser={user?.handle === mergedPost.userHandle}
+                    isCurrentUser={
+                      Boolean(
+                        (user?.id &&
+                          mergedPost.user_id &&
+                          String(user.id) === String(mergedPost.user_id)) ||
+                          (user?.handle &&
+                            String(user.handle).trim().toLowerCase() ===
+                              String(mergedPost.userHandle || '').trim().toLowerCase()),
+                      )
+                    }
                     viewerHandle={user?.handle}
                     viewerUserId={userId}
                     onOpenDM={user?.handle ? openDmSheet : undefined}
@@ -4225,7 +4304,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 keyExtractor={(item) => {
                     if (item.kind === 'post') return `post:${item.post.id}`;
                     if (item.kind === 'interests' || item.kind === 'stories24') {
-                        return `${item.kind}:${item.id}`;
+                        return item.kind === 'stories24'
+                            ? `stories24:${item.railKey}`
+                            : `${item.kind}:${item.id}`;
                     }
                     if (item.kind === 'suggested_follower') {
                         return `suggested-follower:${item.suggestion.userHandle}`;
@@ -4239,7 +4320,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }
                     return 'feed-row';
                 }}
-                extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}-${scenesOverlay?.postId || ''}`}
+                extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}-${scenesOverlay?.postId || ''}-${stories24Items.map((i) => i.handle).join('|')}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 // Keep the render window tight for max FPS while flinging; clip offscreen cells.
                 initialNumToRender={2}
@@ -4437,11 +4518,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                     {showFollowingFeed || String(currentFilter).toLowerCase() === 'discover' ? (
                                         <View style={FEED_EMPTY_CARD}>
                                             <Text style={FEED_EMPTY_FOLLOWING_TITLE}>
-                                                Unlock Your Following News Feed
+                                                {followingCount && followingCount > 0
+                                                    ? "People you follow haven't posted yet"
+                                                    : 'Unlock Your Following News Feed'}
                                             </Text>
                                             <Text style={FEED_EMPTY_FOLLOWING_SUBTITLE}>
-                                                This feed only populates with the accounts you follow. Start
-                                                tapping Follow to personalize your stream.
+                                                {followingCount && followingCount > 0
+                                                    ? "You'll see their clips here as soon as they share."
+                                                    : 'This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream.'}
                                             </Text>
                                         </View>
                                     ) : (
@@ -4553,6 +4637,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                   imageFullscreenPost.id,
                                   imageFullscreenPost.userHandle,
                                   user.handle,
+                                  imageFullscreenPost.isFollowing === true,
                               );
                               const nextFollowing = updated.isFollowing === true;
                               const isFollowRequested = Boolean(
@@ -4824,6 +4909,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         overflowPost.id,
                         overflowPost.userHandle,
                         user?.handle,
+                        true,
                     );
                     const nextFollowing = updated?.isFollowing === true;
                     patchFollowForHandle(overflowPost.userHandle, nextFollowing);

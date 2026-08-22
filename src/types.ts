@@ -118,6 +118,8 @@ export type Post = {
   userNational?: string;
   /** Optional author account classification mirrored from backend/user profile. */
   userAccountType?: 'personal' | 'business';
+  /** Author profile photo from Laravel (`users.avatar_url`), rewritten for the device. */
+  userAvatarUrl?: string;
   // Boost data
   isBoosted?: boolean;
   boostExpiresAt?: number; // Epoch timestamp when boost expires

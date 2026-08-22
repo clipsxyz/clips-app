@@ -5,10 +5,9 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
-import { getAvatarForHandle } from '../api/users';
+import { resolveAvatarImageUri } from '../api/users';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
-import { useMutualFollow } from '../hooks/useMutualFollow';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
 import FeedPostMetaCarousel from './FeedPostMetaCarousel.native';
@@ -53,8 +52,6 @@ export default function FeedPostHeader({
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
-    const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
-
     const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
@@ -67,7 +64,6 @@ export default function FeedPostHeader({
         return [{ label, type: 'location' as const }, ...items];
     }, [post]);
     const socialSourceLabel = getPostSocialSourceLabel(post);
-    const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const isFollowing = post.isFollowing === true;
     const viewer = viewerHandle ?? user?.handle;
     const hasPendingRequest = Boolean(
@@ -78,9 +74,10 @@ export default function FeedPostHeader({
             hasPendingFollowRequest(viewer, safeProfileHandle),
     );
 
-    const avatarSrc = isCurrentUser
-        ? user?.avatarUrl
-        : getAvatarForHandle(safeProfileHandle);
+    const avatarSrc = resolveAvatarImageUri(
+        (isCurrentUser ? user?.avatarUrl : undefined) || post.userAvatarUrl,
+        safeProfileHandle,
+    );
 
     const verifiedAccountType = resolveVerifiedAccountType(
         isCurrentUser ? user?.accountType : post.userAccountType,
@@ -117,19 +114,6 @@ export default function FeedPostHeader({
         };
     }, [safeProfileHandle, isCurrentUser, onHasStoryChange, user?.id]);
 
-    useEffect(() => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        if (!isCurrentUser && onFollow && post.isFollowing) {
-            setShowFollowCheck(true);
-            timer = setTimeout(() => setShowFollowCheck(false), 2500);
-        } else {
-            setShowFollowCheck(false);
-        }
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [post.isFollowing, isCurrentUser, onFollow]);
-
     const showAvatar = variant === 'default';
 
     const avatarBlock = showAvatar ? (
@@ -159,18 +143,15 @@ export default function FeedPostHeader({
                     <Text style={styles.requestedPillText}>Req</Text>
                 </View>
             ) : null}
-            {!isCurrentUser && isMutualFollow && onOpenDM ? (
+            {!isCurrentUser && isFollowing && onFollow ? (
                 <TouchableOpacity
-                    style={styles.dmButton}
-                    onPress={() => onOpenDM(post.userHandle || safeHandle, post.id)}
+                    style={styles.followCheck}
+                    onPress={() => void onFollow()}
+                    accessibilityRole="button"
+                    accessibilityLabel="Unfollow"
                 >
-                    <Icon name="paper-plane" size={10} color="#EF4444" />
-                </TouchableOpacity>
-            ) : null}
-            {!isCurrentUser && isFollowing && !isMutualFollow && showFollowCheck ? (
-                <View style={styles.followCheck}>
                     <Icon name="checkmark" size={10} color="#FFFFFF" />
-                </View>
+                </TouchableOpacity>
             ) : null}
         </View>
     ) : null;

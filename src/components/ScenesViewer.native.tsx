@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     View,
     Text,
+    Image,
     StyleSheet,
     Dimensions,
     Pressable,
@@ -27,11 +28,12 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { type OnProgressData, type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import { postHasVideoMedia, resolvePostPlaybackUri } from '../utils/postMedia';
+import NativePageSwipe from './NativePageSwipe.native';
 import { getScenesMediaSlides, scenesVideoSource } from '../utils/scenesMediaNative';
 import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
-import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
-import { buildPostMetadataItems } from '../utils/feedPostMeta';
-import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
+import { getPostDisplayCaption, getReclipDisplay, buildPostMetadataItems } from '../utils/feedPostMeta';
+import { setAvatarForHandle } from '../api/users';
+import { useResolvedAuthorAvatar } from '../hooks/useResolvedAuthorAvatar';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
@@ -259,6 +261,8 @@ export default function ScenesViewer({
     const [lastTapDebug, setLastTapDebug] = useState<string | null>(null);
     const postsRef = useRef(posts);
     const activeIndexRef = useRef(activeIndex);
+    const mediaSlideIndexRef = useRef(0);
+    const mediaSlidesLenRef = useRef(0);
     activeIndexRef.current = activeIndex;
     postsRef.current = posts;
     const videoRef = useRef<VideoRef>(null);
@@ -281,6 +285,14 @@ export default function ScenesViewer({
 
     const activePost = posts[activeIndex];
     const caption = activePost ? getPostDisplayCaption(activePost) : '';
+    const authorAvatarSrc = useResolvedAuthorAvatar({
+        handle: activePost
+            ? getReclipDisplay(activePost, viewerHandle).profileHandle
+            : undefined,
+        explicitUrl: activePost?.userAvatarUrl,
+        viewerHandle,
+        viewerAvatarUrl,
+    });
     const metadataItems = useMemo(
         () => (activePost ? buildScenesMetadata(activePost, feedLabel) : []),
         [activePost, feedLabel],
@@ -465,6 +477,8 @@ export default function ScenesViewer({
         () => (activePost ? getScenesMediaSlides(activePost) : []),
         [activePost],
     );
+    mediaSlideIndexRef.current = mediaSlideIndex;
+    mediaSlidesLenRef.current = activeMediaSlides.length;
 
     useEffect(() => {
         if (metadataItems.length <= 1) return;
@@ -758,6 +772,7 @@ export default function ScenesViewer({
                 activePost.id,
                 activePost.userHandle,
                 viewerHandle,
+                activePost.isFollowing === true,
             );
             const nextFollowing = updated?.isFollowing === true;
             const handleLower = String(activePost.userHandle || '')
@@ -936,19 +951,41 @@ export default function ScenesViewer({
         [goToPost, handleBack, windowHeight],
     );
 
-    const mediaGestures = useMemo(
-        () =>
-            Gesture.Pan()
-                .activeOffsetY([-12, 12])
-                .failOffsetX([-24, 24])
-                .onUpdate((e) => {
-                    runOnJS(onVerticalPanUpdate)(e.translationY);
-                })
-                .onEnd((e) => {
-                    runOnJS(onVerticalPanEnd)(e.translationY);
-                }),
-        [onVerticalPanEnd, onVerticalPanUpdate],
-    );
+    const commitCarouselIndex = useCallback((next: number) => {
+        if (closingRef.current) return;
+        const len = mediaSlidesLenRef.current;
+        const clamped = Math.max(0, Math.min(next, Math.max(0, len - 1)));
+        if (clamped === mediaSlideIndexRef.current) return;
+        didSeekInitialRef.current = false;
+        setProgress(0);
+        setMediaSlideProgress(0);
+        setPaused(false);
+        setMediaSlideIndex(clamped);
+    }, []);
+
+    const mediaGestures = useMemo(() => {
+        const tap = Gesture.Tap()
+            .enabled(!commentsOpen)
+            .maxDuration(280)
+            .onEnd((e, success) => {
+                if (!success) return;
+                runOnJS(handleMediaPress)(
+                    {
+                        nativeEvent: { pageX: e.absoluteX, pageY: e.absoluteY },
+                    } as GestureResponderEvent,
+                );
+            });
+        const vertical = Gesture.Pan()
+            .activeOffsetY([-16, 16])
+            .failOffsetX([-20, 20])
+            .onUpdate((e) => {
+                runOnJS(onVerticalPanUpdate)(e.translationY);
+            })
+            .onEnd((e) => {
+                runOnJS(onVerticalPanEnd)(e.translationY);
+            });
+        return Gesture.Simultaneous(tap, vertical);
+    }, [commentsOpen, handleMediaPress, onVerticalPanEnd, onVerticalPanUpdate]);
 
     const hideEmbeddedPlayer = embedFeedPlayer && activeIndex === initialIndex;
 
@@ -986,9 +1023,6 @@ export default function ScenesViewer({
         viewerHandle.replace(/^@/, '').trim().toLowerCase() ===
             activePost.userHandle.replace(/^@/, '').trim().toLowerCase();
     const canReclip = Boolean(viewerHandle && !isOwn && !activePost.userReclipped);
-    const authorAvatarSrc = isOwn
-        ? viewerAvatarUrl || getAvatarForHandle(profileHandle) || getAvatarForHandle(viewerHandle)
-        : getAvatarForHandle(profileHandle);
     const dismissOpacity = Math.max(0.55, 1 - dismissPull / (windowHeight * 0.45));
     const captionLong = caption.length > 50;
     const likesCount = Math.max(0, Number(activePost.stats?.likes) || 0);
@@ -1018,8 +1052,9 @@ export default function ScenesViewer({
         activeMediaSlides.length > 1 ||
         activeMediaSlides.some((s) => s.type === 'video' || s.type === 'text');
 
+    const activeSlide = activeMediaSlides[mediaSlideIndex];
     const playbackRaw =
-        activeMediaSlides[mediaSlideIndex]?.url ||
+        activeSlide?.url ||
         resolvePostPlaybackUri(activePost) ||
         activePost.mediaUrl ||
         '';
@@ -1030,6 +1065,13 @@ export default function ScenesViewer({
             : playbackSrc && isPlayableVideoUri(playbackSrc.uri)
               ? playbackSrc
               : null;
+    const showImageSlide = activeSlide?.type === 'image' && Boolean(activeSlide.url);
+    const showVideoSlide =
+        !showImageSlide &&
+        activeSlide?.type !== 'text' &&
+        !hideEmbeddedPlayer &&
+        !commentsSuspendVideo &&
+        Boolean(playbackSource);
 
     return (
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
@@ -1041,46 +1083,113 @@ export default function ScenesViewer({
                         : null,
                 ]}
             >
-                {hideEmbeddedPlayer || commentsSuspendVideo || !playbackSource ? null : (
+                {activeMediaSlides.length > 1 ? (
+                            <NativePageSwipe
+                                pageCount={activeMediaSlides.length}
+                                pageWidth={windowWidth}
+                                pageHeight={windowHeight}
+                                index={mediaSlideIndex}
+                                onIndexChange={commitCarouselIndex}
+                                enabled={!commentsOpen}
+                            >
+                                {activeMediaSlides.map((slide, index) => {
+                                    const isActiveSlide = index === mediaSlideIndex;
+                                    const slideVideo =
+                                        slide.type === 'video' &&
+                                        isActiveSlide &&
+                                        !hideEmbeddedPlayer &&
+                                        !commentsSuspendVideo &&
+                                        playbackSource;
+                                    return (
+                                        <View
+                                            key={`${activePost.id}-slide-${index}`}
+                                            collapsable={false}
+                                            style={{ width: windowWidth, height: windowHeight }}
+                                        >
+                                            {slide.type === 'image' && slide.url ? (
+                                                <Image
+                                                    source={{ uri: slide.url }}
+                                                    resizeMode="cover"
+                                                    pointerEvents="none"
+                                                    style={{ width: windowWidth, height: windowHeight }}
+                                                />
+                                            ) : slideVideo ? (
+                                                <Video
+                                                    ref={videoRef}
+                                                    source={playbackSource as object}
+                                                    style={{ width: windowWidth, height: windowHeight }}
+                                                    resizeMode="cover"
+                                                    repeat
+                                                    paused={paused || commentsOpen || commentsAudioLocked}
+                                                    muted={muted || commentsOpen || commentsAudioLocked}
+                                                    volume={
+                                                        muted || commentsOpen || commentsAudioLocked ? 0 : 1
+                                                    }
+                                                    pointerEvents="none"
+                                                    onLoad={onVideoLoad}
+                                                    onProgress={onVideoProgress}
+                                                    {...androidListSafeVideoProps()}
+                                                    useTextureView
+                                                    hideShutterView
+                                                    shutterColor="transparent"
+                                                />
+                                            ) : slide.posterUrl ? (
+                                                <Image
+                                                    source={{ uri: slide.posterUrl }}
+                                                    resizeMode="cover"
+                                                    pointerEvents="none"
+                                                    style={{ width: windowWidth, height: windowHeight }}
+                                                />
+                                            ) : (
+                                                <View
+                                                    style={{
+                                                        width: windowWidth,
+                                                        height: windowHeight,
+                                                        backgroundColor: '#000000',
+                                                    }}
+                                                />
+                                            )}
+                                        </View>
+                                    );
+                                })}
+                            </NativePageSwipe>
+                        ) : (
+                <GestureDetector gesture={mediaGestures}>
                     <View
                         collapsable={false}
-                        pointerEvents="none"
-                        style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: windowWidth,
-                            height: windowHeight,
-                        }}
+                        style={{ width: windowWidth, height: windowHeight }}
                     >
-                        <Video
-                            ref={videoRef}
-                            source={playbackSource as object}
-                            style={{ width: windowWidth, height: windowHeight }}
-                            resizeMode="cover"
-                            repeat
-                            paused={paused || commentsOpen || commentsAudioLocked}
-                            muted={muted || commentsOpen || commentsAudioLocked}
-                            volume={
-                                muted || commentsOpen || commentsAudioLocked ? 0 : 1
-                            }
-                            pointerEvents="none"
-                            onLoad={onVideoLoad}
-                            onProgress={onVideoProgress}
-                            {...androidListSafeVideoProps()}
-                            useTextureView
-                            hideShutterView
-                            shutterColor="transparent"
-                        />
+                        {showImageSlide ? (
+                            <Image
+                                source={{ uri: activeSlide!.url }}
+                                resizeMode="cover"
+                                pointerEvents="none"
+                                style={{ width: windowWidth, height: windowHeight }}
+                            />
+                        ) : showVideoSlide ? (
+                            <Video
+                                ref={videoRef}
+                                source={playbackSource as object}
+                                style={{ width: windowWidth, height: windowHeight }}
+                                resizeMode="cover"
+                                repeat
+                                paused={paused || commentsOpen || commentsAudioLocked}
+                                muted={muted || commentsOpen || commentsAudioLocked}
+                                volume={
+                                    muted || commentsOpen || commentsAudioLocked ? 0 : 1
+                                }
+                                pointerEvents="none"
+                                onLoad={onVideoLoad}
+                                onProgress={onVideoProgress}
+                                {...androidListSafeVideoProps()}
+                                useTextureView
+                                hideShutterView
+                                shutterColor="transparent"
+                            />
+                        ) : null}
                     </View>
-                )}
-
-                <GestureDetector gesture={mediaGestures}>
-                    <Pressable
-                        style={[StyleSheet.absoluteFillObject, { backgroundColor: 'transparent' }]}
-                        onPress={commentsOpen ? undefined : handleMediaPress}
-                    />
                 </GestureDetector>
+                )}
 
             <View
                 pointerEvents="box-none"
@@ -1089,7 +1198,6 @@ export default function ScenesViewer({
                     top: 0,
                     left: 0,
                     width: windowWidth,
-                    height: windowHeight,
                     backgroundColor: 'transparent',
                 }}
             >
@@ -1134,6 +1242,7 @@ export default function ScenesViewer({
                 ) : (
                     <View style={styles.chromeCircle} />
                 )}
+            </View>
             </View>
             </View>
 
@@ -1281,7 +1390,7 @@ export default function ScenesViewer({
                 </View>
             )}
 
-            <View style={[styles.fxLayer, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
+            <View style={[styles.fxLayer, { backgroundColor: 'transparent' }]} pointerEvents="none">
                 {burstAt ? (
                     <FeedDoubleTapLikeBurst
                         x={burstAt?.x ?? 0}
@@ -1297,7 +1406,6 @@ export default function ScenesViewer({
                     targetRef={likeButtonRef}
                     onComplete={() => setHeartDrop(null)}
                 />
-            </View>
             </View>
             </View>
 

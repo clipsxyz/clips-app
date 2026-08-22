@@ -87,15 +87,9 @@ class UploadController extends Controller
         }
 
         $file = $request->file('file');
-        $user = null;
-        try {
-            $user = Auth::user();
-        } catch (\Throwable $e) {
-            // Auth may throw if guard not configured; continue as guest
-        }
+        $userId = $this->uploadOwnerId($request);
 
         $ext = $file->getClientOriginalExtension() ?: 'jpg';
-        $userId = $user ? $user->id : 'guest';
         $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $ext;
 
         $disk = config('filesystems.default');
@@ -180,7 +174,7 @@ class UploadController extends Controller
         }
 
         $files = $request->file('files');
-        $user = Auth::user();
+        $userId = $this->uploadOwnerId($request);
         $uploadedFiles = [];
 
         // Use a web-accessible filesystem disk (prefer 'public' for local dev so files are served via /storage)
@@ -193,7 +187,6 @@ class UploadController extends Controller
             $disk = config('filesystems.default', 'public');
         }
 
-        $userId = $user ? $user->id : 'guest';
         foreach ($files as $file) {
             // Generate unique filename with user ID for organization (or 'guest' if not authenticated)
             $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $file->getClientOriginalExtension();
@@ -264,6 +257,23 @@ class UploadController extends Controller
         return $value;
     }
     
+    /**
+     * Public upload routes still receive a Bearer token — resolve Sanctum without requiring the auth middleware.
+     */
+    private function uploadOwnerId(Request $request): string
+    {
+        try {
+            $user = $request->user('sanctum') ?: Auth::guard('sanctum')->user();
+            if ($user && $user->id) {
+                return (string) $user->id;
+            }
+        } catch (\Throwable $e) {
+            // continue as guest
+        }
+
+        return 'guest';
+    }
+
     /**
      * Format bytes to human-readable string
      */

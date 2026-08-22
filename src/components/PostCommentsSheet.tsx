@@ -851,7 +851,7 @@ export default function PostCommentsSheet({
         if (!user?.id || !post || user.handle === post.userHandle) return;
         setFollowBusy(true);
         try {
-            const updated = await toggleFollowForPost(user.id, postId, post.userHandle, user.handle);
+            const updated = await toggleFollowForPost(user.id, postId, post.userHandle, user.handle, post.isFollowing === true);
             setPost((prev) => (prev ? { ...prev, isFollowing: updated.isFollowing } : null));
         } catch (err) {
             console.error('Follow toggle failed:', err);

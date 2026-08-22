@@ -224,6 +224,57 @@ class UserControllerTest extends TestCase
         $this->assertEquals(0, $following->fresh()->followers_count);
     }
 
+    public function test_follow_with_following_true_is_idempotent(): void
+    {
+        $follower = User::factory()->create(['is_private' => false]);
+        $following = User::factory()->create(['is_private' => false, 'handle' => 'Paris@CountyCork']);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($following->handle) . '/follow', [
+                'following' => true,
+            ])
+            ->assertOk()
+            ->assertJson(['following' => true, 'status' => 'accepted']);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($following->handle) . '/follow', [
+                'following' => true,
+            ])
+            ->assertOk()
+            ->assertJson(['following' => true, 'status' => 'accepted']);
+
+        $this->assertEquals(1, DB::table('user_follows')->count());
+        $this->assertEquals(1, $follower->fresh()->following_count);
+        $this->assertEquals(1, $following->fresh()->followers_count);
+    }
+
+    public function test_follow_with_following_false_unfollows(): void
+    {
+        $follower = User::factory()->create(['is_private' => false]);
+        $following = User::factory()->create(['is_private' => false, 'handle' => 'Paris@CountyCork']);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($following->handle) . '/follow', [
+                'following' => true,
+            ])
+            ->assertOk()
+            ->assertJson(['following' => true, 'status' => 'accepted']);
+
+        $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($following->handle) . '/follow', [
+                'following' => false,
+            ])
+            ->assertOk()
+            ->assertJson(['following' => false, 'status' => 'unfollowed']);
+
+        $this->assertDatabaseMissing('user_follows', [
+            'follower_id' => $follower->id,
+            'following_id' => $following->id,
+        ]);
+        $this->assertEquals(0, $follower->fresh()->following_count);
+        $this->assertEquals(0, $following->fresh()->followers_count);
+    }
+
     public function test_follow_private_user_creates_pending_request_and_notification(): void
     {
         $follower = User::factory()->create(['is_private' => false]);

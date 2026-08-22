@@ -585,7 +585,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     setEditModalVisible(true);
                 }}
                 onUnfollow={async () => {
-                    const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user?.handle);
+                    const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user?.handle, post.isFollowing === true);
                     setPost((p) =>
                         p ? { ...p, isFollowing: updated?.isFollowing ?? !p.isFollowing } : null
                     );

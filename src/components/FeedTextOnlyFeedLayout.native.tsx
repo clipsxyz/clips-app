@@ -54,7 +54,10 @@ export default function FeedTextOnlyFeedLayout({
         post.userHandle.replace(/^@+/, '').toLowerCase() === viewerHandle.replace(/^@+/, '').toLowerCase();
 
     const { profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
-    const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(profileHandle);
+    const avatarSrc =
+        (isCurrentUser ? user?.avatarUrl : undefined) ||
+        post.userAvatarUrl ||
+        getAvatarForHandle(profileHandle);
     const isFollowing = post.isFollowing === true;
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const viewer = viewerHandle ?? user?.handle;

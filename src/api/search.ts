@@ -1,5 +1,7 @@
 import { apiRequest } from './client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { resolvePublicMediaUrl } from './apiBaseUrl';
+import { setAvatarForHandle } from './users';
 
 export type SearchSections = {
     users?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
@@ -38,6 +40,20 @@ const mockUsers = [
         avatar_url: undefined
     }
 ];
+
+function withResolvedUserAvatars(result: { q: string; sections: SearchSections }) {
+    const items = result.sections?.users?.items;
+    if (!Array.isArray(items)) return result;
+    result.sections!.users!.items = items.map((u: any) => {
+        const raw = u?.avatar_url || u?.avatarUrl;
+        const resolved = typeof raw === 'string' && raw.trim() ? resolvePublicMediaUrl(raw.trim()) || raw.trim() : undefined;
+        if (u?.handle && resolved) {
+            setAvatarForHandle(u.handle, resolved);
+        }
+        return resolved ? { ...u, avatar_url: resolved, avatarUrl: resolved } : u;
+    });
+    return result;
+}
 
 export async function unifiedSearch(params: {
     q: string;
@@ -83,7 +99,7 @@ export async function unifiedSearch(params: {
             }
         }
         
-        return result;
+        return withResolvedUserAvatars(result);
     } catch (error) {
         // Fallback: return mock results if API fails (for testing)
         const qLower = params.q.toLowerCase();

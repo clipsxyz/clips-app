@@ -25,10 +25,11 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers, setFollowState, setReclipState, toggleLike, reclipPost, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
 import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle, getFlagForHandle, setAvatarForHandle } from '../api/users';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { userHasStoriesByHandle } from '../api/stories';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import {
@@ -268,11 +269,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 const pt = apiData?.placesTraveled ?? apiData?.places_traveled;
                 const placesTraveled =
                     Array.isArray(pt) ? pt.filter((s: unknown) => typeof s === 'string') : undefined;
-                const avatarUrl =
+                const rawAvatar =
                     apiData?.avatarUrl ||
                     apiData?.avatar_url ||
                     (isOwn ? user?.avatarUrl : undefined) ||
                     getAvatarForHandle(decodedHandle);
+                const avatarUrl =
+                    typeof rawAvatar === 'string' && rawAvatar.trim()
+                        ? resolvePublicMediaUrl(rawAvatar.trim()) || rawAvatar.trim()
+                        : undefined;
+                if (decodedHandle && avatarUrl) {
+                    setAvatarForHandle(decodedHandle, avatarUrl);
+                }
                 const bio = apiData?.bio || (isOwn ? user?.bio : undefined);
                 const socialLinks =
                     apiData?.socialLinks ||
@@ -363,6 +371,17 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             };
 
             paintLocalProfile(profileData);
+            if (typeof profileData?.is_following === 'boolean') {
+                setIsFollowing(profileData.is_following);
+                if (user?.id) {
+                    setFollowState(String(user.id), decodedHandle, profileData.is_following);
+                }
+            } else if (typeof profileData?.isFollowing === 'boolean') {
+                setIsFollowing(profileData.isFollowing);
+                if (user?.id) {
+                    setFollowState(String(user.id), decodedHandle, profileData.isFollowing);
+                }
+            }
             if (!cancelled()) setLoading(false);
 
             void userHasStoriesByHandle(decodedHandle)

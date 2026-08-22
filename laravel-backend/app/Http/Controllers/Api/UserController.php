@@ -138,22 +138,17 @@ class UserController extends Controller
     }
 
     /**
-     * Follow/Unfollow user
-     * Handle is resolved case-insensitively so "bob@cork" and "Bob@Cork" both work.
+     * Follow / unfollow. Send `{ "following": true|false }` so a retry cannot invert the row.
+     * Omitting `following` keeps the legacy toggle for older clients.
      */
     public function toggleFollow(Request $request, string $handle): JsonResponse
     {
-        $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+        $follower = Auth::user();
+        if (!$follower) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
         }
 
-        $follower = Auth::user();
-        $following = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
-
+        $following = $this->resolveProfileUser($handle);
         if (!$following) {
             return response()->json(['error' => 'User not found'], 404);
         }
@@ -162,63 +157,118 @@ class UserController extends Controller
             return response()->json(['error' => 'Cannot follow yourself'], 400);
         }
 
-        $result = DB::transaction(function () use ($follower, $following) {
-            // Check if there's an existing follow relationship (accepted or pending)
+        $payload = $request->isJson() ? $request->json()->all() : $request->all();
+        $desired = $this->parseDesiredFollowing($payload['following'] ?? null);
+
+        $result = DB::transaction(function () use ($follower, $following, $desired) {
             $existingFollow = DB::table('user_follows')
                 ->where('follower_id', $follower->id)
                 ->where('following_id', $following->id)
+                ->lockForUpdate()
                 ->first();
 
-            if ($existingFollow) {
-                // Unfollow (remove regardless of status)
-                DB::table('user_follows')
-                    ->where('follower_id', $follower->id)
-                    ->where('following_id', $following->id)
-                    ->delete();
-                
-                // Only decrement counts if it was accepted
-                if ($existingFollow->status === 'accepted') {
-                    $follower->decrement('following_count');
-                    $following->decrement('followers_count');
-                }
-                
-                return ['following' => false, 'status' => 'unfollowed'];
-            } else {
-                // Check if profile is private
-                if ($following->is_private) {
-                    // Create pending follow request + live FCM
-                    DB::table('user_follows')->insert([
-                        'follower_id' => $follower->id,
-                        'following_id' => $following->id,
-                        'status' => 'pending',
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-
-                    (new \App\Services\InteractionPushService)->notifyFollowRequest($follower, $following);
-
-                    return ['following' => false, 'status' => 'pending', 'message' => 'Follow request sent'];
-                } else {
-                    // Public profile - follow immediately
-                    DB::table('user_follows')->insert([
-                        'follower_id' => $follower->id,
-                        'following_id' => $following->id,
-                        'status' => 'accepted',
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                    
-                    $follower->increment('following_count');
-                    $following->increment('followers_count');
-
-                    (new \App\Services\InteractionPushService)->notifyFollow($follower, $following);
-                    
-                    return ['following' => true, 'status' => 'accepted'];
-                }
+            if ($desired === true) {
+                return $this->ensureFollowing($follower, $following, $existingFollow);
             }
+            if ($desired === false) {
+                return $this->ensureUnfollowed($follower, $following, $existingFollow);
+            }
+
+            if ($existingFollow) {
+                return $this->ensureUnfollowed($follower, $following, $existingFollow);
+            }
+
+            return $this->ensureFollowing($follower, $following, null);
         });
 
         return response()->json($result);
+    }
+
+    private function parseDesiredFollowing(mixed $value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int) $value === 1;
+        }
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        return $parsed;
+    }
+
+    /**
+     * @param  object|null  $existingFollow
+     * @return array{following: bool, status: string, message?: string}
+     */
+    private function ensureFollowing(User $follower, User $target, $existingFollow): array
+    {
+        if ($existingFollow) {
+            if ($existingFollow->status === 'accepted') {
+                return ['following' => true, 'status' => 'accepted'];
+            }
+
+            return ['following' => false, 'status' => 'pending', 'message' => 'Follow request sent'];
+        }
+
+        if ($target->is_private) {
+            DB::table('user_follows')->insert([
+                'follower_id' => $follower->id,
+                'following_id' => $target->id,
+                'status' => 'pending',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            (new \App\Services\InteractionPushService)->notifyFollowRequest($follower, $target);
+
+            return ['following' => false, 'status' => 'pending', 'message' => 'Follow request sent'];
+        }
+
+        DB::table('user_follows')->insert([
+            'follower_id' => $follower->id,
+            'following_id' => $target->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $follower->increment('following_count');
+        $target->increment('followers_count');
+
+        (new \App\Services\InteractionPushService)->notifyFollow($follower, $target);
+
+        return ['following' => true, 'status' => 'accepted'];
+    }
+
+    /**
+     * @param  object|null  $existingFollow
+     * @return array{following: bool, status: string}
+     */
+    private function ensureUnfollowed(User $follower, User $target, $existingFollow): array
+    {
+        if (!$existingFollow) {
+            return ['following' => false, 'status' => 'unfollowed'];
+        }
+
+        DB::table('user_follows')
+            ->where('follower_id', $follower->id)
+            ->where('following_id', $target->id)
+            ->delete();
+
+        if ($existingFollow->status === 'accepted') {
+            $follower->decrement('following_count');
+            $target->decrement('followers_count');
+        }
+
+        return ['following' => false, 'status' => 'unfollowed'];
     }
 
     /**
@@ -226,15 +276,10 @@ class UserController extends Controller
      */
     public function followers(Request $request, string $handle): JsonResponse
     {
-        $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+        $user = $this->resolveProfileUser($handle);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
         }
-
-        $user = User::where('handle', $handle)->firstOrFail();
         $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
         $limit = (int) $request->get('limit', 20);
 
@@ -390,15 +435,10 @@ class UserController extends Controller
      */
     public function following(Request $request, string $handle): JsonResponse
     {
-        $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+        $user = $this->resolveProfileUser($handle);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
         }
-
-        $user = User::where('handle', $handle)->firstOrFail();
         $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
         $limit = (int) $request->get('limit', 20);
 

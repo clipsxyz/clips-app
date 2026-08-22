@@ -59,7 +59,7 @@ export async function filterVisibleFeedPosts(
 export async function fetchVisibleFeedPage(
     params: NativeFeedFetchParams,
     archivedIds?: Set<string>,
-): Promise<{ items: Post[]; nextCursor: string | number | null }> {
+): Promise<{ items: Post[]; nextCursor: string | number | null; followingCount?: number }> {
     try {
         const page = await fetchPostsPage(
             params.filter,
@@ -77,7 +77,11 @@ export async function fetchVisibleFeedPage(
             prefs: params.prefs,
             archivedIds,
         });
-        return { items, nextCursor: page.nextCursor ?? null };
+        return {
+            items,
+            nextCursor: page.nextCursor ?? null,
+            followingCount: page.followingCount,
+        };
     } catch (err) {
         console.error('fetchVisibleFeedPage failed:', err);
         return { items: [], nextCursor: null };
@@ -89,7 +93,7 @@ const INITIAL_FEED_PAGE_WALK_MAX = isReactNativeRuntime() ? 6 : 24;
 /** Walk mock/API pages until we find visible posts or hit the end. */
 export async function fetchInitialVisibleFeed(
     params: Omit<NativeFeedFetchParams, 'cursor'>,
-): Promise<{ items: Post[]; nextCursor: string | number | null }> {
+): Promise<{ items: Post[]; nextCursor: string | number | null; followingCount?: number }> {
     const archivedIds = await getArchivedFeedPostIdsMobile(params.viewerUserId);
 
     // Mock/dev on device: one larger page is enough; skip slow multi-page walks.
@@ -101,15 +105,17 @@ export async function fetchInitialVisibleFeed(
     }
 
     let cursor: string | number | null = 0;
+    let followingCount: number | undefined;
     for (let step = 0; step < INITIAL_FEED_PAGE_WALK_MAX; step += 1) {
         const page = await fetchVisibleFeedPage({ ...params, cursor }, archivedIds);
+        if (typeof page.followingCount === 'number') followingCount = page.followingCount;
         if (page.items.length > 0) {
-            return page;
+            return { ...page, followingCount };
         }
         if (page.nextCursor == null) {
-            return { items: [], nextCursor: null };
+            return { items: [], nextCursor: null, followingCount };
         }
         cursor = page.nextCursor;
     }
-    return { items: [], nextCursor: null };
+    return { items: [], nextCursor: null, followingCount };
 }

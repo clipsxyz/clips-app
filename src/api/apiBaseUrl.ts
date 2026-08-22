@@ -103,3 +103,14 @@ export function getApiBaseUrl(): string {
     if (onNetwork) return `${protocol}://${hostname}:8000/api`;
     return '/api';
 }
+
+/** Turn `/storage/...` (and other relative Laravel paths) into a loadable URL. */
+export function resolvePublicMediaUrl(url: string | null | undefined): string {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    if (/^(https?:|data:|file:|content:)/i.test(raw)) return raw;
+    const apiBase = getApiBaseUrl().replace(/\/$/, '');
+    const origin = apiBase.replace(/\/api$/i, '');
+    if (raw.startsWith('/')) return `${origin}${raw}`;
+    return origin ? `${origin}/${raw}` : raw;
+}

@@ -1,11 +1,13 @@
 import React from 'react';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isMockMode } from '../api/apiMode';
 import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate, hydratePrivacyStorage } from '../api/privacy';
-import { hydrateFollowsStorage, clearUserState, getState } from '../api/posts';
+import { hydrateFollowsStorage, clearUserState, getState, syncFollowsFromLaravel } from '../api/posts';
 import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
+import { setAvatarForHandle } from '../api/users';
 import {
   clearAuthToken,
   getAuthTokenAsync,
@@ -14,6 +16,50 @@ import {
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 const USER_STORAGE_KEY = 'user';
+
+function displayNameFromAuthPayload(userData: any): string {
+  const raw = userData?.name ?? userData?.display_name ?? userData?.displayName ?? '';
+  const fromName = String(raw).trim();
+  if (fromName) return fromName;
+  const handle = String(userData?.handle || '').trim();
+  if (handle) {
+    const at = handle.indexOf('@');
+    const fromHandle = (at >= 0 ? handle.slice(0, at) : handle).trim();
+    if (fromHandle) return fromHandle;
+  }
+  const email = String(userData?.email || '').trim();
+  if (email.includes('@')) {
+    const localPart = email.split('@')[0]?.trim();
+    if (localPart) return localPart;
+  }
+  return 'Me';
+}
+
+function isPlaceholderTestUser(parsed: { id?: unknown; handle?: unknown } | null): boolean {
+  const id = parsed?.id != null ? String(parsed.id) : '';
+  const handle = parsed?.handle != null ? String(parsed.handle) : '';
+  return id === 'test-user' || handle === 'TestUser@Dublin';
+}
+
+/** Overlay Laravel /auth/me onto the cached profile. Token identity always wins. */
+function applyLaravelIdentity(local: User, fromApi: Record<string, unknown>): User {
+  const next: User = { ...local };
+  const localId = local.id != null ? String(local.id) : '';
+  const apiId = fromApi.id != null ? String(fromApi.id) : '';
+  if (apiId && localId && apiId !== localId) {
+    next.avatarUrl = undefined;
+    next.profileBackgroundUrl = undefined;
+  }
+  for (const [key, val] of Object.entries(fromApi)) {
+    if (val === undefined || val === null) continue;
+    if (key === 'placesTraveled' && Array.isArray(val)) {
+      next.placesTraveled = val.length > 0 ? (val as string[]) : undefined;
+      continue;
+    }
+    (next as Record<string, unknown>)[key] = val;
+  }
+  return next;
+}
 
 async function hydrateUserFromNativeStorage(): Promise<void> {
   try {
@@ -49,11 +95,17 @@ function setSentryUser(user: { id: string; username?: string } | null) {
     /* Sentry optional on native */
   }
 }
-type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
+type AuthCtx = {
+  user: User | null;
+  login: (userData: any) => void;
+  logout: () => void;
+  sessionReady: boolean;
+};
 const Ctx = React.createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
+  const [sessionReady, setSessionReady] = React.useState(false);
   const authRefreshGenRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -65,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshGen = authRefreshGenRef.current;
 
     void (async () => {
+      try {
       await Promise.all([hydratePrivacyStorage(), hydrateUserFromNativeStorage()]);
       if (cancelled) return;
 
@@ -78,6 +131,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const s = localStorage.getItem(USER_STORAGE_KEY);
         if (!s) {
+          // Live Laravel: stay signed out so Splash → Landing/Login. Mock mode keeps a local test user.
+          if (isLaravelApiEnabled()) {
+            if (cancelled) return;
+            setUser(null);
+            return;
+          }
           // Create a test user if no user exists
           const testUser: User = {
             id: 'test-user',
@@ -107,7 +166,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const parsed = JSON.parse(s);
+        let parsed = JSON.parse(s);
+        if (isLaravelApiEnabled() && isPlaceholderTestUser(parsed)) {
+          const token = await getAuthTokenAsync();
+          if (!token) {
+            localStorage.removeItem(USER_STORAGE_KEY);
+            await persistUserToNativeStorage(null);
+            if (cancelled) return;
+            setUser(null);
+            return;
+          }
+        }
+        if (isLaravelApiEnabled() && !isMockMode()) {
+          const token = await getAuthTokenAsync();
+          if (!token) {
+            localStorage.removeItem(USER_STORAGE_KEY);
+            await persistUserToNativeStorage(null);
+            if (cancelled) return;
+            setUser(null);
+            return;
+          }
+          try {
+            const { getCurrentUser, mapLaravelUserToAppFields } = await import('../api/client');
+            const apiUser = await Promise.race([
+              getCurrentUser(),
+              new Promise((_, reject) => {
+                setTimeout(() => {
+                  const err = new Error('auth/me timeout');
+                  (err as { status?: number }).status = 0;
+                  reject(err);
+                }, 5000);
+              }),
+            ]);
+            if (cancelled || refreshGen !== authRefreshGenRef.current) return;
+            const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+            if (fromApi.id && parsed?.id && String(fromApi.id) !== String(parsed.id)) {
+              console.warn('[auth] saved profile did not match Laravel token', {
+                savedHandle: parsed.handle,
+                laravelHandle: fromApi.handle,
+              });
+            }
+            parsed = applyLaravelIdentity(parsed, fromApi);
+            const syncedJson = JSON.stringify(parsed);
+            localStorage.setItem(USER_STORAGE_KEY, syncedJson);
+            await persistUserToNativeStorage(syncedJson);
+          } catch (err: any) {
+            if (err?.status === 401) {
+              localStorage.removeItem(USER_STORAGE_KEY);
+              await persistUserToNativeStorage(null);
+              await clearAuthToken();
+              if (cancelled) return;
+              setUser(null);
+              return;
+            }
+          }
+        }
         const previewId =
           parsed?.id != null && String(parsed.id).trim() !== ''
             ? String(parsed.id)
@@ -115,6 +228,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (previewId) {
           await hydrateFollowsStorage(previewId);
           if (cancelled) return;
+          const previewHandle = typeof parsed?.handle === 'string' ? parsed.handle.trim() : '';
+          if (previewHandle && !isMockMode()) {
+            try {
+              await syncFollowsFromLaravel(previewId, previewHandle);
+            } catch {
+              // Following feed still loads from Laravel even if this cache warm fails.
+            }
+            if (cancelled) return;
+          }
         }
         // Handle backward compatibility for old user format
         let userToSet: User;
@@ -209,38 +331,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               void register?.();
             });
           }
-          // If we have an auth token (Laravel), refresh user from API so handle and profile are correct (fixes Share/DM list after refresh)
-          void getAuthTokenAsync().then((token) => {
-            if (cancelled || refreshGen !== authRefreshGenRef.current || !token || !isLaravelApiEnabled())
-              return;
-            import('../api/client').then(({ getCurrentUser, mapLaravelUserToAppFields }) => {
-              getCurrentUser()
-                .then((apiUser: any) => {
-                  if (cancelled || refreshGen !== authRefreshGenRef.current) return;
-                  void getAuthTokenAsync().then((stillToken) => {
-                    if (cancelled || refreshGen !== authRefreshGenRef.current || !stillToken) return;
-                    const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
-                    const updated: User = { ...userToSet };
-                    for (const [key, val] of Object.entries(fromApi)) {
-                      if (val === undefined || val === null) continue;
-                      if (key === 'placesTraveled' && Array.isArray(val)) {
-                        updated.placesTraveled = val.length > 0 ? val : undefined;
-                        continue;
-                      }
-                      (updated as Record<string, unknown>)[key] = val;
-                    }
-                    setUser(updated);
-                    const updatedJson = JSON.stringify(updated);
-                    localStorage.setItem(USER_STORAGE_KEY, updatedJson);
-                    persistUserToNativeStorage(updatedJson);
-                    if (updated.handle && typeof updated.is_private === 'boolean') {
-                      setProfilePrivacy(updated.handle, updated.is_private);
-                    }
-                  });
-                })
-                .catch(() => {});
-            });
-          });
           // Restore profile pic from IndexedDB (survives refresh on phone)
           if (!userToSet.avatarUrl) {
             db.get(AVATAR_KEY(userToSet.id))
@@ -271,6 +361,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Initialize mock private user for testing (Sarah@Artane)
       initializePrivateMockUser();
+      } finally {
+        if (!cancelled) setSessionReady(true);
+      }
     })();
 
     return () => {
@@ -288,12 +381,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         : userData.accountType === 'personal' || userData.account_type === 'personal'
           ? 'personal'
           : undefined;
+    const name = displayNameFromAuthPayload(userData);
     const u: User = {
       id:
         userData.id != null && String(userData.id).trim() !== ''
           ? String(userData.id)
-          : (userData.name || '').trim().toLowerCase() || 'me',
-      name: userData.name.trim() || 'Me',
+          : name.toLowerCase() || 'me',
+      name,
       email: userData.email || '',
       password: userData.password || '',
       age: userData.age || 18,
@@ -301,7 +395,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       local: userData.local || '',
       regional: userData.regional || '',
       national: userData.national || '',
-      handle: userData.handle || `${(userData.name || '').trim().split(/\s+/)[0] || userData.name || 'User'}@Unknown`,
+      handle: userData.handle || `${name.split(/\s+/)[0] || name || 'User'}@Unknown`,
       countryFlag:
         normalizeCountryFlagInput(userData.countryFlag || '', userData.national || '') || undefined,
       avatarUrl: userData.avatarUrl || undefined,
@@ -320,8 +414,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       guidelinesAcceptedAt: userData.guidelinesAcceptedAt,
     };
     // Drop stale in-memory follows before AsyncStorage hydrate so getState() reloads cleanly.
+    authRefreshGenRef.current += 1;
+    const loginGen = authRefreshGenRef.current;
     clearUserState(u.id);
     setUser(u);
+    if (u.handle && u.avatarUrl) {
+      setAvatarForHandle(u.handle, u.avatarUrl);
+      void import('../utils/syncHostedAvatar').then(({ persistLocalAvatarToLaravel }) =>
+        persistLocalAvatarToLaravel(u.handle, u.avatarUrl).then((hosted) => {
+          if (!hosted || hosted === u.avatarUrl) return;
+          setUser((prev) => (prev && prev.id === u.id ? { ...prev, avatarUrl: hosted } : prev));
+          setAvatarForHandle(u.handle, hosted);
+        }),
+      );
+    }
     // Persist large base64 avatar in IndexedDB (survives refresh); strip from localStorage to avoid quota exceeded
     const toStore = { ...u };
     if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
@@ -331,22 +437,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('user', JSON.stringify(toStore));
 
     void (async () => {
+      let sessionUser = u;
       try {
         await persistUserToNativeStorage(JSON.stringify(toStore));
       } catch {
         // continue even if native storage persist fails
       }
+      if (loginGen !== authRefreshGenRef.current) return;
       try {
-        await Promise.all([hydrateFollowsStorage(u.id), hydratePrivacyStorage()]);
+        await Promise.all([hydrateFollowsStorage(sessionUser.id), hydratePrivacyStorage()]);
+        if (sessionUser.handle && !isMockMode()) {
+          try {
+            await syncFollowsFromLaravel(sessionUser.id, sessionUser.handle);
+          } catch {
+            // Following feed still loads from Laravel even if this cache warm fails.
+          }
+        }
       } catch {
         // continue even if native storage hydrate fails
       }
       // Warm cache from hydrated storage (hydrateFollowsStorage also merges if cache already exists).
-      getState(u.id);
-      if (u.handle) {
-        setProfilePrivacy(u.handle, !!u.is_private);
+      getState(sessionUser.id);
+      if (sessionUser.handle) {
+        setProfilePrivacy(sessionUser.handle, !!sessionUser.is_private);
         try {
-          connectSocket(u.handle);
+          connectSocket(sessionUser.handle);
         } catch (e) {
           console.warn('Socket connect skipped:', e);
         }
@@ -361,7 +476,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           void register?.();
         });
       }
-      setSentryUser({ id: u.id, username: u.name });
+      setSentryUser({ id: sessionUser.id, username: sessionUser.name });
     })();
   };
 
@@ -369,7 +484,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authRefreshGenRef.current += 1;
     const prevId = user?.id;
     disconnectSocket();
-    // Clear UI immediately, but keep Sanctum + AsyncStorage user until FCM unregister finishes.
     setUser(null);
     if (prevId) clearUserState(prevId);
     localStorage.removeItem('user');
@@ -377,19 +491,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('clips_app_stable_uid');
     } catch (_) {}
     setSentryUser(null);
+    void persistUserToNativeStorage(null);
+    void clearAuthToken();
     void (async () => {
       try {
         const { clearNotificationSession } = await import('../services/notifications');
         await clearNotificationSession?.();
       } catch {
-        // still drop local credentials
+        // Token and user are already cleared; FCM is best-effort.
       }
-      await persistUserToNativeStorage(null);
-      await clearAuthToken();
     })();
   };
 
-  return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, login, logout, sessionReady }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {

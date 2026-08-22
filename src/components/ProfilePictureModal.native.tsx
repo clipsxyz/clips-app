@@ -14,6 +14,9 @@ import GazetteerAlertSheet from './GazetteerAlertSheet.native';
 import { useAuth } from '../context/Auth';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
+import { updateAuthProfile } from '../api/client';
+import { setAvatarForHandle } from '../api/users';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import type { User } from '../types';
 
 type Props = {
@@ -92,6 +95,9 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
                         fileName || 'profile-avatar.jpg',
                     );
                     nextAvatarUrl = upload.fileUrl || upload.url || '';
+                    if (nextAvatarUrl) {
+                        await updateAuthProfile({ avatar_url: nextAvatarUrl });
+                    }
                 } catch {
                     // Fall through to local URI / data URL.
                 }
@@ -106,7 +112,10 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
                 nextAvatarUrl = uri;
             }
 
-            saveAvatarUrl(nextAvatarUrl);
+            if (user.handle) {
+                setAvatarForHandle(user.handle, resolvePublicMediaUrl(nextAvatarUrl) || nextAvatarUrl);
+            }
+            saveAvatarUrl(resolvePublicMediaUrl(nextAvatarUrl) || nextAvatarUrl);
             onClose();
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Could not update profile picture.';
@@ -129,6 +138,9 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
             showCancelButton: true,
             onConfirm: () => {
                 saveAvatarUrl(undefined);
+                if (isLaravelApiEnabled()) {
+                    void updateAuthProfile({ avatar_url: null }).catch(() => {});
+                }
                 setAlertConfig(null);
                 onClose();
             },

@@ -432,13 +432,40 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [stories24ContentReady, stories24HoldMinReady]);
 
     useEffect(() => {
+        if (!stories24OpenFromFeedRail || loading) return;
+        const want = (normalizedOpenUserHandle || '').trim().toLowerCase().replace(/^@/, '');
+        if (!want) return;
+        const hasTarget = storyGroups.some(
+            (g) =>
+                String(g.userHandle || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^@/, '') === want,
+        );
+        if (hasTarget) return;
+        setStories24HoldConsumed(true);
+        if (navigation?.canGoBack?.()) {
+            navigation.goBack();
+        }
+    }, [
+        loading,
+        storyGroups,
+        normalizedOpenUserHandle,
+        stories24OpenFromFeedRail,
+        navigation,
+    ]);
+
+    useEffect(() => {
         loadStories();
     }, [user?.id, normalizedOpenUserHandle, railHandlesKey]);
 
     useEffect(() => {
         if (!normalizedOpenUserHandle || storyGroups.length === 0) return;
         if (viewingStoriesRef.current) return;
-        const targetGroup = storyGroups.find(g => g.userHandle === normalizedOpenUserHandle);
+        const want = normalizedOpenUserHandle.trim().toLowerCase().replace(/^@/, '');
+        const targetGroup = storyGroups.find(
+            (g) => String(g.userHandle || '').trim().toLowerCase().replace(/^@/, '') === want,
+        );
         if (targetGroup) {
             void startViewingStories(targetGroup, openStoryId);
         }
@@ -460,18 +487,45 @@ export default function StoriesScreen({ route, navigation }: any) {
             );
 
             const followedUserHandles = await getFollowedUsers(user.id);
+            const follows = getState(user.id).follows;
+            const selfHandle = (user.handle || '').trim().toLowerCase().replace(/^@/, '');
+            const isAllowedStoryHandle = (handle: string, storyUserId?: string) => {
+                const n = String(handle || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^@/, '');
+                if (selfHandle && n === selfHandle) return true;
+                if (
+                    storyUserId &&
+                    String(storyUserId) === String(user.id) &&
+                    (!n || n === selfHandle)
+                ) {
+                    return true;
+                }
+                return getFollowState(follows, handle);
+            };
+            const allowedRequestedHandles = requestedHandles.filter((handle) =>
+                isAllowedStoryHandle(handle),
+            );
 
             const [mainGroups, requestedGroupsResults] = await Promise.all([
                 fetchFollowedUsersStoryGroups(user.id, followedUserHandles),
-                requestedHandles.length > 0
-                    ? Promise.all(requestedHandles.map((handle) => fetchStoryGroupByHandle(handle)))
+                allowedRequestedHandles.length > 0
+                    ? Promise.all(
+                          allowedRequestedHandles.map((handle) => fetchStoryGroupByHandle(handle)),
+                      )
                     : Promise.resolve([] as (StoryGroup | null)[]),
             ]);
 
-            let groups = mainGroups;
+            let groups = mainGroups.filter((g) => isAllowedStoryHandle(g.userHandle, g.userId));
             for (const storyGroup of requestedGroupsResults) {
-                if (!storyGroup) continue;
-                const existingGroupIndex = groups.findIndex((g) => g.userHandle === storyGroup.userHandle);
+                if (!storyGroup || !isAllowedStoryHandle(storyGroup.userHandle, storyGroup.userId))
+                    continue;
+                const existingGroupIndex = groups.findIndex(
+                    (g) =>
+                        String(g.userHandle || '').trim().toLowerCase() ===
+                        String(storyGroup.userHandle || '').trim().toLowerCase(),
+                );
                 if (existingGroupIndex === -1) {
                     groups.push(storyGroup);
                 } else {
@@ -515,7 +569,21 @@ export default function StoriesScreen({ route, navigation }: any) {
                 }),
             );
 
-            setStoryGroups(withGazetteerWorldGroup(groupsWithAvatars));
+            let nextGroups = groupsWithAvatars;
+            if (normalizedOpenUserHandle && railHandles.length === 0) {
+                const want = normalizedOpenUserHandle.trim().toLowerCase().replace(/^@/, '');
+                const only = groupsWithAvatars.filter(
+                    (g) =>
+                        String(g.userHandle || '')
+                            .trim()
+                            .toLowerCase()
+                            .replace(/^@/, '') === want,
+                );
+                nextGroups = only;
+            } else {
+                nextGroups = withGazetteerWorldGroup(groupsWithAvatars);
+            }
+            setStoryGroups(nextGroups);
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
@@ -532,7 +600,11 @@ export default function StoriesScreen({ route, navigation }: any) {
         const groupIndex = isGazetteerWorldGroup(group)
             ? groups.findIndex((g) => isGazetteerWorldGroup(g))
             : groups.findIndex(
-                  (g) => g.userId === group.userId || g.userHandle === group.userHandle,
+                  (g) =>
+                      g.userId === group.userId ||
+                      String(g.userHandle || '')
+                          .trim()
+                          .toLowerCase() === String(group.userHandle || '').trim().toLowerCase(),
               );
         if (groupIndex === -1) return;
 

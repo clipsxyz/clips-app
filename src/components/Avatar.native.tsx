@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -11,6 +11,7 @@ import {
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 import PassportTravelingBorder from './PassportTravelingBorder.native';
+import { resolveAvatarImageUri } from '../api/users';
 
 export default function Avatar({
     src,
@@ -21,14 +22,19 @@ export default function Avatar({
 }: AvatarProps) {
     const { dim, fontSize } = resolveAvatarDimensions(size);
     const initials = getAvatarInitials(name);
+    const imageUri = resolveAvatarImageUri(src);
     const [imageFailed, setImageFailed] = useState(false);
-    const showImage = src && !imageFailed;
+    const showImage = Boolean(imageUri) && !imageFailed;
+
+    useEffect(() => {
+        setImageFailed(false);
+    }, [imageUri]);
 
     const inner = (
         <View style={[styles.innerClip, { width: dim, height: dim, borderRadius: dim / 2 }]}>
             {showImage ? (
                 <Image
-                    source={{ uri: src }}
+                    source={{ uri: imageUri }}
                     style={StyleSheet.absoluteFill}
                     resizeMode="cover"
                     onError={() => setImageFailed(true)}

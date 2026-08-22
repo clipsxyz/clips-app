@@ -6,13 +6,11 @@ import {
     StyleSheet,
     Text,
     StatusBar,
-    ScrollView,
     Pressable,
     useWindowDimensions,
-    type NativeScrollEvent,
-    type NativeSyntheticEvent,
 } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, ScrollView } from 'react-native-gesture-handler';
+import NativePageSwipe from './NativePageSwipe.native';
 import Animated, {
     Easing,
     interpolate,
@@ -36,6 +34,7 @@ import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar.native';
 import { useAuth } from '../context/Auth';
 import { ox } from '../constants/nativeOpticalScale';
+import { useResolvedAuthorAvatar } from '../hooks/useResolvedAuthorAvatar';
 
 /**
  * Fast fade-rise into fullscreen. Short travel so the open does not feel sticky.
@@ -128,8 +127,6 @@ export default function ImageFullscreenModal({
     const [imageCover, setImageCover] = useState(true);
     /** APK: show Twitter chrome via React state (Reanimated opacity under HW texture was invisible). */
     const [chromeShown, setChromeShown] = useState(false);
-    const scrollRef = useRef<ScrollView>(null);
-    const skipScrollSyncRef = useRef(false);
     const originRef = useRef<ImageFullscreenOrigin | null>(null);
     const images = useMemo(() => {
         const fromPost = post ? collectImageUrls(post) : [];
@@ -272,12 +269,7 @@ export default function ImageFullscreenModal({
         const max = Math.max(0, images.length - 1);
         const next = Math.min(Math.max(0, initialIndex), max);
         setIndex(next);
-        skipScrollSyncRef.current = true;
-        scrollRef.current?.scrollTo({ x: next * screenWidth, animated: false });
-        requestAnimationFrame(() => {
-            skipScrollSyncRef.current = false;
-        });
-    }, [visible, post?.id, initialIndex, images.length, screenWidth, isTextOnly]);
+    }, [visible, post?.id, initialIndex, images.length, isTextOnly]);
 
     const backdropStyle = useAnimatedStyle(() => ({
         opacity: backdropOp.value,
@@ -299,15 +291,20 @@ export default function ImageFullscreenModal({
         };
     });
 
-    if (!post) return null;
-
-    const handle = post.userHandle || '';
+    const handle = post?.userHandle || '';
     const name = displayNameFromHandle(handle);
     const handleLabel = atHandle(handle);
     const isOwn = Boolean(user?.handle && handle && user.handle === handle);
-    const isFollowing = post.isFollowing === true;
-    const authorAvatar = getAvatarForHandle(handle);
+    const isFollowing = post?.isFollowing === true;
+    const authorAvatar = useResolvedAuthorAvatar({
+        handle,
+        explicitUrl: post?.userAvatarUrl,
+        viewerHandle: user?.handle,
+        viewerAvatarUrl: user?.avatarUrl,
+    });
     const viewerAvatar = user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined);
+
+    if (!post) return null;
 
     const headerPadTop = insets.top + 6;
     const footerPadBottom = Math.max(insets.bottom, 12);
@@ -315,10 +312,10 @@ export default function ImageFullscreenModal({
     const showChrome = chromeVisible && !closing;
     const imageResizeMode = imageCover && !closing && !shellReady ? 'cover' : 'contain';
 
-    const toggleChrome = () => {
+    const toggleChrome = useCallback(() => {
         if (closing) return;
         setChromeVisible((v) => !v);
-    };
+    }, [closing]);
 
     const handleLikePress = async () => {
         if (!onLike || likeBusy) return;
@@ -331,12 +328,6 @@ export default function ImageFullscreenModal({
     };
 
     const hasCarousel = images.length > 1;
-
-    const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-        if (skipScrollSyncRef.current) return;
-        const next = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
-        setIndex(Math.max(0, Math.min(next, images.length - 1)));
-    };
 
     if (!images.length && !isTextOnly) {
         return (
@@ -392,34 +383,29 @@ export default function ImageFullscreenModal({
                     </View>
                 </Pressable>
             ) : hasCarousel ? (
-                <ScrollView
-                    ref={scrollRef}
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    decelerationRate="fast"
-                    onMomentumScrollEnd={onScrollEnd}
-                    style={animating ? styles.stageFill : { width: screenWidth, height: screenHeight }}
-                    scrollEnabled={shellReady && !closing}
+                <NativePageSwipe
+                    pageCount={images.length}
+                    pageWidth={screenWidth}
+                    pageHeight={screenHeight}
+                    index={index}
+                    onIndexChange={setIndex}
+                    onTap={toggleChrome}
+                    enabled={!closing}
                 >
-                    {images.map((uri) => (
-                        <Pressable
-                            key={uri}
-                            onPress={toggleChrome}
-                            style={
-                                animating
-                                    ? styles.stageFill
-                                    : { width: screenWidth, height: screenHeight }
-                            }
+                    {images.map((uri, i) => (
+                        <View
+                            key={`${uri}-${i}`}
+                            style={{ width: screenWidth, height: screenHeight }}
                         >
                             <Image
                                 source={{ uri }}
                                 style={styles.image}
                                 resizeMode={imageResizeMode}
+                                pointerEvents="none"
                             />
-                        </Pressable>
+                        </View>
                     ))}
-                </ScrollView>
+                </NativePageSwipe>
             ) : (
                 <Pressable
                     onPress={toggleChrome}
@@ -436,12 +422,7 @@ export default function ImageFullscreenModal({
     );
 
     const chromeOverlay = showChrome ? (
-        <View style={styles.chromeRoot} pointerEvents="box-none">
-            <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={toggleChrome}
-                accessibilityLabel="Toggle controls"
-            />
+        <>
             <Pressable
                 style={[styles.closeFab, { top: insets.top + 10 }]}
                 onPress={requestClose}
@@ -593,18 +574,16 @@ export default function ImageFullscreenModal({
                     </Pressable>
                 </View>
             </View>
-        </View>
+        </>
     ) : (
-        <View style={styles.chromeRoot} pointerEvents="box-none">
-            <Pressable
-                style={[styles.closeFab, { top: insets.top + 10 }]}
-                onPress={requestClose}
-                hitSlop={10}
-                accessibilityLabel="Close fullscreen"
-            >
-                <Icon name="close" size={ox(22)} color="#FFFFFF" />
-            </Pressable>
-        </View>
+        <Pressable
+            style={[styles.closeFab, { top: insets.top + 10 }]}
+            onPress={requestClose}
+            hitSlop={10}
+            accessibilityLabel="Close fullscreen"
+        >
+            <Icon name="close" size={ox(22)} color="#FFFFFF" />
+        </Pressable>
     );
 
     return (
@@ -626,16 +605,14 @@ export default function ImageFullscreenModal({
                                 {mediaStage}
                             </View>
                         </Animated.View>
-                        <View style={styles.chromeRoot} pointerEvents="box-none">
-                            <Pressable
-                                style={[styles.closeFab, { top: insets.top + 10 }]}
-                                onPress={requestClose}
-                                hitSlop={10}
-                                accessibilityLabel="Close fullscreen"
-                            >
-                                <Icon name="close" size={ox(22)} color="#FFFFFF" />
-                            </Pressable>
-                        </View>
+                        <Pressable
+                            style={[styles.closeFab, { top: insets.top + 10 }]}
+                            onPress={requestClose}
+                            hitSlop={10}
+                            accessibilityLabel="Close fullscreen"
+                        >
+                            <Icon name="close" size={ox(22)} color="#FFFFFF" />
+                        </Pressable>
                     </>
                 ) : (
                     /* Plain settled tree — chrome is a sibling of the image, not of a Reanimated layer. */
@@ -680,7 +657,8 @@ const styles = StyleSheet.create({
     chromeRoot: {
         ...StyleSheet.absoluteFill,
         zIndex: 20,
-        elevation: 20,
+        elevation: 0,
+        backgroundColor: 'transparent',
     },
     closeFabWrap: {
         position: 'absolute',
@@ -713,8 +691,7 @@ const styles = StyleSheet.create({
         flex: 1,
         width: '100%',
         height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
+        backgroundColor: '#000000',
     },
     stageFill: {
         ...StyleSheet.absoluteFillObject,

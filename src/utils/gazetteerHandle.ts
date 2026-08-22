@@ -1,10 +1,26 @@
-/** Gazetteer handles look like `Name@Place` (alphanumeric only on each side). */
+/**
+ * Gazetteer handles are `Name@Place`.
+ * The part before @ is the person's name (can be a city/country word, e.g. Paris, Ireland).
+ * The part after @ is the only location.
+ */
 
 export function normalizeHandle(handle: string): string {
     return String(handle || '')
         .replace(/^@/, '')
         .trim()
         .toLowerCase();
+}
+
+function rawHandleWithoutLeadingAt(handle: string): string {
+    return String(handle || '').replace(/^@/, '').trim();
+}
+
+/** Display name — never treat this as a place. */
+export function nameFromHandle(handle: string): string {
+    const raw = rawHandleWithoutLeadingAt(handle);
+    const at = raw.indexOf('@');
+    if (at < 0) return raw;
+    return raw.slice(0, at).trim();
 }
 
 /** Collapse spaces so "Super valu" → "Supervalu" (not first-word-only). */
@@ -23,8 +39,9 @@ export function sanitizeHandlePlacePart(place: string): string {
     return alnum || 'Unknown';
 }
 
+/** Location after @ — ignore the name even if the name is a city or country. */
 export function regionalFromHandle(handle: string): string {
-    const raw = String(handle || '').replace(/^@/, '').trim();
+    const raw = rawHandleWithoutLeadingAt(handle);
     const at = raw.indexOf('@');
     if (at < 0) return '';
     return raw.slice(at + 1).trim();

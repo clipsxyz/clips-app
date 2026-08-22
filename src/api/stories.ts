@@ -1536,7 +1536,9 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string, viewerU
 // Get stories for followed users only
 export async function fetchFollowedUsersStoryGroups(userId: string, followedUserHandles: string[]): Promise<StoryGroup[]> {
     const followedSet = new Set(
-        (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase()).filter(Boolean),
+        (followedUserHandles || [])
+            .map((h) => (h || '').trim().toLowerCase().replace(/^@/, ''))
+            .filter(Boolean),
     );
 
     if (!isMockMode()) {
@@ -1544,7 +1546,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
             const groups = await fetchStoryGroups(userId);
             const viewerId = String(userId || '');
             const filtered = groups.filter((group) => {
-                const handle = (group.userHandle || '').trim().toLowerCase();
+                const handle = (group.userHandle || '').trim().toLowerCase().replace(/^@/, '');
                 return String(group.userId) === viewerId || followedSet.has(handle);
             });
 

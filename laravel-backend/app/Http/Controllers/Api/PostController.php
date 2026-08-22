@@ -23,6 +23,9 @@ use Carbon\Carbon;
 
 class PostController extends Controller
 {
+    /** Author fields the feed needs so Ireland/Dublin tabs can match Cork (etc.) from user location, not handle guessing. */
+    private const FEED_USER_WITH = 'user:id,handle,display_name,avatar_url,location_local,location_regional,location_national';
+
     private function buildPublicShareUrl(string $token): string
     {
         $base = rtrim((string) (config('app.frontend_url') ?: config('app.url') ?: ''), '/');
@@ -124,6 +127,22 @@ class PostController extends Controller
 
         $postData = Post::applyEngagementCounts($postData, $attrs);
 
+        if ($post->relationLoaded('user') && $post->user) {
+            $author = $post->user;
+            $postData['user'] = [
+                'id' => $author->id,
+                'handle' => $author->handle,
+                'display_name' => $author->display_name,
+                'avatar_url' => $author->avatar_url,
+                'local' => $author->location_local,
+                'regional' => $author->location_regional,
+                'national' => $author->location_national,
+                'location_local' => $author->location_local,
+                'location_regional' => $author->location_regional,
+                'location_national' => $author->location_national,
+            ];
+        }
+
         return $postData;
     }
 
@@ -173,7 +192,8 @@ class PostController extends Controller
             return response()->json([
                 'items' => [],
                 'nextCursor' => null,
-                'hasMore' => false
+                'hasMore' => false,
+                'followingCount' => 0,
             ]);
         }
     }
@@ -184,20 +204,30 @@ class PostController extends Controller
     private function buildFeedResponse(array $cursorState, int $limit, string $filter, ?string $userId): array
     {
             $hasViewer = !empty($userId);
+            $isFollowingFeed = $this->isFollowingFeedFilter($filter);
+            $followingCount = 0;
+            if ($hasViewer) {
+                $followingCount = (int) DB::table('user_follows')
+                    ->where('follower_id', $userId)
+                    ->where('status', 'accepted')
+                    ->count();
+            }
+
             // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
             // Location feeds: only original posts from that location.
             $query = Post::query()
-                ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
+                ->with([self::FEED_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
                 ->withCount(Post::engagementWithCounts());
 
-            if ($filter === 'Following' && $userId) {
-                $query->following($userId);
-                // Include reclipped posts so "when you reclip it gets shared to people who follow you"
-            } elseif ($filter !== 'Following') {
-                $query->notReclipped()->byLocation($filter);
+            if ($isFollowingFeed) {
+                if ($hasViewer) {
+                    $query->following($userId);
+                } else {
+                    // Guest Following must be empty — never dump the public location feed.
+                    $query->whereRaw('0 = 1');
+                }
             } else {
-                // Following but no userId (e.g. guest): only original posts
-                $query->notReclipped();
+                $query->notReclipped()->byLocation($filter);
             }
 
             if ($hasViewer) {
@@ -254,8 +284,16 @@ class PostController extends Controller
             return [
                 'items' => $transformedPosts,
                 'nextCursor' => $nextCursor,
-                'hasMore' => $nextCursor !== null
+                'hasMore' => $nextCursor !== null,
+                'followingCount' => $followingCount,
             ];
+    }
+
+    private function isFollowingFeedFilter(string $filter): bool
+    {
+        $normalized = strtolower(trim($filter));
+
+        return $normalized === 'following' || $normalized === 'discover';
     }
 
     private function decodeFeedCursor(?string $cursor): array
@@ -317,7 +355,7 @@ class PostController extends Controller
         $userId = $request->get('userId');
         $hasViewer = !empty($userId);
         
-        $query = Post::with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
+        $query = Post::with([self::FEED_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
@@ -357,7 +395,7 @@ class PostController extends Controller
         }
 
         $post = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with([self::FEED_USER_WITH])
             ->withCount(Post::engagementWithCounts())
             ->where('public_share_token', $token)
             ->first();
@@ -923,7 +961,7 @@ class PostController extends Controller
             BoostAnalyticsService::incrementForPost($post->id, 'shares_count');
         });
 
-        $post->load(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url']);
+        $post->load([self::FEED_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url']);
         $post->loadCount(Post::engagementWithCounts());
         Post::bumpFeedCache();
         $postData = self::toApiArray($post, $user instanceof User ? $user : null);

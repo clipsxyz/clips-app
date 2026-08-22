@@ -118,7 +118,20 @@ export async function buildStories24RailItems(
     userHandle?: string | null,
 ): Promise<Stories24RailItem[]> {
     const followedUserHandles = await getFollowedUsers(userId);
-    const groups = await fetchFollowedUsersStoryGroups(userId, followedUserHandles || []);
+    const followedSet = new Set(
+        (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase().replace(/^@/, '')).filter(Boolean),
+    );
+    const selfHandle = (userHandle || '').trim().toLowerCase().replace(/^@/, '');
+    const groups = (await fetchFollowedUsersStoryGroups(userId, followedUserHandles || [])).filter(
+        (group) => {
+            const handle = (group.userHandle || '').trim().toLowerCase().replace(/^@/, '');
+            if (selfHandle && handle === selfHandle) return true;
+            if (String(group.userId) === String(userId) && (!handle || handle === selfHandle)) {
+                return true;
+            }
+            return followedSet.has(handle);
+        },
+    );
 
     const nextItems: Stories24RailItem[] = [];
     for (const group of groups) {

@@ -24,6 +24,7 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import { navigateMainTab } from '../navigation/mainTabs';
+import { resetRootToScreen } from '../navigation/rootNavigationRef';
 import {
     chipActiveMagenta,
     chipActiveMagentaText,
@@ -54,7 +55,8 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones, getCurrentUser, mapLaravelUserToAppFields } from '../api/client';
+import { isMockMode } from '../api/apiMode';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
@@ -198,6 +200,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     const userRef = useRef(user);
     userRef.current = user;
+    const loginRef = useRef(login);
+    loginRef.current = login;
     const postsLoadedRef = useRef(false);
     const loadLockRef = useRef<Promise<void> | null>(null);
     const loadGenRef = useRef(0);
@@ -335,10 +339,36 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
         const run = (async () => {
             const gen = ++loadGenRef.current;
-            const identifier = String(u.handle || u.id);
+            let identifier = String(u.handle || u.id);
+            let viewerId = u.id;
+            if (!isMockMode()) {
+                try {
+                    const me = await getCurrentUser();
+                    if (gen !== loadGenRef.current) return;
+                    if (!userRef.current) return;
+                    const liveHandle = String(me?.handle || '').trim();
+                    const liveId = me?.id != null ? String(me.id) : '';
+                    if (liveHandle || liveId) {
+                        identifier = liveHandle || liveId;
+                        if (liveId) viewerId = liveId;
+                    }
+                    const sameId = !liveId || String(u.id) === liveId;
+                    const sameHandle =
+                        !liveHandle ||
+                        String(u.handle || '').trim().toLowerCase() === liveHandle.toLowerCase();
+                    if (userRef.current && (!sameId || !sameHandle)) {
+                        loginRef.current({
+                            ...u,
+                            ...mapLaravelUserToAppFields(me as Record<string, unknown>),
+                        });
+                    }
+                } catch {
+                    // Fall back to the cached profile handle.
+                }
+            }
             if (!postsLoadedRef.current) setPostsLoading(true);
 
-            const postsTask = fetchPostsByUser(identifier, 50, u.id, 'all')
+            const postsTask = fetchPostsByUser(identifier, 50, viewerId, 'all')
                 .then((userPosts) => {
                     if (gen !== loadGenRef.current) return;
                     setPosts(userPosts);
@@ -592,7 +622,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             onConfirm: () => {
                 setProfileAlert(null);
                 logout();
-                navigation.replace('Login');
+                resetRootToScreen('Login', { mode: 'login' });
             },
         });
     };
