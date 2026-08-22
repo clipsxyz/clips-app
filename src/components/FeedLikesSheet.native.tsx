@@ -52,7 +52,7 @@ export default function FeedLikesSheet({
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        if (!visible || likeCount <= 0) {
+        if (!visible) {
             setLikers([]);
             setFollowing(new Set());
             setLoading(false);

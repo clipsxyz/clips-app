@@ -164,7 +164,7 @@ export default function MyFeedPostCard({
                         isSaved={post.isBookmarked}
                         onLike={onLikePress}
                         onLikesPress={() => {
-                            if ((post.stats?.likes ?? 0) > 0) setLikesSheetVisible(true);
+                            setLikesSheetVisible(true);
                         }}
                         onComment={onCommentPress}
                         onShareToStories={() => setShareToStoriesVisible(true)}

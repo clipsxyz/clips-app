@@ -1,12 +1,8 @@
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isMockMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { isFrontendOnlyPostId } from './posts';
 import { followOrRequest } from '../utils/followOrRequest';
-import {
-    generateFeedLikerHandles,
-    getFollowingSetForHandles,
-} from '../utils/feedLikesSheet';
-import { getAvatarForHandle } from './users';
+import { resolvePublicMediaUrl } from './apiBaseUrl';
 
 export type PostLiker = {
     handle: string;
@@ -22,70 +18,63 @@ export type PostLikersResult = {
     fromApi: boolean;
 };
 
-function mockLikers(userId: string, likeCount: number): PostLikersResult {
-    const handles = generateFeedLikerHandles(likeCount);
-    const following = getFollowingSetForHandles(userId, handles);
+function emptyResult(likeCount: number, viewCount: number): PostLikersResult {
     return {
-        items: handles.map((handle) => ({
-            handle,
-            avatar_url: getAvatarForHandle(handle) || undefined,
-            is_following: following.has(handle),
-        })),
-        likes_count: likeCount,
-        views_count: 0,
+        items: [],
+        likes_count: Math.max(0, likeCount),
+        views_count: Math.max(0, viewCount),
         fromApi: false,
     };
 }
 
-/** Fetch users who liked a post; uses Laravel API when available, mock fallback otherwise. */
+function mapLiker(row: {
+    handle?: string;
+    display_name?: string;
+    avatar_url?: string;
+    is_following?: boolean;
+}): PostLiker | null {
+    const handle = typeof row?.handle === 'string' ? row.handle.trim() : '';
+    if (!handle) return null;
+    const rawAvatar = typeof row.avatar_url === 'string' ? row.avatar_url.trim() : '';
+    return {
+        handle,
+        display_name: typeof row.display_name === 'string' ? row.display_name : undefined,
+        avatar_url: rawAvatar ? resolvePublicMediaUrl(rawAvatar) || rawAvatar : undefined,
+        is_following: row.is_following === true,
+    };
+}
+
+/** Fetch users who liked a post. Never invents mock handles. */
 export async function fetchPostLikers(
     postId: string,
     userId: string,
     likeCount: number,
     viewCount = 0,
 ): Promise<PostLikersResult> {
-    if (likeCount <= 0) {
-        return { items: [], likes_count: 0, views_count: viewCount, fromApi: false };
-    }
-
-    if (isFrontendOnlyPostId(postId) || !isLaravelApiEnabled()) {
-        const mock = mockLikers(userId, likeCount);
-        return { ...mock, views_count: viewCount || mock.views_count };
+    if (likeCount <= 0 || isFrontendOnlyPostId(postId) || isMockMode()) {
+        return emptyResult(likeCount, viewCount);
     }
 
     try {
         const response = await apiClient.fetchPostLikes(postId, {
             userId,
-            limit: Math.min(100, likeCount),
+            limit: Math.min(100, Math.max(likeCount, 1)),
         });
-        const items: PostLiker[] = (response?.items || []).map(
-            (row: {
-                handle?: string;
-                display_name?: string;
-                avatar_url?: string;
-                is_following?: boolean;
-            }) => ({
-                handle: row.handle || '',
-                display_name: row.display_name,
-                avatar_url: row.avatar_url || getAvatarForHandle(row.handle || '') || undefined,
-                is_following: row.is_following === true,
-            }),
-        ).filter((row: PostLiker) => row.handle);
+        const rawItems = Array.isArray(response?.items) ? response.items : [];
+        const items: PostLiker[] = rawItems
+            .map(mapLiker)
+            .filter((row: PostLiker | null): row is PostLiker => row != null);
 
-        if (items.length > 0) {
-            return {
-                items,
-                likes_count: response.likes_count ?? likeCount,
-                views_count: response.views_count ?? viewCount,
-                fromApi: true,
-            };
-        }
+        return {
+            items,
+            likes_count: Number(response?.likes_count ?? likeCount) || 0,
+            views_count: Number(response?.views_count ?? viewCount) || 0,
+            fromApi: true,
+        };
     } catch (error) {
-        console.warn('fetchPostLikers: API failed, using mock fallback', error);
+        console.warn('fetchPostLikers: API failed', error);
+        return emptyResult(likeCount, viewCount);
     }
-
-    const mock = mockLikers(userId, likeCount);
-    return { ...mock, views_count: viewCount || mock.views_count };
 }
 
 /** Toggle follow from likes sheet with local + API sync. Respects private accounts. */

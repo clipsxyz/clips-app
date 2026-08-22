@@ -4398,7 +4398,7 @@ function EngagementBar({
   );
 
   const openLikesSheet = React.useCallback(() => {
-    if (!user || likes <= 0) return;
+    if (!user) return;
     setShowLikesSheet(true);
     setLikersLoading(true);
     void fetchPostLikers(post.id, user.id, likes, views)
@@ -4765,7 +4765,7 @@ function EngagementBar({
                       >
                         <Avatar
                           name={row.display_name || row.handle}
-                          src={row.avatar_url || getAvatarForHandle(row.handle)}
+                          src={row.avatar_url}
                           size="sm"
                         />
                         <div className="min-w-0">

@@ -1383,7 +1383,7 @@ const FeedCard = React.memo(function FeedCard({
                         isSaved={post.isBookmarked}
                         onLike={() => { void onLike(); }}
                         onLikesPress={() => {
-                            if (post.stats.likes > 0) onOpenLikesSheet?.();
+                            onOpenLikesSheet?.();
                         }}
                         onComment={onComment}
                         onShareToStories={() => onShareToStories?.()}
@@ -4813,7 +4813,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     </View>
                 </Modal>
 
-            {likesSheetPost && likesSheetPost.stats.likes > 0 ? (
+            {likesSheetPost ? (
                 <FeedLikesSheet
                     visible={true}
                     postId={String(likesSheetPost.id)}
