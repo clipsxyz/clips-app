@@ -22,7 +22,7 @@ import {
     addPostToCollection,
     createCollection,
     getCollectionsForPost,
-    getCollectionThumbnailUrl,
+    getCollectionThumbSource,
     getUserCollections,
     removePostFromCollection,
     resolvePostThumbnail,
@@ -37,6 +37,7 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
+import CollectionCoverThumb from './CollectionCoverThumb.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 const DEFAULT_COLLECTION_NAME = 'All Posts';
@@ -58,7 +59,7 @@ type Props = {
     userId: string;
     visible: boolean;
     onClose: () => void;
-    onSaved?: () => void;
+    onSaved?: (detail?: { savesCount?: number }) => void;
 };
 
 export default function SavePostModal({ post, userId, visible, onClose, onSaved }: Props) {
@@ -112,9 +113,9 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         autoSavedRef.current = true;
         void (async () => {
             try {
-                await savePostToDefaultCollection(userId, post.id, post);
+                const saved = await savePostToDefaultCollection(userId, post.id, post);
                 await load();
-                onSaved?.();
+                onSaved?.({ savesCount: saved.savesCount });
             } catch (e) {
                 console.error('Auto-save failed:', e);
             }
@@ -178,12 +179,14 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         setSavingId(collectionId);
         try {
             if (postCollectionIds.includes(collectionId)) {
-                await removePostFromCollection(collectionId, post.id);
+                const removed = await removePostFromCollection(collectionId, post.id);
+                await load();
+                onSaved?.({ savesCount: removed.savesCount });
             } else {
-                await addPostToCollection(collectionId, post.id, post);
+                const added = await addPostToCollection(collectionId, post.id, post);
+                await load();
+                onSaved?.({ savesCount: added.savesCount });
             }
-            await load();
-            onSaved?.();
         } catch {
             Alert.alert('Save', 'Could not update collection.');
         } finally {
@@ -206,11 +209,11 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         if (!name || creating) return;
         setCreating(true);
         try {
-            await createCollection(userId, name, true, post.id, post);
+            const created = await createCollection(userId, name, true, post.id, post);
             setNewName('');
             setMode('picker');
             await load();
-            onSaved?.();
+            onSaved?.({ savesCount: created.savesCount });
         } catch {
             Alert.alert('Collections', 'Could not create collection.');
         } finally {
@@ -383,7 +386,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                             ) : null}
 
                             {customCollections.map((c) => {
-                                const thumb = getCollectionThumbnailUrl(c);
+                                const thumb = getCollectionThumbSource(c);
                                 const inCol = postCollectionIds.includes(c.id);
                                 return (
                                     <Pressable
@@ -394,8 +397,9 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                                     >
                                         <View style={styles.cardThumb}>
                                             {thumb ? (
-                                                <Image
-                                                    source={{ uri: thumb }}
+                                                <CollectionCoverThumb
+                                                    uri={thumb.uri}
+                                                    isVideo={thumb.isVideo}
                                                     style={styles.cardThumbImg}
                                                 />
                                             ) : (

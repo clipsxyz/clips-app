@@ -10,7 +10,7 @@ import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import { FaFacebook } from 'react-icons/fa';
 import QRCode from 'qrcode';
 import Flag from '../components/Flag';
-import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
+import { getCollectionThumbSource, getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
 import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
 import Swal from 'sweetalert2';
@@ -759,8 +759,6 @@ export default function ProfilePage() {
       console.error('Error loading drafts:', error);
     }
   }
-
-  const isVideoUrl = React.useCallback((url: string) => /\.(mp4|webm|mov)(\?.*)?$/i.test(url), []);
 
   async function handleDeleteDraft(draftId: string) {
     try {
@@ -2750,16 +2748,11 @@ export default function ProfilePage() {
                   <div className="space-y-3">
                     {collections.map((collection) => {
                       const postCount = collection.postIds?.length || 0;
-                      const thumbSrc = getCollectionThumbnailUrl(collection);
+                      const thumb = getCollectionThumbSource(collection);
                       const firstPost =
                         collection.postIds?.length
                           ? posts.find((p) => p.id === collection.postIds[0])
                           : undefined;
-                      const isVideoThumb =
-                        !!thumbSrc &&
-                        (isVideoUrl(thumbSrc) ||
-                          firstPost?.mediaType === 'video' ||
-                          firstPost?.finalVideoUrl !== undefined);
                       const thumbBroken = !!brokenCollectionThumbs[collection.id];
                       const textFallback =
                         firstPost?.text || firstPost?.caption || firstPost?.text_content;
@@ -2773,10 +2766,10 @@ export default function ProfilePage() {
                           className="w-full p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors text-left"
                         >
                           <div className="flex items-center gap-3">
-                            {thumbSrc && !thumbBroken ? (
-                              isVideoThumb ? (
+                            {thumb && !thumbBroken ? (
+                              thumb.isVideo ? (
                                 <video
-                                  src={thumbSrc}
+                                  src={thumb.uri}
                                   className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
                                   muted
                                   playsInline
@@ -2793,7 +2786,7 @@ export default function ProfilePage() {
                                 />
                               ) : (
                                 <img
-                                  src={thumbSrc}
+                                  src={thumb.uri}
                                   alt={collection.name}
                                   className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
                                   onError={() =>

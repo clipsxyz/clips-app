@@ -45,7 +45,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply } from '../api/posts';
 import {
-    getCollectionThumbnailUrl,
+    getCollectionThumbSource,
     getUserCollections,
     savePostToDefaultCollection,
     unsavePost,
@@ -73,7 +73,7 @@ import {
     deletePost,
     reclipPost,
 } from '../api/posts';
-import { getCollectionsForPost } from '../api/collections';
+import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
 import { updatePost as apiUpdatePost } from '../api/client';
 import {
     markFeedPostArchivedMobile,
@@ -82,6 +82,7 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import CollectionCoverThumb from '../components/CollectionCoverThumb.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
 import ProfilePictureModal from '../components/ProfilePictureModal.native';
 import CommentSafetyModal from '../components/CommentSafetyModal.native';
@@ -1232,7 +1233,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 ) : (
                     <View style={styles.collectionsList}>
                         {collections.map((item) => {
-                            const thumbSrc = getCollectionThumbnailUrl(item, posts);
+                            const thumb = getCollectionThumbSource(item, posts);
                             const firstPost = item.postIds?.length
                                 ? posts.find((p) => p.id === item.postIds[0])
                                 : undefined;
@@ -1248,18 +1249,27 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                         collectionName: item.name,
                                     })}
                                 >
-                                    {firstPost ? (
+                                    {thumb && !thumbBroken ? (
+                                        <View style={styles.collectionThumbnailWrap}>
+                                            <CollectionCoverThumb
+                                                uri={thumb.uri}
+                                                isVideo={thumb.isVideo}
+                                                style={styles.collectionThumbnail}
+                                                onError={
+                                                    thumb.isVideo
+                                                        ? undefined
+                                                        : () =>
+                                                              setBrokenCollectionThumbs((prev) => ({
+                                                                  ...prev,
+                                                                  [item.id]: true,
+                                                              }))
+                                                }
+                                            />
+                                        </View>
+                                    ) : firstPost ? (
                                         <View style={styles.collectionThumbnailWrap}>
                                             <ProfileGridThumb post={firstPost} />
                                         </View>
-                                    ) : thumbSrc && !thumbBroken ? (
-                                        <Image
-                                            source={{ uri: thumbSrc }}
-                                            style={styles.collectionThumbnail}
-                                            onError={() =>
-                                                setBrokenCollectionThumbs((prev) => ({ ...prev, [item.id]: true }))
-                                            }
-                                        />
                                     ) : postCount > 0 && textFallback ? (
                                         <View style={[styles.collectionThumbnail, styles.collectionThumbnailTextFallback]}>
                                             <Text style={styles.collectionThumbnailText} numberOfLines={4}>
@@ -1603,7 +1613,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             {collections.length > 0 ? (
                                 collections.map((collection) => {
                                     const postCount = collection.postIds?.length || 0;
-                                    const thumbSrc = getCollectionThumbnailUrl(collection, posts);
+                                    const thumb = getCollectionThumbSource(collection, posts);
                                     const firstPost = collection.postIds?.length
                                         ? posts.find((p) => p.id === collection.postIds[0])
                                         : undefined;
@@ -1621,15 +1631,19 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 });
                                             }}
                                         >
-                                            {thumbSrc && !thumbBroken ? (
-                                                <Image
-                                                    source={{ uri: thumbSrc }}
+                                            {thumb && !thumbBroken ? (
+                                                <CollectionCoverThumb
+                                                    uri={thumb.uri}
+                                                    isVideo={thumb.isVideo}
                                                     style={styles.collectionModalThumbnail}
-                                                    onError={() =>
-                                                        setBrokenCollectionThumbs((prev) => ({
-                                                            ...prev,
-                                                            [collection.id]: true,
-                                                        }))
+                                                    onError={
+                                                        thumb.isVideo
+                                                            ? undefined
+                                                            : () =>
+                                                                  setBrokenCollectionThumbs((prev) => ({
+                                                                      ...prev,
+                                                                      [collection.id]: true,
+                                                                  }))
                                                     }
                                                 />
                                             ) : postCount > 0 && textFallback ? (
@@ -1831,13 +1845,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     userId={user?.id || 'anon'}
                     visible={!!myFeedSavePost}
                     onClose={() => setMyFeedSavePost(null)}
-                    onSaved={async () => {
+                    onSaved={async (detail) => {
                         const cols = await getCollectionsForPost(user?.id || 'anon', myFeedSavePost.id);
                         const saved = cols.length > 0;
                         setPosts((prev) =>
-                            prev.map((p) =>
-                                p.id === myFeedSavePost.id ? { ...p, isBookmarked: saved } : p,
-                            ),
+                            prev.map((p) => {
+                                if (p.id !== myFeedSavePost.id) return p;
+                                const was = p.isBookmarked === true;
+                                const prevSaves = Number(p.stats?.saves) || 0;
+                                return {
+                                    ...p,
+                                    isBookmarked: saved,
+                                    stats: {
+                                        ...p.stats,
+                                        saves: applyUniqueSavesCount(
+                                            prevSaves,
+                                            was,
+                                            saved,
+                                            detail?.savesCount,
+                                        ),
+                                    },
+                                };
+                            }),
                         );
                     }}
                 />

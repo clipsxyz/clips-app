@@ -34,7 +34,8 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
             const collectionPosts = await getCollectionPosts(collectionId);
             setPosts(collectionPosts);
         } catch (error) {
-            console.error('Error loading collection:', error);
+            console.warn('Error loading collection:', error);
+            setPosts([]);
         } finally {
             setLoading(false);
         }
@@ -96,8 +97,8 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
 
             <View style={styles.infoContainer}>
                 <Text style={styles.postCount}>
-                    {collection?.postIds?.length || 0}{' '}
-                    {collection?.postIds?.length === 1 ? 'post' : 'posts'}
+                    {(collection?.postIds?.length || posts.length)}{' '}
+                    {(collection?.postIds?.length || posts.length) === 1 ? 'post' : 'posts'}
                 </Text>
             </View>
 

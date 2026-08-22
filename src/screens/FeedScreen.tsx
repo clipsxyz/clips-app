@@ -40,6 +40,7 @@ import {
     reclipPost,
     deletePost,
     setReclipState,
+    setBookmarkState,
     addComment,
     fetchComments,
     incrementShares,
@@ -50,6 +51,7 @@ import {
     setCommentModerationState,
     decorateForUser,
     getLocalPostById,
+    upsertLocalPost,
     getFollowState,
     getState,
     mergeEngagementStats,
@@ -223,6 +225,7 @@ import {
     getCollectionsForPost,
     savePostToDefaultCollection,
     unsavePost,
+    applyUniqueSavesCount,
 } from '../api/collections';
 import {
     markFeedPostArchivedMobile,
@@ -1373,6 +1376,7 @@ const FeedCard = React.memo(function FeedCard({
                         comments={post.stats.comments}
                         shares={post.stats.shares}
                         reclips={post.stats.reclips}
+                        saves={post.stats.saves ?? 0}
                         views={post.stats.views}
                         userLiked={post.userLiked}
                         userReclipped={post.userReclipped}
@@ -1447,6 +1451,7 @@ const FeedCard = React.memo(function FeedCard({
         a.stats.comments === b.stats.comments &&
         a.stats.views === b.stats.views &&
         a.stats.reclips === b.stats.reclips &&
+        a.stats.saves === b.stats.saves &&
         a.stats.shares === b.stats.shares &&
         a.mediaUrl === b.mediaUrl &&
         a.mediaType === b.mediaType &&
@@ -2301,6 +2306,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setPages((prev) =>
             prev.map((page) => page.map((p) => (String(p.id) === id ? updater(p) : p))),
         );
+        setImageFullscreenPost((prev) =>
+            prev && String(prev.id) === id ? updater(prev) : prev,
+        );
+        setSelectedPostForComments((prev) =>
+            prev && String(prev.id) === id ? updater(prev) : prev,
+        );
+        setOverflowPost((prev) => (prev && String(prev.id) === id ? updater(prev) : prev));
+        const live = getLocalPostById(id);
+        if (live) upsertLocalPost(updater(live));
     };
 
     const recordFeedView = useCallback(
@@ -2485,16 +2499,42 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const toggleCollectionsSaveForPost = React.useCallback(
         async (target: Post) => {
+            const wasSaved = target.isBookmarked === true;
+            const prevSaves = Number(target.stats?.saves) || 0;
             try {
                 const cols = await getCollectionsForPost(userId, target.id);
                 if (cols.length > 0) {
-                    await unsavePost(userId, target.id);
+                    const unsaved = await unsavePost(userId, target.id);
+                    setBookmarkState(userId, target.id, false);
                     setSavedByPostId((prev) => ({ ...prev, [target.id]: false }));
-                    updatePost(target.id, (p) => ({ ...p, isBookmarked: false }));
+                    updatePost(target.id, (p) => ({
+                        ...p,
+                        isBookmarked: false,
+                        stats: {
+                            ...p.stats,
+                            saves: applyUniqueSavesCount(
+                                Number(p.stats?.saves) || prevSaves,
+                                true,
+                                false,
+                                unsaved.savesCount,
+                            ),
+                        },
+                    }));
                 } else {
-                    await savePostToDefaultCollection(userId, target.id, target);
+                    const saved = await savePostToDefaultCollection(userId, target.id, target);
+                    const nextSaves = applyUniqueSavesCount(
+                        prevSaves,
+                        wasSaved,
+                        true,
+                        saved.savesCount,
+                    );
+                    setBookmarkState(userId, target.id, true);
                     setSavedByPostId((prev) => ({ ...prev, [target.id]: true }));
-                    updatePost(target.id, (p) => ({ ...p, isBookmarked: true }));
+                    updatePost(target.id, (p) => ({
+                        ...p,
+                        isBookmarked: true,
+                        stats: { ...p.stats, saves: nextSaves },
+                    }));
                 }
             } catch (err) {
                 console.error('Collections save toggle failed:', err);
@@ -2577,18 +2617,32 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const p = reclipConfirmPost;
         setReclipConfirmPost(null);
         if (!p || !user) return;
-        const prevReclips = p.stats.reclips;
+        const prevReclips = Number(p.stats?.reclips) || 0;
         const newReclips = prevReclips + 1;
         setReclipState(userId, p.id, true);
         updatePost(p.id, (prev) => ({
             ...prev,
             userReclipped: true,
-            stats: { ...prev.stats, reclips: newReclips },
+            stats: {
+                ...prev.stats,
+                reclips: Math.max(Number(prev.stats?.reclips) || 0, newReclips),
+            },
         }));
         try {
             const result = await reclipPost(userId, p.id, user.handle);
-            if (result.originalPost) {
-                updatePost(p.id, () => result.originalPost);
+            if (result.originalPost && String(result.originalPost.id) === String(p.id)) {
+                updatePost(p.id, (prev) => ({
+                    ...prev,
+                    userReclipped: true,
+                    stats: {
+                        ...mergeEngagementStats(result.originalPost.stats, prev.stats),
+                        reclips: Math.max(
+                            Number(result.originalPost.stats?.reclips) || 0,
+                            Number(prev.stats?.reclips) || 0,
+                            newReclips,
+                        ),
+                    },
+                }));
             }
             // Following feed should pick up your reclip on next load.
             if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
@@ -2639,14 +2693,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (!isFeedFocused && !navigation?.isFocused?.()) return;
             if (!route?.params || route.params.resetHomeFeedAt == null) return;
             try {
-                navigation.setParams({
-                    resetHomeFeedAt: undefined,
-                    location: undefined,
-                    locationLabel: undefined,
-                    locationScope: undefined,
-                    filterType: undefined,
-                    placeId: undefined,
-                });
+                if (navigation.isFocused()) {
+                    navigation.setParams({
+                        resetHomeFeedAt: undefined,
+                        location: undefined,
+                        locationLabel: undefined,
+                        locationScope: undefined,
+                        filterType: undefined,
+                        placeId: undefined,
+                    });
+                }
             } catch {
                 // ignore
             }
@@ -3119,13 +3175,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setActive(tab);
         }
         try {
-            navigation?.setParams?.({
-                location: undefined,
-                locationLabel: undefined,
-                locationScope: undefined,
-                filterType: undefined,
-                placeId: undefined,
-            });
+            if (navigation.isFocused()) {
+                navigation.setParams({
+                    location: undefined,
+                    locationLabel: undefined,
+                    locationScope: undefined,
+                    filterType: undefined,
+                    placeId: undefined,
+                });
+            }
         } catch {
             // ignore
         }
@@ -3145,13 +3203,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setEnd(false);
             setReloadTick((t) => t + 1);
             try {
-                navigation?.setParams?.({
-                    location: selection.filter,
-                    locationLabel: selection.label,
-                    locationScope: selection.scope,
-                    filterType,
-                    placeId: selection.placeId || undefined,
-                });
+                if (navigation.isFocused()) {
+                    navigation.setParams({
+                        location: selection.filter,
+                        locationLabel: selection.label,
+                        locationScope: selection.scope,
+                        filterType,
+                        placeId: selection.placeId || undefined,
+                    });
+                }
             } catch {
                 // ignore
             }
@@ -3246,14 +3306,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setError(null);
         setReloadTick((t) => t + 1);
         try {
-            navigation?.setParams?.({
-                location: undefined,
-                locationLabel: undefined,
-                locationScope: undefined,
-                filterType: undefined,
-                placeId: undefined,
-                resetHomeFeedAt: undefined,
-            });
+            if (navigation.isFocused()) {
+                navigation.setParams({
+                    location: undefined,
+                    locationLabel: undefined,
+                    locationScope: undefined,
+                    filterType: undefined,
+                    placeId: undefined,
+                    resetHomeFeedAt: undefined,
+                });
+            }
         } catch {
             // ignore
         }
@@ -4103,8 +4165,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             ? {
                                   ...mergedPost,
                                   ...live,
-                                  stats: { ...mergedPost.stats, ...live.stats },
+                                  stats: mergeEngagementStats(live.stats, mergedPost.stats),
                                   userLiked: live.userLiked ?? mergedPost.userLiked,
+                                  userReclipped: live.userReclipped || mergedPost.userReclipped,
                               }
                             : mergedPost;
                         const snapshot = decorateForUser(userId, latest);
@@ -4120,11 +4183,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         const scenesFeedLabel = showFollowingFeed
                             ? 'Following'
                             : String(active || user?.national || 'Ireland');
-                        const scenesPosts = videoPostsForScenes.some(
-                            (p) => String(p.id) === tappedId,
-                        )
-                            ? videoPostsForScenes
-                            : [mergedPost, ...videoPostsForScenes];
+                        const scenesPosts = (
+                            videoPostsForScenes.some((p) => String(p.id) === tappedId)
+                                ? videoPostsForScenes
+                                : [mergedPost, ...videoPostsForScenes]
+                        ).map((p) => decorateForUser(userId, p));
                         setScenesViewerActive(true);
                         setScenesViewerActiveState(true);
                         activeVideoPostIdRef.current = null;
@@ -4615,8 +4678,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     imageFullscreenPost
                         ? async () => {
                               await tryReclipPost(imageFullscreenPost);
-                              const refreshed = flat.find((p) => p.id === imageFullscreenPost.id);
-                              if (refreshed) syncFullscreenPost(refreshed);
                           }
                         : undefined
                 }
@@ -4680,6 +4741,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                               setOverflowVisible(true);
                           }
                         : undefined
+                }
+                onSave={
+                    imageFullscreenPost
+                        ? () => {
+                              setSaveModalPost(imageFullscreenPost);
+                          }
+                        : undefined
+                }
+                isSaved={
+                    imageFullscreenPost
+                        ? Boolean(
+                              savedByPostId[imageFullscreenPost.id] ??
+                                  imageFullscreenPost.isBookmarked,
+                          )
+                        : false
                 }
             />
 
@@ -4999,11 +5075,28 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     userId={userId}
                     visible={!!saveModalPost}
                     onClose={() => setSaveModalPost(null)}
-                    onSaved={async () => {
+                    onSaved={async (detail) => {
                         const cols = await getCollectionsForPost(userId, saveModalPost.id);
                         const saved = cols.length > 0;
+                        setBookmarkState(userId, saveModalPost.id, saved);
                         setSavedByPostId((prev) => ({ ...prev, [saveModalPost.id]: saved }));
-                        updatePost(saveModalPost.id, (p) => ({ ...p, isBookmarked: saved }));
+                        updatePost(saveModalPost.id, (p) => {
+                            const was = p.isBookmarked === true;
+                            const prevSaves = Number(p.stats?.saves) || 0;
+                            return {
+                                ...p,
+                                isBookmarked: saved,
+                                stats: {
+                                    ...p.stats,
+                                    saves: applyUniqueSavesCount(
+                                        prevSaves,
+                                        was,
+                                        saved,
+                                        detail?.savesCount,
+                                    ),
+                                },
+                            };
+                        });
                     }}
                 />
             ) : null}

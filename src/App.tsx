@@ -4356,6 +4356,7 @@ function EngagementBar({
   const [comments, setComments] = React.useState(post.stats.comments);
   const [shares, setShares] = React.useState(post.stats.shares);
   const [reclips, setReclips] = React.useState(post.stats.reclips);
+  const [saves, setSaves] = React.useState(post.stats.saves ?? 0);
   const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
   const [busy, setBusy] = React.useState(false);
   const likeCooldownRef = React.useRef(0);
@@ -4427,8 +4428,9 @@ function EngagementBar({
     setComments(post.stats.comments);
     setShares(post.stats.shares);
     setReclips(post.stats.reclips);
+    setSaves(post.stats.saves ?? 0);
     setUserReclipped(post.userReclipped || false);
-  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
+  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.stats.saves, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
@@ -4447,6 +4449,12 @@ function EngagementBar({
       setUserReclipped(true); // so the reclip icon turns green
     };
 
+    const handleSavesUpdated = (event: Event) => {
+      const d = (event as CustomEvent).detail;
+      if (typeof d?.saves === 'number') setSaves(Math.max(0, d.saves));
+      else if (typeof d?.delta === 'number') setSaves((prev) => Math.max(0, prev + d.delta));
+    };
+
     const handleViewAdded = () => {
       setViews(prev => prev + 1);
     };
@@ -4460,6 +4468,7 @@ function EngagementBar({
     window.addEventListener(`commentAdded-${post.id}`, handleCommentAdded);
     window.addEventListener(`shareAdded-${post.id}`, handleShareAdded);
     window.addEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
+    window.addEventListener(`postSaves-${post.id}`, handleSavesUpdated as EventListener);
     window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
@@ -4476,6 +4485,7 @@ function EngagementBar({
       window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
       window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
       window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
+      window.removeEventListener(`postSaves-${post.id}`, handleSavesUpdated as EventListener);
       window.removeEventListener(`viewAdded-${post.id}`, handleViewAdded);
       window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
       window.removeEventListener(`postUpdated-${post.id}`, handlePostUpdated);
@@ -4642,7 +4652,7 @@ function EngagementBar({
             title={isSaved ? 'Saved' : 'Save post'}
           >
             <FiBookmark className={`${iconSize} ${isSaved ? 'text-[#7A8AF0] fill-[#7A8AF0]' : 'text-white'}`} />
-            <span className="text-xs text-white tabular-nums">{isSaved ? 'Saved' : 'Save'}</span>
+            <span className="text-xs text-white tabular-nums">{saves}</span>
           </button>
 
         </div>
@@ -5242,13 +5252,23 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     setIsQuickSaving(true);
     try {
       if (isSaved) {
-        await unsavePost(user.id, post.id);
+        const unsaved = await unsavePost(user.id, post.id);
         setIsSaved(false);
+        window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+          detail: typeof unsaved.savesCount === 'number'
+            ? { saves: unsaved.savesCount }
+            : { delta: -1 },
+        }));
         window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
         showToast('Removed from saved');
       } else {
-        await savePostToDefaultCollection(user.id, post.id, post);
+        const saved = await savePostToDefaultCollection(user.id, post.id, post);
         setIsSaved(true);
+        window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+          detail: typeof saved.savesCount === 'number'
+            ? { saves: saved.savesCount }
+            : { delta: 1 },
+        }));
         window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
         showToast('Saved', 2600, {
           actionLabel: 'Save to collection',
@@ -5660,6 +5680,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             userId={user.id}
             isOpen={saveModalOpen}
             onClose={() => setSaveModalOpen(false)}
+            onSaved={(detail) => {
+              if (typeof detail?.savesCount === 'number') {
+                window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+                  detail: { saves: detail.savesCount },
+                }));
+              }
+            }}
           />
           <EditPostModal
             post={post}
@@ -5719,6 +5746,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             comments: post.stats.comments,
             shares: post.stats.shares,
             reclips: post.stats.reclips,
+            saves: post.stats.saves ?? 0,
             views: post.stats.views,
             userLiked: post.userLiked,
             userReclipped: !!post.userReclipped,
@@ -5732,6 +5760,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onReclip: handleImageFullscreenReclip,
             onShare,
             onFollow,
+            onSave: () => setSaveModalOpen(true),
+            isSaved,
             onVisitProfile: () => {
               handleCloseImageFullscreen();
               navigate(`/user/${encodeURIComponent(post.userHandle)}`, {

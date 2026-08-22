@@ -28,6 +28,7 @@ class PostFactory extends Factory
             'comments_count' => 0,
             'shares_count' => 0,
             'reclips_count' => 0,
+            'saves_count' => 0,
             'is_reclipped' => false,
         ];
     }

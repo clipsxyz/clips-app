@@ -29,7 +29,7 @@ import {
     upsertLocalPost,
 } from '../api/posts';
 import { blockUser } from '../api/messages';
-import { getCollectionsForPost, getPostFromCollectionPreviews, savePostToDefaultCollection, unsavePost } from '../api/collections';
+import { applyUniqueSavesCount, getCollectionsForPost, getPostFromCollectionPreviews, savePostToDefaultCollection, unsavePost } from '../api/collections';
 import {
     markFeedPostArchivedMobile,
     hasPostNotificationsPrefMobile,
@@ -670,10 +670,28 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     userId={userId}
                     visible={saveModalVisible}
                     onClose={() => setSaveModalVisible(false)}
-                    onSaved={async () => {
+                    onSaved={async (detail) => {
                         const cols = await getCollectionsForPost(userId, post.id);
-                        setOverflowSaved(cols.length > 0);
-                        setPost((p) => (p ? { ...p, isBookmarked: cols.length > 0 } : null));
+                        const saved = cols.length > 0;
+                        setOverflowSaved(saved);
+                        setPost((p) => {
+                            if (!p) return null;
+                            const was = p.isBookmarked === true;
+                            const prevSaves = Number(p.stats?.saves) || 0;
+                            return {
+                                ...p,
+                                isBookmarked: saved,
+                                stats: {
+                                    ...p.stats,
+                                    saves: applyUniqueSavesCount(
+                                        prevSaves,
+                                        was,
+                                        saved,
+                                        detail?.savesCount,
+                                    ),
+                                },
+                            };
+                        });
                     }}
                 />
             ) : null}

@@ -1,7 +1,8 @@
 import { Collection, Post } from '../types';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
-import { posts, getPostById, decorateForUser } from './posts';
+import { posts, getPostById, decorateForUser, setBookmarkState, transformLaravelPost } from './posts';
+import { resolvePublicMediaUrl } from './apiBaseUrl';
 
 // Storage key for collections
 const COLLECTIONS_STORAGE_KEY = 'clips_app_collections';
@@ -12,19 +13,98 @@ type CollectionWithPreviewMap = Collection & {
     postPreviewMap?: Record<string, Partial<Post>>;
 };
 
+function parseSavesCount(payload: any): number | undefined {
+    const n = Number(payload?.saves_count ?? payload?.savesCount);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+/** Same gate as likes/reclips: live mode must not fall back to in-memory collections. */
+function isLiveCollectionsApi(): boolean {
+    return !isMockMode();
+}
+
+export type CollectionMutationResult = Collection & { savesCount?: number };
+
+export function applyUniqueSavesCount(
+    prev: number,
+    wasSaved: boolean,
+    nowSaved: boolean,
+    serverCount?: number,
+): number {
+    if (typeof serverCount === 'number' && Number.isFinite(serverCount)) {
+        return Math.max(0, serverCount);
+    }
+    if (nowSaved && !wasSaved) return prev + 1;
+    if (!nowSaved && wasSaved) return Math.max(0, prev - 1);
+    return Math.max(0, prev);
+}
+
+function withSavesCount(collection: Collection, payload: any): CollectionMutationResult {
+    return Object.assign(collection, { savesCount: parseSavesCount(payload) });
+}
+
+function extractCollectionPostList(payload: any): any[] {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.posts)) return payload.posts;
+    if (Array.isArray(payload?.data?.posts)) return payload.data.posts;
+    if (Array.isArray(payload?.data) && payload.data[0]?.id) return payload.data;
+    return [];
+}
+
+function mapRawCollectionPost(raw: any): Post | null {
+    if (!raw || raw.id == null) return null;
+    try {
+        return transformLaravelPost(raw);
+    } catch {
+        return null;
+    }
+}
+
+async function hydrateCollectionPosts(rawList: any[], postIds: string[] = []): Promise<Post[]> {
+    const mapped = rawList
+        .map(mapRawCollectionPost)
+        .filter((p): p is Post => p != null);
+    const have = new Set(mapped.map((p) => String(p.id)));
+    const missing = postIds.map(String).filter((id) => id && !have.has(id));
+    if (missing.length === 0) return mapped;
+    const extras = await Promise.all(
+        missing.map(async (id) => {
+            try {
+                return await getPostById(id);
+            } catch {
+                return null;
+            }
+        }),
+    );
+    for (const extra of extras) {
+        if (extra) mapped.push(extra);
+    }
+    return mapped;
+}
+
+function looksLikeVideoUrl(url?: string): boolean {
+    return !!url && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+}
+
+function rewriteCollectionMediaUrl(url?: string | null): string | undefined {
+    if (!url || typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    if (!trimmed) return undefined;
+    return resolvePublicMediaUrl(trimmed) || trimmed;
+}
+
 function mapApiCollection(raw: any, fallbackUserId?: string): Collection {
     const createdAtRaw = raw?.created_at ?? raw?.createdAt;
     const updatedAtRaw = raw?.updated_at ?? raw?.updatedAt;
     const postIdsRaw = raw?.post_ids ?? raw?.postIds;
     const userIdRaw = raw?.user_id ?? raw?.userId ?? fallbackUserId ?? 'me';
+    const rawThumb = raw?.thumbnail_url ?? raw?.thumbnailUrl;
     return {
         id: String(raw?.id ?? `collection-${Date.now()}`),
         userId: normalizeUserId(userIdRaw),
         name: String(raw?.name ?? 'Untitled Collection'),
         isPrivate: Boolean(raw?.is_private ?? raw?.isPrivate ?? true),
-        thumbnailUrl: typeof (raw?.thumbnail_url ?? raw?.thumbnailUrl) === 'string'
-            ? (raw?.thumbnail_url ?? raw?.thumbnailUrl)
-            : undefined,
+        thumbnailUrl: typeof rawThumb === 'string' ? rewriteCollectionMediaUrl(rawThumb) : undefined,
         postIds: Array.isArray(postIdsRaw) ? postIdsRaw.map((id: any) => String(id)) : [],
         createdAt: typeof createdAtRaw === 'number' ? createdAtRaw : Date.parse(createdAtRaw || '') || Date.now(),
         updatedAt: typeof updatedAtRaw === 'number' ? updatedAtRaw : Date.parse(updatedAtRaw || '') || Date.now(),
@@ -204,12 +284,11 @@ function isFakeVideoPosterUrl(url: string | undefined): boolean {
  */
 export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     if (!post) return undefined;
-    const looksLikeVideo = (url?: string) =>
-        !!url && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+    const looksLikeVideo = looksLikeVideoUrl;
     const usableImage = (url?: string) => {
         const compact = compactPersistedMediaUrl(url);
         if (!compact || looksLikeVideo(compact) || isFakeVideoPosterUrl(compact)) return undefined;
-        return compact;
+        return rewriteCollectionMediaUrl(compact);
     };
 
     const extra = post as Partial<Post> & {
@@ -263,21 +342,46 @@ export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     return undefined;
 }
 
-/** List-row thumbnail: prefer live post URL so blobs/API paths stay valid after creating a collection. */
-export function getCollectionThumbnailUrl(collection: Collection, postPool?: Post[]): string | undefined {
-    const looksLikeVideo = (url?: string) =>
-        !!url && /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+function collectionFirstPost(collection: Collection, postPool?: Post[]): Post | undefined {
     const firstId = collection.postIds[0];
-    if (firstId) {
-        const fp = postPool?.find((p) => p.id === firstId) ?? posts.find((p) => p.id === firstId);
-        const live = resolvePostThumbnail(fp);
-        if (live) return live;
+    if (!firstId) return undefined;
+    const fromPool = postPool?.find((p) => p.id === firstId);
+    if (fromPool) return fromPool;
+    // Live collections already send thumbnailUrl from Laravel — don't overlay mock/feed posts.
+    if (isLiveCollectionsApi()) return undefined;
+    return posts.find((p) => p.id === firstId);
+}
+
+/** List-row still image. Prefers the Laravel collection cover so saved posts keep a thumb. */
+export function getCollectionThumbnailUrl(collection: Collection, postPool?: Post[]): string | undefined {
+    const fromApi = rewriteCollectionMediaUrl(
+        typeof collection.thumbnailUrl === 'string' ? collection.thumbnailUrl.trim() : '',
+    );
+    if (fromApi && !looksLikeVideoUrl(fromApi) && !isFakeVideoPosterUrl(fromApi)) {
+        return fromApi;
     }
-    const t = typeof collection.thumbnailUrl === 'string' ? collection.thumbnailUrl.trim() : '';
-    if (!t || looksLikeVideo(t) || isFakeVideoPosterUrl(t)) {
-        return undefined;
+    const live = resolvePostThumbnail(collectionFirstPost(collection, postPool));
+    if (live) return live;
+    return undefined;
+}
+
+/** Still JPEG when we have one; otherwise the MP4 so list rows can show a paused video frame. */
+export function getCollectionThumbSource(
+    collection: Collection,
+    postPool?: Post[],
+): { uri: string; isVideo: boolean } | undefined {
+    const still = getCollectionThumbnailUrl(collection, postPool);
+    if (still) return { uri: still, isVideo: false };
+    const raw = rewriteCollectionMediaUrl(
+        typeof collection.thumbnailUrl === 'string' ? collection.thumbnailUrl.trim() : '',
+    );
+    if (raw && !isFakeVideoPosterUrl(raw)) {
+        return { uri: raw, isVideo: true };
     }
-    return t;
+    const fp = collectionFirstPost(collection, postPool);
+    const media = rewriteCollectionMediaUrl(fp?.mediaUrl || fp?.mediaItems?.find((item) => item?.url)?.url);
+    if (!media || isFakeVideoPosterUrl(media)) return undefined;
+    return { uri: media, isVideo: looksLikeVideoUrl(media) || fp?.mediaType === 'video' };
 }
 
 function compactPersistedMediaUrl(url?: string): string | undefined {
@@ -427,8 +531,8 @@ function ensureDefaultCollection(collections: Collection[], userId: string): Col
 /**
  * Create a new collection
  */
-export async function createCollection(userId: string, name: string, isPrivate: boolean = true, initialPostId?: string, initialPost?: Partial<Post>): Promise<Collection> {
-    if (isLaravelApiEnabled()) {
+export async function createCollection(userId: string, name: string, isPrivate: boolean = true, initialPostId?: string, initialPost?: Partial<Post>): Promise<CollectionMutationResult> {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.createCollectionApi({
                 name: name.trim(),
@@ -437,10 +541,12 @@ export async function createCollection(userId: string, name: string, isPrivate: 
                 ...(initialPostId ? { postId: initialPostId, post_id: initialPostId } : {}),
             });
             const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload, userId);
+            if (initialPostId) setBookmarkState(userId, initialPostId, true);
             emitCollectionsUpdated(userId);
-            return mapped;
+            return withSavesCount(mapped, payload);
         } catch (error) {
-            console.warn('Laravel createCollection failed, falling back to local collections:', error);
+            console.warn('Laravel createCollection failed:', error);
+            throw error;
         }
     }
 
@@ -497,12 +603,13 @@ export async function createCollection(userId: string, name: string, isPrivate: 
  * Get all collections for a user
  */
 export async function getUserCollections(userId: string): Promise<Collection[]> {
-    if (isLaravelApiEnabled()) {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.fetchCollections();
             return mapApiCollections(payload, userId).sort((a, b) => b.updatedAt - a.updatedAt);
         } catch (error) {
-            console.warn('Laravel getUserCollections failed, falling back to local collections:', error);
+            console.warn('Laravel getUserCollections failed:', error);
+            throw error;
         }
     }
 
@@ -539,15 +646,17 @@ export async function getUserCollections(userId: string): Promise<Collection[]> 
 /**
  * Add a post to a collection
  */
-export async function addPostToCollection(collectionId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
-    if (isLaravelApiEnabled()) {
+export async function addPostToCollection(collectionId: string, postId: string, postSnapshot?: Partial<Post>): Promise<CollectionMutationResult> {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.addPostToCollectionApi(collectionId, postId);
             const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+            if (mapped.userId) setBookmarkState(mapped.userId, postId, true);
             emitCollectionsUpdated(mapped.userId);
-            return mapped;
+            return withSavesCount(mapped, payload);
         } catch (error) {
-            console.warn('Laravel addPostToCollection failed, falling back to local collections:', error);
+            console.warn('Laravel addPostToCollection failed:', error);
+            throw error;
         }
     }
 
@@ -595,15 +704,19 @@ export async function removePostFromCollection(
     collectionId: string,
     postId: string,
     opts?: { unsaveMaster?: boolean }
-): Promise<Collection> {
-    if (isLaravelApiEnabled()) {
+): Promise<CollectionMutationResult> {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.removePostFromCollectionApi(collectionId, postId);
             const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+            if (payload?.is_bookmarked === false && mapped.userId) {
+                setBookmarkState(mapped.userId, postId, false);
+            }
             emitCollectionsUpdated(mapped.userId);
-            return mapped;
+            return withSavesCount(mapped, payload);
         } catch (error) {
-            console.warn('Laravel removePostFromCollection failed, falling back to local collections:', error);
+            console.warn('Laravel removePostFromCollection failed:', error);
+            throw error;
         }
     }
 
@@ -641,20 +754,39 @@ export async function removePostFromCollection(
 }
 
 /** Remove this post from every collection it appears in for this user (full unsave). */
-export async function unsavePost(userId: string, postId: string): Promise<void> {
+export async function unsavePost(userId: string, postId: string): Promise<{ savesCount?: number }> {
+    if (isLiveCollectionsApi()) {
+        try {
+            const cols = await getCollectionsForPost(userId, postId);
+            let savesCount: number | undefined;
+            for (const c of cols) {
+                const payload = await apiClient.removePostFromCollectionApi(c.id, postId);
+                savesCount = parseSavesCount(payload) ?? savesCount;
+            }
+            setBookmarkState(userId, postId, false);
+            return { savesCount };
+        } catch (error) {
+            console.warn('Laravel unsavePost failed:', error);
+            throw error;
+        }
+    }
+
     const cols = await getCollectionsForPost(userId, postId);
     for (const c of cols) {
         await removePostFromCollection(c.id, postId, { unsaveMaster: true });
     }
+    setBookmarkState(userId, postId, false);
+    return {};
 }
 
 export async function getCollection(collectionId: string): Promise<Collection | null> {
-    if (isLaravelApiEnabled()) {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.fetchCollection(collectionId);
             return mapApiCollection(payload?.data ?? payload?.collection ?? payload);
         } catch (error) {
-            console.warn('Laravel getCollection failed, falling back to local collections:', error);
+            console.warn('Laravel getCollection failed:', error);
+            return null;
         }
     }
 
@@ -663,7 +795,43 @@ export async function getCollection(collectionId: string): Promise<Collection | 
     return collections.find((c) => c.id === collectionId) || null;
 }
 
-export async function savePostToDefaultCollection(userId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
+export async function savePostToDefaultCollection(
+    userId: string,
+    postId: string,
+    postSnapshot?: Partial<Post>,
+): Promise<Collection & { savesCount?: number }> {
+    if (isLiveCollectionsApi()) {
+        try {
+            const cols = await getUserCollections(userId);
+            const isDefault = (name: string) =>
+                String(name || '').trim().toLowerCase() === DEFAULT_COLLECTION_NAME.toLowerCase();
+            let defaults = cols.find((c) => isDefault(c.name));
+            let savesCount: number | undefined;
+            if (!defaults) {
+                const created = await apiClient.createCollectionApi({
+                    name: DEFAULT_COLLECTION_NAME,
+                    isPrivate: true,
+                    is_private: true,
+                    postId,
+                    post_id: postId,
+                });
+                defaults = mapApiCollection(created?.data ?? created?.collection ?? created, userId);
+                savesCount = parseSavesCount(created);
+            } else if (!defaults.postIds.includes(postId)) {
+                const payload = await apiClient.addPostToCollectionApi(defaults.id, postId);
+                savesCount = parseSavesCount(payload);
+            } else {
+                savesCount = parseSavesCount(undefined);
+            }
+            setBookmarkState(userId, postId, true);
+            emitCollectionsUpdated(userId);
+            return Object.assign(defaults, { savesCount });
+        } catch (error) {
+            console.warn('Laravel savePostToDefaultCollection failed:', error);
+            throw error;
+        }
+    }
+
     await delay(120);
     const normalizedUserId = normalizeUserId(userId);
     const collections = await loadCollectionsFromPersistence();
@@ -679,6 +847,7 @@ export async function savePostToDefaultCollection(userId: string, postId: string
     savePreviewForPost(defaults as CollectionWithPreviewMap, postId, post);
     await persistCollectionsToDisk(collections);
     emitCollectionsUpdated(normalizedUserId);
+    setBookmarkState(userId, postId, true);
     return defaults;
 }
 
@@ -686,19 +855,23 @@ export async function savePostToDefaultCollection(userId: string, postId: string
  * Get all posts in a collection
  */
 export async function getCollectionPosts(collectionId: string): Promise<Post[]> {
-    if (isLaravelApiEnabled()) {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.fetchCollection(collectionId);
-            const list = Array.isArray(payload?.posts)
-                ? payload.posts
-                : Array.isArray(payload?.data?.posts)
-                    ? payload.data.posts
-                    : [];
-            if (Array.isArray(list) && list.length > 0) {
-                return list as Post[];
+            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+            let raw = extractCollectionPostList(payload);
+            if (raw.length === 0) {
+                try {
+                    const postsPayload = await apiClient.fetchCollectionPosts(collectionId);
+                    raw = extractCollectionPostList(postsPayload);
+                } catch (error) {
+                    console.warn('Laravel fetchCollectionPosts failed:', error);
+                }
             }
+            return hydrateCollectionPosts(raw, mapped.postIds);
         } catch (error) {
-            console.warn('Laravel getCollectionPosts failed, falling back to local collections:', error);
+            console.warn('Laravel getCollectionPosts failed:', error);
+            return [];
         }
     }
 
@@ -707,7 +880,7 @@ export async function getCollectionPosts(collectionId: string): Promise<Post[]> 
     const collections = await loadCollectionsFromPersistence();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
-        throw new Error('Collection not found');
+        return [];
     }
 
     const collectionWithPreview = collection as CollectionWithPreviewMap;
@@ -786,14 +959,15 @@ export async function isPostInCollection(collectionId: string, postId: string): 
  * Get collections that contain a specific post
  */
 export async function getCollectionsForPost(userId: string, postId: string): Promise<Collection[]> {
-    if (isLaravelApiEnabled()) {
+    if (isLiveCollectionsApi()) {
         try {
             const payload = await apiClient.fetchCollections();
             return mapApiCollections(payload, userId)
                 .filter((c) => c.postIds.includes(postId))
                 .sort((a, b) => b.updatedAt - a.updatedAt);
         } catch (error) {
-            console.warn('Laravel getCollectionsForPost failed, falling back to local collections:', error);
+            console.warn('Laravel getCollectionsForPost failed:', error);
+            throw error;
         }
     }
 

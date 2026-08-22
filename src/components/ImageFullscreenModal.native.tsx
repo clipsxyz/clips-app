@@ -519,7 +519,14 @@ export default function ImageFullscreenModal({
                             size={ox(20)}
                             color={post.userReclipped ? '#00BA7C' : '#8B98A5'}
                         />
-                        <Text style={styles.engCount}>{compactCount(post.stats?.reclips)}</Text>
+                        <Text style={styles.engCount}>
+                            {compactCount(
+                                Math.max(
+                                    Number(post.stats?.reclips) || 0,
+                                    post.userReclipped ? 1 : 0,
+                                ),
+                            )}
+                        </Text>
                     </Pressable>
                     <Pressable
                         style={styles.engItem}
@@ -541,7 +548,7 @@ export default function ImageFullscreenModal({
                     </View>
                     {onSave ? (
                         <Pressable
-                            style={styles.engIconOnly}
+                            style={styles.engItem}
                             onPress={onSave}
                             hitSlop={8}
                             accessibilityLabel={isSaved ? 'Saved' : 'Save'}
@@ -551,6 +558,14 @@ export default function ImageFullscreenModal({
                                 size={ox(20)}
                                 color={isSaved ? '#1D9BF0' : '#8B98A5'}
                             />
+                            <Text style={styles.engCount}>
+                                {compactCount(
+                                    Math.max(
+                                        Number(post.stats?.saves) || 0,
+                                        isSaved ? 1 : 0,
+                                    ),
+                                )}
+                            </Text>
                         </Pressable>
                     ) : null}
                     <Pressable

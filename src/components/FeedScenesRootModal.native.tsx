@@ -14,7 +14,8 @@ import ScenesViewer from './ScenesViewer.native';
 function scenesPostNeedsFeedSync(prev: Post | undefined, next: Post): boolean {
     if (!prev) return true;
     return (
-        prev.isLiked !== next.isLiked ||
+        prev.userLiked !== next.userLiked ||
+        prev.userReclipped !== next.userReclipped ||
         prev.isFollowing !== next.isFollowing ||
         prev.text !== next.text ||
         prev.stats?.likes !== next.stats?.likes ||

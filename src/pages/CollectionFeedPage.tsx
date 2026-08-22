@@ -62,7 +62,7 @@ export default function CollectionFeedPage() {
             const decorated = collectionPosts.map(p => decorateForUser(user.id, p));
             setPosts(decorated);
         } catch (error) {
-            console.error('Error loading collection posts:', error);
+            console.warn('Error loading collection posts:', error);
         } finally {
             setIsLoading(false);
         }

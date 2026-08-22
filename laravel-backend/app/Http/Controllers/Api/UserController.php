@@ -555,6 +555,7 @@ class UserController extends Controller
                 'posts.comments_count',
                 'posts.shares_count',
                 'posts.reclips_count',
+                'posts.saves_count',
                 'posts.is_reclipped',
                 'posts.original_post_id',
                 'posts.original_user_handle',

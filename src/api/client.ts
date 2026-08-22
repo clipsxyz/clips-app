@@ -1543,6 +1543,10 @@ export async function fetchCollection(collectionId: string) {
     return apiRequest(`/collections/${encodeURIComponent(collectionId)}`);
 }
 
+export async function fetchCollectionPosts(collectionId: string) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}/posts`);
+}
+
 export async function createCollectionApi(data: {
     name: string;
     isPrivate?: boolean;

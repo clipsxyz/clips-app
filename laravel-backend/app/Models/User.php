@@ -144,6 +144,7 @@ class User extends Authenticatable
     public function reclips()
     {
         return $this->belongsToMany(Post::class, 'post_reclips')
+                    ->withPivot('user_handle')
                     ->withTimestamps();
     }
 
@@ -216,7 +217,7 @@ class User extends Authenticatable
 
     public function hasReclipped(Post $post)
     {
-        return $this->reclips()->where('post_id', $post->id)->exists();
+        return $this->reclips()->where('posts.id', $post->id)->exists();
     }
 
     // Notifications relationships

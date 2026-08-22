@@ -41,11 +41,38 @@ function looksLikeVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url) || isMockDemoVideoPath(url);
 }
 
-/** Muted 1s looping preview — motion so the thumb is clearly a video, not a still. */
-function SuggestedThumbPreviewVideo({ url }: { url: string }) {
+/** Muted looping preview — same pattern as Stories 24 rail cards. */
+const PREVIEW_LOOP_SEC = 2;
+
+function SuggestedThumbPreviewVideo({
+  url,
+  posterUri,
+}: {
+  url: string;
+  posterUri?: string;
+}) {
   const videoRef = React.useRef<VideoRef>(null);
   const [feedScrolling, setFeedScrolling] = React.useState(getFeedScrollBusy());
   React.useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
+
+  const posterSource =
+    posterUri &&
+    posterUri.trim().length > 0 &&
+    !posterUri.startsWith('#') &&
+    !looksLikeVideoUrl(posterUri)
+      ? { uri: posterUri }
+      : undefined;
+
+  if (feedScrolling && posterSource) {
+    return (
+      <Image
+        source={posterSource}
+        style={styles.thumbImage}
+        resizeMode="cover"
+        pointerEvents="none"
+      />
+    );
+  }
 
   return (
     <Video
@@ -63,7 +90,7 @@ function SuggestedThumbPreviewVideo({ url }: { url: string }) {
       {...androidListSafeVideoProps()}
       pointerEvents="none"
       onProgress={({ currentTime }) => {
-        if (currentTime > 1) {
+        if (currentTime > PREVIEW_LOOP_SEC) {
           videoRef.current?.seek(0);
         }
       }}
@@ -130,17 +157,25 @@ export default function SuggestedFollowerFeedCard({
           onLayout={onThumbRowLayout}
         >
           {suggestion.previews.map((preview) => {
-            const videoUrl = preview.mediaUrl || preview.thumbnailUrl;
-            const stillIsImage =
-              Boolean(preview.thumbnailUrl) &&
+            const rawVideo =
+              preview.isVideo
+                ? preview.mediaUrl ||
+                  (looksLikeVideoUrl(preview.thumbnailUrl) || isMockDemoVideoPath(preview.thumbnailUrl)
+                    ? preview.thumbnailUrl
+                    : undefined)
+                : undefined;
+            const videoUrl =
+              rawVideo &&
+              (isMockDemoVideoPath(rawVideo) || looksLikeVideoUrl(rawVideo))
+                ? rawVideo
+                : undefined;
+            const posterUri =
+              preview.thumbnailUrl &&
               !looksLikeVideoUrl(preview.thumbnailUrl) &&
-              !preview.thumbnailUrl.startsWith('/demo-videos/') &&
-              !preview.thumbnailUrl.startsWith('#');
-            const needsVideoFrame =
-              preview.isVideo &&
-              Boolean(videoUrl) &&
-              (isMockDemoVideoPath(videoUrl) || looksLikeVideoUrl(videoUrl)) &&
-              !stillIsImage;
+              !isMockDemoVideoPath(preview.thumbnailUrl) &&
+              !preview.thumbnailUrl.startsWith('#')
+                ? preview.thumbnailUrl
+                : undefined;
             return (
             <TouchableOpacity
               key={preview.postId}
@@ -152,11 +187,11 @@ export default function SuggestedFollowerFeedCard({
                 },
               ]}
             >
-              {needsVideoFrame ? (
-                <SuggestedThumbPreviewVideo url={videoUrl} />
-              ) : stillIsImage ? (
+              {videoUrl ? (
+                <SuggestedThumbPreviewVideo url={videoUrl} posterUri={posterUri} />
+              ) : posterUri ? (
                 <Image
-                  source={{ uri: preview.thumbnailUrl }}
+                  source={{ uri: posterUri }}
                   style={styles.thumbImage}
                   resizeMode="cover"
                 />

@@ -943,14 +943,30 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
         try {
             const result = await reclipPost(user.id, imageFullscreenPost.id, user.handle);
-            if (result?.originalPost) syncFullscreenPost(result.originalPost);
-            else {
+            const prevReclips = Number(imageFullscreenPost.stats?.reclips) || 0;
+            if (result?.originalPost) {
+                syncFullscreenPost({
+                    ...imageFullscreenPost,
+                    ...result.originalPost,
+                    id: imageFullscreenPost.id,
+                    userReclipped: true,
+                    stats: {
+                        ...imageFullscreenPost.stats,
+                        ...result.originalPost.stats,
+                        reclips: Math.max(
+                            Number(result.originalPost.stats?.reclips) || 0,
+                            prevReclips + 1,
+                            1,
+                        ),
+                    },
+                });
+            } else {
                 syncFullscreenPost({
                     ...imageFullscreenPost,
                     userReclipped: true,
                     stats: {
                         ...imageFullscreenPost.stats,
-                        reclips: (imageFullscreenPost.stats?.reclips ?? 0) + 1,
+                        reclips: prevReclips + 1,
                     },
                 });
             }

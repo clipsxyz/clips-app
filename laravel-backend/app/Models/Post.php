@@ -49,6 +49,7 @@ class Post extends Model
         'comments_count',
         'shares_count',
         'reclips_count',
+        'saves_count',
         'is_reclipped',
         'original_post_id',
         'original_user_handle',
@@ -82,6 +83,7 @@ class Post extends Model
         'comments_count' => 'integer',
         'shares_count' => 'integer',
         'reclips_count' => 'integer',
+        'saves_count' => 'integer',
         'is_reclipped' => 'boolean',
         'video_captions_enabled' => 'boolean',
         'subtitles_enabled' => 'boolean',
@@ -118,6 +120,20 @@ class Post extends Model
         return null;
     }
 
+    /** Still preferred, else media URL — for collection list covers. */
+    public function collectionCoverUrl(): ?string
+    {
+        $still = $this->resolvedThumbnailUrl();
+        if (is_string($still) && trim($still) !== '') {
+            return $still;
+        }
+        if (is_string($this->media_url) && trim($this->media_url) !== '') {
+            return $this->media_url;
+        }
+
+        return null;
+    }
+
     /** withCount aliases so they do not collide with posts.likes_count columns. */
     public static function engagementWithCounts(): array
     {
@@ -127,6 +143,7 @@ class Post extends Model
             'shares as shares_rel_count',
             'views as views_rel_count',
             'reclips as reclips_rel_count',
+            'bookmarks as saves_rel_count',
         ];
     }
 
@@ -145,7 +162,7 @@ class Post extends Model
      */
     public static function applyEngagementCounts(array $postData, array $attrs): array
     {
-        foreach (['likes', 'comments', 'shares', 'views', 'reclips'] as $metric) {
+        foreach (['likes', 'comments', 'shares', 'views', 'reclips', 'saves'] as $metric) {
             $col = $metric . '_count';
             $rel = $metric . '_rel_count';
             $postData[$col] = max((int) ($attrs[$col] ?? $postData[$col] ?? 0), (int) ($attrs[$rel] ?? 0));
@@ -352,7 +369,37 @@ class Post extends Model
 
     public function isBookmarkedBy(User $user)
     {
-        return $this->bookmarks()->where('user_id', $user->id)->exists();
+        return $this->bookmarks()->where('users.id', $user->id)->exists();
+    }
+
+    /** First save by this user (any collection) — unique user count. */
+    public function recordSaveForUser(User $user): bool
+    {
+        $sync = $this->bookmarks()->syncWithoutDetaching([$user->id]);
+        $wasNew = ! empty($sync['attached']);
+        if ($wasNew) {
+            $this->increment('saves_count');
+            $this->refresh();
+            self::bumpFeedCache();
+        }
+
+        return $wasNew;
+    }
+
+    /** Last unsave by this user (removed from every collection). */
+    public function clearSaveForUser(User $user): bool
+    {
+        if (! $this->isBookmarkedBy($user)) {
+            return false;
+        }
+        $this->bookmarks()->detach($user->id);
+        if ((int) $this->saves_count > 0) {
+            $this->decrement('saves_count');
+            $this->refresh();
+        }
+        self::bumpFeedCache();
+
+        return true;
     }
 
     public function isViewedBy(User $user)
@@ -362,7 +409,7 @@ class Post extends Model
 
     public function isReclippedBy(User $user)
     {
-        return $this->reclips()->where('user_id', $user->id)->exists();
+        return $this->reclips()->where('users.id', $user->id)->exists();
     }
 
     public function isFollowingAuthor(User $user)

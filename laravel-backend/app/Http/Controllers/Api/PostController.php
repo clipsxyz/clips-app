@@ -725,6 +725,7 @@ class PostController extends Controller
             'comments' => $postData['comments_count'] ?? 0,
             'shares' => $postData['shares_count'] ?? 0,
             'reclips' => $postData['reclips_count'] ?? 0,
+            'saves' => $postData['saves_count'] ?? 0,
         ];
         $postData['userLiked'] = $post->isLikedBy($user);
         $postData['isBookmarked'] = $post->isBookmarkedBy($user);
@@ -1007,7 +1008,7 @@ class PostController extends Controller
     public function reclip(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:posts,id'
+            'id' => 'required|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -1017,51 +1018,77 @@ class PostController extends Controller
         $user = Auth::user();
         $originalPost = Post::findOrFail($id);
 
-        // Prevent users from reclipping their own posts
-        if ($originalPost->user_handle === $user->handle) {
+        if (strcasecmp((string) $originalPost->user_handle, (string) $user->handle) === 0) {
             return response()->json(['error' => 'Cannot reclip your own post'], 400);
         }
 
-        $result = DB::transaction(function () use ($user, $originalPost) {
-            // Check if already reclipped
-            $existingReclip = $user->reclips()->where('post_id', $originalPost->id)->first();
-            
-            if ($existingReclip) {
-                // Return the updated original post instead of error
+        $bundle = DB::transaction(function () use ($user, $originalPost) {
+            if ($user->hasReclipped($originalPost)) {
                 $originalPost->refresh();
-                return $originalPost;
+
+                return ['original' => $originalPost, 'reclip' => null];
             }
 
-            // Create reclipped post
             $reclippedPost = Post::create([
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
                 'text_content' => $originalPost->text_content,
+                'caption' => $originalPost->caption,
                 'media_url' => $originalPost->media_url,
                 'media_type' => $originalPost->media_type,
+                'thumbnail_url' => $originalPost->thumbnail_url,
+                'final_video_url' => $originalPost->final_video_url,
+                'media_items' => $originalPost->media_items,
                 'location_label' => $originalPost->location_label,
+                'place_id' => $originalPost->place_id,
+                'latitude' => $originalPost->latitude,
+                'longitude' => $originalPost->longitude,
+                'venue' => $originalPost->venue,
+                'landmark' => $originalPost->landmark,
+                'tags' => $originalPost->tags,
+                'stickers' => $originalPost->stickers,
+                'text_style' => $originalPost->text_style,
                 'is_reclipped' => true,
                 'original_post_id' => $originalPost->id,
-                'original_user_handle' => $originalPost->user_handle, // Original poster's handle
+                'original_user_handle' => $originalPost->user_handle,
                 'reclipped_by' => $user->handle,
             ]);
 
-            // Add reclip record
-            $user->reclips()->create([
-                'post_id' => $originalPost->id,
-                'user_handle' => $user->handle
+            $user->reclips()->syncWithoutDetaching([
+                $originalPost->id => ['user_handle' => $user->handle],
             ]);
 
-            // Update original post reclip count
             $originalPost->increment('reclips_count');
             Post::bumpFeedCache();
+            $originalPost->refresh();
 
-            return $reclippedPost;
+            return ['original' => $originalPost, 'reclip' => $reclippedPost];
         });
 
-        // Refresh the post to get all relationships
-        $result->load(['user', 'originalPost']);
+        $originalPost = $bundle['original'];
+        $reclippedPost = $bundle['reclip'];
 
-        return response()->json($result, 201);
+        $originalPost->load(['user', 'taggedUsers']);
+        $originalData = self::toApiArray($originalPost, $user);
+        $originalData['user_reclipped'] = true;
+        $originalData['reclips_count'] = (int) $originalPost->reclips_count;
+
+        \Log::info('posts.reclip', [
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'original_post_id' => $originalPost->id,
+            'created_copy' => (bool) $reclippedPost,
+            'reclips_count' => $originalData['reclips_count'],
+        ]);
+
+        if (! $reclippedPost) {
+            return response()->json($originalData);
+        }
+
+        $reclippedPost->load(['user', 'originalPost', 'taggedUsers']);
+        $payload = self::toApiArray($reclippedPost, $user);
+        $payload['original_post'] = $originalData;
+
+        return response()->json($payload, 201);
     }
 }

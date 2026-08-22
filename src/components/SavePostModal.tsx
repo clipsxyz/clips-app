@@ -8,7 +8,7 @@ import {
     removePostFromCollection,
     getCollectionsForPost,
     savePostToDefaultCollection,
-    getCollectionThumbnailUrl,
+    getCollectionThumbSource,
 } from '../api/collections';
 import { posts } from '../api/posts';
 import { showToast } from '../utils/toast';
@@ -20,7 +20,7 @@ interface SavePostModalProps {
     userId: string;
     isOpen: boolean;
     onClose: () => void;
-    onSaved?: () => void;
+    onSaved?: (detail?: { savesCount?: number }) => void;
 }
 
 export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }: SavePostModalProps) {
@@ -52,10 +52,16 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
         autoSavedOnceRef.current = true;
         (async () => {
             try {
-                await savePostToDefaultCollection(userId, post.id, post);
+                const saved = await savePostToDefaultCollection(userId, post.id, post);
                 await loadCollections();
                 setShowSavedToast(true);
                 window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+                if (typeof saved.savesCount === 'number') {
+                    window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+                        detail: { saves: saved.savesCount },
+                    }));
+                }
+                onSaved?.({ savesCount: saved.savesCount });
                 window.setTimeout(() => setShowSavedToast(false), 2200);
             } catch (error) {
                 console.error('Error auto-saving post to default collection:', error);
@@ -92,13 +98,16 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
 
             // Notify that post was saved
             window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+            if (typeof newCollection.savesCount === 'number') {
+                window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+                    detail: { saves: newCollection.savesCount },
+                }));
+            }
 
             setNewCollectionName('');
             setIsCreatingCollection(false);
 
-            if (onSaved) {
-                onSaved();
-            }
+            onSaved?.({ savesCount: newCollection.savesCount });
         } catch (error) {
             console.error('Error creating collection:', error);
             showToast('Could not create collection. Try a shorter name or smaller media.');
@@ -112,10 +121,13 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
         setIsSaving(collectionId);
 
         try {
+            let savesCount: number | undefined;
             if (isInCollection) {
-                await removePostFromCollection(collectionId, post.id);
+                const removed = await removePostFromCollection(collectionId, post.id);
+                savesCount = removed.savesCount;
             } else {
-                await addPostToCollection(collectionId, post.id, post);
+                const added = await addPostToCollection(collectionId, post.id, post);
+                savesCount = added.savesCount;
             }
 
             // Refresh collections
@@ -123,10 +135,13 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
 
             // Notify that post was saved/unsaved
             window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
-
-            if (onSaved) {
-                onSaved();
+            if (typeof savesCount === 'number') {
+                window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+                    detail: { saves: savesCount },
+                }));
             }
+
+            onSaved?.({ savesCount });
             setShowSavedToast(true);
             window.setTimeout(() => setShowSavedToast(false), 2200);
         } catch (error) {
@@ -304,14 +319,9 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                 {customCollections.map(collection => {
                                     const isInCollection = postCollections.includes(collection.id);
                                     const isSavingToThis = isSaving === collection.id;
-                                    const thumbSrc = getCollectionThumbnailUrl(collection);
+                                    const thumb = getCollectionThumbSource(collection);
                                     const firstPost =
                                         collection.postIds.length > 0 ? posts.find((p) => p.id === collection.postIds[0]) : null;
-                                    const isVideoThumb =
-                                        !!thumbSrc &&
-                                        (isLikelyVideoUrl(thumbSrc) ||
-                                            firstPost?.mediaType === 'video' ||
-                                            firstPost?.finalVideoUrl !== undefined);
                                     const thumbBroken = !!brokenCollectionThumbs[collection.id];
                                     const textFallback =
                                         firstPost?.text || firstPost?.caption || firstPost?.text_content;
@@ -322,10 +332,10 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                             className="flex items-center gap-4 p-4 rounded-xl hover:bg-white/5 transition-colors"
                                         >
                                             <div className="w-16 h-16 rounded-lg bg-[rgba(15,36,48,0.88)] border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                                {thumbSrc && !thumbBroken ? (
-                                                    isVideoThumb ? (
+                                                {thumb && !thumbBroken ? (
+                                                    thumb.isVideo ? (
                                                         <video
-                                                            src={thumbSrc}
+                                                            src={thumb.uri}
                                                             className="w-full h-full object-cover"
                                                             muted
                                                             playsInline
@@ -343,7 +353,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                                         />
                                                     ) : (
                                                         <img
-                                                            src={thumbSrc}
+                                                            src={thumb.uri}
                                                             alt={collection.name}
                                                             className="w-full h-full object-cover"
                                                             onError={() =>

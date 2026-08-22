@@ -32,6 +32,7 @@ export type ImageFullscreenEngagement = {
   comments: number;
   shares: number;
   reclips: number;
+  saves?: number;
   views?: number;
   userLiked: boolean;
   userReclipped: boolean;
@@ -567,7 +568,7 @@ export default function ImageFullscreenViewer({
                 {engagement.onSave ? (
                   <button
                     type="button"
-                    className={`flex min-h-9 w-7 items-center justify-center ${
+                    className={`flex min-h-9 items-center gap-1.5 ${
                       engagement.isSaved ? 'text-[#1D9BF0]' : 'text-[#8B98A5]'
                     }`}
                     onClick={engagement.onSave}
@@ -576,8 +577,16 @@ export default function ImageFullscreenViewer({
                     <FiBookmark
                       size={20}
                       className={engagement.isSaved ? 'fill-current' : undefined}
-                      strokeWidth={1.75}
+                      strokeWidth={engagement.isSaved ? 0 : 1.75}
                     />
+                    <span className="text-[13px] tabular-nums">
+                      {compactCount(
+                        Math.max(
+                          Number(engagement.saves) || 0,
+                          engagement.isSaved ? 1 : 0,
+                        ),
+                      )}
+                    </span>
                   </button>
                 ) : null}
                 <button

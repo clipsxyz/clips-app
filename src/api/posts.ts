@@ -1192,6 +1192,13 @@ export async function syncFollowsFromLaravel(userId: string, viewerHandle: strin
   replaceFollowsFromHandles(uid, collected);
 }
 
+/** Set whether the user has saved a post (bookmark). Used for optimistic UI. */
+export function setBookmarkState(userId: string, postId: string, saved: boolean): void {
+  const s = getState(userId);
+  if (saved) s.bookmarks[postId] = true;
+  else delete s.bookmarks[postId];
+}
+
 /** Set whether the user has reclipped a post (so decorateForUser shows green). Used for optimistic UI. */
 export function setReclipState(userId: string, postId: string, reclipped: boolean): void {
   const s = getState(userId);
@@ -1255,12 +1262,33 @@ export function decorateForUser(userId: string, p: Post): Post {
     : Object.prototype.hasOwnProperty.call(s.likes, String(p.id))
       ? !!s.likes[String(p.id)]
       : undefined;
+  const localReclipped = Object.prototype.hasOwnProperty.call(s.reclips, idKey)
+    ? !!s.reclips[idKey]
+    : Object.prototype.hasOwnProperty.call(s.reclips, String(p.id))
+      ? !!s.reclips[String(p.id)]
+      : undefined;
+  const userReclipped = localReclipped !== undefined ? localReclipped : p.userReclipped === true;
+  const reclips = Math.max(Number(p.stats?.reclips) || 0, userReclipped ? 1 : 0);
+  const localBookmarked = Object.prototype.hasOwnProperty.call(s.bookmarks, idKey)
+    ? !!s.bookmarks[idKey]
+    : Object.prototype.hasOwnProperty.call(s.bookmarks, String(p.id))
+      ? !!s.bookmarks[String(p.id)]
+      : undefined;
+  const isBookmarked = localBookmarked !== undefined ? localBookmarked : p.isBookmarked === true;
   const decorated = {
     ...p,
     userLiked: localLiked !== undefined ? localLiked : p.userLiked === true,
-    isBookmarked: !!s.bookmarks[idKey] || !!s.bookmarks[p.id],
+    isBookmarked,
     isFollowing,
-    userReclipped: !!s.reclips[idKey] || !!s.reclips[p.id],
+    userReclipped,
+    stats: {
+      likes: Number(p.stats?.likes) || 0,
+      views: Number(p.stats?.views) || 0,
+      comments: Number(p.stats?.comments) || 0,
+      shares: Number(p.stats?.shares) || 0,
+      reclips,
+      saves: Math.max(Number(p.stats?.saves) || 0, isBookmarked ? 1 : 0),
+    },
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
     textStyle: p.textStyle,
@@ -1276,15 +1304,45 @@ export function mergeEngagementStats(
   incoming?: Post['stats'],
   previous?: Post['stats'],
 ): Post['stats'] {
-  const a = incoming ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
-  const b = previous ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
+  const a = incoming ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0, saves: 0 };
+  const b = previous ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0, saves: 0 };
   return {
     likes: Math.max(Number(a.likes) || 0, Number(b.likes) || 0),
     views: Math.max(Number(a.views) || 0, Number(b.views) || 0),
     comments: Math.max(Number(a.comments) || 0, Number(b.comments) || 0),
     shares: Math.max(Number(a.shares) || 0, Number(b.shares) || 0),
     reclips: Math.max(Number(a.reclips) || 0, Number(b.reclips) || 0),
+    saves: Math.max(Number(a.saves) || 0, Number(b.saves) || 0),
   };
+}
+
+function syncLocalBookmarksFromApi(
+  userId: string,
+  rows: Post[],
+  opts?: { allowUndo?: boolean },
+): void {
+  if (!userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  for (const p of rows) {
+    const id = String(p.id);
+    if (p.isBookmarked === true) s.bookmarks[id] = true;
+    else if (opts?.allowUndo) delete s.bookmarks[id];
+  }
+}
+
+/** After a live fetch, adopt server reclips so a restart still shows the green icon. */
+function syncLocalReclipsFromApi(
+  userId: string,
+  rows: Post[],
+  opts?: { allowUndo?: boolean },
+): void {
+  if (!userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  for (const p of rows) {
+    const id = String(p.id);
+    if (p.userReclipped === true) s.reclips[id] = true;
+    else if (opts?.allowUndo) delete s.reclips[id];
+  }
 }
 
 /** After a live fetch, adopt server likes without wiping a just-tapped like when the API omitted the viewer flag. */
@@ -1531,21 +1589,29 @@ export function transformLaravelPost(response: any): Post {
       const ts = raw ? new Date(raw).getTime() : Date.now();
       return Number.isFinite(ts) ? ts : Date.now();
     })(),
-    stats: mergeEngagementStats(
-      {
-        likes: Number(response.likes_count ?? response.stats?.likes ?? 0) || 0,
-        views: Number(response.views_count ?? response.stats?.views ?? 0) || 0,
-        comments: Number(response.comments_count ?? response.stats?.comments ?? 0) || 0,
-        shares: Number(response.shares_count ?? response.stats?.shares ?? 0) || 0,
-        reclips: Number(response.reclips_count ?? response.stats?.reclips ?? 0) || 0,
-      },
-      existing?.stats,
-    ),
+    stats: (() => {
+      const merged = mergeEngagementStats(
+        {
+          likes: Number(response.likes_count ?? response.stats?.likes ?? 0) || 0,
+          views: Number(response.views_count ?? response.stats?.views ?? 0) || 0,
+          comments: Number(response.comments_count ?? response.stats?.comments ?? 0) || 0,
+          shares: Number(response.shares_count ?? response.stats?.shares ?? 0) || 0,
+          reclips: Number(response.reclips_count ?? response.stats?.reclips ?? 0) || 0,
+          saves: Number(response.saves_count ?? response.stats?.saves ?? 0) || 0,
+        },
+        existing?.stats,
+      );
+      return {
+        ...merged,
+        // Unique saves can go down on unsave — don't keep a stale local max.
+        saves: Number(response.saves_count ?? response.stats?.saves ?? 0) || 0,
+      };
+    })(),
     isBookmarked: response.is_bookmarked || false,
     isFollowing: response.is_following || false,
     authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
     userLiked: response.user_liked || false,
-    userReclipped: response.user_reclipped || false,
+    userReclipped: !!(response.user_reclipped || response.userReclipped),
     stickers: response.stickers,
     templateId: response.template_id || response.templateId,
     bannerText: response.banner_text || response.bannerText,
@@ -2047,6 +2113,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       const uid = userId || 'me';
       syncLocalFollowsFromApi(uid, items);
       syncLocalLikesFromApi(uid, items, { allowUnlike: true });
+      syncLocalReclipsFromApi(uid, items, { allowUndo: true });
+      syncLocalBookmarksFromApi(uid, items, { allowUndo: true });
       items = items.map(p => decorateForUser(uid, p));
 
       return {
@@ -2941,50 +3009,59 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
 }
 
 export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
-  const useLaravelAPI =
-    isLaravelApiEnabled() &&
-    !String(originalPostId).startsWith('mock-scenes-') &&
-    !isMockPostId(originalPostId);
+  const livePost = shouldUseLivePostApi(originalPostId);
 
-  if (useLaravelAPI) {
+  if (livePost) {
     try {
       const response = await apiClient.reclipPost(originalPostId);
       const s = getState(userId);
       s.reclips[originalPostId] = true;
-      const reclippedPost = transformLaravelPost(response);
 
-      // Laravel returns the new reclipped row; the feed card is the *original* post.
-      const originalRaw = response?.original_post ?? response?.originalPost;
-      let originalPost: Post;
-      if (originalRaw && String(originalRaw.id) === String(originalPostId)) {
-        originalPost = transformLaravelPost(originalRaw);
-      } else {
-        const cached = posts.find((x) => x.id === originalPostId);
-        const nextReclips = (cached?.stats?.reclips ?? 0) + 1;
-        originalPost = cached
-          ? { ...cached, stats: { ...cached.stats, reclips: nextReclips } }
-          : {
-              ...reclippedPost,
-              id: originalPostId,
-              stats: { ...reclippedPost.stats, reclips: (reclippedPost.stats?.reclips ?? 0) + 1 },
-            };
-      }
+      const originalRaw = response?.original_post ?? response?.originalPost ?? (
+        String(response?.id) === String(originalPostId) && !response?.is_reclipped && !response?.isReclipped
+          ? response
+          : null
+      );
+      const reclippedPost =
+        response &&
+        (response.is_reclipped === true || response.isReclipped === true) &&
+        String(response.id) !== String(originalPostId)
+          ? transformLaravelPost(response)
+          : null;
 
-      const idx = posts.findIndex((x) => x.id === originalPostId);
-      if (idx >= 0) {
-        posts[idx] = {
-          ...posts[idx],
-          stats: { ...posts[idx].stats, reclips: originalPost.stats.reclips },
-        };
-      }
+      const cached = posts.find((x) => String(x.id) === String(originalPostId));
+      let originalPost: Post = originalRaw
+        ? transformLaravelPost(originalRaw)
+        : cached
+          ? { ...cached }
+          : reclippedPost
+            ? { ...reclippedPost, id: originalPostId }
+            : transformLaravelPost(response);
 
-      return { originalPost: decorateForUser(userId, originalPost), reclippedPost };
+      originalPost = decorateForUser(userId, {
+        ...originalPost,
+        id: originalPostId,
+        userReclipped: true,
+        stats: {
+          ...originalPost.stats,
+          reclips: Math.max(
+            Number(originalPost.stats?.reclips) || 0,
+            (cached?.stats?.reclips ?? 0) + 1,
+            1,
+          ),
+        },
+      });
+
+      upsertLocalPost(originalPost);
+
+      return { originalPost, reclippedPost };
     } catch (error: any) {
-      if (error?.name === 'ConnectionRefused' || error?.message?.includes('CONNECTION_REFUSED') || error?.message?.includes('Failed to fetch')) {
-        // Fall through to mock
-      } else {
-        throw error;
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel reclip failed:', error);
       }
+      // Live posts must not fall through to mock reclips — that greens the icon
+      // until refresh, then Laravel feed reloads with reclips_count 0.
+      throw error;
     }
   }
 

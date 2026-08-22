@@ -210,6 +210,7 @@ export default function ScenesModal({
     const [comments, setComments] = React.useState(post.stats.comments);
     const [shares, setShares] = React.useState(post.stats.shares);
     const [reclips, setReclips] = React.useState(post.stats.reclips);
+    const [saves, setSaves] = React.useState(post.stats.saves ?? 0);
     const [isFollowing, setIsFollowing] = React.useState(post.isFollowing);
     const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
     // Separate busy flags so Reclip doesn't visually affect Follow and vice versa
@@ -696,6 +697,7 @@ export default function ScenesModal({
         setComments(post.stats.comments);
         setShares(post.stats.shares);
         setReclips(post.stats.reclips);
+        setSaves(post.stats.saves ?? 0);
         setIsFollowing(post.isFollowing);
         // Only ever turn userReclipped ON from the post; never force it OFF here,
         // so a local optimistic reclip in Scenes is not immediately reset.
@@ -708,6 +710,7 @@ export default function ScenesModal({
         post.stats.comments,
         post.stats.shares,
         post.stats.reclips,
+        post.stats.saves,
         post.isFollowing,
         post.userReclipped
     ]);
@@ -848,8 +851,15 @@ export default function ScenesModal({
         };
 
         window.addEventListener(`postSaved-${post.id}`, handlePostSaved);
+        const handleSavesUpdated = (event: Event) => {
+            const d = (event as CustomEvent).detail;
+            if (typeof d?.saves === 'number') setSaves(Math.max(0, d.saves));
+            else if (typeof d?.delta === 'number') setSaves((prev) => Math.max(0, prev + d.delta));
+        };
+        window.addEventListener(`postSaves-${post.id}`, handleSavesUpdated);
         return () => {
             window.removeEventListener(`postSaved-${post.id}`, handlePostSaved);
+            window.removeEventListener(`postSaves-${post.id}`, handleSavesUpdated);
         };
     }, [user?.id, post.id]);
 
@@ -858,13 +868,19 @@ export default function ScenesModal({
         setIsQuickSaving(true);
         try {
             if (isSaved) {
-                await unsavePost(user.id, post.id);
+                const unsaved = await unsavePost(user.id, post.id);
                 setIsSaved(false);
+                setSaves((n) =>
+                    typeof unsaved.savesCount === 'number' ? unsaved.savesCount : Math.max(0, n - 1),
+                );
                 window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
                 showToast('Removed from saved');
             } else {
-                await savePostToDefaultCollection(user.id, post.id, post);
+                const saved = await savePostToDefaultCollection(user.id, post.id, post);
                 setIsSaved(true);
+                setSaves((n) =>
+                    typeof saved.savesCount === 'number' ? saved.savesCount : n + 1,
+                );
                 window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
                 showToast('Saved', 2600, {
                     actionLabel: 'Save to collection',
@@ -2336,7 +2352,7 @@ export default function ScenesModal({
                                         >
                                             <FiBookmark className={`w-[22px] h-[22px] ${isSaved ? 'text-black fill-black' : 'text-black'}`} />
                                         </button>
-                                        <span className="text-[11px] font-bold text-white/90">{isSaved ? 'Saved' : 'Save'}</span>
+                                        <span className="text-[11px] font-bold text-white/90">{saves}</span>
                                     </div>
 
                                     <div className="flex flex-col items-center gap-0.5">
@@ -2754,6 +2770,14 @@ export default function ScenesModal({
                     isOpen={saveModalOpen}
                     onClose={() => {
                         setSaveModalOpen(false);
+                    }}
+                    onSaved={(detail) => {
+                        setIsSaved(true);
+                        if (typeof detail?.savesCount === 'number') {
+                            setSaves(detail.savesCount);
+                        } else {
+                            setSaves((n) => Math.max(n, 1));
+                        }
                     }}
                 />
             )}

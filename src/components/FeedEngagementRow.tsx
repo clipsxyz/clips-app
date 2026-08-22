@@ -17,6 +17,7 @@ type FeedEngagementRowProps = {
     shares?: number;
     reclips?: number;
     views?: number;
+    saves?: number;
     userLiked?: boolean;
     userReclipped?: boolean;
     isSaved?: boolean;
@@ -47,6 +48,7 @@ export default function FeedEngagementRow({
     shares = 0,
     reclips = 0,
     views = 0,
+    saves = 0,
     userLiked = false,
     userReclipped = false,
     isSaved = false,
@@ -149,15 +151,11 @@ export default function FeedEngagementRow({
                     style={[styles.item, compact && styles.itemCompact]}
                     disabled={!onSave}
                     activeOpacity={0.7}
-                    accessibilityLabel={isSaved ? 'Saved' : 'Save post'}
+                    accessibilityLabel={isSaved ? `Saved, ${saves}` : `Save post, ${saves}`}
                     accessibilityState={{ selected: isSaved }}
                 >
                     <FeedBookmarkIcon size={ACTION_ICON} color={saveColor} filled={isSaved} />
-                    {showSaveLabel ? (
-                        <Text style={[styles.text, { color: countColor }]}>
-                            {isSaved ? 'Saved' : 'Save'}
-                        </Text>
-                    ) : null}
+                    <Text style={[styles.text, { color: countColor }]}>{saves}</Text>
                 </TouchableOpacity>
             ) : null}
 

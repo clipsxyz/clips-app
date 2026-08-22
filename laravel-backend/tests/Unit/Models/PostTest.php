@@ -212,5 +212,26 @@ class PostTest extends TestCase
         $this->assertSame('https://example.com/from-column.jpg', $fromColumn->resolvedThumbnailUrl());
         $this->assertSame('https://example.com/from-items.jpg', $fromItems->resolvedThumbnailUrl());
     }
+
+    public function test_collection_cover_url_prefers_still_then_media(): void
+    {
+        $user = User::factory()->create();
+        $withStill = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => 'https://example.com/poster.jpg',
+        ]);
+        $videoOnly = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => null,
+            'media_items' => null,
+        ]);
+
+        $this->assertSame('https://example.com/poster.jpg', $withStill->collectionCoverUrl());
+        $this->assertSame('https://example.com/clip.mp4', $videoOnly->collectionCoverUrl());
+    }
 }
 

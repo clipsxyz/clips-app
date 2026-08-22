@@ -158,6 +158,7 @@ export default function MyFeedPostCard({
                         comments={post.stats?.comments ?? 0}
                         shares={post.stats?.shares ?? 0}
                         reclips={post.stats?.reclips ?? 0}
+                        saves={post.stats?.saves ?? 0}
                         userLiked={post.userLiked}
                         userReclipped={post.userReclipped}
                         isSaved={post.isBookmarked}

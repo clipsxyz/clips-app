@@ -399,5 +399,109 @@ class PostControllerTest extends TestCase
             ->assertJsonPath('followingCount', 0)
             ->assertJsonCount(0, 'items');
     }
+
+    public function test_can_reclip_another_users_post(): void
+    {
+        $author = User::factory()->create();
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'text_content' => 'Reclip me',
+            'reclips_count' => 0,
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip");
+
+        $response->assertStatus(201)
+            ->assertJsonPath('original_post.id', $post->id)
+            ->assertJsonPath('original_post.user_reclipped', true)
+            ->assertJsonPath('original_post.reclips_count', 1)
+            ->assertJsonPath('is_reclipped', true)
+            ->assertJsonPath('user_handle', $viewer->handle)
+            ->assertJsonPath('original_post_id', $post->id);
+
+        $this->assertDatabaseHas('post_reclips', [
+            'user_id' => $viewer->id,
+            'post_id' => $post->id,
+        ]);
+        $this->assertDatabaseHas('posts', [
+            'id' => $post->id,
+            'reclips_count' => 1,
+        ]);
+        $this->assertTrue($viewer->fresh()->hasReclipped($post));
+    }
+
+    public function test_cannot_reclip_own_post(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip");
+
+        $response->assertStatus(400)
+            ->assertJsonPath('error', 'Cannot reclip your own post');
+        $this->assertDatabaseMissing('post_reclips', [
+            'user_id' => $user->id,
+            'post_id' => $post->id,
+        ]);
+    }
+
+    public function test_reclip_is_idempotent(): void
+    {
+        $author = User::factory()->create();
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'reclips_count' => 0,
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')->postJson("/api/posts/{$post->id}/reclip")
+            ->assertStatus(201);
+        $again = $this->actingAs($viewer, 'sanctum')->postJson("/api/posts/{$post->id}/reclip");
+
+        $again->assertOk()
+            ->assertJsonPath('id', $post->id)
+            ->assertJsonPath('user_reclipped', true)
+            ->assertJsonPath('reclips_count', 1);
+        $this->assertEquals(1, Post::query()->where('original_post_id', $post->id)->count());
+    }
+
+    public function test_reclip_survives_feed_reload(): void
+    {
+        $author = User::factory()->create([
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'location_label' => 'Dublin',
+            'text_content' => 'Stay reclipped',
+            'reclips_count' => 0,
+            'is_reclipped' => false,
+        ]);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/reclip")
+            ->assertStatus(201);
+
+        $feed = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=Dublin&limit=20');
+
+        $feed->assertOk();
+        $row = collect($feed->json('items'))->firstWhere('id', $post->id);
+        $this->assertNotNull($row, 'Original post missing from feed after reclip');
+        $this->assertTrue((bool) $row['user_reclipped']);
+        $this->assertSame(1, (int) $row['reclips_count']);
+    }
 }
 

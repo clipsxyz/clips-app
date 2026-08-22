@@ -86,7 +86,7 @@ export type Post = {
   caption?: string; // Caption/description for image/video posts
   createdAt: number; // Epoch timestamp in milliseconds (like Date.now())
   created_at?: string; // Backend field (ISO string)
-  stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
+  stats: { likes: number; views: number; comments: number; shares: number; reclips: number; saves?: number };
   isBookmarked: boolean;
   isFollowing: boolean;
   /** True when the post author follows the current user (mutual follow → show DM icon). */

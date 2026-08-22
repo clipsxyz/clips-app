@@ -9,7 +9,7 @@ import { resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
 
-const STRIP_VIDEO_LOOP_SEC = 3;
+const STRIP_VIDEO_LOOP_SEC = 2;
 const VIDEO_SRC_RE = /\.(mp4|webm|mov|m4v|ogg)(\?|#|$)/i;
 
 function PreviewVideo({

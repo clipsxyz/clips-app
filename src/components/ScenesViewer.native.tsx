@@ -51,7 +51,7 @@ import EditPostModal from './EditPostModal.native';
 import CreateGroupModal from './CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal.native';
 import ScenesMediaPlayer, { ScenesMediaProgressBar } from './ScenesMediaPlayer.native';
-import { getCollectionsForPost } from '../api/collections';
+import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
     getGlobalVideoMutedNative,
@@ -247,7 +247,7 @@ export default function ScenesViewer({
     const [topMetaVisible, setTopMetaVisible] = useState(true);
     const [metadataIndex, setMetadataIndex] = useState(0);
     const [saveModalOpen, setSaveModalOpen] = useState(false);
-    const [isSaved, setIsSaved] = useState(false);
+    const [isSaved, setIsSaved] = useState(() => Boolean(activePost?.isBookmarked));
     const [dismissPull, setDismissPull] = useState(0);
     const [mediaSlideProgress, setMediaSlideProgress] = useState(0);
     const [mediaSlideIndex, setMediaSlideIndex] = useState(0);
@@ -300,13 +300,18 @@ export default function ScenesViewer({
 
     const patchPost = useCallback(
         (postId: string, patch: Partial<Post> | ((p: Post) => Post)) => {
-            const next = postsProp.map((p) => {
-                if (p.id !== postId) return p;
+            const id = String(postId);
+            const apply = (p: Post) => {
+                if (String(p.id) !== id) return p;
                 return typeof patch === 'function' ? patch(p) : { ...p, ...patch };
-            });
+            };
+            const fromProp = postsProp.map(apply);
+            const next = fromProp.some((p) => String(p.id) === id)
+                ? fromProp
+                : posts.map(apply);
             onPostsChange?.(next);
         },
-        [onPostsChange, postsProp],
+        [onPostsChange, posts, postsProp],
     );
 
     useEffect(() => {
@@ -493,6 +498,7 @@ export default function ScenesViewer({
             setIsSaved(false);
             return;
         }
+        setIsSaved(Boolean(activePost.isBookmarked));
         let cancelled = false;
         void getCollectionsForPost(viewerUserId, activePost.id).then((cols) => {
             if (!cancelled) setIsSaved(cols.length > 0);
@@ -812,7 +818,7 @@ export default function ScenesViewer({
             return;
         }
         if (activePost.userReclipped) return;
-        const prevReclips = activePost.stats.reclips;
+        const prevReclips = Number(activePost.stats?.reclips) || 0;
         const nextReclips = prevReclips + 1;
         setReclipState(viewerUserId, activePost.id, true);
         patchPost(activePost.id, {
@@ -822,10 +828,18 @@ export default function ScenesViewer({
         try {
             const result = await reclipPost(viewerUserId, activePost.id, viewerHandle);
             if (result.originalPost) {
-                patchPost(activePost.id, {
-                    ...result.originalPost,
+                patchPost(activePost.id, (p) => ({
+                    ...p,
                     userReclipped: true,
-                });
+                    stats: {
+                        ...p.stats,
+                        reclips: Math.max(
+                            Number(result.originalPost?.stats?.reclips) || 0,
+                            Number(p.stats?.reclips) || 0,
+                            nextReclips,
+                        ),
+                    },
+                }));
             }
         } catch (err) {
             console.warn('Reclip failed in Scenes:', err);
@@ -1028,7 +1042,16 @@ export default function ScenesViewer({
     const likesCount = Math.max(0, Number(activePost.stats?.likes) || 0);
     const commentsCount = Math.max(0, Number(activePost.stats?.comments) || 0);
     const sharesCount = Math.max(0, Number(activePost.stats?.shares) || 0);
-    const reclipsCount = Math.max(0, Number(activePost.stats?.reclips) || 0);
+    const reclipsCount = Math.max(
+        0,
+        Number(activePost.stats?.reclips) || 0,
+        activePost.userReclipped ? 1 : 0,
+    );
+    const savesCount = Math.max(
+        0,
+        Number(activePost.stats?.saves) || 0,
+        isSaved || activePost.isBookmarked ? 1 : 0,
+    );
     const isLiked = activePost.userLiked === true;
 
     const renderCaptionMentions = (text: string) => {
@@ -1349,7 +1372,7 @@ export default function ScenesViewer({
                             <Icon name="paper-plane-outline" size={20} color="#FFFFFF" />
                         </ScenesRailAction>
                         <ScenesRailAction
-                            count={isSaved ? 'Saved' : 'Save'}
+                            count={savesCount}
                             label="Save to collection"
                             onPress={() => setSaveModalOpen(true)}
                         >
@@ -1608,8 +1631,22 @@ export default function ScenesViewer({
                 userId={viewerUserId}
                 visible={saveModalOpen}
                 onClose={() => setSaveModalOpen(false)}
-                onSaved={() => {
-                    setIsSaved(true);
+                onSaved={async (detail) => {
+                    const cols = await getCollectionsForPost(viewerUserId, activePost.id);
+                    const saved = cols.length > 0;
+                    setIsSaved(saved);
+                    patchPost(activePost.id, (p) => {
+                        const was = p.isBookmarked === true;
+                        const prev = Number(p.stats?.saves) || 0;
+                        return {
+                            ...p,
+                            isBookmarked: saved,
+                            stats: {
+                                ...p.stats,
+                                saves: applyUniqueSavesCount(prev, was, saved, detail?.savesCount),
+                            },
+                        };
+                    });
                 }}
             />
 
