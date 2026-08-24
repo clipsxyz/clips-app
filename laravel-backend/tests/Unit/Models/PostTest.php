@@ -102,6 +102,38 @@ class PostTest extends TestCase
         $this->assertCount(1, $results);
     }
 
+    public function test_by_location_usa_includes_new_york_state_authors(): void
+    {
+        $nyUser = User::factory()->create([
+            'location_local' => 'New York State',
+            'location_regional' => 'New York State',
+            'location_national' => null,
+        ]);
+        $dublinUser = User::factory()->create([
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+
+        $nyPost = Post::factory()->create([
+            'user_id' => $nyUser->id,
+            'location_label' => 'New York State',
+        ]);
+        Post::factory()->create([
+            'user_id' => $dublinUser->id,
+            'location_label' => 'Dublin, Ireland',
+        ]);
+
+        $results = Post::byLocation('USA')->pluck('id')->all();
+
+        $this->assertContains($nyPost->id, $results);
+        $this->assertCount(1, $results);
+
+        $mangled = Post::byLocation('Usa')->pluck('id')->all();
+        $this->assertContains($nyPost->id, $mangled);
+        $this->assertCount(1, $mangled);
+    }
+
     public function test_is_liked_by_returns_true_when_like_exists(): void
     {
         $user = User::factory()->create();

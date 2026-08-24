@@ -1,3 +1,4 @@
+import { Alert } from 'react-native';
 import { createPost } from '../api/posts';
 import { isMockMode } from '../api/apiMode';
 import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPostNative';
@@ -13,6 +14,21 @@ import { getUploadOverlayForJob } from './uploadOverlayNative';
 function isLocalDeviceMediaUrl(url?: string | null): boolean {
     if (!url) return false;
     return /^(file|content|ph):\/\//i.test(url) || url.startsWith('data:');
+}
+
+function messageForUploadError(err: unknown): string {
+    const raw = err instanceof Error ? err.message : '';
+    const name = err instanceof Error ? err.name : '';
+    if (
+        name === 'UploadTooLarge' ||
+        /\b413\b/.test(raw) ||
+        /file too large/i.test(raw) ||
+        /too large to upload/i.test(raw)
+    ) {
+        return 'This clip is too large to upload. Try a shorter or lower-quality video (max 100MB).';
+    }
+    if (raw) return raw;
+    return 'Failed to create post. Please try again.';
 }
 
 function assertRemoteMediaForLive(url: string | undefined, label: string): void {
@@ -214,10 +230,15 @@ export function startBackgroundFeedUpload(tempId: string): void {
     if (!job || job.status !== 'uploading') return;
 
     void executePendingFeedUpload(job).catch((err: unknown) => {
-        const message =
-            err instanceof Error ? err.message : 'Failed to create post. Please try again.';
+        const message = messageForUploadError(err);
         console.error('runBackgroundFeedUploadNative:', err);
         failPendingFeedUpload(tempId, message);
         getUploadOverlayForJob(tempId)?.error(message);
+        if (
+            err instanceof Error &&
+            (err.name === 'UploadTooLarge' || /\b413\b/.test(err.message) || /too large/i.test(message))
+        ) {
+            Alert.alert('File too large', message);
+        }
     });
 }

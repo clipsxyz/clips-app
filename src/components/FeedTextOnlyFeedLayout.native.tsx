@@ -12,8 +12,10 @@ import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import Avatar from './Avatar';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
+import PostLinkPreviewCard from './PostLinkPreviewCard.native';
 import TaggedAvatars from './TaggedAvatars.native';
 import { FEED_UI } from '../constants/feedUiTokens';
+import { getPostCaptionWithoutLink } from '../utils/linkPreview';
 const AVATAR_COLUMN_WIDTH = FEED_UI.icon.avatar + 8;
 const BUBBLE_MAX_WIDTH = 480;
 
@@ -30,6 +32,8 @@ type Props = {
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onShowTaggedUsers?: () => void;
     menuAnchorRef?: React.Ref<View>;
+    /** News feed hides OG share cards (they live in Stories 24). */
+    showLinkPreview?: boolean;
 };
 
 export default function FeedTextOnlyFeedLayout({
@@ -45,6 +49,7 @@ export default function FeedTextOnlyFeedLayout({
     onRegisterDmAnchor,
     onShowTaggedUsers,
     menuAnchorRef,
+    showLinkPreview = true,
 }: Props) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
@@ -69,6 +74,8 @@ export default function FeedTextOnlyFeedLayout({
             hasPendingFollowRequest(viewer, profileHandle),
     );
     const bubbleMaxWidth = Math.min(Math.max(120, cardWidth - AVATAR_COLUMN_WIDTH - 8), BUBBLE_MAX_WIDTH);
+    const leftover = getPostCaptionWithoutLink(post, post.text || '');
+    const showBubble = leftover.length > 0 || !post.linkPreview || !showLinkPreview;
 
     const registerAnchor = useCallback(
         (ref: View | null) => {
@@ -111,15 +118,19 @@ export default function FeedTextOnlyFeedLayout({
                 menuAnchorRef={menuAnchorRef}
             />
 
+            {showLinkPreview && post.linkPreview ? <PostLinkPreviewCard preview={post.linkPreview} /> : null}
+
             {/* Web PostHeader textOnlyFeed: bubble then avatar, row aligned end. */}
             <View style={styles.bubbleRow}>
                 <View style={[styles.bubbleSlot, { maxWidth: bubbleMaxWidth }]}>
-                    <FeedTextOnlyCard
-                        post={post}
-                        isFromViewer={isFromViewer}
-                        onDoubleLike={onDoubleLike}
-                        maxWidth={bubbleMaxWidth}
-                    />
+                    {showBubble ? (
+                        <FeedTextOnlyCard
+                            post={leftover ? { ...post, text: leftover } : post}
+                            isFromViewer={isFromViewer}
+                            onDoubleLike={onDoubleLike}
+                            maxWidth={bubbleMaxWidth}
+                        />
+                    ) : null}
                 </View>
                 <View style={styles.avatarColumn}>
                     <View ref={(r) => registerAnchor(r)} collapsable={false} style={styles.avatarWrap}>
@@ -171,6 +182,10 @@ export default function FeedTextOnlyFeedLayout({
 }
 
 const styles = StyleSheet.create({
+    root: {
+        paddingHorizontal: 16,
+        paddingBottom: 12,
+    },
     root: {
         paddingHorizontal: 16,
         paddingBottom: 12,

@@ -106,6 +106,11 @@ export default function MainTabBar({
               screen: 'Feed',
               params: {
                 resetHomeFeedAt: Date.now(),
+                location: null,
+                locationLabel: null,
+                locationScope: null,
+                filterType: null,
+                placeId: null,
               },
             });
             return;

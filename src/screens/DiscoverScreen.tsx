@@ -200,7 +200,14 @@ export default function DiscoverScreen({ navigation }: any) {
         }
         navigateMainTab(navigation, 'Home', {
             screen: 'Feed',
-            params: { resetHomeFeedAt: Date.now() },
+            params: {
+                resetHomeFeedAt: Date.now(),
+                location: null,
+                locationLabel: null,
+                locationScope: null,
+                filterType: null,
+                placeId: null,
+            },
         });
     };
 

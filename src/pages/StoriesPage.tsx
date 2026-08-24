@@ -26,6 +26,9 @@ import type { Story, StoryGroup, Post } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 import StoriesPopIcon from '../components/StoriesPopIcon';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import StoryLinkShareBody from '../components/StoryLinkShareBody';
+import { extractFirstHttpUrl } from '../utils/linkPreview';
+import { STORY_LINK_SHARE_CANVAS_CSS } from '../utils/discoverAmbientPalette';
 
 /** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
 const STORIES24_LOADING_HOLD_MS = 2600;
@@ -2336,15 +2339,22 @@ export default function StoriesPage() {
                                                   ? 'text-xl'
                                                   : 'text-base';
 
+                                        const isLinkShare = Boolean(
+                                            currentStory?.linkPreview || extractFirstHttpUrl(currentStoryText)
+                                        );
                                         return (
                                             <div
                                                 className="relative flex h-full w-full items-center justify-center p-4"
                                                 style={{
-                                                    background: currentStory?.textStyle?.background || '#1a1a1a',
+                                                    background: isLinkShare
+                                                        ? STORY_LINK_SHARE_CANVAS_CSS
+                                                        : currentStory?.textStyle?.background || '#1a1a1a',
                                                 }}
                                             >
                                                 <div className="relative w-full max-w-md">
-                                                    <div
+                                                    <StoryLinkShareBody
+                                                        text={currentStoryText}
+                                                        storedPreview={currentStory?.linkPreview}
                                                         className={`${sizeClass} whitespace-pre-wrap px-6 py-8 font-normal leading-relaxed`}
                                                         style={{
                                                             color:
@@ -2354,9 +2364,7 @@ export default function StoriesPage() {
                                                             overflowWrap: 'anywhere',
                                                             wordBreak: 'break-word',
                                                         }}
-                                                    >
-                                                        {currentStoryText}
-                                                    </div>
+                                                    />
                                                     {taggedUsersPositions && taggedUsersPositions.length > 0 && (
                                                         <>
                                                             {taggedUsersPositions.map((taggedUser) => (
@@ -4184,7 +4192,7 @@ export default function StoriesPage() {
                                     setSelectedResponse(null);
                                     setPaused(false);
                                     pausedRef.current = false;
-                                    navigate('/clip');
+                                    navigate('/create/instant', { state: { openStoryPicker: true } });
                                 }}
                                 className="w-full py-3 rounded-xl bg-gradient-to-tr from-purple-500 via-pink-500 to-pink-600 text-white font-semibold hover:opacity-90 transition-opacity"
                             >
@@ -4739,7 +4747,7 @@ export default function StoriesPage() {
                                     if (hasStories && currentUserGroup) {
                                         startViewingStories(currentUserGroup);
                                     } else {
-                                        navigate('/clip');
+                                        navigate('/create/instant', { state: { openStoryPicker: true } });
                                     }
                                 }}
                                 className="relative aspect-[9/16] rounded-lg overflow-hidden bg-gray-800 group cursor-pointer border border-gray-700 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black"

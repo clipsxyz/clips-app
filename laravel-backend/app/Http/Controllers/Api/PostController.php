@@ -10,6 +10,7 @@ use App\Jobs\ProcessRenderJob;
 use App\Services\BoostAnalyticsService;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
+use App\Services\LinkPreviewService;
 use App\Services\VideoThumbnailService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -126,6 +127,10 @@ class PostController extends Controller
         $postData['poster_url'] = $poster;
 
         $postData = Post::applyEngagementCounts($postData, $attrs);
+
+        $preview = is_array($post->link_preview) ? $post->link_preview : null;
+        $postData['link_preview'] = $preview;
+        $postData['linkPreview'] = $preview;
 
         if ($post->relationLoaded('user') && $post->user) {
             $author = $post->user;
@@ -512,7 +517,19 @@ class PostController extends Controller
             'location' => $request->location,
         ]);
 
-        $post = DB::transaction(function () use ($request, $user) {
+        $previewService = app(LinkPreviewService::class);
+        $linkPreview = null;
+        if (is_array($request->linkPreview ?? $request->link_preview)) {
+            $linkPreview = $previewService->normalizeClientPayload(
+                (array) ($request->linkPreview ?? $request->link_preview)
+            );
+        }
+        if ($linkPreview === null) {
+            $blob = trim((string) $request->text.' '.(string) $request->caption);
+            $linkPreview = $previewService->previewFromText($blob);
+        }
+
+        $post = DB::transaction(function () use ($request, $user, $linkPreview) {
             $geo = $this->resolvePostGeoFields($request);
 
             $mediaItems = $request->mediaItems;
@@ -554,6 +571,7 @@ class PostController extends Controller
                 'landmark' => $request->landmark,
                 'social_format' => $request->socialFormat,
                 'caption' => $request->caption,
+                'link_preview' => $linkPreview,
                 'image_text' => $request->imageText,
                 'banner_text' => $request->bannerText,
                 'stickers' => $request->stickers,

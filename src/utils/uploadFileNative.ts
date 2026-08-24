@@ -151,6 +151,13 @@ export async function uploadFileFromUri(
                 /* ignore parse errors */
             }
             console.log('[uploadFileFromUri] response status=', response.status, message);
+            if (response.status === 413) {
+                const err = new Error(
+                    'This clip is too large to upload. Try a shorter or lower-quality video (max 100MB).',
+                );
+                err.name = 'UploadTooLarge';
+                throw err;
+            }
             throw new Error(message);
         }
 

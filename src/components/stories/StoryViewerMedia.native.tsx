@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { View, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Story } from '../../types';
@@ -11,6 +11,14 @@ import {
     storyVideoSource,
 } from '../../utils/storyMediaNative';
 import StorySafeVideo from './StorySafeVideo.native';
+import PostLinkPreviewCard from '../PostLinkPreviewCard.native';
+import { useLinkPreview } from '../../hooks/useLinkPreview';
+import {
+    captionWithoutLinkUrl,
+    extractFirstHttpUrl,
+    fallbackLinkPreview,
+} from '../../utils/linkPreview';
+import { STORY_LINK_SHARE_CANVAS_COLORS } from '../../utils/discoverAmbientPalette';
 
 type Props = {
     story: Story;
@@ -21,15 +29,23 @@ type Props = {
 /** Regular (non–shared-post) story media: video, image, or text-only template. */
 export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
     const text = getStoryTextContent(story);
+    const linkUrl = extractFirstHttpUrl(text);
+    const { preview: fetchedPreview } = useLinkPreview(text || '', { debounceMs: 0 });
+    const preview =
+        story.linkPreview ||
+        fetchedPreview ||
+        (linkUrl ? fallbackLinkPreview(linkUrl) : null);
+    const leftover = preview ? captionWithoutLinkUrl(text, preview.url) : text;
+    const hasOwnMedia = Boolean((story.mediaUrl || '').trim());
     const videoSource = storyVideoSource(story.mediaUrl);
-    const posterSource = getStoryVideoPosterSource(story.mediaUrl);
-    const posterUri = getStoryVideoPosterFallback(story.mediaUrl);
-    const imageUri = resolveStoryMediaUrl(story.mediaUrl) || posterUri;
-    const hasMedia = !!videoSource || !!posterSource || !!imageUri;
+    const posterSource = hasOwnMedia ? getStoryVideoPosterSource(story.mediaUrl) : undefined;
+    const posterUri = hasOwnMedia ? getStoryVideoPosterFallback(story.mediaUrl) : undefined;
+    const imageUri = hasOwnMedia ? resolveStoryMediaUrl(story.mediaUrl) || posterUri : undefined;
+    const hasMedia = hasOwnMedia && (!!videoSource || !!posterSource || !!imageUri);
     const isVideo = isStoryVideo(story);
-    const [videoFailed, setVideoFailed] = useState(false);
+    const [videoFailed, setVideoFailed] = React.useState(false);
 
-    useEffect(() => {
+    React.useEffect(() => {
         setVideoFailed(false);
     }, [story.id, story.mediaUrl]);
 
@@ -67,10 +83,29 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
 
     if (text) {
         const { gradientColors, color, fontSize } = getTextStoryStyle(story);
+        const canvasColors = preview
+            ? [...STORY_LINK_SHARE_CANVAS_COLORS]
+            : gradientColors;
+        const showText = leftover.length > 0;
         return (
-            <LinearGradient colors={gradientColors} style={StyleSheet.absoluteFill}>
-                <View style={styles.textOnlyWrap}>
-                    <Text style={[styles.textOnlyBody, { color, fontSize }]}>{text}</Text>
+            <LinearGradient
+                colors={canvasColors}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+            >
+                <View style={styles.textOnlyWrap} pointerEvents="box-none">
+                    {showText ? (
+                        <Text style={[styles.textOnlyBody, { color, fontSize }]}>{leftover}</Text>
+                    ) : null}
+                    {preview ? (
+                        <View style={styles.linkCardWrap} pointerEvents="auto">
+                            <PostLinkPreviewCard preview={preview} compact />
+                        </View>
+                    ) : null}
+                    {!showText && !preview ? (
+                        <Text style={[styles.textOnlyBody, { color, fontSize }]}>{text}</Text>
+                    ) : null}
                 </View>
             </LinearGradient>
         );
@@ -93,11 +128,18 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 28,
+        paddingHorizontal: 20,
+        width: '100%',
     },
     textOnlyBody: {
         fontWeight: '700',
         textAlign: 'center',
         lineHeight: 28,
+        marginBottom: 12,
+    },
+    linkCardWrap: {
+        width: '100%',
+        maxWidth: 360,
+        zIndex: 5,
     },
 });

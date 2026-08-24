@@ -7,6 +7,7 @@ import {
     type FeedContentPrefs,
 } from './feedContentPrefsMobile';
 import { getArchivedFeedPostIdsMobile } from './feedEngagementPrefsMobile';
+import { excludeLinkShareFeedPosts } from './linkPreview';
 
 export type NativeFeedFetchParams = {
     filter: string;
@@ -47,9 +48,11 @@ export async function filterVisibleFeedPosts(
             opts.archivedIds ??
             (await getArchivedFeedPostIdsMobile(opts.viewerUserId).catch(() => new Set<string>()));
         visible = visible.filter((item) => !archivedIds.has(item.id));
-        return filterPostsByContentPrefs(visible, opts.prefs, {
-            isProtectedDevMockVideo: isDevMockFeedVideoPost,
-        });
+        return excludeLinkShareFeedPosts(
+            filterPostsByContentPrefs(visible, opts.prefs, {
+                isProtectedDevMockVideo: isDevMockFeedVideoPost,
+            }),
+        );
     } catch (err) {
         console.warn('filterVisibleFeedPosts failed — showing unfiltered page', err);
         return items;

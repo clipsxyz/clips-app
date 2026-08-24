@@ -44,6 +44,7 @@ import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { ox } from '../constants/nativeOpticalScale';
+import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
 
 type TagUser = { handle: string; displayName?: string; avatarUrl?: string };
 
@@ -80,7 +81,8 @@ function TemplateComposerBackground({
 export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const isStory24 = !!route.params?.story24;
+  const isLinkPost = !!route.params?.linkPost;
+  const isStory24 = !!route.params?.story24 || isLinkPost;
 
   const [text, setText] = useState(String(route.params?.text || route.params?.textBody || ''));
   const [locationText, setLocationText] = useState(String(route.params?.location || ''));
@@ -429,7 +431,11 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                 <TextInput
                   value={text}
                   onChangeText={setText}
-                  placeholder="What's up?"
+                  placeholder={
+                    isLinkPost
+                      ? 'Paste a YouTube, TikTok, Instagram, or web link'
+                      : "What's up?"
+                  }
                   placeholderTextColor="#9CA3AF"
                   style={[styles.textInput, { color: inputColor, fontSize: inputFontSize }]}
                   multiline
@@ -438,6 +444,12 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
                   textAlignVertical="top"
                 />
               </TemplateComposerBackground>
+              <ComposerLinkPreview text={text} />
+              {isLinkPost ? (
+                <Text style={styles.linkHint}>
+                  We’ll fetch a cover, title, and source badge for your story.
+                </Text>
+              ) : null}
               <View style={styles.counterRow}>
                 <Text
                   style={[
@@ -794,6 +806,12 @@ const styles = StyleSheet.create({
   counterRow: {
     alignItems: 'flex-end',
     marginTop: ox(4),
+  },
+  linkHint: {
+    marginTop: ox(8),
+    fontSize: ox(12),
+    lineHeight: ox(16),
+    color: 'rgba(255,255,255,0.55)',
   },
   counterText: {
     color: '#6B7280',

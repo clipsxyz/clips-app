@@ -72,6 +72,8 @@ type Props = {
     onMenu?: () => void;
     onFollow?: () => void | Promise<void>;
     onVisitProfile?: () => void;
+    /** Ignore close while a stacked comments/share/save modal is open. */
+    closeLocked?: boolean;
 };
 
 function collectImageUrls(post: Post): string[] {
@@ -115,6 +117,7 @@ export default function ImageFullscreenModal({
     onMenu,
     onFollow,
     onVisitProfile,
+    closeLocked = false,
 }: Props) {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
@@ -216,7 +219,7 @@ export default function ImageFullscreenModal({
     }, [backdropOp, markExpanded, originRect, progress]);
 
     const requestClose = useCallback(() => {
-        if (closing) return;
+        if (closeLocked || closing) return;
         setClosing(true);
         setChromeVisible(false);
         setChromeShown(false);
@@ -246,7 +249,12 @@ export default function ImageFullscreenModal({
             closeFallbackTimerRef.current = null;
             finishClose();
         }, COLLAPSE_FALLBACK_MS);
-    }, [backdropOp, closing, finishClose, progress]);
+    }, [backdropOp, closeLocked, closing, finishClose, progress]);
+
+    const toggleChrome = useCallback(() => {
+        if (closing) return;
+        setChromeVisible((v) => !v);
+    }, [closing]);
 
     useEffect(() => {
         if (!visible || !post) return;
@@ -311,11 +319,6 @@ export default function ImageFullscreenModal({
     /** Don't gate on chromeShown — that hid UI when HW layers ate sibling overlays. */
     const showChrome = chromeVisible && !closing;
     const imageResizeMode = imageCover && !closing && !shellReady ? 'cover' : 'contain';
-
-    const toggleChrome = useCallback(() => {
-        if (closing) return;
-        setChromeVisible((v) => !v);
-    }, [closing]);
 
     const handleLikePress = async () => {
         if (!onLike || likeBusy) return;

@@ -59,6 +59,7 @@ class Post extends Model
         'template_id',
         'media_items',
         'caption',
+        'link_preview',
         'image_text',
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'video_captions_enabled',
@@ -76,6 +77,7 @@ class Post extends Model
         'tags' => 'array',
         'stickers' => 'array',
         'media_items' => 'array',
+        'link_preview' => 'array',
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'edit_timeline' => 'array', // Edit timeline for hybrid editing pipeline
         'likes_count' => 'integer',
@@ -306,16 +308,23 @@ class Post extends Model
             'dublin', 'cork', 'galway', 'limerick', 'waterford', 'kilkenny', 'belfast',
             'finglas', 'artane', 'ballymun',
         ];
+        $usaPlaces = [
+            'new york', 'new york state', 'ny', 'nyc',
+        ];
+        $usaNational = in_array($needleLower, ['usa', 'us', 'united states'], true);
 
-        return $query->where(function ($q) use ($needle, $needleLower, $irelandPlaces) {
+        return $query->where(function ($q) use ($needle, $needleLower, $irelandPlaces, $usaPlaces, $usaNational) {
             $q->where('location_label', 'LIKE', "%{$needle}%")
                 ->orWhere('venue', 'LIKE', "%{$needle}%")
                 ->orWhere('landmark', 'LIKE', "%{$needle}%")
                 ->orWhere('place_id', $needle)
-                ->orWhereHas('user', function ($uq) use ($needle, $needleLower, $irelandPlaces) {
+                ->orWhereHas('user', function ($uq) use ($needle, $needleLower, $irelandPlaces, $usaPlaces, $usaNational) {
                     $uq->where('location_local', 'LIKE', "%{$needle}%")
                         ->orWhere('location_regional', 'LIKE', "%{$needle}%")
-                        ->orWhere('location_national', 'LIKE', "%{$needle}%");
+                        ->orWhere('location_national', 'LIKE', "%{$needle}%")
+                        ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$needleLower])
+                        ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$needleLower])
+                        ->orWhereRaw('LOWER(TRIM(location_national)) = ?', [$needleLower]);
 
                     // Ireland news is national: Cork/Galway authors belong even if
                     // location_label is only "Cork" and national was left blank.
@@ -323,6 +332,18 @@ class Post extends Model
                         $uq->orWhere(function ($irelandQ) use ($irelandPlaces) {
                             foreach ($irelandPlaces as $place) {
                                 $irelandQ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$place])
+                                    ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$place]);
+                            }
+                        });
+                    }
+
+                    // USA news: New York State authors belong even if national was left blank,
+                    // and "Usa" / "USA" must match regardless of column casing.
+                    if ($usaNational) {
+                        $uq->orWhereRaw("LOWER(TRIM(location_national)) IN ('usa', 'us', 'united states')");
+                        $uq->orWhere(function ($usaQ) use ($usaPlaces) {
+                            foreach ($usaPlaces as $place) {
+                                $usaQ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$place])
                                     ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$place]);
                             }
                         });

@@ -12,6 +12,7 @@ import FeedPostHeader from './FeedPostHeader.native';
 import FeedPostMedia from './FeedPostMedia.native';
 import FeedTextOnlyFeedLayout from './FeedTextOnlyFeedLayout.native';
 import FeedCaptionText from './FeedCaptionText.native';
+import PostLinkPreviewCard from './PostLinkPreviewCard.native';
 import FeedEngagementRow from './FeedEngagementRow';
 import FeedEngagementRightActions from './FeedEngagementRightActions.native';
 import FeedHeartDrop from './FeedHeartDrop.native';
@@ -24,6 +25,7 @@ import ShareToStoriesModal from './ShareToStoriesModal.native';
 import TaggedUsersBottomSheet from './TaggedUsersBottomSheet.native';
 import BoostMetricsPanel from './BoostMetricsPanel.native';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
+import { getPostCaptionWithoutLink } from '../utils/linkPreview';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
 import {
     FEED_CARD_BODY,
@@ -68,6 +70,10 @@ export default function MyFeedPostCard({
         post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0),
     );
     const displayCaption = useMemo(() => getPostDisplayCaption(post), [post]);
+    const captionWithoutLink = useMemo(
+        () => getPostCaptionWithoutLink(post, displayCaption),
+        [post, displayCaption],
+    );
     const carouselThumbItems = useMemo(
         () =>
             (post.mediaItems || []).filter(
@@ -136,9 +142,14 @@ export default function MyFeedPostCard({
                 </View>
             )}
 
-            {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
+            {!textOnlyPost && captionWithoutLink.length > 0 && hasFeedMedia ? (
                 <View style={styles.captionWrap}>
-                    <FeedCaptionText caption={displayCaption} />
+                    <FeedCaptionText caption={captionWithoutLink} />
+                </View>
+            ) : null}
+            {!textOnlyPost && post.linkPreview ? (
+                <View style={{ width: '100%', alignSelf: 'stretch' }}>
+                    <PostLinkPreviewCard preview={post.linkPreview} />
                 </View>
             ) : null}
 

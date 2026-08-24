@@ -72,11 +72,12 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost, fetchComments } from '../api/posts';
+import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost, fetchComments, setBookmarkState } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { followOrRequest } from '../utils/followOrRequest';
 import { hasPendingFollowRequest } from '../api/privacy';
-import { getCollectionsForPost } from '../api/collections';
+import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
+import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
 import type { Post, Story, StoryGroup } from '../types';
 import Avatar from '../components/Avatar';
 import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
@@ -723,6 +724,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [dismissProgress, navigation]);
 
     const closeStories = () => {
+        flushScenesPostUpdates();
         if (dismissingRef.current) return;
         if (timerRef.current) {
             clearInterval(timerRef.current);
@@ -899,6 +901,8 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (fullscreenHoldRef.current?.id === updated.id) {
             fullscreenHoldRef.current = updated;
         }
+        setScenesPostUpdate(updated);
+        flushScenesPostUpdates();
     }, []);
 
     /** RN Modal cannot host another Modal/BottomSheet — park fullscreen first. */
@@ -928,10 +932,7 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const handleFullscreenComment = () => {
         if (!imageFullscreenPost) return;
-        const post = imageFullscreenPost;
-        dismissFullscreenForOverlay();
-        // Let the fullscreen Modal unmount before presenting the sheet.
-        setTimeout(() => setFullscreenCommentsPost(post), 40);
+        setFullscreenCommentsPost(imageFullscreenPost);
     };
 
     const handleFullscreenReclip = async () => {
@@ -979,16 +980,12 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const handleFullscreenShare = () => {
         if (!imageFullscreenPost) return;
-        const post = imageFullscreenPost;
-        dismissFullscreenForOverlay();
-        setTimeout(() => setFullscreenSharePost(post), 40);
+        setFullscreenSharePost(imageFullscreenPost);
     };
 
     const handleFullscreenSave = () => {
         if (!imageFullscreenPost) return;
-        const post = imageFullscreenPost;
-        dismissFullscreenForOverlay();
-        setTimeout(() => setFullscreenSavePost(post), 40);
+        setFullscreenSavePost(imageFullscreenPost);
     };
 
     useEffect(() => {
@@ -1015,6 +1012,14 @@ export default function StoriesScreen({ route, navigation }: any) {
             openedFullPostRef.current = false;
             setSuspendStoryMedia(false);
             if (!showInlineReplyComposerRef.current) setPaused(false);
+        }, []),
+    );
+
+    useFocusEffect(
+        useCallback(() => {
+            return () => {
+                flushScenesPostUpdates();
+            };
         }, []),
     );
 
@@ -1691,6 +1696,9 @@ export default function StoriesScreen({ route, navigation }: any) {
             <ImageFullscreenModal
                 post={imageFullscreenPost}
                 visible={Boolean(imageFullscreenPost)}
+                closeLocked={Boolean(
+                    fullscreenCommentsPost || fullscreenSharePost || fullscreenSavePost,
+                )}
                 onClose={() => {
                     fullscreenHoldRef.current = null;
                     setImageFullscreenPost(null);
@@ -1711,41 +1719,61 @@ export default function StoriesScreen({ route, navigation }: any) {
                 isSaved={fullscreenPostSaved}
             />
 
-            <PostCommentsSheet
-                postId={fullscreenCommentsPost?.id ?? ''}
-                post={fullscreenCommentsPost}
-                isOpen={fullscreenCommentsPost !== null}
-                commentAuthorHandle={user?.handle || ''}
-                currentUserHandle={user?.handle}
-                onCommentCountChange={(n) => {
-                    const closed = fullscreenCommentsPost;
-                    if (!closed?.id) return;
-                    syncFullscreenPost({
-                        ...closed,
-                        stats: {
-                            ...closed.stats,
-                            comments: Math.max(0, n),
-                        },
-                    });
-                }}
-                onClose={() => {
-                    const closed = fullscreenCommentsPost;
-                    setFullscreenCommentsPost(null);
-                    restoreFullscreenFromHold();
-                    if (!closed?.id) return;
-                    void fetchComments(closed.id)
-                        .then((list) => {
-                            syncFullscreenPost({
-                                ...closed,
-                                stats: {
-                                    ...closed.stats,
-                                    comments: Math.max(closed.stats.comments || 0, list.length),
-                                },
-                            });
-                        })
-                        .catch(() => {});
-                }}
-            />
+            <Modal
+                visible={fullscreenCommentsPost !== null}
+                transparent
+                animationType="slide"
+                statusBarTranslucent
+                hardwareAccelerated
+                onRequestClose={() => setFullscreenCommentsPost(null)}
+            >
+                <View style={styles.fullscreenOverlayRoot}>
+                    <Pressable
+                        style={styles.fullscreenOverlayBackdrop}
+                        onPress={() => setFullscreenCommentsPost(null)}
+                        accessibilityLabel="Dismiss comments"
+                    />
+                    <View style={styles.fullscreenCommentsSheet}>
+                        {fullscreenCommentsPost ? (
+                            <PostCommentsSheet
+                                variant="scenesEmbed"
+                                postId={fullscreenCommentsPost.id}
+                                post={fullscreenCommentsPost}
+                                isOpen={fullscreenCommentsPost !== null}
+                                commentAuthorHandle={user?.handle || ''}
+                                currentUserHandle={user?.handle}
+                                onCommentCountChange={(n) => {
+                                    const closed = fullscreenCommentsPost;
+                                    if (!closed?.id) return;
+                                    syncFullscreenPost({
+                                        ...closed,
+                                        stats: {
+                                            ...closed.stats,
+                                            comments: Math.max(0, n),
+                                        },
+                                    });
+                                }}
+                                onClose={() => {
+                                    const closed = fullscreenCommentsPost;
+                                    setFullscreenCommentsPost(null);
+                                    if (!closed?.id) return;
+                                    void fetchComments(closed.id)
+                                        .then((list) => {
+                                            syncFullscreenPost({
+                                                ...closed,
+                                                stats: {
+                                                    ...closed.stats,
+                                                    comments: Math.max(closed.stats.comments || 0, list.length),
+                                                },
+                                            });
+                                        })
+                                        .catch(() => {});
+                                }}
+                            />
+                        ) : null}
+                    </View>
+                </View>
+            </Modal>
 
             <FeedShareModal
                 post={fullscreenSharePost}
@@ -1765,13 +1793,34 @@ export default function StoriesScreen({ route, navigation }: any) {
                         setFullscreenSavePost(null);
                         restoreFullscreenFromHold();
                     }}
-                    onSaved={async () => {
+                    onSaved={async (detail) => {
                         if (!user?.id || !fullscreenSavePost) return;
+                        const post = fullscreenSavePost;
                         try {
-                            const cols = await getCollectionsForPost(user.id, fullscreenSavePost.id);
-                            setFullscreenPostSaved(cols.length > 0);
+                            const cols = await getCollectionsForPost(user.id, post.id);
+                            const saved = cols.length > 0;
+                            setFullscreenPostSaved(saved);
+                            setBookmarkState(user.id, post.id, saved);
+                            syncFullscreenPost({
+                                ...post,
+                                isBookmarked: saved,
+                                stats: {
+                                    ...post.stats,
+                                    saves: applyUniqueSavesCount(
+                                        Number(post.stats?.saves) || 0,
+                                        post.isBookmarked === true,
+                                        saved,
+                                        detail?.savesCount,
+                                    ),
+                                },
+                            });
                         } catch {
                             setFullscreenPostSaved(true);
+                            setBookmarkState(user.id, post.id, true);
+                            syncFullscreenPost({
+                                ...post,
+                                isBookmarked: true,
+                            });
                         }
                     }}
                 />
@@ -1822,6 +1871,21 @@ const styles = StyleSheet.create({
         marginTop: ox(4),
         fontSize: ox(11),
         color: 'rgba(255,255,255,0.35)',
+    },
+    fullscreenOverlayRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    fullscreenOverlayBackdrop: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    fullscreenCommentsSheet: {
+        height: Math.round(Dimensions.get('window').height * 0.78),
+        backgroundColor: 'transparent',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: 'hidden',
     },
     header: {
         flexDirection: 'row',

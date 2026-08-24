@@ -565,6 +565,7 @@ class UserController extends Controller
                 'posts.template_id',
                 'posts.media_items',
                 'posts.caption',
+                'posts.link_preview',
                 'posts.image_text',
                 'posts.text_style',
                 'posts.video_captions_enabled',

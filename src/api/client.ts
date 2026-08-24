@@ -37,6 +37,8 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/users/privacy/toggle',
     '/users/check-follows-me',
     '/stories',
+    '/link-preview',
+    '/v1/parse-link',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
@@ -849,6 +851,14 @@ export async function createPost(postData: {
     videoFrameMode?: 'crop' | 'fit' | 'original';
     videoPosterUrl?: string;
     caption?: string;
+    linkPreview?: {
+        url: string;
+        title?: string;
+        description?: string;
+        imageUrl?: string;
+        siteName?: string;
+        source?: string;
+    };
     imageText?: string;
     bannerText?: string;
     stickers?: any[];
@@ -1090,6 +1100,37 @@ export async function fetchPostLikes(
     if (params?.limit != null) search.set('limit', String(params.limit));
     const qs = search.toString();
     return apiRequest(`/posts/${postId}/likes${qs ? `?${qs}` : ''}`);
+}
+
+export async function fetchLinkPreview(url: string): Promise<{
+    url: string;
+    title?: string;
+    description?: string;
+    image_url?: string;
+    thumbnail_url?: string;
+    site_name?: string;
+    source?: string;
+    is_direct_video?: boolean;
+    video_url?: string;
+}> {
+    const search = new URLSearchParams({ url });
+    return apiRequest(`/link-preview?${search.toString()}`);
+}
+
+/** Instagram Reels/posts: Meta oEmbed via Laravel, never a client-side scrape. */
+export async function parseLinkPreview(url: string): Promise<{
+    url: string;
+    title?: string;
+    description?: string;
+    image_url?: string;
+    thumbnail_url?: string;
+    site_name?: string;
+    source?: string;
+    is_direct_video?: boolean;
+    video_url?: string;
+}> {
+    const search = new URLSearchParams({ url });
+    return apiRequest(`/v1/parse-link?${search.toString()}`);
 }
 
 export async function updatePost(postId: string, postData: {

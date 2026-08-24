@@ -168,7 +168,7 @@ function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress }: OrbitMod
     );
 }
 
-export default function InstantCreateScreen({ navigation }: any) {
+export default function InstantCreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
     const [centeredMode, setCenteredMode] = useState<CreateModeId>('gallery');
@@ -384,12 +384,13 @@ export default function InstantCreateScreen({ navigation }: any) {
         [navigateFromAssets],
     );
 
-    /** System gallery has no camera tab — offer library vs camera explicitly. */
+    /** System gallery has no camera tab — offer library, camera, and (for stories) a pasted link. */
     const openMediaSourceMenu = useCallback(
         (mode: PickerMode = 'feed') => {
+            const isStory = mode === 'story24';
             setMediaSourceMenu({
-                title: 'Add media',
-                subtitle: 'Choose a source',
+                title: isStory ? 'Add to your story' : 'Add to your post',
+                subtitle: isStory ? 'Photo, video, or a link' : 'Photo or video',
                 options: [
                     {
                         label: 'Photo library',
@@ -401,11 +402,26 @@ export default function InstantCreateScreen({ navigation }: any) {
                         icon: 'camera-outline',
                         onPress: () => void pickCameraMedia(mode),
                     },
+                    ...(isStory
+                        ? [
+                              {
+                                  label: 'Paste a link',
+                                  icon: 'link-outline' as const,
+                                  onPress: () => navigation.navigate('StoryLinkCreate'),
+                              },
+                          ]
+                        : []),
                 ],
             });
         },
-        [pickCameraMedia, pickGalleryMedia],
+        [navigation, pickCameraMedia, pickGalleryMedia],
     );
+
+    useEffect(() => {
+        if (!route?.params?.openStoryPicker) return;
+        openMediaSourceMenu('story24');
+        navigation.setParams?.({ openStoryPicker: undefined });
+    }, [navigation, openMediaSourceMenu, route?.params?.openStoryPicker]);
 
     const openGallerySourceExplainer = useCallback(() => {
         setHubAlert({
@@ -442,7 +458,7 @@ export default function InstantCreateScreen({ navigation }: any) {
             return;
         }
         if (item.id === 'story') {
-            navigation.navigate('Clip', { storyMode: true });
+            openMediaSourceMenu('story24');
             return;
         }
         setHubAlert({

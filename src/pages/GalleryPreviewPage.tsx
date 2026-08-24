@@ -8,6 +8,7 @@ import { useAuth } from '../context/Auth';
 import { FiFilter, FiSmile, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { MdOutlineShareLocation } from 'react-icons/md';
 import { createPost } from '../api/posts';
+import { createStory } from '../api/stories';
 import { saveDraft } from '../api/drafts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -92,9 +93,13 @@ export default function GalleryPreviewPage() {
         draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
         /** Set when uploading from Create → Shorts / TikTok / Reels picker */
         socialUploadTarget?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
+        story24?: boolean;
+        storyAudience?: 'public' | 'close_friends' | 'only_me';
     } | null) || {};
 
     const socialUploadTarget = state.socialUploadTarget;
+    const story24 = !!state.story24;
+    const storyAudience = state.storyAudience || 'public';
 
     const isFromDraft = !!(state.fromDraft && state.draftMediaUrl);
     const moduleSeed = useMemo(() => readModuleCacheSeed(), []);
@@ -615,7 +620,10 @@ export default function GalleryPreviewPage() {
             ? (mediaUrl || (carouselItems[0]?.url ?? ''))
             : (videoFrameDataUrl || mediaUrl || (carouselItems[0]?.url ?? ''));
         const overlay = thumbForOverlay
-            ? showUploadOverlay({ thumbUrl: thumbForOverlay, initialMessage: 'Posting to Gazetteer…' })
+            ? showUploadOverlay({
+                thumbUrl: thumbForOverlay,
+                initialMessage: story24 ? 'Posting to your story…' : 'Posting to Gazetteer…',
+            })
             : null;
         setIsUploading(true);
         try {
@@ -655,6 +663,39 @@ export default function GalleryPreviewPage() {
                 videoPosterUrl = prepared.videoPosterUrl;
             }
             const typedCaption = caption.trim();
+            if (story24) {
+                await createStory(
+                    user.id,
+                    user.handle,
+                    persistentMediaUrl,
+                    mediaType,
+                    typedCaption || undefined,
+                    storyLocation.trim() || undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    stickers.length > 0 ? stickers : undefined,
+                    taggedUsers.length > 0 ? taggedUsers : undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    venue.trim() || undefined,
+                    videoPosterUrl,
+                    storyAudience,
+                );
+                clearGalleryPreviewMedia();
+                window.dispatchEvent(new CustomEvent('storyCreated', {
+                    detail: { userHandle: user.handle },
+                }));
+                showToast('Story created successfully!');
+                navigate('/stories');
+                if (overlay) {
+                    overlay.success('Your story is live for 24 hours.');
+                }
+                return;
+            }
             const createdPost = await createPost(
                 user.id,
                 user.handle,
@@ -715,7 +756,7 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget]);
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget, story24, storyAudience]);
 
     const content = (
         <div
@@ -800,8 +841,8 @@ export default function GalleryPreviewPage() {
                             onClick={handlePost}
                             disabled={isUploading}
                             className="p-2.5 rounded-full bg-black text-white disabled:opacity-50 transition-colors shadow-lg flex-shrink-0 hover:bg-black"
-                            title="Post to newsfeed"
-                            aria-label="Post to newsfeed"
+                            title={story24 ? 'Share to your story' : 'Post to newsfeed'}
+                            aria-label={story24 ? 'Share to your story' : 'Post to newsfeed'}
                         >
                             <FiSend className="w-6 h-6" />
                         </button>

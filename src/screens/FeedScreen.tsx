@@ -180,6 +180,7 @@ import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
 import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
+import { getPostCaptionWithoutLink, excludeLinkShareFeedPosts, isLinkShareFeedPost } from '../utils/linkPreview';
 import FeedShareModal from '../components/FeedShareModal';
 import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
@@ -1107,6 +1108,10 @@ const FeedCard = React.memo(function FeedCard({
         [post.mediaItems],
     );
     const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
+    const captionWithoutLink = React.useMemo(
+        () => getPostCaptionWithoutLink(post, displayCaption),
+        [post, displayCaption],
+    );
     const { profileHandle } = getReclipDisplay(post, viewerHandle);
     const isRequested = Boolean(
         !isCurrentUser &&
@@ -1234,6 +1239,7 @@ const FeedCard = React.memo(function FeedCard({
                     onRegisterDmAnchor={onRegisterDmAnchor}
                     onShowTaggedUsers={() => onOpenTaggedSheet?.()}
                     menuAnchorRef={profileMenuAnchorRef}
+                    showLinkPreview={false}
                 />
             ) : (
                 <View
@@ -1345,7 +1351,7 @@ const FeedCard = React.memo(function FeedCard({
                 </View>
             )}
 
-            {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
+            {!textOnlyPost && captionWithoutLink.length > 0 && hasFeedMedia ? (
                 <Pressable
                     style={FEED_CARD_CAPTION_PADDING}
                     onPress={onPostPress}
@@ -1354,7 +1360,7 @@ const FeedCard = React.memo(function FeedCard({
                     accessibilityLabel="Open post"
                 >
                     <FeedCaptionText
-                        caption={displayCaption}
+                        caption={captionWithoutLink}
                         onHandlePress={(handle) => {
                             if (onVisitHandle) onVisitHandle(handle);
                             else onVisitProfile?.();
@@ -2223,16 +2229,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return tab.toLowerCase() === 'following' ? 'discover' : tab;
     }, [active, customLocation, currentFilter, showFollowingFeed, user?.national]);
 
-    useEffect(() => {
+    const syncFeedFetchCtx = React.useCallback((filter: string) => {
         feedFetchCtxRef.current = {
-            filter: feedFetchFilter,
+            filter,
             viewerUserId: userId,
             viewerHandle: user?.handle,
             userLocal: user?.local || 'Finglas',
             userRegional: user?.regional || 'Dublin',
             userNational: user?.national || 'Ireland',
         };
-    }, [feedFetchFilter, userId, user?.handle, user?.local, user?.regional, user?.national]);
+    }, [userId, user?.handle, user?.local, user?.regional, user?.national]);
+
+    useEffect(() => {
+        syncFeedFetchCtx(feedFetchFilter);
+    }, [feedFetchFilter, syncFeedFetchCtx]);
 
     React.useEffect(() => {
         if (!user) {
@@ -2407,9 +2417,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 setPages((prev) => {
                     const next = prev
                         .map((page) =>
-                            filterPostsByContentPrefs(page, prefs, {
-                                isProtectedDevMockVideo: isDevMockFeedVideoPost,
-                            }),
+                            excludeLinkShareFeedPosts(
+                                filterPostsByContentPrefs(page, prefs, {
+                                    isProtectedDevMockVideo: isDevMockFeedVideoPost,
+                                }),
+                            ),
                         )
                         .filter((page) => page.length > 0);
                     // Avoid wiping a loaded feed if prefs were empty on first paint.
@@ -2677,37 +2689,46 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useEffect(() => {
         if (!isFeedFocused && !navigation?.isFocused?.()) return;
         if (!route?.params || route.params.resetHomeFeedAt == null) return;
+        const nextFilter = user?.national || defaultNational;
+        // Drop in-flight Dublin/search results before they can apply under the USA header.
+        feedLoadGenRef.current += 1;
+        syncFeedFetchCtx(nextFilter);
+        setShowFollowingFeed(false);
+        setActive(nextFilter);
+        setCustomLocation(null);
+        setCustomLocationLabel(null);
+        setCustomLocationPlaceId(null);
+        setCustomFilterType(null);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+        setReloadTick((t) => t + 1);
+        let cancelled = false;
         void (async () => {
             await clearPendingLocationFeed();
-            setShowFollowingFeed(false);
-            setActive(user?.national || defaultNational);
-            setCustomLocation(null);
-            setCustomLocationLabel(null);
-            setCustomLocationPlaceId(null);
-            setCustomFilterType(null);
-            setPages([]);
-            setCursor(0);
-            setEnd(false);
-            setError(null);
-            setReloadTick((t) => t + 1);
-            if (!isFeedFocused && !navigation?.isFocused?.()) return;
-            if (!route?.params || route.params.resetHomeFeedAt == null) return;
+            if (cancelled) return;
             try {
                 if (navigation.isFocused()) {
+                    // `undefined` is ignored by React Navigation and leaves a prior
+                    // Dublin search param in place — use null so Home actually clears it.
                     navigation.setParams({
-                        resetHomeFeedAt: undefined,
-                        location: undefined,
-                        locationLabel: undefined,
-                        locationScope: undefined,
-                        filterType: undefined,
-                        placeId: undefined,
+                        resetHomeFeedAt: null,
+                        location: null,
+                        locationLabel: null,
+                        locationScope: null,
+                        filterType: null,
+                        placeId: null,
                     });
                 }
             } catch {
                 // ignore
             }
         })();
-    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational, isFeedFocused]);
+        return () => {
+            cancelled = true;
+        };
+    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational, isFeedFocused, syncFeedFetchCtx]);
 
     useEffect(() => {
         // A live Home-tab reset token must win; null/undefined means apply location.
@@ -2836,6 +2857,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }),
             ),
         );
+        setSavedByPostId((prev) => {
+            let changed = false;
+            const nextMap = { ...prev };
+            for (const update of updates) {
+                if (typeof update.isBookmarked === 'boolean' && nextMap[update.id] !== update.isBookmarked) {
+                    nextMap[update.id] = update.isBookmarked;
+                    changed = true;
+                }
+            }
+            return changed ? nextMap : prev;
+        });
         // Keep the same viewport after post patches remount/remeasure rows.
         pinFeedScrollSoon(pinnedY);
     }, [pinFeedScrollSoon]);
@@ -2872,6 +2904,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 setPendingUploadTick((tick) => tick + 1);
                 return;
             }
+            if (isLinkShareFeedPost(decorated)) {
+                setPendingUploadTick((tick) => tick + 1);
+                return;
+            }
             setPages((prev) => {
                 if (prev.length === 0) {
                     return [[decorated]];
@@ -2892,11 +2928,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, [userId]);
 
     const applyFeedPageResult = React.useCallback(
-        (items: Post[], nextCursor: string | number | null, nextFollowingCount?: number) => {
+        (
+            items: Post[],
+            nextCursor: string | number | null,
+            nextFollowingCount?: number,
+            requestedFilter?: string,
+        ) => {
             if (typeof nextFollowingCount === 'number') {
                 setFollowingCount(nextFollowingCount);
             }
-            const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+            const feedTab = String((requestedFilter ?? feedFetchCtxRef.current.filter) || '').trim();
             const recent = recentCreatedPostsRef.current
                 .map((p) => {
                     const live = getLocalPostById(p.id);
@@ -2939,6 +2980,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }
                 merged = filterPostsForLocationFeed(merged, feedTab);
             }
+            merged = excludeLinkShareFeedPosts(merged);
             if (merged.length > 0) {
                 setPages([merged]);
                 setCursor(nextCursor);
@@ -2973,12 +3015,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             return { promise, clear: () => loadTimeoutId && clearTimeout(loadTimeoutId) };
         };
 
-        const runFetch = () => fetchInitialVisibleFeed(buildFeedFetchParams(0));
+        const params = buildFeedFetchParams(0);
+        const requestedFilter = params.filter;
+        const runFetch = () => fetchInitialVisibleFeed(params);
         const firstTimeout = makeLoadTimeout();
         try {
             const result = await Promise.race([runFetch(), firstTimeout.promise]);
             if (gen !== feedLoadGenRef.current) return;
-            applyFeedPageResult(result.items, result.nextCursor, result.followingCount);
+            applyFeedPageResult(result.items, result.nextCursor, result.followingCount, requestedFilter);
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
             console.error('Error loading feed:', err);
@@ -3013,7 +3057,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             try {
                 const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
                 if (gen !== feedLoadGenRef.current) return;
-                applyFeedPageResult(retryResult.items, retryResult.nextCursor, retryResult.followingCount);
+                applyFeedPageResult(retryResult.items, retryResult.nextCursor, retryResult.followingCount, requestedFilter);
                 return;
             } catch (retryErr) {
                 console.error('Feed recover retry failed:', retryErr);
@@ -3030,7 +3074,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                       : 'Failed to load feed',
             );
             // Keep just-created posts visible even when the feed fetch fails/times out.
-            applyFeedPageResult([], null);
+            applyFeedPageResult([], null, undefined, requestedFilter);
         } finally {
             firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
@@ -3051,6 +3095,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         try {
             let walkCursor: string | number | null = cursor;
             let appended: Post[] = [];
+            const feedTab = String(buildFeedFetchParams(cursor).filter || '').trim();
             for (let step = 0; step < 16; step += 1) {
                 if (gen !== feedLoadGenRef.current) return;
                 const page = await fetchVisibleFeedPage(buildFeedFetchParams(walkCursor));
@@ -3067,10 +3112,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             if (gen !== feedLoadGenRef.current) return;
             if (appended.length > 0) {
-                const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
-                const safeAppended = isLocationScopedFeedTab(feedTab)
+                const safeAppended = excludeLinkShareFeedPosts(
+                    isLocationScopedFeedTab(feedTab)
                     ? filterPostsForLocationFeed(appended, feedTab)
-                    : appended;
+                    : appended,
+                );
                 if (safeAppended.length === 0) {
                     setCursor(walkCursor);
                     setEnd(walkCursor == null);
@@ -3159,6 +3205,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const handleTabChange = (tab: Tab) => {
         setError(null);
+        const nextFilter = tab === 'Following' ? 'discover' : tab;
         if (tab === 'Following') {
             setShowFollowingFeed(true);
             setCustomLocation(null);
@@ -3174,14 +3221,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setCustomFilterType(null);
             setActive(tab);
         }
+        syncFeedFetchCtx(nextFilter);
         try {
             if (navigation.isFocused()) {
                 navigation.setParams({
-                    location: undefined,
-                    locationLabel: undefined,
-                    locationScope: undefined,
-                    filterType: undefined,
-                    placeId: undefined,
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
                 });
             }
         } catch {
@@ -3192,6 +3240,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const applyCustomLocationFeed = useCallback(
         (selection: PlaceFeedSelection, filterType: 'location' | 'venue' | 'landmark') => {
+            const nextFilter =
+                filterType === 'venue'
+                    ? `venue:${selection.filter}`
+                    : filterType === 'landmark'
+                        ? `landmark:${selection.filter}`
+                        : selection.filter;
+            syncFeedFetchCtx(nextFilter);
             setShowFollowingFeed(false);
             setCustomLocation(selection.filter);
             setCustomLocationLabel(selection.label);
@@ -3216,7 +3271,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 // ignore
             }
         },
-        [navigation]
+        [navigation, syncFeedFetchCtx]
     );
 
     const handleHeaderLocationSearch = useCallback(
@@ -3294,8 +3349,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const clearCustomLocation = () => {
         void clearPendingLocationFeed();
+        const nextFilter = user?.national || defaultNational;
+        syncFeedFetchCtx(nextFilter);
         setShowFollowingFeed(false);
-        setActive(user?.national || defaultNational);
+        setActive(nextFilter);
         setCustomLocation(null);
         setCustomLocationLabel(null);
         setCustomLocationPlaceId(null);
@@ -3308,12 +3365,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         try {
             if (navigation.isFocused()) {
                 navigation.setParams({
-                    location: undefined,
-                    locationLabel: undefined,
-                    locationScope: undefined,
-                    filterType: undefined,
-                    placeId: undefined,
-                    resetHomeFeedAt: undefined,
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
+                    resetHomeFeedAt: null,
                 });
             }
         } catch {
@@ -3865,7 +3922,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         items={item.railItems}
                         previewVideosPaused={false}
                         onOpenStory={openStoryFromRail}
-                        onAddYours={() => navigation.navigate('Clip')}
+                        onAddYours={() => navigation.navigate('InstantCreate', { openStoryPicker: true })}
                         onScrollCardIntoView={scrollStories24RailIntoView}
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}

@@ -88,6 +88,64 @@ export function bottomSheet(opts: BottomSheetOptions): SweetAlertOptions {
   };
 }
 
+export type MediaSourceChoice = 'library' | 'camera' | 'link';
+
+/** Create hub: Photo library / Camera / optional Paste a link. */
+export function mediaSourceChoiceSheet(
+  onAction: (action: MediaSourceChoice) => void,
+  opts?: { title?: string; message?: string; includeLink?: boolean },
+): SweetAlertOptions {
+  const title = opts?.title ?? 'Add to your post';
+  const message = opts?.message ?? 'Photo, video, or a link';
+  const includeLink = opts?.includeLink !== false;
+  const gazetteerBlock = '<p class="swal-bottom-sheet-gazetteer">Gazetteer says</p>';
+  const linkButton = includeLink
+    ? `
+        <button class="w-full py-3 rounded-full bg-[#3d9b8f]/40 text-white text-sm font-semibold border border-[#3d9b8f]/55 hover:bg-[#3d9b8f]/55 transition" data-action="link">
+          Paste a link
+        </button>`
+    : '';
+  const content = `
+    <div class="swal-bottom-sheet-content">
+      ${gazetteerBlock}
+      <h3 class="swal-bottom-sheet-title-text">${title}</h3>
+      <p class="swal-bottom-sheet-message">${message}</p>
+      <div class="mt-4 px-4 pb-4 space-y-2">
+        <button class="w-full py-3 rounded-full bg-white/10 text-white text-sm font-semibold border border-white/15 hover:bg-white/15 transition" data-action="library">
+          Photo library
+        </button>
+        <button class="w-full py-3 rounded-full bg-white/10 text-white text-sm font-semibold border border-white/15 hover:bg-white/15 transition" data-action="camera">
+          Camera
+        </button>
+        ${linkButton}
+      </div>
+    </div>
+  `;
+
+  return {
+    ...BOTTOM_SHEET_BASE,
+    showConfirmButton: false,
+    showCancelButton: false,
+    title: undefined,
+    html: content,
+    didOpen: (popup) => {
+      const root = popup as HTMLElement;
+      const attach = (action: MediaSourceChoice) => {
+        const btn = root.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`);
+        if (btn) {
+          btn.onclick = () => {
+            onAction(action);
+            Swal.close();
+          };
+        }
+      };
+      attach('library');
+      attach('camera');
+      if (includeLink) attach('link');
+    },
+  };
+}
+
 export type DraftConfirmAction = 'save' | 'discard' | 'keep';
 
 /** Three-option bottom sheet specifically for "Save draft / Discard / Keep editing" flows. */

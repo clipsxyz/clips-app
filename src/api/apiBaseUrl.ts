@@ -58,6 +58,14 @@ export function getApiBaseUrl(): string {
 
     // React Native / no real window.location — never touch `.hostname` on undefined location.
     if (isRn) {
+        const rnFromScript = getReactNativeDefaultApiBaseUrl();
+        const scriptIsLan =
+            !!rnFromScript &&
+            !/localhost|127\.0\.0\.1/i.test(rnFromScript);
+        // Wireless ADB reverse drops constantly; if Metro loaded over Wi‑Fi, use that host for Laravel too.
+        if (scriptIsLan) {
+            return preferLocalhostOverEmulatorLoopback(rnFromScript) || FALLBACK_API;
+        }
         if (envUrl) {
             try {
                 const parsed = new URL(envUrl);

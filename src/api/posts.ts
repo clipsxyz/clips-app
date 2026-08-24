@@ -10,6 +10,7 @@ import {
 import * as apiClient from './client';
 import { isMockMode } from './apiMode';
 import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
+import { mapApiLinkPreview } from '../utils/linkPreview';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
@@ -81,6 +82,8 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
     belfast: { local: 'Belfast', regional: 'Belfast', national: 'Ireland' },
     ireland: { local: 'Various', regional: 'Various', national: 'Ireland' },
     newyork: { local: 'New York', regional: 'New York', national: 'USA' },
+    newyorkstate: { local: 'New York State', regional: 'New York State', national: 'USA' },
+    nyc: { local: 'New York', regional: 'New York', national: 'USA' },
     london: { local: 'London', regional: 'London', national: 'UK' },
     paris: { local: 'Paris', regional: 'Paris', national: 'France' },
     tokyo: { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' },
@@ -115,7 +118,7 @@ const LOCATION_CITIES = new Set([
   'copenhagen', 'stockholm', 'oslo', 'helsinki', 'reykjavik', 'tallinn', 'riga', 'vilnius',
   'moscow', 'saint petersburg', 'istanbul', 'ankara',
   // Americas
-  'new york', 'los angeles', 'chicago', 'houston', 'phoenix', 'philadelphia', 'san antonio', 'san diego',
+  'new york', 'new york state', 'los angeles', 'chicago', 'houston', 'phoenix', 'philadelphia', 'san antonio', 'san diego',
   'san francisco', 'boston', 'seattle', 'miami', 'atlanta', 'denver', 'washington', 'toronto', 'vancouver',
   'montreal', 'calgary', 'mexico city', 'guadalajara', 'monterrey', 'são paulo', 'rio de janeiro',
   'buenos aires', 'lima', 'bogotá', 'bogota', 'santiago', 'caracas',
@@ -138,6 +141,16 @@ const IRELAND_AUTHOR_PLACES = new Set([
   'kilkenny',
   'belfast',
   ...DUBLIN_LOCAL_AREAS,
+]);
+/** Places whose authors belong on the USA news tab when national is blank. */
+const USA_AUTHOR_PLACES = new Set([
+  'usa',
+  'us',
+  'united states',
+  'new york',
+  'new york state',
+  'ny',
+  'nyc',
 ]);
 
 function toLocationLabelCase(value?: string): string {
@@ -184,7 +197,14 @@ function resolveAuthorLocations(input: {
       DUBLIN_LOCAL_AREAS.has(localLower)
     ) {
       national = 'Ireland';
-    } else if (regionalLower === 'new york' || localLower === 'new york') {
+    } else if (
+      regionalLower === 'new york' ||
+      localLower === 'new york' ||
+      regionalLower === 'new york state' ||
+      localLower === 'new york state' ||
+      USA_AUTHOR_PLACES.has(regionalLower) ||
+      USA_AUTHOR_PLACES.has(localLower)
+    ) {
       national = 'USA';
     } else if (regionalLower === 'london' || localLower === 'london') {
       national = 'UK';
@@ -1584,6 +1604,7 @@ export function transformLaravelPost(response: any): Post {
     text: response.text_content || response.text || response.caption || existing?.text,
     imageText: response.image_text || response.imageText,
     caption: response.caption || response.text_content || response.text || existing?.caption,
+    linkPreview: mapApiLinkPreview(response.link_preview ?? response.linkPreview) || existing?.linkPreview,
     createdAt: (() => {
       const raw = response.created_at || response.createdAt;
       const ts = raw ? new Date(raw).getTime() : Date.now();
@@ -1954,7 +1975,12 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   if (local === query || regional === query || national === query) return true;
   if (LOCATION_COUNTRIES.has(query)) {
     if (query === 'uk' && (national === 'united kingdom' || national === 'uk')) return true;
-    if (query === 'usa' && (national === 'usa' || national === 'united states')) return true;
+    if (query === 'usa' || query === 'united states') {
+      if (national === 'usa' || national === 'united states' || national === 'us') return true;
+      // National news: New York State authors belong even if national was left blank.
+      if (USA_AUTHOR_PLACES.has(local) || USA_AUTHOR_PLACES.has(regional)) return true;
+      return false;
+    }
     return national === query;
   }
   if (LOCATION_CITIES.has(query)) {
@@ -2005,8 +2031,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       } else if (t === 'ireland') {
         filter = 'Ireland';
       } else {
-        // Custom location - use as-is (Laravel will handle it via byLocation scope)
-        filter = tab.charAt(0).toUpperCase() + tab.slice(1).toLowerCase();
+        // Keep USA/UK/New York State as-is — do not title-case "USA" into "Usa".
+        filter = toLocationLabelCase(tab) || tab;
       }
 
       console.log('[fetchPostsPage/posts] calling live Laravel feed via apiClient.fetchPostsPage', {

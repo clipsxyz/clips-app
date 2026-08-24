@@ -11,7 +11,7 @@ use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\CommentController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UploadController;
-use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\LinkPreviewController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\MessageController;
@@ -239,6 +239,11 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/phone/send-code', [AuthController::class, 'sendPhoneCode']);
         Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
         Route::post('/logout', [AuthController::class, 'logout']);
+    });
+
+    Route::get('/link-preview', [LinkPreviewController::class, 'show'])->middleware('throttle:30,1');
+    Route::prefix('v1')->group(function () {
+        Route::get('/parse-link', [LinkPreviewController::class, 'show'])->middleware('throttle:30,1');
     });
 
     // Posts routes (protected - require auth for actions)

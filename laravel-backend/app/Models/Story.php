@@ -39,6 +39,7 @@ class Story extends Model
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers', // JSON array of StickerOverlay objects
         'tagged_users', // JSON array of user handles
+        'link_preview',
     ];
 
     protected $casts = [
@@ -47,6 +48,7 @@ class Story extends Model
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers' => 'array', // Array of StickerOverlay objects
         'tagged_users' => 'array', // Array of user handles
+        'link_preview' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

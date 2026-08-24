@@ -2,6 +2,7 @@ import type { Story, StoryGroup, StickerOverlay } from '../types';
 import { isMockMode } from '../config/runtimeEnv';
 import { getAvatarForHandle } from './users';
 import { resolveStoryMediaUrl } from '../utils/storyMediaNative';
+import { mapApiLinkPreview } from '../utils/linkPreview';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
 export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
@@ -799,6 +800,7 @@ function mapLaravelStoryToStory(story: any): Story {
         sharedFromPost: story.shared_from_post_id || story.sharedFromPost || undefined,
         sharedFromUser: story.shared_from_user_handle || story.sharedFromUser || undefined,
         videoPosterUrl: resolveStoryMediaUrl(story.video_poster_url) || undefined,
+        linkPreview: mapApiLinkPreview(story.link_preview ?? story.linkPreview),
     };
 }
 
@@ -1117,6 +1119,7 @@ export async function createStory(
             venue: response.venue || venue || undefined,
             videoPosterUrl:
                 resolveStoryMediaUrl(response.video_poster_url || videoPosterUrl) || undefined,
+            linkPreview: mapApiLinkPreview(response.link_preview ?? response.linkPreview),
             audience: response.audience || audience || 'public',
             views: response.views_count || 0,
             viewerHandles: Array.isArray((response as any).viewer_handles)

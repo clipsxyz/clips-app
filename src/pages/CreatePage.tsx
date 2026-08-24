@@ -12,6 +12,7 @@ import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { showToast } from '../utils/toast';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+import ComposerLinkPreview from '../components/ComposerLinkPreview';
 
 const STICKER_SAFE_ZONE_TOP = 18;
 const STICKER_SAFE_ZONE_BOTTOM = 82;
@@ -1074,6 +1075,7 @@ export default function CreatePage() {
                             maxLength={500}
                             rows={2}
                         />
+                        <ComposerLinkPreview text={text} />
                         <div className="flex justify-end mt-2">
                             <span className={`text-xs transition-colors duration-200 ${text.length > 450
                                 ? 'text-red-500 dark:text-red-400'

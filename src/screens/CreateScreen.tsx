@@ -38,6 +38,7 @@ import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
 import TextStickerModalNative from '../components/TextStickerModal.native';
 import type { Sticker, StickerOverlay } from '../types';
+import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
 import { clampStickerY } from '../utils/stickerLayoutNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import {
@@ -788,8 +789,8 @@ export default function CreateScreen({ navigation, route }: any) {
                         <TouchableOpacity
                             onPress={() => {
                                 setMediaSourceMenu({
-                                    title: 'Add media',
-                                    subtitle: 'Choose a source',
+                                    title: isStory24Flow ? 'Add to your story' : 'Add to your post',
+                                    subtitle: isStory24Flow ? 'Photo, video, or a link' : 'Photo or video',
                                     options: [
                                         {
                                             label: 'Photo library',
@@ -819,6 +820,17 @@ export default function CreateScreen({ navigation, route }: any) {
                                                 });
                                             },
                                         },
+                                        ...(isStory24Flow
+                                            ? [
+                                                  {
+                                                      label: 'Paste a link',
+                                                      icon: 'link-outline' as const,
+                                                      onPress: () => {
+                                                          navigation.replace('StoryLinkCreate');
+                                                      },
+                                                  },
+                                              ]
+                                            : []),
                                     ],
                                 });
                             }}
@@ -1061,6 +1073,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         numberOfLines={6}
                         maxLength={TEXT_POST_BODY_MAX_LENGTH}
                     />
+                    <ComposerLinkPreview text={text} />
                     <View style={styles.captionCounterRow}>
                         <Text
                             style={[

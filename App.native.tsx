@@ -38,6 +38,7 @@ import { GAZETTEER_ABYSS } from './src/theme/gazetteerAmbientNative';
 import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
 import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
 import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
+import StoryLinkCreateScreen from './src/screens/StoryLinkCreateScreen';
 import TextOnlyPostDetailsScreen from './src/screens/TextOnlyPostDetailsScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
@@ -316,6 +317,11 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="TextOnlyCreate"
             component={TextOnlyCreateScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="StoryLinkCreate"
+            component={StoryLinkCreateScreen}
             options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen

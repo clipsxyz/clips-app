@@ -9,10 +9,12 @@ use App\Models\StoryReply;
 use App\Models\StoryView;
 use App\Models\User;
 use App\Models\Post;
+use App\Services\LinkPreviewService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -297,8 +299,10 @@ class StoryController extends Controller
             'has_stickers' => $hasStickers,
         ]);
 
-        $story = DB::transaction(function () use ($payload, $user) {
-            $story = Story::create([
+        $linkPreview = app(LinkPreviewService::class)->previewFromText($payload['text']);
+
+        $story = DB::transaction(function () use ($payload, $user, $linkPreview) {
+            $attrs = [
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
                 'media_url' => $payload['media_url'],
@@ -317,7 +321,11 @@ class StoryController extends Controller
                 'stickers' => $payload['stickers'],
                 'tagged_users' => $payload['taggedUsers'],
                 'expires_at' => now('UTC')->addHours(24),
-            ]);
+            ];
+            if (Schema::hasColumn('stories', 'link_preview')) {
+                $attrs['link_preview'] = $linkPreview;
+            }
+            $story = Story::create($attrs);
 
             return $story->fresh() ?? $story;
         });

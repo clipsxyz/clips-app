@@ -138,6 +138,35 @@ describe('locationFeedGuard', () => {
         expect(postMatchesLocationTab(corkOnly, 'dublin')).toBe(false);
     });
 
+    it('keeps a New York State author on USA news even when national is blank', () => {
+        const nyOnly = post({
+            id: 'ny-blank-national',
+            userHandle: 'Donny@NewYorkState',
+            locationLabel: 'New York State',
+            userLocal: 'New York State',
+            userRegional: 'New York State',
+            userNational: '',
+        });
+        expect(postMatchesLocationTab(nyOnly, 'usa')).toBe(true);
+        expect(postMatchesLocationTab(nyOnly, 'USA')).toBe(true);
+        expect(postMatchesLocationTab(nyOnly, 'new york state')).toBe(true);
+        expect(postMatchesLocationTab(nyOnly, 'dublin')).toBe(false);
+        expect(filterPostsForLocationFeed([nyOnly], 'USA')).toHaveLength(1);
+        expect(filterPostsForLocationFeed([nyOnly], 'dublin')).toHaveLength(0);
+    });
+
+    it('infers USA from Donny@NewYorkState when the API omits user locations', () => {
+        const donny = transformLaravelPost({
+            id: 'donny-ny-handle',
+            user_handle: 'Donny@NewYorkState',
+            location_label: 'New York State',
+        });
+        expect(donny.userNational).toBe('USA');
+        expect(donny.userRegional).toBe('New York State');
+        expect(postMatchesLocationTab(donny, 'usa')).toBe(true);
+        expect(postMatchesLocationTab(donny, 'dublin')).toBe(false);
+    });
+
     it('never treats the name before @ as a location', () => {
         const parisInCork = transformLaravelPost({
             id: 'name-paris-place-cork',

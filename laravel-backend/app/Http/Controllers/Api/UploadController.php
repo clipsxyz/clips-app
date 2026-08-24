@@ -30,7 +30,7 @@ class UploadController extends Controller
         if ($contentLength > 0 && $contentLength > $maxAllowed) {
             return response()->json([
                 'error' => 'File too large',
-                'message' => "File size ({$this->formatBytes($contentLength)}) exceeds PHP limit ({$this->formatBytes($maxAllowed)}). Please increase upload_max_filesize and post_max_size in php.ini to at least 100M.",
+                'message' => 'This clip is too large to upload. Try a shorter or lower-quality video (max 100MB).',
                 'maxSize' => $this->formatBytes($maxAllowed),
                 'fileSize' => $this->formatBytes($contentLength),
                 'phpUploadMax' => ini_get('upload_max_filesize'),

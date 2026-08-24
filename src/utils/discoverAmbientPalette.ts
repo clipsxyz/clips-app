@@ -70,6 +70,11 @@ export const PASSPORT_TRAVELING_BORDER_COLORS = [
     PASSPORT_PALETTE.wavePrimary,
 ] as const;
 
+/** Stories 24 link-share canvas — same colors as the header Stories icon ring. */
+export const STORY_LINK_SHARE_CANVAS_COLORS = PASSPORT_TRAVELING_BORDER_COLORS;
+
+export const STORY_LINK_SHARE_CANVAS_CSS = `linear-gradient(135deg, ${PASSPORT_TRAVELING_BORDER_COLORS.join(', ')})`;
+
 export function getAmbientPalette(variant: DiscoverAmbientVariant): AmbientPalette {
     if (variant === 'goldChrome') return GOLD_CHROME_PALETTE;
     if (variant === 'passport') return PASSPORT_PALETTE;

@@ -50,6 +50,19 @@ export type PostMediaItem = {
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
 };
 
+export type LinkPreview = {
+  url: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  siteName?: string;
+  source: string;
+  /** Direct .mp4 / HLS (or similar) URL — play inline instead of a still. */
+  isDirectVideo?: boolean;
+  /** Playable media file when different from the page `url` (e.g. og:video). */
+  videoUrl?: string;
+};
+
 export type Post = {
   id: string;
   publicShareToken?: string;
@@ -76,6 +89,8 @@ export type Post = {
   videoPosterUrl?: string;
   /** JPEG grid thumbnail from API (`thumbnail_url`). */
   thumbnailUrl?: string;
+  /** Open Graph card when the post body contains a web URL. */
+  linkPreview?: LinkPreview;
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
   /** Video framing preference chosen at upload time. */
   videoFrameMode?: 'crop' | 'fit' | 'original';
@@ -217,6 +232,7 @@ export type Story = {
   sharedFromUser?: string; // Original post author if this story is shared from a post
   /** Still frame for Stories 24 rail / hold screens (shared video posts). */
   videoPosterUrl?: string;
+  linkPreview?: LinkPreview;
   poll?: {
     question: string;
     option1: string;

@@ -110,6 +110,7 @@ import {
 } from './utils/feedTextBubble';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from './utils/globalVideoMute';
 import { postHasVideoMedia } from './utils/postMedia';
+import { excludeLinkShareFeedPosts, getPostCaptionWithoutLink, isLinkShareFeedPost } from './utils/linkPreview';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -355,7 +356,9 @@ export default function App() {
   const isClipPage = loc.pathname === '/clip';
   const isFeedPage = loc.pathname === '/feed';
   const isCreateFullscreen =
-    loc.pathname === '/create/instant' || loc.pathname === '/create/gallery-preview';
+    loc.pathname === '/create/instant' ||
+    loc.pathname === '/create/gallery-preview' ||
+    loc.pathname === '/create/story-link';
   const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen; // No scroll, no bottom nav
 
   // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesnâ€™t shift fixed chrome
@@ -399,6 +402,7 @@ export default function App() {
           && loc.pathname !== '/search'
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
+          && loc.pathname !== '/create/story-link'
           && loc.pathname !== '/create/instant'
           && loc.pathname !== '/create/gallery-preview'
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
@@ -417,6 +421,7 @@ export default function App() {
           && loc.pathname !== '/create/gallery-preview'
           && loc.pathname !== '/create/text-only'
           && loc.pathname !== '/create/text-only/details'
+          && loc.pathname !== '/create/story-link'
           && loc.pathname !== '/payment'
           && loc.pathname !== '/clip'
           && loc.pathname !== '/create'
@@ -1383,6 +1388,7 @@ function PostHeader({
   onMenuClick,
   variant = 'default',
   children,
+  textOnlyLead,
   textOnlyFooter,
 }: {
   post: Post;
@@ -1393,6 +1399,8 @@ function PostHeader({
   variant?: 'default' | 'textOnlyFeed';
   /** Main text card; for `textOnlyFeed` use `textOnlyFooter` for tagged users etc. */
   children?: React.ReactNode;
+  /** Full-width block between chrome and the bubble row (e.g. link preview). */
+  textOnlyLead?: React.ReactNode;
   /** Below the card row on text-only feed posts (e.g. tagged avatars). */
   textOnlyFooter?: React.ReactNode;
 }) {
@@ -1918,6 +1926,8 @@ function PostHeader({
           </div>
           )}
         </div>
+
+        {textOnlyLead != null ? <div className="relative z-0 mt-2 w-full">{textOnlyLead}</div> : null}
 
         {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
         <div className="relative z-0 mt-2 flex w-full min-w-0 items-end justify-end gap-2">
@@ -5131,6 +5141,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       (post as any).captionText
     );
   }, [post.caption, post.text, post.imageText, post]);
+  const captionWithoutLink = React.useMemo(
+    () => getPostCaptionWithoutLink(post, displayCaption),
+    [post, displayCaption],
+  );
   const likeButtonRef = React.useRef<HTMLButtonElement>(null);
   const articleRef = React.useRef<HTMLElement>(null);
 
@@ -5403,20 +5417,30 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               ) : undefined
             }
           >
-            <TextCard
-              text={post.text || ''}
-              onDoubleLike={onLike}
-              onHeartAnimation={(clientX, clientY) => {
-                setTimeout(() => {
-                  setHeartAnimation({ startX: clientX, startY: clientY });
-                }, 50);
-              }}
-              textStyle={effectiveTextStyle}
-              stickers={post.stickers}
-              isFromViewer={viewerIsAuthor}
-              feedHeadlineByline={textOnlyFeedByline}
-              feedCardTitleId={titleId}
-            />
+            {(() => {
+              const leftover = getPostCaptionWithoutLink(post, post.text || '');
+              const showBubble = (leftover || post.text || '').length > 0;
+              return (
+                <>
+                  {showBubble ? (
+                    <TextCard
+                      text={leftover || post.text || ''}
+                      onDoubleLike={onLike}
+                      onHeartAnimation={(clientX, clientY) => {
+                        setTimeout(() => {
+                          setHeartAnimation({ startX: clientX, startY: clientY });
+                        }, 50);
+                      }}
+                      textStyle={effectiveTextStyle}
+                      stickers={post.stickers}
+                      isFromViewer={viewerIsAuthor}
+                      feedHeadlineByline={textOnlyFeedByline}
+                      feedCardTitleId={titleId}
+                    />
+                  ) : null}
+                </>
+              );
+            })()}
           </PostHeader>
         )
         ) : (
@@ -5505,13 +5529,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         </div>
       ) : null}
       {/* Caption + engagement are intentionally hidden for tile-grid boost posts (phone Instagram style). */}
-      {!isTileBoostMode && (
+          {!isTileBoostMode && (
         <>
-          {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
+          {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && captionWithoutLink.length > 0 && (
             <div className="px-3 py-2.5">
-              {displayCaption.length > 0 && (
-                <CaptionText caption={displayCaption} />
-              )}
+              <CaptionText caption={captionWithoutLink} />
             </div>
           )}
           <EngagementBar
@@ -7638,6 +7660,10 @@ function FeedPageWrapper() {
         ? postsStore.find((p) => String(p.id) === String(state.createdPostId))
         : undefined);
     if (!createdPost) return;
+    if (isLinkShareFeedPost(createdPost)) {
+      navigate('/feed', { replace: true, state: {} });
+      return;
+    }
     if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
       postsStore.unshift(createdPost);
     }
@@ -7666,6 +7692,7 @@ function FeedPageWrapper() {
       const customEvent = event as CustomEvent<{ post?: Post }>;
       const createdPost = customEvent.detail?.post;
       if (!createdPost) return;
+      if (isLinkShareFeedPost(createdPost)) return;
 
       // Keep shared store warm in case persistence is delayed/fails on phone.
       if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
@@ -7730,9 +7757,11 @@ function FeedPageWrapper() {
       setPages((prev) =>
         prev
           .map((page) =>
-            filterPostsByContentPrefs(page, prefs, {
-              isProtectedDevMockVideo: isDevMockFeedVideoPost,
-            }),
+            excludeLinkShareFeedPosts(
+              filterPostsByContentPrefs(page, prefs, {
+                isProtectedDevMockVideo: isDevMockFeedVideoPost,
+              }),
+            ),
           )
           .filter((page) => page.length > 0),
       );
@@ -7746,9 +7775,11 @@ function FeedPageWrapper() {
     setPages((prev) =>
       prev
         .map((page) =>
-          filterPostsByContentPrefs(page, feedContentPrefsRef.current, {
-            isProtectedDevMockVideo: isDevMockFeedVideoPost,
-          }),
+          excludeLinkShareFeedPosts(
+            filterPostsByContentPrefs(page, feedContentPrefsRef.current, {
+              isProtectedDevMockVideo: isDevMockFeedVideoPost,
+            }),
+          ),
         )
         .filter((page) => page.length > 0),
     );
@@ -7849,9 +7880,11 @@ function FeedPageWrapper() {
 
     // Apply current follow/like/bookmark state so UI is correct after cache or tab switch
     const decoratedPosts = uniquePosts.map(p => decorateForUser(userId, p));
-    const visiblePosts = filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current, {
-      isProtectedDevMockVideo: isDevMockFeedVideoPost,
-    });
+    const visiblePosts = excludeLinkShareFeedPosts(
+      filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current, {
+        isProtectedDevMockVideo: isDevMockFeedVideoPost,
+      }),
+    );
 
     // Merge posts and ads, sort by epoch time (createdAt) - newest first
     const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [

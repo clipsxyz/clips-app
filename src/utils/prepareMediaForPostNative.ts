@@ -1,6 +1,9 @@
 import { extractVideoPosterFrame } from './extractVideoPosterNative';
 import { isFiltered, type InstantFilterInfo } from './instantFiltersNative';
-import { transcodeVideoForUploadNative } from './transcodeVideoForUploadNative';
+import {
+    compressImageForUploadNative,
+    transcodeVideoForUploadNative,
+} from './transcodeVideoForUploadNative';
 import { uploadFileFromUri } from './uploadFileNative';
 
 type NativeMediaType = 'image' | 'video' | null;
@@ -120,6 +123,15 @@ export async function prepareMediaForPostNative({
         }
     }
 
+    if (mediaType === 'image' && isLocalUri(workingUrl) && !shouldBake) {
+        try {
+            onStage?.('compress');
+            workingUrl = await compressImageForUploadNative(workingUrl);
+        } catch (err) {
+            console.warn('prepareMediaForPostNative: image compress failed', err);
+        }
+    }
+
     if (mediaType === 'video' && isLocalUri(workingUrl)) {
         const filterName = shouldBake && filterInfo ? filterInfo.active : null;
         try {
@@ -131,6 +143,9 @@ export async function prepareMediaForPostNative({
             if (shouldBake) {
                 filterExportFailed = true;
             }
+            throw new Error(
+                'Could not compress this video for upload. Try a shorter clip, then post again.',
+            );
         }
     }
 
