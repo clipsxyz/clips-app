@@ -52,7 +52,7 @@ export default function FeedPostHeader({
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
-    const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
+    const { isReclip, displayHandle, profileHandle, originalHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
     const metadataItems = useMemo(() => {
@@ -170,15 +170,15 @@ export default function FeedPostHeader({
             <View style={[styles.left, showAvatar && styles.leftWithAvatar]}>
                 {avatarBlock}
                 <View style={styles.infoCol}>
+                    {handleRow}
                     {isReclip ? (
                         <View style={styles.reclipRow}>
                             <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
                             <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                                {String(post.userHandle || safeHandle).trim() || 'User'} reclipped
+                                reclipped {String(originalHandle || post.originalUserHandle || '').trim() || 'a post'}
                             </Text>
                         </View>
                     ) : null}
-                    {handleRow}
                     {socialSourceLabel ? (
                         <View
                             style={[

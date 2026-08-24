@@ -1572,11 +1572,31 @@ export function transformLaravelPost(response: any): Post {
     setAvatarForHandle(authorHandle, authorAvatarUrl);
   }
 
+  const rawReclip = response.is_reclipped ?? response.isReclipped;
+  const isReclipped =
+    rawReclip === true ||
+    rawReclip === 1 ||
+    rawReclip === '1' ||
+    (rawReclip == null && existing?.isReclipped === true);
+  const originalUserHandle = isReclipped
+    ? response.original_user_handle ||
+      response.originalUserHandle ||
+      response.original_post?.user_handle ||
+      response.original_post?.userHandle ||
+      response.originalPost?.userHandle ||
+      existing?.originalUserHandle
+    : undefined;
+
   return {
     id: response.id,
     publicShareToken: response.public_share_token || response.publicShareToken,
     user_id: response.user_id || response.userId || response.user?.id || existing?.user_id,
     userHandle: authorHandle || response.user_handle || response.userHandle,
+    isReclipped,
+    originalUserHandle,
+    originalPostId: isReclipped
+      ? response.original_post_id || response.originalPostId || existing?.originalPostId
+      : undefined,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,

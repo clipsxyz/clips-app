@@ -9,7 +9,7 @@ import {
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { unifiedSearch } from '../api/search';
+import { unifiedSearch, userMatchesSearchQuery } from '../api/search';
 import Avatar from './Avatar.native';
 import StoryModalShell from './StoryModalShell.native';
 
@@ -61,11 +61,7 @@ export default function UserTaggingModalNative({
                         avatarUrl: u?.avatar_url || u?.avatarUrl,
                     }))
                     .filter((u) => u.handle)
-                    .filter((u) => {
-                        const h = u.handle.toLowerCase();
-                        const n = (u.displayName || '').toLowerCase();
-                        return h.includes(queryLower) || n.includes(queryLower);
-                    });
+                    .filter((u) => userMatchesSearchQuery(u, queryLower));
                 if (!cancelled) setUsers(mapped);
             } catch {
                 if (!cancelled) setUsers([]);

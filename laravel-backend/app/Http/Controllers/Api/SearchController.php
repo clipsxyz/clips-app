@@ -226,7 +226,7 @@ class SearchController extends Controller
         ]);
 
         $qRaw = trim($request->query('q', ''));
-        $q = strtolower($qRaw);
+        $q = strtolower(ltrim($qRaw, '@'));
         $typesStr = $request->query('types', 'users,locations,posts');
         $types = array_filter(array_map('trim', explode(',', $typesStr)));
 
@@ -293,14 +293,22 @@ class SearchController extends Controller
         if (in_array('users', $types)) {
             $offset = $usersCursor * $usersLimit;
             $users = User::query()
-                ->where(function ($query) use ($q) {
-                    $query->whereRaw("LOWER(handle) LIKE ?", ["%$q%"])
-                        ->orWhereRaw("LOWER(display_name) LIKE ?", ["%$q%"]);
+                ->where(function ($query) use ($qRaw) {
+                    $this->applyUserSearchFilter($query, $qRaw);
                 })
-                ->select('id', 'username', 'display_name', 'handle', 'avatar_url')
+                ->select(
+                    'id',
+                    'username',
+                    'display_name',
+                    'handle',
+                    'avatar_url',
+                    'location_local',
+                    'location_regional',
+                    'location_national'
+                )
                 ->orderByRaw(
                     "CASE WHEN LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ? THEN 0 ELSE 1 END",
-                    ["$q%", "$q%"]
+                    ["{$q}%", "{$q}%"]
                 )
                 ->orderByRaw(
                     "CASE WHEN LOWER(handle) = ? THEN 0 WHEN LOWER(display_name) = ? THEN 1 ELSE 2 END",
@@ -318,7 +326,7 @@ class SearchController extends Controller
             $nextCursor = $hasMore ? $usersCursor + 1 : null;
 
             $sections['users'] = [
-                'items' => $users->values(),
+                'items' => $users->map(fn (User $u) => $this->presentSearchUser($u))->values(),
                 'nextCursor' => $nextCursor,
                 'hasMore' => $hasMore,
             ];
@@ -639,6 +647,59 @@ class SearchController extends Controller
         }
 
         return $payload;
+    }
+
+    /**
+     * Match Name@Place handles, @prefix queries, usernames, and home locations.
+     * "New York State" must find Donny@NewYorkState; "@Donny" must find Donny@….
+     */
+    private function applyUserSearchFilter($query, string $qRaw): void
+    {
+        $q = strtolower(ltrim(trim($qRaw), '@'));
+        if ($q === '') {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+
+        $like = '%'.$q.'%';
+        $compact = strtolower((string) preg_replace('/[^a-z0-9]+/', '', $q));
+        $compactSql = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(%s, ''), ' ', ''), '@', ''), '-', ''), '_', ''), '.', ''))";
+
+        $query->whereRaw('LOWER(handle) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(display_name, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(username, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(location_local, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(location_regional, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(location_national, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(handle) LIKE ?', [$q.'@%']);
+
+        if (strlen($compact) >= 2) {
+            $compactLike = '%'.$compact.'%';
+            foreach (['handle', 'display_name', 'username', 'location_local', 'location_regional', 'location_national'] as $col) {
+                $query->orWhereRaw(sprintf($compactSql, $col).' LIKE ?', [$compactLike]);
+            }
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentSearchUser(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'username' => $user->username,
+            'display_name' => $user->display_name,
+            'handle' => $user->handle,
+            'avatar_url' => $user->avatar_url,
+            'location_local' => $user->location_local,
+            'location_regional' => $user->location_regional,
+            'location_national' => $user->location_national,
+            'local' => $user->location_local,
+            'regional' => $user->location_regional,
+            'national' => $user->location_national,
+        ];
     }
 }
 

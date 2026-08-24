@@ -41,6 +41,53 @@ const mockUsers = [
     }
 ];
 
+function compactSearchText(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Client-side match aligned with Laravel user search (handle, @prefix, place, username). */
+export function userMatchesSearchQuery(
+    user: {
+        handle?: string;
+        display_name?: string;
+        displayName?: string;
+        username?: string;
+        local?: string;
+        regional?: string;
+        national?: string;
+        location_local?: string;
+        location_regional?: string;
+        location_national?: string;
+    },
+    rawQuery: string,
+): boolean {
+    const needle = String(rawQuery || '').trim().replace(/^@+/, '').toLowerCase();
+    if (!needle) return false;
+    const compactNeedle = compactSearchText(needle);
+    const fields = [
+        user.handle,
+        user.display_name,
+        user.displayName,
+        user.username,
+        user.local,
+        user.regional,
+        user.national,
+        user.location_local,
+        user.location_regional,
+        user.location_national,
+    ]
+        .filter(Boolean)
+        .map((v) => String(v));
+    const hay = fields.join(' ').toLowerCase();
+    if (hay.includes(needle)) return true;
+    if (user.handle && user.handle.toLowerCase().startsWith(`${needle}@`)) return true;
+    if (compactNeedle.length >= 2) {
+        const compactHay = compactSearchText(fields.join(''));
+        if (compactHay.includes(compactNeedle)) return true;
+    }
+    return false;
+}
+
 function withResolvedUserAvatars(result: { q: string; sections: SearchSections }) {
     const items = result.sections?.users?.items;
     if (!Array.isArray(items)) return result;
@@ -68,7 +115,8 @@ export async function unifiedSearch(params: {
     const useLaravelAPI = isLaravelApiEnabled();
 
     const searchParams = new URLSearchParams();
-    searchParams.set('q', params.q);
+    const q = String(params.q || '').trim().replace(/^@+/, '');
+    searchParams.set('q', q);
     if (params.types) searchParams.set('types', params.types);
     if (params.usersCursor != null) searchParams.set('usersCursor', String(params.usersCursor));
     if (params.locationsCursor != null) searchParams.set('locationsCursor', String(params.locationsCursor));
@@ -86,11 +134,11 @@ export async function unifiedSearch(params: {
 
         const result = await apiRequest(`/search?${searchParams.toString()}`, {
             method: 'GET',
-            timeoutMs: 6000,
+            timeoutMs: 12000,
         }) as { q: string; sections: SearchSections };
         
         // Add Sarah@Artane to search results if query matches (for testing)
-        const qLower = params.q.toLowerCase();
+        const qLower = q.toLowerCase();
         if (result.sections?.users && (qLower.includes('sarah') || qLower.includes('artane') || qLower.includes('sarah@artane'))) {
             const existingHandles = new Set(result.sections.users.items.map((u: any) => u.handle?.toLowerCase()));
             if (!existingHandles.has('sarah@artane')) {
@@ -102,15 +150,9 @@ export async function unifiedSearch(params: {
         return withResolvedUserAvatars(result);
     } catch (error) {
         // Fallback: return mock results if API fails (for testing)
-        const qLower = params.q.toLowerCase();
+        const qLower = q.toLowerCase();
         if (params.types?.includes('users')) {
-            const filteredUsers = mockUsers.filter((u) => {
-                return (
-                    u.handle.toLowerCase().includes(qLower) ||
-                    (u.display_name && u.display_name.toLowerCase().includes(qLower)) ||
-                    (u.username && u.username.toLowerCase().includes(qLower))
-                );
-            });
+            const filteredUsers = mockUsers.filter((u) => userMatchesSearchQuery(u, qLower));
 
             if (filteredUsers.length > 0) {
                 return {

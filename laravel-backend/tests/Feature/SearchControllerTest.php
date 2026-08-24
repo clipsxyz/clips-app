@@ -61,4 +61,35 @@ class SearchControllerTest extends TestCase
         $ids = collect($posts)->pluck('id')->toArray();
         $this->assertContains($post->id, $ids);
     }
+
+    public function test_unified_search_users_matches_at_prefix_username_and_place(): void
+    {
+        $donny = User::factory()->create([
+            'handle' => 'Donny@NewYorkState',
+            'display_name' => 'Donny',
+            'username' => 'visual_ib',
+            'location_local' => 'New York State',
+            'location_regional' => 'New York State',
+            'location_national' => 'USA',
+        ]);
+        User::factory()->create([
+            'handle' => 'Gazetteer@Dublin',
+            'display_name' => 'Gazetteer',
+            'username' => 'clipscursar',
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+
+        foreach (['Donny', '@Donny', 'visual_ib', 'New York State', 'NewYork'] as $q) {
+            $response = $this->getJson('/api/search?q='.rawurlencode($q).'&types=users');
+            $response->assertStatus(200);
+            $ids = collect($response->json('sections.users.items'))->pluck('id')->all();
+            $this->assertContains($donny->id, $ids, "query [{$q}] should find Donny@NewYorkState");
+        }
+
+        $dublinOnly = $this->getJson('/api/search?q=Dublin&types=users');
+        $dublinIds = collect($dublinOnly->json('sections.users.items'))->pluck('id')->all();
+        $this->assertNotContains($donny->id, $dublinIds);
+    }
 }

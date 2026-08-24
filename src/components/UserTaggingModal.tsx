@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FiX, FiSearch, FiUser } from 'react-icons/fi';
-import { unifiedSearch, type SearchSections } from '../api/search';
+import { unifiedSearch, userMatchesSearchQuery, type SearchSections } from '../api/search';
 import Avatar from './Avatar';
 
 interface UserTaggingModalProps {
@@ -53,11 +53,9 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
                 if (result.sections?.users?.items) {
                     // Filter and sort results - prioritize exact matches
                     const queryLower = normalizedQuery.toLowerCase();
-                    const filtered = result.sections.users.items.filter((user: any) => {
-                        const handleLower = (user.handle || '').toLowerCase();
-                        const nameLower = (user.display_name || user.handle || '').toLowerCase();
-                        return handleLower.includes(queryLower) || nameLower.includes(queryLower);
-                    });
+                    const filtered = result.sections.users.items.filter((user: any) =>
+                        userMatchesSearchQuery(user, queryLower)
+                    );
                     
                     // Sort: exact handle match first, then handle starts with, then name match
                     const sorted = filtered.sort((a: any, b: any) => {
