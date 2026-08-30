@@ -47,7 +47,7 @@ export default function StoryInsightsSheet({
     const [followLoadingHandle, setFollowLoadingHandle] = useState<string | null>(null);
 
     const ownerNorm = currentUserHandle.trim().toLowerCase();
-    const viewsCount = Number(story.views || 0);
+    const viewsCount = Number(story.views_count ?? story.views ?? 0) || 0;
     const replies = (story.replies || []).filter(
         (r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm,
     );

@@ -17,7 +17,7 @@ import ShareModal from '../components/ShareModal';
 import ScenesModal from '../components/ScenesModal';
 import { getEffectiveTextStyleForPost, getTextOnlyFallbackBackground, getTextOnlyPreviewTextClass } from '../utils/effectiveTextPostStyle';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
-import { fetchFollowers, fetchFollowing, fetchUserProfile, toggleFollow } from '../api/client';
+import { fetchFollowers, fetchFollowing, fetchUserProfile, toggleFollow, connectionListTotal, profileAudienceFromPayload } from '../api/client';
 import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { 
@@ -367,7 +367,9 @@ export default function ViewProfilePage() {
 
     const isOwnProfile = React.useMemo(() => {
         if (!handle || !user?.handle) return false;
-        return decodeURIComponent(handle) === user.handle;
+        const left = decodeURIComponent(handle).replace(/^@/, '').trim().toLowerCase();
+        const right = String(user.handle).replace(/^@/, '').trim().toLowerCase();
+        return Boolean(left && right && left === right);
     }, [handle, user?.handle]);
 
     const profileNotifyDisplayName = React.useMemo(() => {
@@ -1561,9 +1563,14 @@ export default function ViewProfilePage() {
 
             // Refresh profile counts in background (don't block UI)
             fetchUserProfile(handleToUse, user?.id, undefined, undefined, sourcePostId).then((userProfileData) => {
-                const followingCount = userProfileData.following_count || 0;
-                const followersCount = userProfileData.followers_count || 0;
-                setStats(prev => ({ ...prev, following: followingCount, followers: followersCount }));
+                const audience = profileAudienceFromPayload(userProfileData);
+                const followingCount = audience.following ?? 0;
+                const followersCount = audience.followers ?? 0;
+                setStats(prev => ({
+                    ...prev,
+                    following: Math.max(prev.following, followingCount),
+                    followers: Math.max(prev.followers, followersCount),
+                }));
                 if (profileUser) {
                     setProfileUser((prev: any) => ({
                         ...prev,
@@ -1783,8 +1790,9 @@ export default function ViewProfilePage() {
                     try {
                         const userProfileData = await fetchUserProfile(decodedHandle, user?.id, null, 20, sourcePostId);
                         apiProfileData = userProfileData;
-                        followingCount = userProfileData.following_count || 0;
-                        followersCount = userProfileData.followers_count || 0;
+                        const audience = profileAudienceFromPayload(userProfileData);
+                        followingCount = audience.following ?? 0;
+                        followersCount = audience.followers ?? 0;
 
                         if (userProfileData.avatar_url && !avatarUrl) avatarUrl = userProfileData.avatar_url;
                         if (userProfileData.bio && !bio) bio = userProfileData.bio;
@@ -1816,7 +1824,11 @@ export default function ViewProfilePage() {
 
                 // When viewing own profile, ensure following count is at least the frontend follow list size
                 // (e.g. user followed Ava from feed but backend count wasn't updated or API failed)
-                const isOwnProfile = decodedHandle === user?.handle;
+                const isOwnProfile = decodeURIComponent(handle || '').replace(/^@/, '').trim().toLowerCase() === String(user?.handle || '').replace(/^@/, '').trim().toLowerCase();
+                if (isOwnProfile) {
+                    followersCount = Math.max(followersCount, Number(user?.followers_count ?? 0) || 0);
+                    followingCount = Math.max(followingCount, Number(user?.following_count ?? 0) || 0);
+                }
                 if (isOwnProfile && user?.id) {
                     try {
                         const followedList = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
@@ -1876,6 +1888,21 @@ export default function ViewProfilePage() {
                     likes: profileData.stats.likes,
                     views: profileData.stats.views
                 });
+                const listHandle = String(apiProfileData?.handle || decodedHandle || '').trim();
+                if (useLaravelApi && listHandle) {
+                    void fetchFollowers(listHandle, 0, 1)
+                        .then((res) => {
+                            const total = connectionListTotal(res);
+                            setStats((prev) => ({ ...prev, followers: Math.max(prev.followers, total) }));
+                        })
+                        .catch(() => undefined);
+                    void fetchFollowing(listHandle, 0, 1)
+                        .then((res) => {
+                            const total = connectionListTotal(res);
+                            setStats((prev) => ({ ...prev, following: Math.max(prev.following, total) }));
+                        })
+                        .catch(() => undefined);
+                }
                 const apiPostsRaw = Array.isArray(apiProfileData?.posts) ? apiProfileData.posts : [];
                 if (apiPostsRaw.length > 0) {
                     const transformedApiPosts = apiPostsRaw.map((p: any) => transformLaravelPost(p));

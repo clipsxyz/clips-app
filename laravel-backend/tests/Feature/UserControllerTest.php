@@ -37,13 +37,46 @@ class UserControllerTest extends TestCase
         $this->assertEquals($user->id, $response->json('id'));
     }
 
-    public function test_user_profile_requires_auth(): void
+    public function test_public_user_profile_is_guest_accessible(): void
     {
         $user = User::factory()->create(['is_private' => false]);
 
         $response = $this->getJson('/api/users/' . $user->handle);
 
-        $response->assertStatus(401);
+        $response->assertStatus(200)
+            ->assertJsonPath('id', $user->id)
+            ->assertJsonPath('handle', $user->handle);
+    }
+
+    public function test_public_user_posts_are_guest_accessible_with_encoded_handle(): void
+    {
+        $user = User::factory()->create([
+            'is_private' => false,
+            'handle' => 'TestUser@Dublin',
+        ]);
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'is_reclipped' => false,
+        ]);
+
+        $encoded = $this->getJson('/api/users/' . rawurlencode('TestUser@Dublin') . '/posts?tab=all&postsLimit=20');
+        $encoded->assertStatus(200);
+        $this->assertCount(1, $encoded->json('posts'));
+        $this->assertSame($post->id, $encoded->json('posts.0.id'));
+
+        $literalAt = $this->getJson('/api/users/TestUser@Dublin/posts?tab=all&postsLimit=20');
+        $literalAt->assertStatus(200);
+        $this->assertCount(1, $literalAt->json('posts'));
+    }
+
+    public function test_private_profile_posts_return_403_for_guests(): void
+    {
+        $user = User::factory()->create(['is_private' => true]);
+
+        $this->getJson('/api/users/' . rawurlencode($user->handle) . '/posts')
+            ->assertStatus(403)
+            ->assertJsonFragment(['can_view' => false]);
     }
 
     public function test_private_profile_returns_403_when_not_follower(): void
@@ -394,5 +427,128 @@ class UserControllerTest extends TestCase
             ]);
 
         $this->assertFalse($user->fresh()->is_private);
+    }
+
+    public function test_show_returns_live_follow_counts_when_columns_are_stale(): void
+    {
+        $user = User::factory()->create([
+            'is_private' => false,
+            'followers_count' => 0,
+            'following_count' => 0,
+        ]);
+        $follower = User::factory()->create();
+        $following = User::factory()->create();
+
+        DB::table('user_follows')->insert([
+            [
+                'follower_id' => $follower->id,
+                'following_id' => $user->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'follower_id' => $user->id,
+                'following_id' => $following->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $response = $this->getJson('/api/users/' . rawurlencode($user->handle));
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followers_count', 1)
+            ->assertJsonPath('following_count', 1)
+            ->assertJsonPath('stats.followers', 1)
+            ->assertJsonPath('stats.following', 1);
+    }
+
+    public function test_following_list_is_people_the_profile_follows_not_themselves(): void
+    {
+        $owner = User::factory()->create(['handle' => 'Gazetteer@Dublin', 'is_private' => false]);
+        $donny = User::factory()->create(['handle' => 'Donny@NewYorkState', 'is_private' => false]);
+        $paris = User::factory()->create(['handle' => 'Paris@CountyCork', 'is_private' => false]);
+
+        DB::table('user_follows')->insert([
+            [
+                'follower_id' => $owner->id,
+                'following_id' => $donny->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'follower_id' => $owner->id,
+                'following_id' => $paris->id,
+                'status' => 'accepted',
+                'created_at' => now()->subMinute(),
+                'updated_at' => now()->subMinute(),
+            ],
+            [
+                'follower_id' => $donny->id,
+                'following_id' => $owner->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $following = $this->getJson('/api/users/' . rawurlencode($owner->handle) . '/following');
+        $following->assertStatus(200)
+            ->assertJsonPath('total', 2);
+        $followingHandles = collect($following->json('items'))->pluck('handle')->all();
+        $this->assertEqualsCanonicalizing(
+            ['Donny@NewYorkState', 'Paris@CountyCork'],
+            $followingHandles,
+        );
+        $this->assertNotContains($owner->handle, $followingHandles);
+
+        $followers = $this->getJson('/api/users/' . rawurlencode($donny->handle) . '/followers');
+        $followers->assertStatus(200)
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('items.0.handle', $owner->handle);
+    }
+
+    public function test_audience_returns_live_counts_and_viewer_follow_state(): void
+    {
+        $owner = User::factory()->create(['handle' => 'Gazetteer@Dublin', 'is_private' => false]);
+        $donny = User::factory()->create(['handle' => 'Donny@NewYorkState', 'is_private' => false]);
+        $paris = User::factory()->create(['handle' => 'Paris@CountyCork', 'is_private' => false]);
+
+        DB::table('user_follows')->insert([
+            [
+                'follower_id' => $owner->id,
+                'following_id' => $donny->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'follower_id' => $owner->id,
+                'following_id' => $paris->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'follower_id' => $donny->id,
+                'following_id' => $owner->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $this->actingAs($donny, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($owner->handle) . '/audience')
+            ->assertStatus(200)
+            ->assertJson([
+                'handle' => $owner->handle,
+                'followers_count' => 1,
+                'following_count' => 2,
+                'is_following' => true,
+            ]);
     }
 }

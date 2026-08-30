@@ -44,10 +44,10 @@ import {
     fetchFollowedUsersStoryGroups,
     fetchStoryGroupByHandle,
     markStoryViewed, 
-    incrementStoryViews,
     addStoryReaction,
     addStoryReply,
     voteOnPoll,
+    type StoryViewMetrics,
 } from '../api/stories';
 import StoryPollOverlay from '../components/stories/StoryPollOverlay.native';
 import {
@@ -73,12 +73,25 @@ import {
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
 import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost, fetchComments, setBookmarkState } from '../api/posts';
-import { getAvatarForHandle } from '../api/users';
+import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
 import { followOrRequest } from '../utils/followOrRequest';
 import { hasPendingFollowRequest } from '../api/privacy';
 import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
 import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
 import type { Post, Story, StoryGroup } from '../types';
+
+function applyStoryInteractionMetrics(story: Story, metrics: StoryViewMetrics): Story {
+    return {
+        ...story,
+        views: metrics.views_count,
+        views_count: metrics.views_count,
+        reactions_count: Math.max(Number(story.reactions_count ?? 0) || 0, metrics.reactions_count),
+        replies_count: Math.max(Number(story.replies_count ?? 0) || 0, metrics.replies_count),
+        reactions: metrics.reactions ?? story.reactions,
+        replies: metrics.replies ?? story.replies,
+        hasViewed: true,
+    };
+}
 import Avatar from '../components/Avatar';
 import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
 import PostCommentsSheet from '../components/PostCommentsSheet';
@@ -192,6 +205,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const currentStoryIndexRef = useRef(0);
     const currentGroupIndexRef = useRef(0);
     const storyGroupsRef = useRef(storyGroups);
+    const recordedStoryViewIdsRef = useRef(new Set<string>());
     currentStoryIndexRef.current = currentStoryIndex;
     currentGroupIndexRef.current = currentGroupIndex;
     storyGroupsRef.current = storyGroups;
@@ -253,6 +267,19 @@ export default function StoriesScreen({ route, navigation }: any) {
             currentGroup &&
             (currentStory.userId === user.id || currentGroup.userHandle === user.handle),
     );
+    const storyViewsCount = Number(currentStory?.views_count ?? currentStory?.views ?? 0) || 0;
+    const storyReactionsCount = Number(
+        currentStory?.reactions_count ??
+            currentStory?.reactions?.filter(
+                (r) =>
+                    (r.userHandle || '').trim().toLowerCase() !==
+                    (user?.handle || '').trim().toLowerCase(),
+            ).length ??
+            0,
+    ) || 0;
+    const storyRepliesCount = Number(
+        currentStory?.replies_count ?? currentStory?.replies?.length ?? 0,
+    ) || 0;
 
     useEffect(() => {
         if (!viewingStories || !currentStory?.sharedFromPost || !user?.id) {
@@ -554,13 +581,18 @@ export default function StoriesScreen({ route, navigation }: any) {
                     if (group.userId === user.id && user.avatarUrl) {
                         return { ...group, avatarUrl: user.avatarUrl };
                     }
-                    let avatarUrl = group.avatarUrl || getAvatarForHandle(group.userHandle);
+                    let avatarUrl =
+                        resolveAvatarImageUri(group.avatarUrl, group.userHandle) ||
+                        getAvatarForHandle(group.userHandle);
                     if (!avatarUrl) {
                         try {
-                            const { fetchUserProfile } = await import('../api/client');
-                            const profile = await fetchUserProfile(group.userHandle, user.id);
-                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
-                                avatarUrl = profile.avatar_url || profile.avatarUrl;
+                            const { fetchProfileAudience } = await import('../api/client');
+                            const audience = await fetchProfileAudience(group.userHandle);
+                            if (audience?.avatar_url) {
+                                avatarUrl = resolveAvatarImageUri(
+                                    audience.avatar_url,
+                                    group.userHandle,
+                                );
                             }
                         } catch {
                             /* keep undefined — Avatar shows initials */
@@ -1077,7 +1109,52 @@ export default function StoriesScreen({ route, navigation }: any) {
         // Optimistic UI — mock store may miss API-loaded stories; still show selection.
         setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
         try {
-            await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
+            setStoryGroups((groups) =>
+                groups.map((group) => ({
+                    ...group,
+                    stories: group.stories.map((story) => {
+                        if (story.id !== currentStory.id) return story;
+                        const hadReaction = !!(
+                            story.userReaction ||
+                            (story.reactions || []).some((r) => r.userId === user.id)
+                        );
+                        const reactions = [
+                            ...(story.reactions || []).filter((r) => r.userId !== user.id),
+                            {
+                                id: `reaction-${Date.now()}`,
+                                userId: user.id,
+                                userHandle: user.handle,
+                                emoji,
+                                createdAt: Date.now(),
+                            },
+                        ];
+                        return {
+                            ...story,
+                            reactions,
+                            userReaction: emoji,
+                            reactions_count: hadReaction
+                                ? Math.max(Number(story.reactions_count ?? 0) || 0, reactions.length)
+                                : (Number(story.reactions_count ?? 0) || 0) + 1,
+                        };
+                    }),
+                })),
+            );
+            const metrics = await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
+            if (metrics) {
+                setStoryGroups((groups) =>
+                    groups.map((group) => ({
+                        ...group,
+                        stories: group.stories.map((story) =>
+                            story.id !== currentStory.id
+                                ? story
+                                : {
+                                      ...applyStoryInteractionMetrics(story, metrics),
+                                      userReaction: emoji,
+                                  },
+                        ),
+                    })),
+                );
+            }
             if (
                 toHandle &&
                 toHandle.trim().toLowerCase() !== user.handle.trim().toLowerCase()
@@ -1138,7 +1215,7 @@ export default function StoriesScreen({ route, navigation }: any) {
 
         try {
             setIsSendingReply(true);
-            await addStoryReply(currentStory.id, user.id, user.handle, normalizedReply);
+            const metrics = await addStoryReply(currentStory.id, user.id, user.handle, normalizedReply);
 
             if (toHandle && !isSelfStory) {
                 try {
@@ -1173,6 +1250,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         ...group,
                         stories: group.stories.map((story, storyIdx) => {
                             if (storyIdx !== currentStoryIndex) return story;
+                            if (metrics) return applyStoryInteractionMetrics(story, metrics);
                             return {
                                 ...story,
                                 replies: [
@@ -1185,6 +1263,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         createdAt: Date.now(),
                                     },
                                 ],
+                                replies_count: (Number(story.replies_count ?? story.replies?.length ?? 0) || 0) + 1,
                             };
                         }),
                     };
@@ -1209,9 +1288,48 @@ export default function StoriesScreen({ route, navigation }: any) {
         const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !viewingStories) return;
 
-        markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
-        incrementStoryViews(currentStory.id).catch(console.error);
-    }, [currentGroupIndex, currentStoryIndex, viewingStories]);
+        let cancelled = false;
+        const storyId = currentStory.id;
+        const alreadyRecorded = recordedStoryViewIdsRef.current.has(storyId);
+        if (!alreadyRecorded) {
+            recordedStoryViewIdsRef.current.add(storyId);
+            setStoryGroups((groups) =>
+                groups.map((group) => ({
+                    ...group,
+                    stories: group.stories.map((story) => {
+                        if (story.id !== storyId) return story;
+                        const nextViews = (Number(story.views_count ?? story.views ?? 0) || 0) + 1;
+                        return {
+                            ...story,
+                            views: nextViews,
+                            views_count: nextViews,
+                            hasViewed: true,
+                        };
+                    }),
+                })),
+            );
+        }
+
+        void markStoryViewed(storyId, user.id, user.handle)
+            .then((metrics) => {
+                if (cancelled || !metrics) return;
+                setStoryGroups((groups) =>
+                    groups.map((group) => ({
+                        ...group,
+                        stories: group.stories.map((story) =>
+                            story.id !== storyId
+                                ? story
+                                : applyStoryInteractionMetrics(story, metrics),
+                        ),
+                    })),
+                );
+            })
+            .catch(console.error);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentGroupIndex, currentStoryIndex, viewingStories, currentStory?.id, user?.id]);
 
     const handlePollVote = useCallback(
         async (option: 'option1' | 'option2' | 'option3') => {
@@ -1487,13 +1605,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             }}
                         >
                             <Text style={styles.ownerInsightsText}>
-                                {(currentStory.views ?? 0)} views •{' '}
-                                {(currentStory.reactions?.filter(
-                                    (r) =>
-                                        (r.userHandle || '').trim().toLowerCase() !==
-                                        (user?.handle || '').trim().toLowerCase(),
-                                ).length ?? 0)}{' '}
-                                reactions • {(currentStory.replies?.length ?? 0)} replies
+                                {storyViewsCount} views • {storyReactionsCount} reactions • {storyRepliesCount} replies
                             </Text>
                         </TouchableOpacity>
                     ) : null}
@@ -1578,11 +1690,6 @@ export default function StoriesScreen({ route, navigation }: any) {
                     <StoryBottomBar
                         hidden={isHoldingToPause}
                         ownerMode={isViewingOwnStory}
-                        ownerSummary={`${currentStory.views ?? 0} views · tap for insights`}
-                        onOpenInsights={() => {
-                            setShowInsightsSheet(true);
-                            setPaused(true);
-                        }}
                         showReplyComposer={showInlineReplyComposer && !isViewingOwnStory}
                         replyText={replyText}
                         replyPlaceholder="Message..."

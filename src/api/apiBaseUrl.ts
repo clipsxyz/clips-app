@@ -112,13 +112,50 @@ export function getApiBaseUrl(): string {
     return '/api';
 }
 
+function currentApiOrigin(): string {
+    const apiBase = getApiBaseUrl().replace(/\/$/, '');
+    return apiBase.replace(/\/api$/i, '');
+}
+
+function isDevMediaHost(hostname: string): boolean {
+    return (
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '10.0.2.2' ||
+        /^10\./.test(hostname) ||
+        /^192\.168\./.test(hostname) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    );
+}
+
+/** Point leftover localhost / old LAN :8000 media URLs at the API this device can reach. */
+function remapDevMediaHostToApiOrigin(absoluteUrl: string): string {
+    const origin = currentApiOrigin();
+    if (!origin || !/^https?:\/\//i.test(origin)) return absoluteUrl;
+    try {
+        const parsed = new URL(absoluteUrl);
+        const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+        if (port !== '8000' || !isDevMediaHost(parsed.hostname)) return absoluteUrl;
+        const current = new URL(origin);
+        parsed.protocol = current.protocol;
+        parsed.hostname = current.hostname;
+        parsed.port = current.port;
+        return parsed.toString();
+    } catch {
+        return absoluteUrl;
+    }
+}
+
 /** Turn `/storage/...` (and other relative Laravel paths) into a loadable URL. */
 export function resolvePublicMediaUrl(url: string | null | undefined): string {
     const raw = String(url || '').trim();
     if (!raw) return '';
-    if (/^(https?:|data:|file:|content:)/i.test(raw)) return raw;
-    const apiBase = getApiBaseUrl().replace(/\/$/, '');
-    const origin = apiBase.replace(/\/api$/i, '');
-    if (raw.startsWith('/')) return `${origin}${raw}`;
+    if (/^(data:|file:|content:|ph:)/i.test(raw)) return raw;
+    if (/^https?:\/\//i.test(raw)) return remapDevMediaHostToApiOrigin(raw);
+    let origin = currentApiOrigin();
+    if (!origin || !/^https?:\/\//i.test(origin)) {
+        origin = isReactNativeRuntime() ? 'http://localhost:8000' : origin;
+    }
+    if (raw.startsWith('/')) return origin ? `${origin}${raw}` : raw;
     return origin ? `${origin}/${raw}` : raw;
 }

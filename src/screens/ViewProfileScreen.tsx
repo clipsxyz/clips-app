@@ -26,7 +26,17 @@ import {
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, getFollowedUsers, setFollowState, setReclipState, toggleLike, reclipPost, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
-import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
+import {
+    fetchUserProfile,
+    fetchFollowers,
+    fetchFollowing,
+    connectionListTotal,
+    connectionItemsFromResponse,
+    profileAudienceFromPayload,
+    fetchProfileAudience,
+    isAbortError,
+    isTooManyRequestsError,
+} from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
 import { getAvatarForHandle, getFlagForHandle, setAvatarForHandle } from '../api/users';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
@@ -38,8 +48,8 @@ import {
     hasPendingFollowRequest,
     canSendMessage,
 } from '../api/privacy';
-import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
-import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
+import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts, isMockDirectoryHandle } from '../api/mockFollowGraph';
+import { isMockMode } from '../config/runtimeEnv';
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Flag from '../components/Flag.native';
@@ -73,9 +83,49 @@ import {
     setProfilePostNotifyLevelMobile,
 } from '../utils/profilePostNotifyPrefsMobile';
 
+function sameHandle(a?: string | null, b?: string | null): boolean {
+    const norm = (value?: string | null) =>
+        String(value || '')
+            .replace(/^@/, '')
+            .trim()
+            .toLowerCase();
+    const left = norm(a);
+    const right = norm(b);
+    return Boolean(left && right && left === right);
+}
+
+function isOwnProfileIdentity(
+    authUser?: { id?: string | null; handle?: string | null } | null,
+    routeHandle?: string | null,
+    apiData?: { id?: string | null; handle?: string | null } | null,
+): boolean {
+    if (!authUser) return false;
+    if (sameHandle(authUser.handle, routeHandle) || sameHandle(authUser.handle, apiData?.handle)) {
+        return true;
+    }
+    const authId = authUser.id != null ? String(authUser.id) : '';
+    if (authId && (sameHandle(authId, routeHandle) || sameHandle(authId, String(apiData?.id || '')))) {
+        return true;
+    }
+    const authHead = String(authUser.handle || '')
+        .replace(/^@/, '')
+        .split('@')[0]
+        .trim()
+        .toLowerCase();
+    const other = String(routeHandle || '')
+        .replace(/^@/, '')
+        .trim();
+    const otherHead = other.split('@')[0].toLowerCase();
+    const otherLoc = other.split('@')[1];
+    return Boolean(authHead && otherHead && authHead === otherHead && !otherLoc);
+}
+
 export default function ViewProfileScreen({ route, navigation }: any) {
     const { handle, sourcePostId } = route.params ?? {};
     const { user } = useAuth();
+    const routeHandleRef = React.useRef(handle);
+    routeHandleRef.current = handle;
+    const connectionsAbortRef = React.useRef<AbortController | null>(null);
 
     const [profileUser, setProfileUser] = useState<any>(null);
     const [posts, setPosts] = useState<Post[]>([]);
@@ -122,7 +172,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [showShareProfileSheet, setShowShareProfileSheet] = useState(false);
     const socialLinks = (profileUser?.socialLinks || profileUser?.social_links || {}) as Record<string, string | undefined>;
     const decodedHandle = decodeURIComponent(handle || '');
-    const isOwnProfile = Boolean(user?.handle && decodedHandle === user.handle);
+    const isOwnProfile = isOwnProfileIdentity(user, decodedHandle, profileUser);
     const profileAccountType = (() => {
         const raw =
             profileUser?.accountType ||
@@ -170,6 +220,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         (isOwnProfile ? user?.profileBackgroundUrl : undefined);
 
     useEffect(() => {
+        const controller = new AbortController();
+        connectionsAbortRef.current = controller;
+        return () => controller.abort();
+    }, [handle]);
+
+    useEffect(() => {
         let cancelled = false;
         void loadProfile(() => cancelled);
         return () => {
@@ -201,60 +257,177 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         if (!handle) return;
         const cancelled = () => Boolean(isCancelled?.());
         setLoading(true);
+        setFollowersList([]);
+        setFollowingList([]);
         try {
             const decodedHandle = decodeURIComponent(handle);
             const profilePrivate = isProfilePrivate(decodedHandle);
             if (!cancelled()) setProfileIsPrivate(profilePrivate);
 
-            let followedUsers: string[] = [];
-            if (user?.id && user?.handle) {
-                try {
-                    followedUsers = await getFollowedUsers(user.id);
-                } catch {
-                    followedUsers = [];
-                }
-                if (cancelled()) return;
+            const audienceTask = !isMockMode()
+                ? fetchProfileAudience(decodedHandle).then((audience) => {
+                      if (cancelled()) return audience;
+                      const current = String(routeHandleRef.current || '');
+                      let currentDecoded = current;
+                      try {
+                          currentDecoded = decodeURIComponent(current);
+                      } catch {
+                          /* already decoded */
+                      }
+                      const stillThisProfile =
+                          sameHandle(current, decodedHandle) ||
+                          sameHandle(currentDecoded, decodedHandle) ||
+                          sameHandle(current, audience.handle) ||
+                          sameHandle(currentDecoded, audience.handle);
+                      if (!stillThisProfile) return audience;
+                      setStats((prev) => ({
+                          ...prev,
+                          followers: Math.max(prev.followers, audience.followers),
+                          following: Math.max(prev.following, audience.following),
+                      }));
+                      if (typeof audience.is_following === 'boolean') {
+                          setIsFollowing(audience.is_following);
+                      }
+                      const rawAvatar = String(audience.avatar_url || '').trim();
+                      if (rawAvatar) {
+                          const url = resolvePublicMediaUrl(rawAvatar) || rawAvatar;
+                          setAvatarForHandle(decodedHandle, url);
+                          if (audience.handle) setAvatarForHandle(audience.handle, url);
+                          setProfileUser((prev: any) =>
+                              prev
+                                  ? { ...prev, avatarUrl: prev.avatarUrl || url }
+                                  : {
+                                        handle: decodedHandle,
+                                        name: decodedHandle.split('@')[0],
+                                        avatarUrl: url,
+                                    },
+                          );
+                      } else {
+                          setProfileUser((prev: any) =>
+                              prev || {
+                                  handle: decodedHandle,
+                                  name: decodedHandle.split('@')[0],
+                              },
+                          );
+                      }
+                      // Counts are ready — don't keep the spinner up for the posts payload.
+                      if (!cancelled()) setLoading(false);
+                      return audience;
+                  })
+                : Promise.resolve({ followers: 0, following: 0 });
 
-                const canViewProfileState = canViewProfile(user.handle, decodedHandle, followedUsers);
-                const isFollowingUser = followedUsers.some(
-                    (h) => h.toLowerCase() === decodedHandle.toLowerCase(),
-                );
-                const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
-
-                setCanView(canViewProfileState);
-                setIsFollowing(isFollowingUser);
-                setHasPendingRequest(hasPending);
-
-                if (!canViewProfileState && profilePrivate && decodedHandle !== user.handle) {
-                    setLoading(false);
-                    return;
-                }
-            }
+            const followedTask =
+                user?.id && user?.handle
+                    ? getFollowedUsers(user.id).catch(() => [] as string[])
+                    : Promise.resolve([] as string[]);
 
             let userPosts: Post[] = [];
             let profileData: any;
+            let listAudience = { followers: 0, following: 0 };
+            let followedUsers: string[] = [];
+            let audienceRateLimited = false;
+            let profileRateLimited = false;
 
-            if (isLaravelApiEnabled()) {
-                try {
-                    profileData = await fetchUserProfile(
-                        decodedHandle,
+            if (!isMockMode()) {
+                const fetchProfile = (identifier: string) =>
+                    fetchUserProfile(
+                        identifier,
                         user?.id,
                         null,
                         20,
                         typeof sourcePostId === 'string' ? sourcePostId : undefined,
                         'all',
                     );
-                    if (cancelled()) return;
+                const [followedSettled, profileSettled, audienceSettled] = await Promise.allSettled([
+                    followedTask,
+                    fetchProfile(decodedHandle),
+                    audienceTask,
+                ]);
+                followedUsers =
+                    followedSettled.status === 'fulfilled' && Array.isArray(followedSettled.value)
+                        ? followedSettled.value
+                        : [];
+                if (!cancelled() && user?.id && user?.handle) {
+                    const canViewProfileState = canViewProfile(
+                        user.handle,
+                        decodedHandle,
+                        followedUsers,
+                    );
+                    const isFollowingUser = followedUsers.some((h) =>
+                        sameHandle(h, decodedHandle),
+                    );
+                    const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
+                    setCanView(canViewProfileState);
+                    if (
+                        audienceSettled.status !== 'fulfilled' ||
+                        typeof audienceSettled.value?.is_following !== 'boolean'
+                    ) {
+                        setIsFollowing(isFollowingUser);
+                    }
+                    setHasPendingRequest(hasPending);
+                    if (
+                        !canViewProfileState &&
+                        profilePrivate &&
+                        !isOwnProfileIdentity(user, decodedHandle)
+                    ) {
+                        setLoading(false);
+                        return;
+                    }
+                }
+                if (audienceSettled.status === 'fulfilled') {
+                    listAudience = audienceSettled.value;
+                } else if (isTooManyRequestsError(audienceSettled.reason)) {
+                    audienceRateLimited = true;
+                }
+                if (profileSettled.status === 'fulfilled') {
+                    profileData = profileSettled.value;
                     userPosts = mapLaravelProfilePosts(profileData?.posts);
-                } catch (error: any) {
-                    console.error('[ViewProfile] profile fetch error', {
-                        name: error?.name,
-                        message: error?.message,
-                        status: error?.status,
-                        response: error?.response,
-                        mockMode: isMockMode(),
-                    });
-                    if (error?.status === 403 && !cancelled()) {
+                } else {
+                    const error: any = profileSettled.reason;
+                    const ownHandle = String(user?.handle || '').trim();
+                    let retried = false;
+                    if (isTooManyRequestsError(error)) {
+                        profileRateLimited = true;
+                        retried = true;
+                        const retryAfterMs = Math.max(
+                            1500,
+                            Number((error as { retryAfterMs?: number }).retryAfterMs) || 2000,
+                        );
+                        await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+                        if (!cancelled()) {
+                            try {
+                                profileData = await fetchProfile(decodedHandle);
+                                userPosts = mapLaravelProfilePosts(profileData?.posts);
+                            } catch (retryError) {
+                                if (isTooManyRequestsError(retryError)) {
+                                    profileRateLimited = true;
+                                }
+                            }
+                        }
+                    } else if (
+                        ownHandle &&
+                        !sameHandle(ownHandle, decodedHandle) &&
+                        isOwnProfileIdentity(user, decodedHandle)
+                    ) {
+                        try {
+                            profileData = await fetchProfile(ownHandle);
+                            retried = true;
+                            if (cancelled()) return;
+                            userPosts = mapLaravelProfilePosts(profileData?.posts);
+                        } catch {
+                            retried = false;
+                        }
+                    }
+                    if (!retried) {
+                        console.error('[ViewProfile] profile fetch error', {
+                            name: error?.name,
+                            message: error?.message,
+                            status: error?.status,
+                            response: error?.response,
+                            mockMode: isMockMode(),
+                        });
+                    }
+                    if (error?.status === 403 && !cancelled() && !profileData) {
                         setCanView(false);
                         setProfileIsPrivate(true);
                     }
@@ -264,7 +437,23 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 if (cancelled()) return;
             }
 
-            const isOwn = Boolean(user?.handle && decodedHandle === user.handle);
+            if (
+                !isMockMode() &&
+                !audienceRateLimited &&
+                !profileRateLimited &&
+                listAudience.followers === 0 &&
+                listAudience.following === 0 &&
+                profileData?.handle &&
+                !sameHandle(profileData.handle, decodedHandle)
+            ) {
+                try {
+                    listAudience = await fetchProfileAudience(String(profileData.handle));
+                } catch {
+                    /* keep zeros */
+                }
+            }
+
+            const isOwn = isOwnProfileIdentity(user, decodedHandle, profileData);
             const paintLocalProfile = (apiData?: any) => {
                 const pt = apiData?.placesTraveled ?? apiData?.places_traveled;
                 const placesTraveled =
@@ -272,6 +461,8 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 const rawAvatar =
                     apiData?.avatarUrl ||
                     apiData?.avatar_url ||
+                    apiData?.user?.avatar_url ||
+                    apiData?.user?.avatarUrl ||
                     (isOwn ? user?.avatarUrl : undefined) ||
                     getAvatarForHandle(decodedHandle);
                 const avatarUrl =
@@ -288,15 +479,38 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     (isOwn ? user?.socialLinks : undefined);
                 const aggregateViews = userPosts.reduce((sum, p) => sum + (p.stats?.views ?? 0), 0);
                 const aggregateLikes = userPosts.reduce((sum, p) => sum + (p.stats?.likes ?? 0), 0);
-                let followersCount = apiData?.followers_count || 0;
-                let followingCount = apiData?.following_count || 0;
-                if (!apiData && user?.id && decodedHandle !== user?.handle) {
-                    const followsThis = followedUsers.some(
-                        (h) => h.toLowerCase() === decodedHandle.toLowerCase(),
-                    );
-                    if (followsThis && followersCount < 1) followersCount = 1;
+                const audience = profileAudienceFromPayload(apiData);
+                let followersCount =
+                    audience.followers != null && Number.isFinite(audience.followers)
+                        ? audience.followers
+                        : NaN;
+                let followingCount =
+                    audience.following != null && Number.isFinite(audience.following)
+                        ? audience.following
+                        : NaN;
+                if (!Number.isFinite(followersCount) || followersCount < 0) {
+                    followersCount = isOwn ? Number(user?.followers_count ?? 0) || 0 : 0;
                 }
-                if (!isLaravelApiEnabled()) {
+                if (!Number.isFinite(followingCount) || followingCount < 0) {
+                    followingCount = isOwn ? Number(user?.following_count ?? 0) || 0 : 0;
+                }
+                followersCount = Math.max(followersCount, listAudience.followers || 0);
+                followingCount = Math.max(followingCount, listAudience.following || 0);
+                if (isOwn) {
+                    followersCount = Math.max(
+                        followersCount,
+                        Number(user?.followers_count ?? 0) || 0,
+                    );
+                    followingCount = Math.max(
+                        followingCount,
+                        Number(user?.following_count ?? 0) || 0,
+                    );
+                }
+                if (isMockMode()) {
+                    if (!apiData && user?.id && !sameHandle(decodedHandle, user?.handle)) {
+                        const followsThis = followedUsers.some((h) => sameHandle(h, decodedHandle));
+                        if (followsThis && followersCount < 1) followersCount = 1;
+                    }
                     const mockCounts = computeMockGraphFollowCounts(
                         decodedHandle,
                         user?.handle,
@@ -352,20 +566,22 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     apiData?.views_count ??
                     apiData?.stats?.views_count ??
                     apiData?.stats?.views;
-                setStats({
-                    following: followingCount,
-                    followers: followersCount,
+                setStats((prev) => ({
+                    following: Math.max(prev.following, followingCount),
+                    followers: Math.max(prev.followers, followersCount),
                     likes: Math.max(
+                        prev.likes,
                         Number(likesFromApi) || 0,
                         aggregateLikes,
                         localLikes,
                     ),
                     views: Math.max(
+                        prev.views,
                         Number(viewsFromApi) || 0,
                         aggregateViews,
                         localViews,
                     ),
-                });
+                }));
                 setProfilePostsCursor(apiData?.postsNextCursor ?? null);
                 setProfilePostsHasMore(Boolean(apiData?.postsHasMore) || userPosts.length >= 20);
             };
@@ -393,7 +609,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     if (!cancelled()) setHasStory(false);
                 });
         } catch (error) {
-            console.error('Error loading profile:', error);
+            if (!isAbortError(error)) {
+                console.error('Error loading profile:', error);
+            }
             if (!cancelled()) {
                 // Still show a usable shell from the handle — never block behind a hard error alert.
                 const decodedHandle = decodeURIComponent(handle);
@@ -477,12 +695,40 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const normalizeConnectionItems = (items: any[]): ConnectionRow[] => {
         return (Array.isArray(items) ? items : [])
             .map((item: any) => {
-                const handleRaw = String(item?.handle || item?.userHandle || item?.username || item?.name || '').replace(/^@/, '').trim();
+                const nested = item?.user && typeof item.user === 'object' ? item.user : null;
+                const handleRaw = String(
+                    item?.handle ||
+                        item?.userHandle ||
+                        item?.user_handle ||
+                        nested?.handle ||
+                        nested?.userHandle ||
+                        '',
+                )
+                    .replace(/^@/, '')
+                    .trim();
                 if (!handleRaw) return null;
+                const avatarUrl = (() => {
+                    const raw =
+                        typeof item?.avatar_url === 'string'
+                            ? item.avatar_url
+                            : typeof item?.avatarUrl === 'string'
+                              ? item.avatarUrl
+                              : typeof nested?.avatar_url === 'string'
+                                ? nested.avatar_url
+                                : nested?.avatarUrl;
+                    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+                    return trimmed ? resolvePublicMediaUrl(trimmed) || trimmed : undefined;
+                })();
+                if (avatarUrl) setAvatarForHandle(handleRaw, avatarUrl);
                 return {
                     handleNoAt: handleRaw,
-                    displayName: String(item?.display_name || item?.displayName || item?.name || handleRaw),
-                    avatarUrl: typeof item?.avatar_url === 'string' ? item.avatar_url : item?.avatarUrl,
+                    displayName: String(
+                        item?.display_name ||
+                            item?.displayName ||
+                            nested?.display_name ||
+                            handleRaw,
+                    ),
+                    avatarUrl,
                     isRequested: !!(item?.is_requested || item?.has_pending_request || item?.isRequested),
                     isPrivate: !!(item?.isPrivate || item?.is_private) || isProfilePrivate(handleRaw),
                 };
@@ -560,7 +806,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
     const loadConnections = async (tab: 'followers' | 'following', reset = true) => {
         if (!handle) return;
-        const decodedHandle = decodeURIComponent(handle);
+        const decodedHandle = String(profileUser?.handle || decodeURIComponent(handle)).trim();
         if (reset) setConnectionsLoading(true);
         else setConnectionsLoadingMore(true);
         try {
@@ -571,7 +817,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             );
             setViewerFollowedSet(followedSet);
 
-            if (!isLaravelApiEnabled()) {
+            if (isMockMode()) {
                 const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
                 const followPatch: Record<string, boolean> = {};
                 const requestPatch: Record<string, boolean> = {};
@@ -595,11 +841,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 return;
             }
 
+            const listSignal = connectionsAbortRef.current?.signal;
             const cursor = tab === 'followers' ? (reset ? 0 : followersCursor) : (reset ? 0 : followingCursor);
             const response = tab === 'followers'
-                ? await fetchFollowers(decodedHandle, cursor, 40)
-                : await fetchFollowing(decodedHandle, cursor, 40);
-            const normalized = normalizeConnectionItems(Array.isArray(response?.items) ? response.items : []);
+                ? await fetchFollowers(decodedHandle, cursor, 40, listSignal)
+                : await fetchFollowing(decodedHandle, cursor, 40, listSignal);
+            const normalized = normalizeConnectionItems(connectionItemsFromResponse(response));
             const followPatch: Record<string, boolean> = {};
             const requestPatch: Record<string, boolean> = {};
             normalized.forEach((entry) => {
@@ -622,6 +869,10 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 });
                 setFollowersHasMore(hasMore);
                 setFollowersCursor(nextCursor);
+                if (reset) {
+                    const total = connectionListTotal(response);
+                    setStats((prev) => ({ ...prev, followers: Math.max(prev.followers, total) }));
+                }
             } else {
                 setFollowingList((prev) => {
                     if (reset) return normalized;
@@ -632,36 +883,37 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 });
                 setFollowingHasMore(hasMore);
                 setFollowingCursor(nextCursor);
+                if (reset) {
+                    const total = connectionListTotal(response);
+                    setStats((prev) => ({ ...prev, following: Math.max(prev.following, total) }));
+                }
             }
         } catch (error: any) {
+            if (isAbortError(error)) return;
             console.error('Failed to load connections:', error);
-            const message = String(error?.message || '');
-            const isConnectionError =
-                message === 'CONNECTION_REFUSED' ||
-                error?.name === 'ConnectionRefused' ||
-                message.includes('Failed to fetch');
-            if (isConnectionError || reset) {
-                try {
-                    const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
-                    const followedUsers = await getFollowedUsers(viewerId);
-                    const followedSet = new Set(
-                        (Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))),
-                    );
-                    const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
-                    if (tab === 'followers') {
-                        setFollowersList(normalized);
-                        setFollowersHasMore(false);
-                        setStats((prev) => ({ ...prev, followers: normalized.length }));
-                    } else {
-                        setFollowingList(normalized);
-                        setFollowingHasMore(false);
-                        setStats((prev) => ({ ...prev, following: normalized.length }));
-                    }
-                } catch {
-                    if (reset) {
-                        if (tab === 'followers') setFollowersList([]);
-                        if (tab === 'following') setFollowingList([]);
-                    }
+            if (!isMockMode()) {
+                return;
+            }
+            try {
+                const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+                const followedUsers = await getFollowedUsers(viewerId);
+                const followedSet = new Set(
+                    (Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))),
+                );
+                const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
+                if (tab === 'followers') {
+                    setFollowersList(normalized);
+                    setFollowersHasMore(false);
+                    setStats((prev) => ({ ...prev, followers: Math.max(prev.followers, normalized.length) }));
+                } else {
+                    setFollowingList(normalized);
+                    setFollowingHasMore(false);
+                    setStats((prev) => ({ ...prev, following: Math.max(prev.following, normalized.length) }));
+                }
+            } catch {
+                if (reset) {
+                    if (tab === 'followers') setFollowersList([]);
+                    if (tab === 'following') setFollowingList([]);
                 }
             }
         } finally {
@@ -709,6 +961,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             const key = String(rawHandle || '').replace(/^@/, '').trim();
             if (!key) return;
             const normalized = normalizeHandleKey(key);
+            if (!isMockMode() && isMockDirectoryHandle(key)) return;
             if (excluded.has(normalized) || suggestedMap.has(normalized)) return;
             const inFollowers = followerMap.has(normalized);
             const inFollowing = followingMap.has(normalized);
@@ -737,10 +990,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             if (viewerFollowedSet.has(normalizeHandleKey(row.handleNoAt))) return;
             addSuggested(row.handleNoAt, row.displayName);
         });
-        allPosts.forEach((post) => {
-            addSuggested(post.userHandle, post.userHandle);
-        });
-        Object.keys(MOCK_FOLLOWING_GRAPH).forEach((h) => addSuggested(h, h));
+        if (isMockMode()) {
+            allPosts.forEach((post) => {
+                addSuggested(post.userHandle, post.userHandle);
+            });
+            Object.keys(MOCK_FOLLOWING_GRAPH).forEach((h) => addSuggested(h, h));
+        }
 
         return Array.from(suggestedMap.values()).sort(
             (a, b) => (b.mutualCount || 0) - (a.mutualCount || 0),
@@ -913,7 +1168,15 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         if (profilePostsHasMore && profilePostsCursor != null) {
             setProfilePostsLoadingMore(true);
             try {
-                const nextProfile = await fetchUserProfile(decoded, user?.id, profilePostsCursor, 20, undefined, 'all');
+                const nextProfile = await fetchUserProfile(
+                    decoded,
+                    user?.id,
+                    profilePostsCursor,
+                    20,
+                    undefined,
+                    'all',
+                    connectionsAbortRef.current?.signal,
+                );
                 const appended = mapLaravelProfilePosts(nextProfile?.posts);
                 if (appended.length > 0) {
                     setPosts((prev) => {
@@ -924,7 +1187,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 setProfilePostsCursor((nextProfile as any)?.postsNextCursor ?? null);
                 setProfilePostsHasMore(Boolean((nextProfile as any)?.postsHasMore));
             } catch (error) {
-                console.error('Error loading more profile posts:', error);
+                if (!isAbortError(error)) {
+                    console.error('Error loading more profile posts:', error);
+                }
             } finally {
                 setProfilePostsLoadingMore(false);
             }
@@ -1060,7 +1325,11 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
                 <ProfileCoverHero
                     coverUrl={profileCoverUrl}
-                    avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
+                    avatarUrl={
+                        profileUser?.avatarUrl ||
+                        getAvatarForHandle(decodedHandle)
+                    }
+                    handle={decodedHandle}
                     name={profileDisplayName}
                     hasStory={hasStory}
                     onAvatarPress={() => {
@@ -1411,7 +1680,10 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 onClose={() => setShowProfileMenu(false)}
                 name={profileDisplayName}
                 handle={profileUser?.handle || decodedHandle}
-                avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
+                avatarUrl={
+                    profileUser?.avatarUrl ||
+                    getAvatarForHandle(decodedHandle)
+                }
                 actions={[
                     ...(hasStory
                         ? [
@@ -1473,7 +1745,13 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 onToggleFollow={(h) => void toggleConnectionFollow(h)}
                 onOpenProfile={(h) => {
                     setShowConnectionsModal(false);
-                    navigation.navigate('ViewProfile', { handle: h });
+                    const next = String(h || '').replace(/^@/, '').trim();
+                    if (!next) return;
+                    if (typeof navigation.push === 'function') {
+                        navigation.push('ViewProfile', { handle: next });
+                    } else {
+                        navigation.navigate('ViewProfile', { handle: next });
+                    }
                 }}
                 hasMore={
                     (connectionsScope === 'followers' && followersHasMore) ||

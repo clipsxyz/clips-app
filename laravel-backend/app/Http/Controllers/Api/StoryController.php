@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\StoryResource;
 use App\Models\Story;
 use App\Models\StoryReaction;
 use App\Models\StoryReply;
@@ -42,7 +43,7 @@ class StoryController extends Controller
         $hasViewer = !empty($userId);
 
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url', 'reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views']);
 
         if ($hasViewer) {
@@ -50,11 +51,7 @@ class StoryController extends Controller
                 'views as has_viewed' => function ($q) use ($userId) {
                     $q->where('user_id', $userId);
                 },
-            ])
-            ->with(['reactions' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-                $q->select('story_id', 'emoji');
-            }]);
+            ]);
         }
 
         if ($cursorState['created_at'] && $cursorState['id']) {
@@ -72,21 +69,8 @@ class StoryController extends Controller
             ->limit($limit)
             ->get();
 
-        $items = $stories->map(function ($story) use ($hasViewer) {
-            $storyData = $story->toArray();
-            if ($hasViewer) {
-                $attrs = $story->getAttributes();
-                $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                    ? (bool) $attrs['has_viewed']
-                    : false;
-                $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                    ? optional($story->reactions->first())->emoji
-                    : null;
-            } else {
-                $storyData['has_viewed'] = false;
-                $storyData['user_reaction'] = null;
-            }
-            return $storyData;
+        $items = $stories->map(function ($story) use ($hasViewer, $userId) {
+            return StoryResource::payload($story, $hasViewer, $hasViewer ? (string) $userId : null);
         })->values();
 
         $lastStory = $stories->last();
@@ -110,7 +94,7 @@ class StoryController extends Controller
         $userId = $request->get('userId');
         $hasViewer = !empty($userId);
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url', 'reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views']);
 
         if ($hasViewer) {
@@ -118,17 +102,13 @@ class StoryController extends Controller
                 'views as has_viewed' => function ($q) use ($userId) {
                     $q->where('user_id', $userId);
                 },
-            ])
-            ->with(['reactions' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-                $q->select('story_id', 'emoji');
-            }]);
+            ]);
         }
 
         $stories = $query->orderBy('created_at', 'desc')->get();
 
         // Group by user
-        $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer) {
+        $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer, $userId) {
             $user = $userStories->first()->user;
             // Newest first within each user (viewer opens on latest slide).
             $ordered = $userStories->sortByDesc('created_at')->values();
@@ -137,21 +117,8 @@ class StoryController extends Controller
                 'user_handle' => $user->handle,
                 'user_name' => $user->display_name,
                 'avatar_url' => $user->avatar_url,
-                'stories' => $ordered->map(function ($story) use ($hasViewer) {
-                    $storyData = $story->toArray();
-                    if ($hasViewer) {
-                        $attrs = $story->getAttributes();
-                        $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                            ? (bool) $attrs['has_viewed']
-                            : false;
-                        $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                            ? optional($story->reactions->first())->emoji
-                            : null;
-                    } else {
-                        $storyData['has_viewed'] = false;
-                        $storyData['user_reaction'] = null;
-                    }
-                    return $storyData;
+                'stories' => $ordered->map(function ($story) use ($hasViewer, $userId) {
+                    return StoryResource::payload($story, $hasViewer, $hasViewer ? (string) $userId : null);
                 }),
             ];
         })->values();
@@ -178,6 +145,7 @@ class StoryController extends Controller
 
         $query = Story::where('user_id', $user->id)
             ->active()
+            ->with(['reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
 
@@ -186,30 +154,13 @@ class StoryController extends Controller
                 'views as has_viewed' => function ($q) use ($userId) {
                     $q->where('user_id', $userId);
                 },
-            ])
-            ->with(['reactions' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-                $q->select('story_id', 'emoji');
-            }]);
+            ]);
         }
 
         $stories = $query->get();
 
-        $transformedStories = $stories->map(function ($story) use ($hasViewer) {
-            $storyData = $story->toArray();
-            if ($hasViewer) {
-                $attrs = $story->getAttributes();
-                $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                    ? (bool) $attrs['has_viewed']
-                    : false;
-                $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                    ? optional($story->reactions->first())->emoji
-                    : null;
-            } else {
-                $storyData['has_viewed'] = false;
-                $storyData['user_reaction'] = null;
-            }
-            return $storyData;
+        $transformedStories = $stories->map(function ($story) use ($hasViewer, $userId) {
+            return StoryResource::payload($story, $hasViewer, $hasViewer ? (string) $userId : null);
         });
 
         return response()->json($transformedStories);
@@ -336,7 +287,9 @@ class StoryController extends Controller
             'user_handle' => $story->user_handle,
         ]);
 
-        return response()->json($story, 201);
+        $story->loadCount(['reactions', 'replies', 'views']);
+
+        return response()->json(StoryResource::payload($story, false), 201);
     }
 
     /**
@@ -353,6 +306,10 @@ class StoryController extends Controller
         }
 
         $user = Auth::user();
+        if (!$user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
         $story = Story::findOrFail($id);
 
         if ($story->isExpired()) {
@@ -360,16 +317,21 @@ class StoryController extends Controller
         }
 
         DB::transaction(function () use ($user, $story) {
-            // Create view if not exists (unique constraint prevents duplicates)
-            StoryView::firstOrCreate([
+            $view = StoryView::firstOrCreate([
                 'story_id' => $story->id,
                 'user_id' => $user->id,
             ]);
 
-            $story->increment('views_count');
+            if ($view->wasRecentlyCreated) {
+                $story->increment('views_count');
+            }
         });
+        $story->refresh();
 
-        return response()->json(['success' => true]);
+        return response()->json(array_merge(
+            ['success' => true],
+            $this->storyInteractionMetrics($story)
+        ));
     }
 
     /**
@@ -414,7 +376,7 @@ class StoryController extends Controller
             }
         });
 
-        return response()->json($reaction, 201);
+        return response()->json(array_merge($reaction->toArray(), $this->storyInteractionMetrics($story)), 201);
     }
 
     /**
@@ -447,7 +409,36 @@ class StoryController extends Controller
             ]);
         });
 
-        return response()->json($reply, 201);
+        return response()->json(array_merge($reply->toArray(), $this->storyInteractionMetrics($story)), 201);
+    }
+
+    /**
+     * @return array{views_count: int, reactions_count: int, replies_count: int, reactions: array<int, array<string, mixed>>, replies: array<int, array<string, mixed>>}
+     */
+    private function storyInteractionMetrics(Story $story): array
+    {
+        $story->load(['reactions', 'replies']);
+        $story->loadCount(['reactions', 'replies', 'views']);
+
+        return [
+            'views_count' => (int) ($story->views_count ?? 0),
+            'reactions_count' => (int) ($story->reactions_count ?? 0),
+            'replies_count' => (int) ($story->replies_count ?? 0),
+            'reactions' => $story->reactions->map(fn ($reaction) => [
+                'id' => $reaction->id,
+                'user_id' => $reaction->user_id,
+                'user_handle' => $reaction->user_handle,
+                'emoji' => $reaction->emoji,
+                'created_at' => $reaction->created_at,
+            ])->values()->all(),
+            'replies' => $story->replies->map(fn ($reply) => [
+                'id' => $reply->id,
+                'user_id' => $reply->user_id,
+                'user_handle' => $reply->user_handle,
+                'text' => $reply->text,
+                'created_at' => $reply->created_at,
+            ])->values()->all(),
+        ];
     }
 
     private function decodeStoryCursor(?string $cursor): array

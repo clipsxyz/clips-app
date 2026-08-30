@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Image,
     Modal,
@@ -10,6 +10,7 @@ import {
     View,
     useWindowDimensions,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from './Avatar.native';
 import FeedPostMedia from './FeedPostMedia.native';
@@ -66,6 +67,10 @@ export default function ProfileGridPeekSheet({
     const previewWidth = Math.min(width - 32, 360);
     const previewMediaHeight = Math.min(width * 0.52, 420);
 
+    useEffect(() => {
+        setVideoMuted(true);
+    }, [post?.id]);
+
     const textStyle = useMemo(() => (post ? getEffectiveTextStyleForPost(post) : undefined), [post]);
 
     const actions: PeekAction[] = useMemo(
@@ -113,6 +118,7 @@ export default function ProfileGridPeekSheet({
 
     return (
         <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <Pressable style={styles.overlay} onPress={onClose}>
                 <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
                     <ScrollView bounces={false} showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
@@ -167,6 +173,7 @@ export default function ProfileGridPeekSheet({
                                                 mode="feed"
                                                 muted={videoMuted}
                                                 isActive
+                                                hideOverlayChrome
                                             />
                                         ) : (
                                             <Image
@@ -175,11 +182,19 @@ export default function ProfileGridPeekSheet({
                                                 resizeMode="contain"
                                             />
                                         )}
+                                        {caption ? (
+                                            <View style={styles.captionOverlay} pointerEvents="none">
+                                                <Text style={styles.captionText} numberOfLines={4}>
+                                                    {caption}
+                                                </Text>
+                                            </View>
+                                        ) : null}
                                         {isVideoPost(post) ? (
                                             <TouchableOpacity
                                                 style={styles.muteButton}
                                                 onPress={() => setVideoMuted((m) => !m)}
                                                 accessibilityLabel={videoMuted ? 'Unmute' : 'Mute'}
+                                                hitSlop={8}
                                             >
                                                 <Icon
                                                     name={videoMuted ? 'volume-mute' : 'volume-high'}
@@ -187,13 +202,6 @@ export default function ProfileGridPeekSheet({
                                                     color="#111827"
                                                 />
                                             </TouchableOpacity>
-                                        ) : null}
-                                        {caption ? (
-                                            <View style={styles.captionOverlay}>
-                                                <Text style={styles.captionText} numberOfLines={4}>
-                                                    {caption}
-                                                </Text>
-                                            </View>
                                         ) : null}
                                     </>
                                 ) : (
@@ -236,6 +244,7 @@ export default function ProfileGridPeekSheet({
                     </ScrollView>
                 </Pressable>
             </Pressable>
+            </GestureHandlerRootView>
         </Modal>
     );
 }
@@ -312,6 +321,8 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.95)',
         alignItems: 'center',
         justifyContent: 'center',
+        zIndex: 40,
+        elevation: 8,
     },
     captionOverlay: {
         position: 'absolute',

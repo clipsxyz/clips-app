@@ -104,9 +104,9 @@ export function isLaravelApiEnabled(): boolean {
     return true;
   }
   if (isReactNativeRuntime()) {
-    // Legacy default: stay on mock unless explicitly enabled above.
-    // Do not flip this to true — nativeFeedLoader uses it and an empty walk wipes Home.
-    return false;
+    // Live unless mock was opted in. Missing Metro env inlining used to return
+    // false here, so View Profile skipped Laravel while the feed still used it.
+    return true;
   }
   return true;
 }

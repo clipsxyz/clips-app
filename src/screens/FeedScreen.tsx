@@ -190,7 +190,7 @@ import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
-import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/Stories24FeedRail.native';
+import Stories24FeedShelf, { type Stories24FeedShelfHandle } from '../components/Stories24FeedShelf.native';
 import { getInboxUnreadPollMs, getStoriesRailPollMs } from '../utils/backgroundPollMs';
 import {
     buildStories24RailItems,
@@ -1451,6 +1451,7 @@ const FeedCard = React.memo(function FeedCard({
         a.userLiked === b.userLiked &&
         a.isBookmarked === b.isBookmarked &&
         a.isFollowing === b.isFollowing &&
+        a.authorFollowsYou === b.authorFollowsYou &&
         (a as { isFollowRequested?: boolean }).isFollowRequested ===
             (b as { isFollowRequested?: boolean }).isFollowRequested &&
         a.stats.likes === b.stats.likes &&
@@ -1666,7 +1667,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [dmSheetOpen, setDmSheetOpen] = useState(false);
     const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
     const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
-    const [dmSheetMessage, setDmSheetMessage] = useState('');
     const [feedDmDeliveryFx, setFeedDmDeliveryFx] = useState<FeedDmDeliveryFxState | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
     const [headerScopePicker, setHeaderScopePicker] = useState<LocationSuggestion | null>(null);
@@ -1714,7 +1714,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
     const [stories24CollapsePayload, setStories24CollapsePayload] =
         React.useState<Stories24RailReturnPayload | null>(null);
-    const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
+    const stories24RailRef = React.useRef<Stories24FeedShelfHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
     const pinFeedScrollSoon = useCallback((explicitY?: number | null) => {
@@ -3694,15 +3694,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, [flatForRender.length, stories24CollapsePayload]);
 
-    const scrollStories24RailIntoView = React.useCallback(async () => {
-        const idx = flatForRender.findIndex((row) => row.kind === 'stories24');
-        if (idx < 0) return;
-        await new Promise<void>((resolve) => {
-            flatListRef.current?.scrollToIndex({ index: idx, animated: false, viewPosition: 0.5 });
-            setTimeout(resolve, 80);
-        });
-    }, [flatForRender]);
-
     const videoPostsForScenes = React.useMemo(() => flat.filter(postHasVideoMedia), [flat]);
 
     const customLocationDisplay = customLocationLabel || customLocation;
@@ -3783,25 +3774,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const openDmSheet = useCallback((handle: string, postId: string) => {
         setDmSheetRecipientHandle(handle);
         setDmSheetAnchorPostId(postId);
-        setDmSheetMessage('');
         setDmSheetOpen(true);
     }, []);
 
-    const sendDmFromSheet = useCallback(() => {
-        const text = dmSheetMessage.trim();
-        if (!text || !user?.handle || !dmSheetRecipientHandle) return;
+    const sendDmFromSheet = useCallback((text: string) => {
+        const trimmed = String(text || '').trim();
+        if (!trimmed || !user?.handle || !dmSheetRecipientHandle) return;
         const recipient = dmSheetRecipientHandle;
         const anchorId = dmSheetAnchorPostId;
-        appendMessage(user.handle, recipient, { text, sourcePostId: anchorId ?? undefined })
+        appendMessage(user.handle, recipient, { text: trimmed, sourcePostId: anchorId ?? undefined })
             .then(() => {
-                setDmSheetMessage('');
                 setDmSheetOpen(false);
                 setDmSheetRecipientHandle(null);
                 setDmSheetAnchorPostId(null);
                 setTimeout(() => startFeedDmDeliveryFx(recipient, anchorId), 50);
             })
             .catch((err) => console.error('Send DM failed:', err));
-    }, [dmSheetMessage, user?.handle, dmSheetRecipientHandle, dmSheetAnchorPostId, startFeedDmDeliveryFx]);
+    }, [user?.handle, dmSheetRecipientHandle, dmSheetAnchorPostId, startFeedDmDeliveryFx]);
 
     const isVisitorInCustomLocation = useMemo(() => {
         if (!customLocation || !user) return false;
@@ -3916,14 +3905,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             if (item.kind === 'stories24') {
                 return wrapRow(
-                    <Stories24FeedRail
+                    <Stories24FeedShelf
                         key={item.railKey}
                         ref={stories24RailRef}
                         items={item.railItems}
-                        previewVideosPaused={false}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('InstantCreate', { openStoryPicker: true })}
-                        onScrollCardIntoView={scrollStories24RailIntoView}
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}
                     />,
@@ -4365,7 +4352,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             saveInterests,
             stories24Items,
             openStoryFromRail,
-            scrollStories24RailIntoView,
             stories24CollapsePayload,
             patchFollowForHandle,
             showFeedLikeBurst,
@@ -4938,13 +4924,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 <FeedDmSheet
                     open={dmSheetOpen}
                     recipientHandle={dmSheetRecipientHandle}
-                    message={dmSheetMessage}
-                    onChangeMessage={setDmSheetMessage}
                     onClose={() => {
                         setDmSheetOpen(false);
                         setDmSheetRecipientHandle(null);
                         setDmSheetAnchorPostId(null);
-                        setDmSheetMessage('');
                     }}
                     onSend={sendDmFromSheet}
                 />

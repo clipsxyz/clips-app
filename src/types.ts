@@ -124,6 +124,8 @@ export type Post = {
   originalPostId?: string;
   original_post_id?: string; // Backend field
   originalUserHandle?: string; // Original poster's handle (for reclipped posts)
+  /** Original author's avatar when this row is a reclip. */
+  originalUserAvatarUrl?: string;
   reclippedBy?: string;
   reclipped_by?: string; // Backend field
   is_reclipped?: boolean; // Backend field
@@ -223,6 +225,9 @@ export type Story = {
   location?: string;
   venue?: string; // Venue / place name (metadata carousel on story view)
   views: number;
+  views_count?: number;
+  reactions_count?: number;
+  replies_count?: number;
   viewerHandles?: string[]; // Distinct viewer handles for owner insights
   hasViewed: boolean;
   reactions: StoryReaction[];

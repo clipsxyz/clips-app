@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
@@ -17,9 +17,8 @@ import { useAuth } from '../context/Auth';
 import Avatar from './Avatar.native';
 import Flag from './Flag.native';
 import PlaceAutocompleteField from './PlaceAutocompleteField.native';
-import { fetchFollowers, mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
-import { getFollowedUsers } from '../api/posts';
-import { getAvatarForHandle } from '../api/users';
+import { fetchFollowers, fetchFollowing, mapLaravelUserToAppFields, updateAuthProfile, connectionListTotal, connectionItemsFromResponse, isAbortError } from '../api/client';
+import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { nextHandleAfterNameChange, normalizeHandle as handleKey } from '../utils/gazetteerHandle';
 import { renameUserHandleEverywhere } from '../api/posts';
@@ -36,6 +35,19 @@ import {
     profilePassportCardGap,
     profilePassportScrollInset,
 } from '../theme/gazetteerAmbientNative';
+
+function connectionHandlesFromResponse(res: any): string[] {
+    const list = connectionItemsFromResponse(res);
+    list.forEach((row: any) => {
+        const handle = String(row?.handle || row?.user_handle || row?.userHandle || '').trim();
+        const raw = String(row?.avatar_url || row?.avatarUrl || '').trim();
+        if (handle && raw) setAvatarForHandle(handle, raw);
+    });
+    return list
+        .map((row: any) => (typeof row === 'string' ? row : row?.handle ?? row?.user_handle ?? ''))
+        .map((handle: string) => String(handle || '').trim())
+        .filter(Boolean);
+}
 
 export type ProfileCardId =
     | 'name'
@@ -278,6 +290,7 @@ export default function ProfilePassportCards({
     const [loadingFollowers, setLoadingFollowers] = useState(false);
     const [loadingFollowing, setLoadingFollowing] = useState(false);
     const [saving, setSaving] = useState(false);
+    const unmountAbortRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         setDisplayName(user?.name || '');
@@ -361,37 +374,64 @@ export default function ProfilePassportCards({
         [login, user],
     );
 
-    const refreshFollowing = useCallback(async () => {
-        if (!user?.id) return;
-        const handles = await getFollowedUsers(String(user.id));
-        setFollowingList(handles);
-        setFollowingCount(handles.length);
-    }, [user?.id]);
-
-    const refreshFollowers = useCallback(async () => {
+    const refreshFollowing = useCallback(async (signal?: AbortSignal) => {
         if (!user?.handle || !isLaravelApiEnabled()) {
-            setFollowersCount(0);
+            setFollowingCount(Number(user?.following_count ?? 0) || 0);
+            setFollowingList([]);
+            return;
+        }
+        try {
+            const res: any = await fetchFollowing(user.handle, 0, 200, signal);
+            if (signal?.aborted) return;
+            const handles = connectionHandlesFromResponse(res);
+            setFollowingList(handles);
+            setFollowingCount(Math.max(handles.length, connectionListTotal(res)));
+        } catch (error) {
+            if (isAbortError(error) || signal?.aborted) return;
+            setFollowingCount(Number(user?.following_count ?? 0) || 0);
+            setFollowingList([]);
+        }
+    }, [user?.handle, user?.following_count]);
+
+    const refreshFollowers = useCallback(async (signal?: AbortSignal) => {
+        if (!user?.handle || !isLaravelApiEnabled()) {
+            setFollowersCount(Number(user?.followers_count ?? 0) || 0);
             setFollowersList([]);
             return;
         }
         try {
-            const res: any = await fetchFollowers(user.handle, 0, 200);
-            const list = Array.isArray(res?.data) ? res.data : res?.followers ?? [];
-            const handles = list
-                .map((u: any) => u?.handle ?? u?.user_handle ?? String(u))
-                .filter(Boolean);
+            const res: any = await fetchFollowers(user.handle, 0, 200, signal);
+            if (signal?.aborted) return;
+            const handles = connectionHandlesFromResponse(res);
             setFollowersList(handles);
-            setFollowersCount(handles.length);
-        } catch {
-            setFollowersCount(0);
+            setFollowersCount(Math.max(handles.length, connectionListTotal(res)));
+        } catch (error) {
+            if (isAbortError(error) || signal?.aborted) return;
+            setFollowersCount(Number(user?.followers_count ?? 0) || 0);
             setFollowersList([]);
         }
-    }, [user?.handle]);
+    }, [user?.handle, user?.followers_count]);
 
     useEffect(() => {
-        setFollowersCount(user?.followers_count ?? 0);
-        setFollowingCount(user?.following_count ?? 0);
+        if (typeof user?.followers_count === 'number' && user.followers_count > 0) {
+            setFollowersCount((prev) => Math.max(prev, user.followers_count));
+        }
+        if (typeof user?.following_count === 'number' && user.following_count > 0) {
+            setFollowingCount((prev) => Math.max(prev, user.following_count));
+        }
     }, [user?.followers_count, user?.following_count]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        unmountAbortRef.current = controller;
+        return () => controller.abort();
+    }, []);
+
+    useEffect(() => {
+        const signal = unmountAbortRef.current?.signal;
+        void refreshFollowers(signal);
+        void refreshFollowing(signal);
+    }, [refreshFollowers, refreshFollowing]);
 
     useEffect(() => {
         if (selectedCard !== 'location') return;
@@ -429,13 +469,14 @@ export default function ProfilePassportCards({
     }, [regional, national, selectedCard, user?.regional]);
 
     useEffect(() => {
+        const signal = unmountAbortRef.current?.signal;
         if (selectedCard === 'following') {
             setLoadingFollowing(true);
-            void refreshFollowing().finally(() => setLoadingFollowing(false));
+            void refreshFollowing(signal).finally(() => setLoadingFollowing(false));
         }
         if (selectedCard === 'followers') {
             setLoadingFollowers(true);
-            void refreshFollowers().finally(() => setLoadingFollowers(false));
+            void refreshFollowers(signal).finally(() => setLoadingFollowers(false));
         }
     }, [selectedCard, refreshFollowers, refreshFollowing]);
 
@@ -453,7 +494,7 @@ export default function ProfilePassportCards({
 
     const openProfile = (handle: string) => {
         setSelectedCard(null);
-        navigation.navigate('ViewProfile', { handle: normalizeHandle(handle) });
+        navigation.navigate('ViewProfile', { handle: String(handle || '').replace(/^@/, '').trim() });
     };
 
     const cardTitle = (id: ProfileCardId) => {
@@ -640,7 +681,7 @@ export default function ProfilePassportCards({
             ) : (
                 followersList.map((handle) => (
                     <TouchableOpacity key={handle} style={styles.personRow} onPress={() => openProfile(handle)}>
-                        <Avatar src={getAvatarForHandle(handle)} name={handle} size={36} />
+                        <Avatar src={getAvatarForHandle(handle)} name={handle} handle={handle} size={36} />
                         <Text style={styles.personHandle}>{handle}</Text>
                     </TouchableOpacity>
                 ))
@@ -655,7 +696,7 @@ export default function ProfilePassportCards({
             ) : (
                 followingList.map((handle) => (
                     <TouchableOpacity key={handle} style={styles.personRow} onPress={() => openProfile(handle)}>
-                        <Avatar src={getAvatarForHandle(handle)} name={handle} size={36} />
+                        <Avatar src={getAvatarForHandle(handle)} name={handle} handle={handle} size={36} />
                         <Text style={styles.personHandle}>{handle}</Text>
                     </TouchableOpacity>
                 ))

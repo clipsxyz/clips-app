@@ -13,7 +13,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerAlertSheet from './GazetteerAlertSheet.native';
 import { useAuth } from '../context/Auth';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
-import { uploadFileFromUri } from '../utils/uploadFileNative';
+import { persistLocalAvatarToLaravel } from '../utils/syncHostedAvatar';
 import { updateAuthProfile } from '../api/client';
 import { setAvatarForHandle } from '../api/users';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
@@ -88,18 +88,9 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
             let nextAvatarUrl = '';
 
             if (isLaravelApiEnabled()) {
-                try {
-                    const upload = await uploadFileFromUri(
-                        uri,
-                        mimeType || 'image/jpeg',
-                        fileName || 'profile-avatar.jpg',
-                    );
-                    nextAvatarUrl = upload.fileUrl || upload.url || '';
-                    if (nextAvatarUrl) {
-                        await updateAuthProfile({ avatar_url: nextAvatarUrl });
-                    }
-                } catch {
-                    // Fall through to local URI / data URL.
+                const hosted = await persistLocalAvatarToLaravel(user.handle, uri);
+                if (hosted) {
+                    nextAvatarUrl = hosted;
                 }
             }
 

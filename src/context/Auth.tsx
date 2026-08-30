@@ -13,8 +13,11 @@ import {
   getAuthTokenAsync,
   hydrateAuthTokenFromStorage,
 } from '../utils/authTokenBridge';
+import { isLocalDeviceUri } from '../utils/syncHostedAvatar';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
+const AVATAR_HANDLE_KEY = (handle: string) =>
+  `clips_app_avatar_handle_${String(handle || '').trim().toLowerCase()}`;
 const USER_STORAGE_KEY = 'user';
 
 function displayNameFromAuthPayload(userData: any): string {
@@ -85,6 +88,28 @@ async function persistUserToNativeStorage(userJson: string | null): Promise<void
   }
 }
 
+async function readStoredAvatar(userId: string, handle?: string): Promise<string | undefined> {
+  try {
+    const byId = await db.get<string>(AVATAR_KEY(userId));
+    const idRaw = typeof byId === 'string' ? byId.trim() : '';
+    if (idRaw) return idRaw;
+    const handleKey = handle ? AVATAR_HANDLE_KEY(handle) : '';
+    if (!handleKey || handleKey.endsWith('_')) return undefined;
+    const byHandle = await db.get<string>(handleKey);
+    const handleRaw = typeof byHandle === 'string' ? byHandle.trim() : '';
+    return handleRaw || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistAvatarBackup(userId: string, handle: string | undefined, url: string): void {
+  const trimmed = String(url || '').trim();
+  if (!trimmed || !userId) return;
+  db.set(AVATAR_KEY(userId), trimmed).catch(() => {});
+  if (handle) db.set(AVATAR_HANDLE_KEY(handle), trimmed).catch(() => {});
+}
+
 function setSentryUser(user: { id: string; username?: string } | null) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -107,6 +132,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
   const [sessionReady, setSessionReady] = React.useState(false);
   const authRefreshGenRef = React.useRef(0);
+
+  const hydrateAndSyncAvatar = React.useCallback(
+    (userId: string, handle: string | undefined, currentAvatar: string | undefined) => {
+      const gen = authRefreshGenRef.current;
+      const apply = (url: string) => {
+        if (authRefreshGenRef.current !== gen) return;
+        if (handle) setAvatarForHandle(handle, url);
+        setUser((prev) => (prev && prev.id === userId ? { ...prev, avatarUrl: url } : prev));
+      };
+
+      void (async () => {
+        let avatar = String(currentAvatar || '').trim() || undefined;
+        if (!avatar) {
+          avatar = await readStoredAvatar(userId, handle);
+        }
+        if (!avatar) return;
+        apply(avatar);
+        persistAvatarBackup(userId, handle, avatar);
+        if (!handle) return;
+        try {
+          const { persistLocalAvatarToLaravel } = await import('../utils/syncHostedAvatar');
+          const hosted = await persistLocalAvatarToLaravel(handle, avatar);
+          if (!hosted || hosted === avatar) return;
+          apply(hosted);
+          persistAvatarBackup(userId, handle, hosted);
+        } catch {
+          /* keep restored local avatar even if Laravel upload fails */
+        }
+      })();
+    },
+    [],
+  );
 
   React.useEffect(() => {
     void hydrateAuthTokenFromStorage();
@@ -331,30 +388,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               void register?.();
             });
           }
-          // Restore profile pic from IndexedDB (survives refresh on phone)
-          if (!userToSet.avatarUrl) {
-            db.get(AVATAR_KEY(userToSet.id))
-              .then((avatarUrl: string | undefined) => {
-                if (avatarUrl) {
-                  setUser((prev) => (prev && prev.id === userToSet.id ? { ...prev, avatarUrl } : prev));
-                }
-              })
-              .catch(() => {});
-          }
+          // Restore a device-only avatar, then host it on Laravel so logout/login keeps it.
+          hydrateAndSyncAvatar(userToSet.id, userToSet.handle, userToSet.avatarUrl);
           // Initialize mock private user for testing (Sarah@Artane)
           initializePrivateMockUser();
           return;
         }
-        // For converted (old-format) user: restore profile pic from IndexedDB if missing
-        if (!userToSet.avatarUrl) {
-          db.get(AVATAR_KEY(userToSet.id))
-            .then((avatarUrl: string | undefined) => {
-              if (avatarUrl) {
-                setUser((prev) => (prev && prev.id === userToSet.id ? { ...prev, avatarUrl } : prev));
-              }
-            })
-            .catch(() => {});
-        }
+        hydrateAndSyncAvatar(userToSet.id, userToSet.handle, userToSet.avatarUrl);
       } catch (error) {
         console.error('Error loading user from localStorage:', error);
       }
@@ -382,11 +422,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ? 'personal'
           : undefined;
     const name = displayNameFromAuthPayload(userData);
+    const nextId =
+      userData.id != null && String(userData.id).trim() !== ''
+        ? String(userData.id)
+        : name.toLowerCase() || 'me';
+    const sameUser = user != null && String(user.id) === nextId;
     const u: User = {
-      id:
-        userData.id != null && String(userData.id).trim() !== ''
-          ? String(userData.id)
-          : name.toLowerCase() || 'me',
+      id: nextId,
       name,
       email: userData.email || '',
       password: userData.password || '',
@@ -398,7 +440,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       handle: userData.handle || `${name.split(/\s+/)[0] || name || 'User'}@Unknown`,
       countryFlag:
         normalizeCountryFlagInput(userData.countryFlag || '', userData.national || '') || undefined,
-      avatarUrl: userData.avatarUrl || undefined,
+      avatarUrl: userData.avatarUrl || (sameUser ? user?.avatarUrl : undefined) || undefined,
       profileBackgroundUrl: userData.profileBackgroundUrl || undefined,
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
@@ -418,21 +460,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const loginGen = authRefreshGenRef.current;
     clearUserState(u.id);
     setUser(u);
-    if (u.handle && u.avatarUrl) {
-      setAvatarForHandle(u.handle, u.avatarUrl);
-      void import('../utils/syncHostedAvatar').then(({ persistLocalAvatarToLaravel }) =>
-        persistLocalAvatarToLaravel(u.handle, u.avatarUrl).then((hosted) => {
-          if (!hosted || hosted === u.avatarUrl) return;
-          setUser((prev) => (prev && prev.id === u.id ? { ...prev, avatarUrl: hosted } : prev));
-          setAvatarForHandle(u.handle, hosted);
-        }),
-      );
-    }
-    // Persist large base64 avatar in IndexedDB (survives refresh); strip from localStorage to avoid quota exceeded
+    hydrateAndSyncAvatar(u.id, u.handle, u.avatarUrl);
     const toStore = { ...u };
-    if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
-      db.set(AVATAR_KEY(u.id), toStore.avatarUrl).catch(() => {});
-      toStore.avatarUrl = undefined;
+    if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 0) {
+      persistAvatarBackup(u.id, u.handle, toStore.avatarUrl);
+      if (toStore.avatarUrl.length > 2000 || isLocalDeviceUri(toStore.avatarUrl)) {
+        toStore.avatarUrl = undefined;
+      }
     }
     localStorage.setItem('user', JSON.stringify(toStore));
 

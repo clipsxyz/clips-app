@@ -26,6 +26,7 @@ class PostController extends Controller
 {
     /** Author fields the feed needs so Ireland/Dublin tabs can match Cork (etc.) from user location, not handle guessing. */
     private const FEED_USER_WITH = 'user:id,handle,display_name,avatar_url,location_local,location_regional,location_national';
+    private const FEED_ORIGINAL_USER_WITH = 'originalUser:id,handle,avatar_url';
 
     private function buildPublicShareUrl(string $token): string
     {
@@ -148,6 +149,16 @@ class PostController extends Controller
             ];
         }
 
+        if ($post->is_reclipped && $post->relationLoaded('originalUser') && $post->originalUser) {
+            $original = $post->originalUser;
+            $postData['original_user'] = [
+                'id' => $original->id,
+                'handle' => $original->handle,
+                'avatar_url' => $original->avatar_url,
+            ];
+            $postData['original_user_avatar_url'] = $original->avatar_url;
+        }
+
         return $postData;
     }
 
@@ -221,7 +232,7 @@ class PostController extends Controller
             // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
             // Location feeds: only original posts from that location.
             $query = Post::query()
-                ->with([self::FEED_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
+                ->with([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
                 ->withCount(Post::engagementWithCounts());
 
             if ($isFollowingFeed) {
@@ -360,7 +371,7 @@ class PostController extends Controller
         $userId = $request->get('userId');
         $hasViewer = !empty($userId);
         
-        $query = Post::with([self::FEED_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
+        $query = Post::with([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
@@ -400,7 +411,7 @@ class PostController extends Controller
         }
 
         $post = Post::query()
-            ->with([self::FEED_USER_WITH])
+            ->with([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH])
             ->withCount(Post::engagementWithCounts())
             ->where('public_share_token', $token)
             ->first();
@@ -980,7 +991,7 @@ class PostController extends Controller
             BoostAnalyticsService::incrementForPost($post->id, 'shares_count');
         });
 
-        $post->load([self::FEED_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url']);
+        $post->load([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url']);
         $post->loadCount(Post::engagementWithCounts());
         Post::bumpFeedCache();
         $postData = self::toApiArray($post, $user instanceof User ? $user : null);

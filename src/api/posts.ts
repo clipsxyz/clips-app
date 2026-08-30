@@ -18,6 +18,7 @@ import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
 import { setAvatarForHandle } from './users';
+import { isMockDirectoryHandle } from './mockFollowGraph';
 import { regionalFromHandle } from '../utils/gazetteerHandle';
 import {
   createFollowRequest,
@@ -342,11 +343,7 @@ export async function clearLocalFeedPostsStorage(): Promise<void> {
   }
   if (!isMockMode()) {
     posts = posts.filter(
-      (p) =>
-        !isMockPostId(p.id) &&
-        !['sarah@artane', 'bob@ireland', 'ava@galway', 'alice@cork'].includes(
-          String(p.userHandle || '').toLowerCase(),
-        ),
+      (p) => !isMockPostId(p.id) && !isMockDirectoryHandle(p.userHandle),
     );
   }
 }
@@ -541,11 +538,7 @@ if (!postsInitialized) {
   // Live mode: never seed Sarah/Bob/Ava/json demos into memory (they leak into feeds).
   if (!isMockMode()) {
     posts = [...userCreatedPosts].filter(
-      (p) =>
-        !isMockPostId(p.id) &&
-        !['sarah@artane', 'bob@ireland', 'ava@galway', 'alice@cork'].includes(
-          String(p.userHandle || '').toLowerCase(),
-        ),
+      (p) => !isMockPostId(p.id) && !isMockDirectoryHandle(p.userHandle),
     );
     postsInitialized = true;
     console.log('[posts] live mode — skipped mock seed posts, kept', posts.length, 'local posts');
@@ -1586,6 +1579,20 @@ export function transformLaravelPost(response: any): Post {
       response.originalPost?.userHandle ||
       existing?.originalUserHandle
     : undefined;
+  const rawOriginalAvatar =
+    response.original_user?.avatar_url ||
+    response.original_user?.avatarUrl ||
+    response.original_user_avatar_url ||
+    response.originalUserAvatarUrl ||
+    response.original_post?.user?.avatar_url ||
+    existing?.originalUserAvatarUrl;
+  const originalUserAvatarUrl =
+    isReclipped && typeof rawOriginalAvatar === 'string' && rawOriginalAvatar.trim()
+      ? rewriteMediaUrlForNetwork(rawOriginalAvatar.trim())
+      : undefined;
+  if (originalUserHandle && originalUserAvatarUrl) {
+    setAvatarForHandle(originalUserHandle, originalUserAvatarUrl);
+  }
 
   return {
     id: response.id,
@@ -1594,6 +1601,7 @@ export function transformLaravelPost(response: any): Post {
     userHandle: authorHandle || response.user_handle || response.userHandle,
     isReclipped,
     originalUserHandle,
+    originalUserAvatarUrl,
     originalPostId: isReclipped
       ? response.original_post_id || response.originalPostId || existing?.originalPostId
       : undefined,
@@ -3439,6 +3447,7 @@ export async function fetchPostsByUser(
         viewerId: viewerUserId,
         postsLimit: limit,
         tab: tab || 'all',
+        timeoutMs: 15_000,
       });
       const transformed = mapLaravelProfilePosts(payload?.posts);
       console.log('[fetchPostsByUser] live ok', {
@@ -3479,6 +3488,9 @@ export async function fetchPostsByUser(
         });
       });
     } catch (error: any) {
+      if (error?.name === 'AbortError' || error?.message === 'Aborted') {
+        return [];
+      }
       console.error('[fetchPostsByUser] live error', {
         name: error?.name,
         message: error?.message,

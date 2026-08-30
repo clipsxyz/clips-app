@@ -141,12 +141,28 @@ class StoryControllerTest extends TestCase
             ->postJson("/api/stories/{$story->id}/view");
 
         $response->assertStatus(200)
-            ->assertJson(['success' => true]);
+            ->assertJson([
+                'success' => true,
+                'views_count' => 1,
+                'reactions_count' => 0,
+                'replies_count' => 0,
+            ]);
 
         $this->assertDatabaseHas('story_views', [
             'story_id' => $story->id,
             'user_id' => $viewer->id,
         ]);
+        $this->assertSame(1, $story->fresh()->views_count);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/view")
+            ->assertStatus(200)
+            ->assertJsonPath('views_count', 1);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/view")
+            ->assertStatus(200)
+            ->assertJsonPath('views_count', 2);
     }
 
     public function test_cannot_view_expired_story(): void
@@ -183,7 +199,18 @@ class StoryControllerTest extends TestCase
             ->assertJsonFragment([
                 'story_id' => $story->id,
                 'user_id' => $viewer->id,
-            ]);
+            ])
+            ->assertJsonPath('reactions_count', 1)
+            ->assertJsonPath('replies_count', 0);
+
+        $list = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stories?userId='.$user->id);
+
+        $list->assertStatus(200);
+        $row = collect($list->json())->flatMap(fn ($group) => collect($group['stories']))->firstWhere('id', $story->id);
+        $this->assertNotNull($row);
+        $this->assertSame(1, $row['reactions_count']);
+        $this->assertCount(1, $row['reactions']);
     }
 
     public function test_can_add_reply_to_story(): void
@@ -204,7 +231,18 @@ class StoryControllerTest extends TestCase
             ->assertJsonFragment([
                 'story_id' => $story->id,
                 'user_id' => $viewer->id,
-            ]);
+            ])
+            ->assertJsonPath('replies_count', 1)
+            ->assertJsonPath('reactions_count', 0);
+
+        $list = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stories?userId='.$user->id);
+
+        $list->assertStatus(200);
+        $row = collect($list->json())->flatMap(fn ($group) => collect($group['stories']))->firstWhere('id', $story->id);
+        $this->assertNotNull($row);
+        $this->assertSame(1, $row['replies_count']);
+        $this->assertCount(1, $row['replies']);
     }
 
     public function test_can_list_own_active_stories_by_handle(): void
@@ -258,6 +296,12 @@ class StoryControllerTest extends TestCase
         $allTexts = collect($payload)->flatMap(fn ($group) => collect($group['stories'])->pluck('text'))->all();
         $this->assertContains('Stay on the rail', $allTexts);
         $this->assertNotContains('Too old', $allTexts);
+
+        $firstStory = $payload[0]['stories'][0] ?? null;
+        $this->assertIsArray($firstStory);
+        $this->assertArrayHasKey('views_count', $firstStory);
+        $this->assertArrayHasKey('reactions_count', $firstStory);
+        $this->assertArrayHasKey('replies_count', $firstStory);
     }
 }
 

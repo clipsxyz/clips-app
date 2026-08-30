@@ -21,6 +21,8 @@ export const ENDPOINT_AUTH_EXPECTATIONS: EndpointAuthExpectation[] = [
     { method: 'POST', path: '/auth/register', auth: 'public', area: 'profile' },
     { method: 'POST', path: '/auth/login', auth: 'public', area: 'profile' },
     { method: 'GET', path: '/auth/me', auth: 'auth', area: 'profile' },
+    { method: 'GET', path: '/users/{handle}', auth: 'public', area: 'profile' },
+    { method: 'GET', path: '/users/{handle}/posts', auth: 'public', area: 'profile' },
     { method: 'PUT', path: '/auth/profile', auth: 'auth', area: 'profile' },
 
     { method: 'GET', path: '/posts', auth: 'public', area: 'feed' },
@@ -41,6 +43,7 @@ export const ENDPOINT_AUTH_EXPECTATIONS: EndpointAuthExpectation[] = [
     { method: 'GET', path: '/stories/paged', auth: 'auth', area: 'stories' },
     { method: 'POST', path: '/stories', auth: 'auth', area: 'stories' },
     { method: 'GET', path: '/collections', auth: 'auth', area: 'collections' },
+    { method: 'GET', path: '/me/collections', auth: 'auth', area: 'collections' },
     { method: 'POST', path: '/collections', auth: 'auth', area: 'collections' },
 
     { method: 'POST', path: '/boost/estimate', auth: 'public', area: 'boost' },

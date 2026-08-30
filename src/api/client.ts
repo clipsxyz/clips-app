@@ -1,8 +1,31 @@
 /// <reference types="vite/client" />
 import { clearLaravelUnreachable, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
-import { getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
+import { getAuthTokenAsync, getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { isMockMode } from './apiMode';
+
+/** Must stay ≥ 10s so local Metro/Laravel profile GETs are not aborted early. */
+const LARAVEL_USERS_GET_TIMEOUT_MS = 12_000;
+
+export function isAbortError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const name = String((error as { name?: string }).name || '');
+    const message = String((error as { message?: string }).message || '');
+    return name === 'AbortError' || name === 'TimeoutError' || message === 'Aborted';
+}
+
+export function isTooManyRequestsError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const status = Number((error as { status?: number }).status);
+    const message = String((error as { message?: string }).message || '');
+    return status === 429 || /too many attempts/i.test(message);
+}
+
+function throwAbortError(): never {
+    const abortError = new Error('Aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+}
 
 function throwMockConnectionRefused(): never {
     // Mock mode / allowlist miss is not a downed server. Never poison the session
@@ -29,6 +52,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/search/places/summary',
     '/notifications/fcm-token',
     '/collections',
+    '/me/collections',
     '/chat-groups',
     '/messages/send',
     '/messages/conversations',
@@ -47,6 +71,7 @@ const LIVE_API_PATH_PREFIXES = [
     '/users/',
     '/comments/',
     '/auth/',
+    '/me/',
     '/messages/',
     '/notifications/',
     '/chat-groups/',
@@ -70,19 +95,28 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         throwMockConnectionRefused();
     }
 
-    const authHeader = await getAuthorizationHeader();
+    const token = (await getAuthTokenAsync())?.trim() || '';
     const { timeoutMs = 8000, ...fetchOptions } = options;
     const API_BASE_URL = getApiBaseUrl();
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+    const extraHeaders = fetchOptions.headers;
+    const extraHeaderObj =
+        extraHeaders instanceof Headers
+            ? Object.fromEntries(extraHeaders.entries())
+            : extraHeaders && !Array.isArray(extraHeaders)
+              ? (extraHeaders as Record<string, string>)
+              : {};
+
     const config: RequestInit = {
         ...fetchOptions,
         headers: {
+            Accept: 'application/json',
             'Content-Type': 'application/json',
-            ...authHeader,
-            ...fetchOptions.headers,
+            ...extraHeaderObj,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         signal: controller.signal,
     };
@@ -643,6 +677,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         rawAccountType === 'business' || rawAccountType === 'personal'
             ? rawAccountType
             : (apiUser.is_business === true ? 'business' : undefined);
+    const rawAvatar = String(apiUser.avatar_url ?? apiUser.avatarUrl ?? '').trim();
     return {
         id: apiUser.id != null ? String(apiUser.id) : undefined,
         name: (apiUser.display_name ?? apiUser.name) as string | undefined,
@@ -653,10 +688,9 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         handle: apiUser.handle as string | undefined,
         bio: apiUser.bio as string | undefined,
         placesTraveled: Array.isArray(pt) ? (pt as string[]).filter((s) => typeof s === 'string') : undefined,
-        avatarUrl: (() => {
-            const raw = (apiUser.avatar_url ?? apiUser.avatarUrl) as string | undefined;
-            return raw ? resolvePublicMediaUrl(raw) || raw : undefined;
-        })(),
+        ...(rawAvatar
+            ? { avatarUrl: resolvePublicMediaUrl(rawAvatar) || rawAvatar }
+            : {}),
         profileBackgroundUrl: (apiUser.profile_background_url ?? apiUser.profileBackgroundUrl) as string | undefined,
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
         is_private: apiUser.is_private as boolean | undefined,
@@ -664,6 +698,8 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         is_verified: apiUser.is_verified as boolean | undefined,
         facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
+        followers_count: Number(apiUser.followers_count ?? apiUser.followersCount ?? 0) || 0,
+        following_count: Number(apiUser.following_count ?? apiUser.followingCount ?? 0) || 0,
     };
 }
 
@@ -1241,7 +1277,10 @@ function isProfileUuid(value: string): boolean {
     );
 }
 
-async function laravelUsersGet(pathAndQuery: string): Promise<any> {
+async function laravelUsersGet(
+    pathAndQuery: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<any> {
     if (isMockMode()) {
         console.log('[laravelUsersGet] IS_MOCK=true → skip Laravel', pathAndQuery);
         throwMockConnectionRefused();
@@ -1249,23 +1288,33 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
 
     const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
     const url = `${API_BASE_URL}${pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`}`;
-    const authHeader = await getAuthorizationHeader();
-    console.log('[laravelUsersGet] GET', url, { hasAuth: Boolean(authHeader.Authorization) });
+    const token = (await getAuthTokenAsync())?.trim() || '';
+    const headers: Record<string, string> = {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+    };
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    console.log('[laravelUsersGet] GET', url, { hasAuth: Boolean(token) });
 
+    const timeoutMs = Math.max(10_000, options?.timeoutMs ?? LARAVEL_USERS_GET_TIMEOUT_MS);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const external = options?.signal;
+    const onExternalAbort = () => controller.abort();
+    if (external?.aborted) {
+        clearTimeout(timeoutId);
+        throwAbortError();
+    }
+    external?.addEventListener('abort', onExternalAbort);
 
     try {
         const response = await fetch(url, {
             method: 'GET',
-            headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-                ...authHeader,
-            },
+            headers,
             signal: controller.signal,
         });
-        clearTimeout(timeoutId);
         const text = await response.text();
         let payload: any = null;
         try {
@@ -1287,11 +1336,20 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
             const error = new Error(errorMessage);
             (error as any).status = response.status;
             (error as any).response = payload;
+            if (response.status === 429) {
+                const retryAfter = Number(response.headers.get('Retry-After'));
+                (error as any).retryAfterMs =
+                    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000;
+            }
             throw error;
         }
         return payload;
     } catch (error: any) {
-        clearTimeout(timeoutId);
+        if (isAbortError(error) || controller.signal.aborted || external?.aborted) {
+            console.debug('[laravelUsersGet] aborted', { url });
+            if (isAbortError(error)) throw error;
+            throwAbortError();
+        }
         console.error('[laravelUsersGet] fetch error', {
             url,
             name: error?.name,
@@ -1299,9 +1357,6 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
             status: error?.status,
         });
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
-            throw error;
-        }
-        if (error?.name === 'AbortError') {
             throw error;
         }
         const isConnectionError =
@@ -1316,6 +1371,9 @@ async function laravelUsersGet(pathAndQuery: string): Promise<any> {
             throw connectionError;
         }
         throw error;
+    } finally {
+        clearTimeout(timeoutId);
+        external?.removeEventListener('abort', onExternalAbort);
     }
 }
 
@@ -1327,6 +1385,7 @@ export async function fetchUserProfile(
     postsLimit?: number,
     sourcePostId?: string,
     tab: string = 'all',
+    signal?: AbortSignal,
 ) {
     const params = new URLSearchParams();
     if (userId) params.append('userId', userId);
@@ -1340,7 +1399,7 @@ export async function fetchUserProfile(
     }
     const encoded = encodeUserIdentifier(handle);
     const qs = params.toString();
-    const payload = await laravelUsersGet(`/users/${encoded}${qs ? `?${qs}` : ''}`);
+    const payload = await laravelUsersGet(`/users/${encoded}${qs ? `?${qs}` : ''}`, { signal });
     console.log('[fetchUserProfile/client] ok', {
         handle: payload?.handle,
         posts_count: payload?.posts_count ?? payload?.postsCount,
@@ -1356,6 +1415,8 @@ export async function fetchUserPosts(
         postsCursor?: string | number | null;
         postsLimit?: number;
         tab?: string;
+        signal?: AbortSignal;
+        timeoutMs?: number;
     } = {},
 ) {
     const params = new URLSearchParams();
@@ -1367,7 +1428,10 @@ export async function fetchUserPosts(
     params.append('tab', options.tab || 'all');
     const encoded = encodeUserIdentifier(identifier);
     const qs = params.toString();
-    const payload = await laravelUsersGet(`/users/${encoded}/posts${qs ? `?${qs}` : ''}`);
+    const payload = await laravelUsersGet(`/users/${encoded}/posts${qs ? `?${qs}` : ''}`, {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+    });
     console.log('[fetchUserPosts/client] ok', {
         identifier,
         posts_count: payload?.posts_count ?? payload?.postsCount,
@@ -1385,22 +1449,150 @@ export async function toggleFollow(handle: string, following?: boolean) {
     });
 }
 
-export async function fetchFollowers(handle: string, cursor: number | string | null = 0, limit: number = 20) {
+export async function fetchFollowers(
+    handle: string,
+    cursor: number | string | null = 0,
+    limit: number = 20,
+    signal?: AbortSignal,
+) {
     const params = new URLSearchParams({
         cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
     const encoded = encodeUserIdentifier(handle);
-    return apiRequest(`/users/${encoded}/followers?${params}`);
+    return laravelUsersGet(`/users/${encoded}/followers?${params}`, { signal });
 }
 
-export async function fetchFollowing(handle: string, cursor: number | string | null = 0, limit: number = 20) {
+export async function fetchFollowing(
+    handle: string,
+    cursor: number | string | null = 0,
+    limit: number = 20,
+    signal?: AbortSignal,
+) {
     const params = new URLSearchParams({
         cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
     const encoded = encodeUserIdentifier(handle);
-    return apiRequest(`/users/${encoded}/following?${params}`);
+    return laravelUsersGet(`/users/${encoded}/following?${params}`, { signal });
+}
+
+/** Live follow totals from /followers or /following. Prefer `total` when > 0. */
+export function connectionListTotal(res: any): number {
+    const body =
+        res && (res.items != null || res.total != null || res.followers != null || res.following != null)
+            ? res
+            : res?.data ?? res;
+    const list = Array.isArray(body?.items)
+        ? body.items
+        : Array.isArray(body?.data)
+          ? body.data
+          : Array.isArray(body?.followers)
+            ? body.followers
+            : Array.isArray(body?.following)
+              ? body.following
+              : Array.isArray(body)
+                ? body
+                : [];
+    const total = Number(body?.total);
+    if (Number.isFinite(total) && total > 0) return total;
+    if (list.length > 0) return list.length;
+    if (Number.isFinite(total) && total >= 0) return total;
+    return 0;
+}
+
+export function connectionItemsFromResponse(res: any): any[] {
+    const body =
+        res && (res.items != null || res.followers != null || res.following != null)
+            ? res
+            : res?.data ?? res;
+    if (Array.isArray(body?.items)) return body.items;
+    if (Array.isArray(body?.data)) return body.data;
+    if (Array.isArray(body?.followers)) return body.followers;
+    if (Array.isArray(body?.following)) return body.following;
+    if (Array.isArray(body)) return body;
+    return [];
+}
+
+export function profileAudienceFromPayload(payload: any): {
+    followers?: number;
+    following?: number;
+    avatar_url?: string;
+} {
+    const body =
+        payload && (payload.handle != null || payload.id != null || payload.followers_count != null)
+            ? payload
+            : payload?.data ?? payload;
+    const stats = body?.stats && typeof body.stats === 'object' ? body.stats : {};
+    const asCount = (value: unknown): number | undefined => {
+        if (typeof value === 'boolean' || Array.isArray(value) || value == null || value === '') {
+            return undefined;
+        }
+        const n = Number(value);
+        return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
+    return {
+        followers:
+            asCount(body?.followers_count) ??
+            asCount(body?.followersCount) ??
+            asCount(stats.followers) ??
+            asCount(stats.followers_count),
+        following:
+            asCount(body?.following_count) ??
+            asCount(body?.followingCount) ??
+            asCount(stats.following) ??
+            asCount(stats.following_count),
+        avatar_url: (() => {
+            const raw = String(body?.avatar_url ?? body?.avatarUrl ?? '').trim();
+            return raw || undefined;
+        })(),
+    };
+}
+
+/** Live Following / Followers totals for a profile (not the viewer's graph). */
+export async function fetchProfileAudience(
+    handle: string,
+    signal?: AbortSignal,
+): Promise<{
+    followers: number;
+    following: number;
+    is_following?: boolean;
+    handle?: string;
+    avatar_url?: string;
+}> {
+    const identifier = String(handle || '').trim();
+    if (!identifier) return { followers: 0, following: 0 };
+    try {
+        const encoded = encodeUserIdentifier(identifier);
+        const payload = await laravelUsersGet(`/users/${encoded}/audience`, { signal });
+        const parsed = profileAudienceFromPayload(payload);
+        const followers = parsed.followers ?? 0;
+        const following = parsed.following ?? 0;
+        return {
+            followers,
+            following,
+            is_following:
+                typeof payload?.is_following === 'boolean'
+                    ? payload.is_following
+                    : typeof payload?.isFollowing === 'boolean'
+                      ? payload.isFollowing
+                      : undefined,
+            handle: typeof payload?.handle === 'string' ? payload.handle : undefined,
+            avatar_url: parsed.avatar_url,
+        };
+    } catch (error) {
+        if (isAbortError(error) || signal?.aborted) throw error;
+        // 429: extra list fetches make throttling worse and keep View Profile at 0.
+        if (isTooManyRequestsError(error)) throw error;
+        const [followersRes, followingRes] = await Promise.all([
+            fetchFollowers(identifier, 0, 20, signal).catch(() => null),
+            fetchFollowing(identifier, 0, 20, signal).catch(() => null),
+        ]);
+        return {
+            followers: connectionListTotal(followersRes),
+            following: connectionListTotal(followingRes),
+        };
+    }
 }
 
 export async function togglePrivacy() {
@@ -1578,6 +1770,11 @@ export async function declineChatGroupInvite(inviteId: string) {
 // Collections API
 export async function fetchCollections() {
     return apiRequest('/collections');
+}
+
+/** Same payload as GET /collections, for sessions that only have a bearer token (no user id yet). */
+export async function fetchMyCollections() {
+    return apiRequest('/me/collections');
 }
 
 export async function fetchCollection(collectionId: string) {

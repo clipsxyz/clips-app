@@ -168,4 +168,27 @@ class UserTest extends TestCase
         $user->reclips()->attach($post->id, ['user_handle' => $user->handle]);
         $this->assertTrue($user->hasReclipped($post->fresh()));
     }
+
+    public function test_sync_live_audience_counts_repairs_stale_columns(): void
+    {
+        $user = User::factory()->create([
+            'followers_count' => 0,
+            'following_count' => 0,
+        ]);
+        $other = User::factory()->create();
+
+        DB::table('user_follows')->insert([
+            'follower_id' => $other->id,
+            'following_id' => $user->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $counts = $user->syncLiveAudienceCounts(true);
+
+        $this->assertSame(1, $counts['followers_count']);
+        $this->assertSame(0, $counts['following_count']);
+        $this->assertEquals(1, $user->fresh()->followers_count);
+    }
 }

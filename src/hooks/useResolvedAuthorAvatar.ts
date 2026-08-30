@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getAvatarForHandle, resolveAvatarImageUri, setAvatarForHandle } from '../api/users';
+import { isMockMode } from '../config/runtimeEnv';
 
 function sameHandle(a?: string | null, b?: string | null): boolean {
     const na = String(a || '')
@@ -13,9 +14,50 @@ function sameHandle(a?: string | null, b?: string | null): boolean {
     return Boolean(na && nb && na === nb);
 }
 
+function handleKey(handle: string): string {
+    return handle.replace(/^@/, '').trim().toLowerCase();
+}
+
+const audienceAvatarInflight = new Map<string, Promise<string | undefined>>();
+const audienceAvatarMiss = new Set<string>();
+
+function fetchAudienceAvatar(handle: string): Promise<string | undefined> {
+    const key = handleKey(handle);
+    if (!key || audienceAvatarMiss.has(key)) return Promise.resolve(undefined);
+    const existing = audienceAvatarInflight.get(key);
+    if (existing) return existing;
+    const pending = import('../api/client')
+        .then(({ fetchProfileAudience }) => fetchProfileAudience(handle))
+        .then((audience) => {
+            const raw = String(audience?.avatar_url || '').trim();
+            if (!raw) {
+                audienceAvatarMiss.add(key);
+                return undefined;
+            }
+            const url = resolveAvatarImageUri(raw, handle);
+            if (!url) {
+                audienceAvatarMiss.add(key);
+                return undefined;
+            }
+            setAvatarForHandle(handle, url);
+            return url;
+        })
+        .catch((error) => {
+            if (error && typeof error === 'object' && Number((error as { status?: number }).status) === 429) {
+                audienceAvatarMiss.add(key);
+            }
+            return undefined;
+        })
+        .finally(() => {
+            audienceAvatarInflight.delete(key);
+        });
+    audienceAvatarInflight.set(key, pending);
+    return pending;
+}
+
 /**
  * Feed/fullscreen author avatar. Resolves `/storage/...` to a loadable URL
- * and fetches the profile once if the post was cached without `userAvatarUrl`.
+ * and fetches the cheap audience payload once if the post omitted `userAvatarUrl`.
  */
 export function useResolvedAuthorAvatar(opts: {
     handle?: string | null;
@@ -32,19 +74,12 @@ export function useResolvedAuthorAvatar(opts: {
     );
 
     useEffect(() => {
-        if (resolved || !handle) return;
+        if (resolved || !handle || isMockMode()) return;
         let cancelled = false;
-        void import('../api/client')
-            .then(({ fetchUserProfile }) => fetchUserProfile(handle))
-            .then((payload: any) => {
-                const raw = String(payload?.avatar_url || payload?.avatarUrl || '').trim();
-                if (!raw || cancelled) return;
-                const url = resolveAvatarImageUri(raw, handle);
-                if (!url) return;
-                setAvatarForHandle(handle, url);
-                setFetchedUrl(url);
-            })
-            .catch(() => {});
+        void fetchAudienceAvatar(handle).then((url) => {
+            if (!url || cancelled) return;
+            setFetchedUrl(url);
+        });
         return () => {
             cancelled = true;
         };

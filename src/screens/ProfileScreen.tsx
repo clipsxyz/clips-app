@@ -55,7 +55,7 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones, getCurrentUser, mapLaravelUserToAppFields } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones, getCurrentUser, mapLaravelUserToAppFields, fetchFollowers, fetchFollowing, connectionListTotal, isAbortError } from '../api/client';
 import { isMockMode } from '../api/apiMode';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
@@ -206,6 +206,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const postsLoadedRef = useRef(false);
     const loadLockRef = useRef<Promise<void> | null>(null);
     const loadGenRef = useRef(0);
+    const unmountAbortRef = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        unmountAbortRef.current = controller;
+        return () => controller.abort();
+    }, []);
 
     const myFeedActiveVideoPostIdRef = useRef<string | null>(null);
     myFeedActiveVideoPostIdRef.current = myFeedActiveVideoPostId;
@@ -342,6 +349,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             const gen = ++loadGenRef.current;
             let identifier = String(u.handle || u.id);
             let viewerId = u.id;
+            let liveFollowers = Number(u.followers_count ?? 0) || 0;
+            let liveFollowing = Number(u.following_count ?? 0) || 0;
             if (!isMockMode()) {
                 try {
                     const me = await getCurrentUser();
@@ -353,20 +362,45 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         identifier = liveHandle || liveId;
                         if (liveId) viewerId = liveId;
                     }
-                    const sameId = !liveId || String(u.id) === liveId;
-                    const sameHandle =
-                        !liveHandle ||
-                        String(u.handle || '').trim().toLowerCase() === liveHandle.toLowerCase();
-                    if (userRef.current && (!sameId || !sameHandle)) {
-                        loginRef.current({
-                            ...u,
-                            ...mapLaravelUserToAppFields(me as Record<string, unknown>),
-                        });
+                    const mapped = mapLaravelUserToAppFields(me as Record<string, unknown>);
+                    liveFollowers = Number(me?.followers_count ?? mapped.followers_count ?? 0) || 0;
+                    liveFollowing = Number(me?.following_count ?? mapped.following_count ?? 0) || 0;
+                    const liveHandleForLists = String(me?.handle || identifier || '').trim();
+                    if (liveHandleForLists) {
+                        const listSignal = unmountAbortRef.current?.signal;
+                        try {
+                            liveFollowers = Math.max(
+                                liveFollowers,
+                                connectionListTotal(await fetchFollowers(liveHandleForLists, 0, 1, listSignal)),
+                            );
+                        } catch (error) {
+                            if (isAbortError(error)) return;
+                            /* keep /auth/me count */
+                        }
+                        try {
+                            liveFollowing = Math.max(
+                                liveFollowing,
+                                connectionListTotal(await fetchFollowing(liveHandleForLists, 0, 1, listSignal)),
+                            );
+                        } catch (error) {
+                            if (isAbortError(error)) return;
+                            /* keep /auth/me count */
+                        }
                     }
+                    loginRef.current({
+                        ...userRef.current,
+                        ...mapped,
+                        followers_count: liveFollowers,
+                        following_count: liveFollowing,
+                    });
                 } catch {
                     // Fall back to the cached profile handle.
                 }
             }
+            setAudienceCounts({
+                followers: liveFollowers,
+                following: liveFollowing,
+            });
             if (!postsLoadedRef.current) setPostsLoading(true);
 
             const postsTask = fetchPostsByUser(identifier, 50, viewerId, 'all')
@@ -383,7 +417,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 });
 
             const extrasTask = Promise.all([
-                getUserCollections(u.id || 'me').catch((err) => {
+                getUserCollections(String(viewerId || userRef.current?.id || 'me')).catch((err) => {
                     console.error('Error loading collections:', err);
                     return [] as Collection[];
                 }),
@@ -395,10 +429,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 if (gen !== loadGenRef.current) return;
                 setCollections(userCollections);
                 setDrafts(userDrafts);
-                setAudienceCounts({
-                    followers: u.followers_count ?? 0,
-                    following: u.following_count ?? 0,
-                });
             }).catch((error) => {
                 console.error('Error loading profile extras:', error);
             });

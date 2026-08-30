@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
+import { resolveAvatarImageUri } from '../api/users';
 import { PASSPORT_TRAVELING_BORDER_COLORS } from '../utils/discoverAmbientPalette';
 
 export default function Avatar({
@@ -10,10 +11,14 @@ export default function Avatar({
     className = '',
     hasStory = false,
     onClick,
+    handle,
 }: AvatarProps) {
     const initials = getAvatarInitials(name);
     const isNumericSize = typeof size === 'number';
     const { dim, fontSize } = isNumericSize ? resolveAvatarDimensions(size) : { dim: 0, fontSize: 14 };
+    const handleHint =
+        handle || (typeof name === 'string' && name.includes('@') ? name : undefined);
+    const imageSrc = resolveAvatarImageUri(src, handleHint);
 
     const sizeClasses = {
         sm: 'w-8 h-8 text-xs',
@@ -28,9 +33,9 @@ export default function Avatar({
 
     const avatarContent = (
         <>
-            {src ? (
+            {imageSrc ? (
                 <img
-                    src={src}
+                    src={imageSrc}
                     alt={`${name}'s profile picture`}
                     className="w-full h-full object-cover rounded-full"
                     onError={(e) => {

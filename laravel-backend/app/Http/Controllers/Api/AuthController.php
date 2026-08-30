@@ -258,7 +258,10 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = Auth::user();
-        
+        if ($user instanceof User) {
+            $user->syncLiveAudienceCounts(true);
+        }
+
         return response()->json($user->makeHidden(['password']));
     }
 

@@ -4,10 +4,26 @@ import { setAvatarForHandle } from '../api/users';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { uploadFileFromUri } from './uploadFileNative';
 
-function isLocalDeviceUri(uri: string): boolean {
+export function isLocalDeviceUri(uri: string): boolean {
   const raw = String(uri || '').trim();
   if (!raw) return false;
+  // Laravel public disk paths — not an on-device file.
+  if (/^\/storage\/(uploads|avatars)\b/i.test(raw)) return false;
   return /^(file:|content:|ph:|data:)/i.test(raw) || raw.startsWith('/');
+}
+
+function toPersistableAvatarUrl(remote: string): string {
+  const raw = String(remote || '').trim();
+  if (!raw) return raw;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.pathname.startsWith('/storage/')) {
+      return parsed.pathname;
+    }
+  } catch {
+    /* relative or data URI */
+  }
+  return raw;
 }
 
 /**
@@ -27,8 +43,9 @@ export async function persistLocalAvatarToLaravel(
     const upload = await uploadFileFromUri(uri, 'image/jpeg', 'profile-avatar.jpg');
     const remote = upload.fileUrl || upload.url;
     if (!remote) return undefined;
-    await updateAuthProfile({ avatar_url: remote });
-    const hosted = resolvePublicMediaUrl(remote) || remote;
+    const persistUrl = toPersistableAvatarUrl(remote);
+    await updateAuthProfile({ avatar_url: persistUrl });
+    const hosted = resolvePublicMediaUrl(persistUrl) || persistUrl;
     setAvatarForHandle(handle, hosted);
     return hosted;
   } catch (err) {

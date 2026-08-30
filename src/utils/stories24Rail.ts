@@ -164,7 +164,8 @@ export async function buildStories24RailItems(
                 : sharedPost?.mediaType === 'video'
                   ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
                   : undefined;
-        const avatarUrl = getAvatarForHandle(group.userHandle);
+        const avatarUrl =
+            resolveStoryMediaUrl(group.avatarUrl) || getAvatarForHandle(group.userHandle);
         // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
         // the rail pauses previews and would flash the avatar instead of the shared clip.
         let thumb =
@@ -181,7 +182,7 @@ export async function buildStories24RailItems(
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.poll?.question || '').trim() ||
             (latest.sharedFromPost ? 'Shared a post' : 'New story');
-        const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
+        const title = text.length > 90 ? `${text.slice(0, 90)}...` : text;
         const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
         nextItems.push({

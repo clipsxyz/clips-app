@@ -6,6 +6,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import { resolveAvatarImageUri } from '../api/users';
+import { useResolvedAuthorAvatar } from '../hooks/useResolvedAuthorAvatar';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import Avatar from './Avatar';
@@ -19,6 +20,7 @@ import {
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
+import { useMutualFollow } from '../hooks/useMutualFollow';
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -53,6 +55,8 @@ export default function FeedPostHeader({
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
     const { isReclip, displayHandle, profileHandle, originalHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
+    const originalDisplayHandle = String(originalHandle || post.originalUserHandle || '').trim();
+    const originalAvatarSrc = resolveAvatarImageUri(post.originalUserAvatarUrl, originalDisplayHandle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
     const metadataItems = useMemo(() => {
@@ -73,11 +77,14 @@ export default function FeedPostHeader({
             isProfilePrivate(safeProfileHandle) &&
             hasPendingFollowRequest(viewer, safeProfileHandle),
     );
+    const isMutualFollow = useMutualFollow(post, isCurrentUser);
 
-    const avatarSrc = resolveAvatarImageUri(
-        (isCurrentUser ? user?.avatarUrl : undefined) || post.userAvatarUrl,
-        safeProfileHandle,
-    );
+    const avatarSrc = useResolvedAuthorAvatar({
+        handle: safeProfileHandle,
+        explicitUrl: (isCurrentUser ? user?.avatarUrl : undefined) || post.userAvatarUrl,
+        viewerHandle: viewer,
+        viewerAvatarUrl: user?.avatarUrl,
+    });
 
     const verifiedAccountType = resolveVerifiedAccountType(
         isCurrentUser ? user?.accountType : post.userAccountType,
@@ -129,6 +136,7 @@ export default function FeedPostHeader({
                 <Avatar
                     src={avatarSrc}
                     name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                    handle={safeProfileHandle}
                     size={FEED_UI.icon.avatar}
                     hasStory={hasStory}
                 />
@@ -143,7 +151,17 @@ export default function FeedPostHeader({
                     <Text style={styles.requestedPillText}>Req</Text>
                 </View>
             ) : null}
-            {!isCurrentUser && isFollowing && onFollow ? (
+            {!isCurrentUser && isMutualFollow && onOpenDM ? (
+                <TouchableOpacity
+                    style={styles.dmButton}
+                    onPress={() => onOpenDM(post.userHandle, post.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send message"
+                >
+                    <Icon name="paper-plane" size={10} color="#EF4444" />
+                </TouchableOpacity>
+            ) : null}
+            {!isCurrentUser && isFollowing && onFollow && !isMutualFollow ? (
                 <TouchableOpacity
                     style={styles.followCheck}
                     onPress={() => void onFollow()}
@@ -175,7 +193,19 @@ export default function FeedPostHeader({
                         <View style={styles.reclipRow}>
                             <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
                             <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                                reclipped {String(originalHandle || post.originalUserHandle || '').trim() || 'a post'}
+                                reclipped
+                            </Text>
+                            <Avatar
+                                src={originalAvatarSrc}
+                                name={
+                                    originalDisplayHandle.replace(/^@/, '').split('@')[0] ||
+                                    'User'
+                                }
+                                handle={originalDisplayHandle}
+                                size={16}
+                            />
+                            <Text style={[styles.reclipText, { color: reclipColor, flexShrink: 1 }]} numberOfLines={1}>
+                                {originalDisplayHandle || 'a post'}
                             </Text>
                         </View>
                     ) : null}
@@ -382,6 +412,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 4,
         marginBottom: 4,
+        minWidth: 0,
+        maxWidth: '100%',
     },
     // Web: `text-xs` — optically bumped for phone Instagram weight
     reclipText: {

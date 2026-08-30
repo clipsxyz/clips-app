@@ -1,6 +1,6 @@
-import type { Story, StoryGroup, StickerOverlay } from '../types';
+import type { Story, StoryGroup, StoryReaction, StoryReply, StickerOverlay } from '../types';
 import { isMockMode } from '../config/runtimeEnv';
-import { getAvatarForHandle } from './users';
+import { getAvatarForHandle, resolveAvatarImageUri, setAvatarForHandle } from './users';
 import { resolveStoryMediaUrl } from '../utils/storyMediaNative';
 import { mapApiLinkPreview } from '../utils/linkPreview';
 
@@ -770,6 +770,51 @@ export type StoriesPage = {
     hasMore: boolean;
 };
 
+function mapLaravelReaction(raw: any): StoryReaction | null {
+    if (!raw?.emoji) return null;
+    return {
+        id: String(raw.id || `reaction-${raw.user_id || raw.userId || ''}`),
+        userId: raw.user_id || raw.userId || '',
+        userHandle: raw.user_handle || raw.userHandle || '',
+        emoji: raw.emoji,
+        createdAt: raw.created_at ? new Date(raw.created_at).getTime() : Date.now(),
+    };
+}
+
+function mapLaravelReply(raw: any): StoryReply | null {
+    const text = typeof raw?.text === 'string' ? raw.text : '';
+    if (!text) return null;
+    return {
+        id: String(raw.id || `reply-${raw.user_id || raw.userId || ''}`),
+        userId: raw.user_id || raw.userId || '',
+        userHandle: raw.user_handle || raw.userHandle || '',
+        text,
+        createdAt: raw.created_at ? new Date(raw.created_at).getTime() : Date.now(),
+    };
+}
+
+function mapLaravelReactions(raw: any): StoryReaction[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(mapLaravelReaction).filter((row): row is StoryReaction => !!row);
+}
+
+function mapLaravelReplies(raw: any): StoryReply[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(mapLaravelReply).filter((row): row is StoryReply => !!row);
+}
+
+function storyCountsFromApi(story: any): Pick<Story, 'views' | 'views_count' | 'reactions_count' | 'replies_count'> {
+    const reactions = mapLaravelReactions(story?.reactions);
+    const replies = mapLaravelReplies(story?.replies);
+    const views = Number(story?.views_count ?? story?.views ?? 0) || 0;
+    return {
+        views,
+        views_count: views,
+        reactions_count: Number(story?.reactions_count ?? reactions.length ?? 0) || 0,
+        replies_count: Number(story?.replies_count ?? replies.length ?? 0) || 0,
+    };
+}
+
 function mapLaravelStoryToStory(story: any): Story {
     const handle = story.user_handle || story.user?.handle || '';
     return {
@@ -789,10 +834,10 @@ function mapLaravelStoryToStory(story: any): Story {
             : (story.created_at
                 ? new Date(story.created_at).getTime() + 24 * 60 * 60 * 1000
                 : Date.now() + 24 * 60 * 60 * 1000),
-        views: story.views_count || 0,
+        ...storyCountsFromApi(story),
         hasViewed: !!story.has_viewed,
-        reactions: [],
-        replies: [],
+        reactions: mapLaravelReactions(story.reactions),
+        replies: mapLaravelReplies(story.replies),
         userReaction: story.user_reaction || undefined,
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
@@ -813,13 +858,21 @@ function mapLaravelStoryGroups(raw: any[]): StoryGroup[] {
             user_handle: s.user_handle || handle,
             user_id: s.user_id || group.user_id,
         })));
-        return {
-            userId: group.user_id || mappedStories[0]?.userId,
-            userHandle: handle || mappedStories[0]?.userHandle,
-            name: group.user_name || (handle || mappedStories[0]?.userHandle || '').split('@')[0],
-            avatarUrl: group.avatar_url || getAvatarForHandle(handle || mappedStories[0]?.userHandle || ''),
-            stories: mappedStories,
-        };
+            const groupHandle = handle || mappedStories[0]?.userHandle || '';
+            const resolvedAvatar = resolveAvatarImageUri(
+                group.avatar_url || group.avatarUrl,
+                groupHandle,
+            );
+            if (resolvedAvatar && groupHandle) {
+                setAvatarForHandle(groupHandle, resolvedAvatar);
+            }
+            return {
+                userId: group.user_id || mappedStories[0]?.userId,
+                userHandle: groupHandle,
+                name: group.user_name || (groupHandle || '').split('@')[0],
+                avatarUrl: resolvedAvatar || getAvatarForHandle(groupHandle),
+                stories: mappedStories,
+            };
     }).filter((g) => g.userId && g.stories.length > 0);
 }
 
@@ -1121,7 +1174,7 @@ export async function createStory(
                 resolveStoryMediaUrl(response.video_poster_url || videoPosterUrl) || undefined,
             linkPreview: mapApiLinkPreview(response.link_preview ?? response.linkPreview),
             audience: response.audience || audience || 'public',
-            views: response.views_count || 0,
+            ...storyCountsFromApi(response),
             viewerHandles: Array.isArray((response as any).viewer_handles)
                 ? (response as any).viewer_handles
                 : [],
@@ -1213,39 +1266,89 @@ export async function createStory(
     }
 }
 
-// Mark story as viewed
-export async function markStoryViewed(storyId: string, _userId: string, viewerHandle?: string): Promise<void> {
-    await delay();
+export type StoryViewMetrics = {
+    views_count: number;
+    reactions_count: number;
+    replies_count: number;
+    reactions?: StoryReaction[];
+    replies?: StoryReply[];
+};
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        const normalizedHandle = (viewerHandle || '').trim();
-        if (!Array.isArray(story.viewerHandles)) story.viewerHandles = [];
-        const alreadyCounted = normalizedHandle
-            ? story.viewerHandles.some((h) => (h || '').trim().toLowerCase() === normalizedHandle.toLowerCase())
-            : story.hasViewed;
-        if (!alreadyCounted) {
-            if (normalizedHandle) story.viewerHandles.push(normalizedHandle);
-            story.views += 1;
+function parseStoryViewMetrics(response: any): StoryViewMetrics {
+    const reactions = mapLaravelReactions(response?.reactions);
+    const replies = mapLaravelReplies(response?.replies);
+    return {
+        views_count: Number(response?.views_count ?? 0) || 0,
+        reactions_count: Number(response?.reactions_count ?? reactions.length ?? 0) || 0,
+        replies_count: Number(response?.replies_count ?? replies.length ?? 0) || 0,
+        reactions,
+        replies,
+    };
+}
+
+// Mark story as viewed
+export async function markStoryViewed(
+    storyId: string,
+    _userId: string,
+    viewerHandle?: string,
+): Promise<StoryViewMetrics | void> {
+    const applyMock = (): StoryViewMetrics | void => {
+        const story = stories.find((s) => s.id === storyId);
+        if (story) {
+            const normalizedHandle = (viewerHandle || '').trim();
+            if (!Array.isArray(story.viewerHandles)) story.viewerHandles = [];
+            const alreadyCounted = normalizedHandle
+                ? story.viewerHandles.some((h) => (h || '').trim().toLowerCase() === normalizedHandle.toLowerCase())
+                : story.hasViewed;
+            if (!alreadyCounted) {
+                if (normalizedHandle) story.viewerHandles.push(normalizedHandle);
+                story.views += 1;
+                story.views_count = story.views;
+            }
+            story.hasViewed = true;
+            return {
+                views_count: Number(story.views_count ?? story.views ?? 0) || 0,
+                reactions_count: Number(story.reactions_count ?? story.reactions?.length ?? 0) || 0,
+                replies_count: Number(story.replies_count ?? story.replies?.length ?? 0) || 0,
+                reactions: story.reactions || [],
+                replies: story.replies || [],
+            };
         }
-        story.hasViewed = true;
+        return undefined;
+    };
+
+    if (!isMockMode()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const response = await apiRequest(`/stories/${storyId}/view`, { method: 'POST' });
+            return parseStoryViewMetrics(response);
+        } catch (error: any) {
+            const isConnectionFallback =
+                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+            if (!isConnectionFallback) throw error;
+        }
     }
+
+    await delay();
+    return applyMock();
 }
 
 // Increment story view count
-export async function incrementStoryViews(storyId: string): Promise<void> {
-    await delay();
-
-    // Kept for backward compatibility; view counts are now deduped in markStoryViewed.
-    const _story = stories.find(s => s.id === storyId);
-    void _story;
+export async function incrementStoryViews(_storyId: string): Promise<void> {
+    // View counts are recorded in markStoryViewed via POST /stories/{id}/view.
 }
 
 // Add reaction to story
-export async function addStoryReaction(storyId: string, userId: string, userHandle: string, emoji: string): Promise<void> {
-    const pushMockReaction = () => {
+export async function addStoryReaction(
+    storyId: string,
+    userId: string,
+    userHandle: string,
+    emoji: string,
+): Promise<StoryViewMetrics | void> {
+    const pushMockReaction = (): StoryViewMetrics | void => {
         const story = stories.find(s => s.id === storyId);
         if (story) {
+            const hadReaction = (story.reactions || []).some((r) => r.userId === userId);
             story.reactions = story.reactions.filter(r => r.userId !== userId);
             story.reactions.push({
                 id: `reaction-${Date.now()}`,
@@ -1255,18 +1358,29 @@ export async function addStoryReaction(storyId: string, userId: string, userHand
                 createdAt: Date.now()
             });
             story.userReaction = emoji;
+            story.reactions_count = hadReaction
+                ? Math.max(Number(story.reactions_count ?? 0) || 0, story.reactions.length)
+                : (Number(story.reactions_count ?? 0) || 0) + 1;
+            return {
+                views_count: Number(story.views_count ?? story.views ?? 0) || 0,
+                reactions_count: Number(story.reactions_count ?? story.reactions.length) || 0,
+                replies_count: Number(story.replies_count ?? story.replies?.length ?? 0) || 0,
+                reactions: story.reactions,
+                replies: story.replies || [],
+            };
         }
+        return undefined;
     };
 
     if (!isMockMode()) {
         try {
             const { apiRequest } = await import('./client');
-            await apiRequest(`/stories/${storyId}/reaction`, {
+            const response = await apiRequest(`/stories/${storyId}/reaction`, {
                 method: 'POST',
                 body: JSON.stringify({ emoji }),
             });
             pushMockReaction();
-            return;
+            return parseStoryViewMetrics(response);
         } catch (error: any) {
             const isConnectionFallback =
                 error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
@@ -1275,12 +1389,17 @@ export async function addStoryReaction(storyId: string, userId: string, userHand
     }
 
     await delay();
-    pushMockReaction();
+    return pushMockReaction();
 }
 
 // Add reply to story
-export async function addStoryReply(storyId: string, userId: string, userHandle: string, text: string): Promise<void> {
-    const pushMockReply = () => {
+export async function addStoryReply(
+    storyId: string,
+    userId: string,
+    userHandle: string,
+    text: string,
+): Promise<StoryViewMetrics | void> {
+    const pushMockReply = (): StoryViewMetrics | void => {
         const story = stories.find((s) => s.id === storyId);
         if (story) {
             if (!Array.isArray(story.replies)) story.replies = [];
@@ -1291,18 +1410,27 @@ export async function addStoryReply(storyId: string, userId: string, userHandle:
                 text,
                 createdAt: Date.now(),
             });
+            story.replies_count = (Number(story.replies_count ?? 0) || 0) + 1;
+            return {
+                views_count: Number(story.views_count ?? story.views ?? 0) || 0,
+                reactions_count: Number(story.reactions_count ?? story.reactions?.length ?? 0) || 0,
+                replies_count: Number(story.replies_count ?? story.replies.length) || 0,
+                reactions: story.reactions || [],
+                replies: story.replies,
+            };
         }
+        return undefined;
     };
 
     if (!isMockMode()) {
         try {
             const { apiRequest } = await import('./client');
-            await apiRequest(`/stories/${storyId}/reply`, {
+            const response = await apiRequest(`/stories/${storyId}/reply`, {
                 method: 'POST',
                 body: JSON.stringify({ text }),
             });
             pushMockReply();
-            return;
+            return parseStoryViewMetrics(response);
         } catch (error: any) {
             const isConnectionFallback =
                 error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
@@ -1311,7 +1439,7 @@ export async function addStoryReply(storyId: string, userId: string, userHandle:
     }
 
     await delay();
-    pushMockReply();
+    return pushMockReply();
 }
 
 // Add answer to question in story - stores question in questions API (not messages)

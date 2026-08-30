@@ -4,7 +4,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { userHasStoriesByHandle } from '../api/stories';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
-import { getAvatarForHandle } from '../api/users';
+import { resolveAvatarImageUri } from '../api/users';
 import { useAuth } from '../context/Auth';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { getReclipDisplay } from '../utils/feedPostMeta';
@@ -59,10 +59,10 @@ export default function FeedTextOnlyFeedLayout({
         post.userHandle.replace(/^@+/, '').toLowerCase() === viewerHandle.replace(/^@+/, '').toLowerCase();
 
     const { profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
-    const avatarSrc =
-        (isCurrentUser ? user?.avatarUrl : undefined) ||
-        post.userAvatarUrl ||
-        getAvatarForHandle(profileHandle);
+    const avatarSrc = resolveAvatarImageUri(
+        (isCurrentUser ? user?.avatarUrl : undefined) || post.userAvatarUrl,
+        profileHandle,
+    );
     const isFollowing = post.isFollowing === true;
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const viewer = viewerHandle ?? user?.handle;
@@ -138,6 +138,7 @@ export default function FeedTextOnlyFeedLayout({
                             <Avatar
                                 src={avatarSrc}
                                 name={(profileHandle || post.userHandle || 'User').split('@')[0]}
+                                handle={profileHandle || post.userHandle}
                                 size={FEED_UI.icon.avatar}
                                 hasStory={hasStory}
                             />

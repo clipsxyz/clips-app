@@ -194,6 +194,7 @@ export default function ViewProfileConnectionsModal({
                                         <Avatar
                                             src={row.avatarUrl}
                                             name={row.displayName || key}
+                                            handle={key}
                                             size="md"
                                         />
                                         <View style={styles.rowText}>

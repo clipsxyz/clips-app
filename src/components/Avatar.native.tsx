@@ -19,10 +19,13 @@ export default function Avatar({
     size = 'md',
     hasStory = false,
     onClick,
+    handle,
 }: AvatarProps) {
     const { dim, fontSize } = resolveAvatarDimensions(size);
     const initials = getAvatarInitials(name);
-    const imageUri = resolveAvatarImageUri(src);
+    const handleHint =
+        handle || (typeof name === 'string' && name.includes('@') ? name : undefined);
+    const imageUri = resolveAvatarImageUri(src, handleHint);
     const [imageFailed, setImageFailed] = useState(false);
     const showImage = Boolean(imageUri) && !imageFailed;
 

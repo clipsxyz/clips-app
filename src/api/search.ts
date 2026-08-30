@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { isMockMode } from '../config/runtimeEnv';
 import { resolvePublicMediaUrl } from './apiBaseUrl';
 import { setAvatarForHandle } from './users';
 
@@ -88,10 +88,16 @@ export function userMatchesSearchQuery(
     return false;
 }
 
+function asItemList(value: unknown): any[] {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>);
+    return [];
+}
+
 function withResolvedUserAvatars(result: { q: string; sections: SearchSections }) {
-    const items = result.sections?.users?.items;
-    if (!Array.isArray(items)) return result;
-    result.sections!.users!.items = items.map((u: any) => {
+    const items = asItemList(result.sections?.users?.items);
+    if (!result.sections?.users) return result;
+    result.sections.users.items = items.map((u: any) => {
         const raw = u?.avatar_url || u?.avatarUrl;
         const resolved = typeof raw === 'string' && raw.trim() ? resolvePublicMediaUrl(raw.trim()) || raw.trim() : undefined;
         if (u?.handle && resolved) {
@@ -112,7 +118,7 @@ export async function unifiedSearch(params: {
     locationsLimit?: number;
     postsLimit?: number;
 }) {
-    const useLaravelAPI = isLaravelApiEnabled();
+    const useLaravelAPI = !isMockMode();
 
     const searchParams = new URLSearchParams();
     const q = String(params.q || '').trim().replace(/^@+/, '');
@@ -136,6 +142,10 @@ export async function unifiedSearch(params: {
             method: 'GET',
             timeoutMs: 12000,
         }) as { q: string; sections: SearchSections };
+
+        if (result?.sections?.users) {
+            result.sections.users.items = asItemList(result.sections.users.items);
+        }
         
         // Add Sarah@Artane to search results if query matches (for testing)
         const qLower = q.toLowerCase();
@@ -149,7 +159,7 @@ export async function unifiedSearch(params: {
         
         return withResolvedUserAvatars(result);
     } catch (error) {
-        // Fallback: return mock results if API fails (for testing)
+        console.warn('[unifiedSearch] live search failed', error);
         const qLower = q.toLowerCase();
         if (params.types?.includes('users')) {
             const filteredUsers = mockUsers.filter((u) => userMatchesSearchQuery(u, qLower));

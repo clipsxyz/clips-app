@@ -97,6 +97,41 @@ class User extends Authenticatable
                     ->withTimestamps();
     }
 
+    public function liveFollowersCount(): int
+    {
+        return (int) $this->followers()->count();
+    }
+
+    public function liveFollowingCount(): int
+    {
+        return (int) $this->following()->count();
+    }
+
+    /**
+     * Pivot rows are the source of truth. Denormalized users.followers_count /
+     * following_count can drift (imports, failed increments). Repair the model
+     * (and optionally the row) so API payloads stay accurate.
+     *
+     * @return array{followers_count: int, following_count: int}
+     */
+    public function syncLiveAudienceCounts(bool $persist = false): array
+    {
+        $followers = $this->liveFollowersCount();
+        $following = $this->liveFollowingCount();
+        $changed = (int) $this->followers_count !== $followers
+            || (int) $this->following_count !== $following;
+        $this->followers_count = $followers;
+        $this->following_count = $following;
+        if ($persist && $changed) {
+            $this->saveQuietly();
+        }
+
+        return [
+            'followers_count' => $followers,
+            'following_count' => $following,
+        ];
+    }
+
     public function followRequests()
     {
         return $this->belongsToMany(User::class, 'user_follows', 'following_id', 'follower_id')

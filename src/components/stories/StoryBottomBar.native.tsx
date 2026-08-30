@@ -15,10 +15,8 @@ const QUICK_REACTIONS = ['😍', '😂'] as const;
 
 type Props = {
     hidden?: boolean;
-    /** Owner viewing their own story — insights + share footer (no Message composer). */
+    /** Owner viewing their own story — share only (insights live in the top banner). */
     ownerMode?: boolean;
-    ownerSummary?: string;
-    onOpenInsights?: () => void;
     showReplyComposer: boolean;
     replyText: string;
     replyPlaceholder?: string;
@@ -36,13 +34,11 @@ type Props = {
 
 /**
  * TikTok-style story footer: bordered Message pill · spaced emojis · heart · share.
- * Owner mode: insights pill · share (Instagram owner chrome).
+ * Owner mode: share icon only.
  */
 export default function StoryBottomBar({
     hidden,
     ownerMode = false,
-    ownerSummary = 'Tap for insights',
-    onOpenInsights,
     showReplyComposer,
     replyText,
     replyPlaceholder = 'Message...',
@@ -66,18 +62,7 @@ export default function StoryBottomBar({
             pointerEvents="box-none"
         >
             {ownerMode ? (
-                <View style={styles.tray}>
-                    <TouchableOpacity
-                        style={styles.messagePill}
-                        onPress={onOpenInsights}
-                        activeOpacity={0.75}
-                        accessibilityRole="button"
-                        accessibilityLabel="Story insights"
-                    >
-                        <Text style={styles.messagePillText} numberOfLines={1}>
-                            {ownerSummary}
-                        </Text>
-                    </TouchableOpacity>
+                <View style={styles.ownerShareRow} pointerEvents="box-none">
                     <TouchableOpacity
                         onPress={onShare}
                         style={styles.actionBtn}
@@ -210,6 +195,13 @@ const styles = StyleSheet.create({
         paddingRight: ox(6),
         paddingVertical: ox(4),
         minHeight: ox(52),
+    },
+    ownerShareRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        minHeight: ox(52),
+        paddingRight: ox(2),
     },
     messagePill: {
         flex: 1,

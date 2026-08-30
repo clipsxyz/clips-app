@@ -178,6 +178,12 @@ class Post extends Model
         return $this->belongsTo(User::class);
     }
 
+    /** Original author of a reclipped post (matched on handle). */
+    public function originalUser()
+    {
+        return $this->belongsTo(User::class, 'original_user_handle', 'handle');
+    }
+
     public function comments()
     {
         return $this->hasMany(Comment::class);

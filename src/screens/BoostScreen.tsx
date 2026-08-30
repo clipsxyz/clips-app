@@ -48,7 +48,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         }
         setError(null);
         try {
-            const userPosts = await fetchPostsByUser(user.handle, 50);
+            const userPosts = await fetchPostsByUser(user.handle, 50, user.id);
             // One map lookup for all Sponsored flags — avoid N× getActiveBoost (was timing out on API in mock).
             const boostLabels = await getAllActiveBoostLabels();
             const decorated = userPosts.map((p) => {
@@ -63,6 +63,11 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             });
             setPosts(decorated);
         } catch (err) {
+            const name = err && typeof err === 'object' ? String((err as { name?: string }).name || '') : '';
+            const message = err && typeof err === 'object' ? String((err as { message?: string }).message || '') : '';
+            if (name === 'AbortError' || message === 'Aborted') {
+                return;
+            }
             console.error('Error loading user posts:', err);
             setError('Failed to load your posts');
         } finally {

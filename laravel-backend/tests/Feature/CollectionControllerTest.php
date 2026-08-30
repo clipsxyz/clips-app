@@ -21,6 +21,22 @@ class CollectionControllerTest extends TestCase
             ->assertJson([]);
     }
 
+    public function test_me_collections_alias_requires_auth(): void
+    {
+        $this->getJson('/api/me/collections')->assertStatus(401);
+    }
+
+    public function test_me_collections_alias_lists_authenticated_user_collections(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/me/collections');
+
+        $response->assertStatus(200)
+            ->assertJson([]);
+    }
+
     public function test_can_create_collection(): void
     {
         $user = User::factory()->create();

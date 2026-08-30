@@ -163,8 +163,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
         const id = setTimeout(() => {
             let types = 'users,locations,posts';
             if (searchMode === 'users' || searchMode === 'nearby') types = 'users';
-            if (searchMode === 'posts') types = 'posts';
-            if (searchMode === 'venues' || searchMode === 'landmarks') types = 'locations';
+            else if (searchMode === 'posts') types = 'users,posts';
             unifiedSearch({ q, types, usersLimit: 10, locationsLimit: 10, postsLimit: 12 })
                 .then((r) => {
                     setSections(r.sections || {});
@@ -368,7 +367,10 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
             return;
         }
         if (searchMode === 'users' || searchMode === 'nearby') {
-            goToUser(q);
+            const first = filteredUsers.find((u: any) => String(u?.handle || '').trim());
+            if (first?.handle) {
+                goToUser(first.handle);
+            }
             return;
         }
         // For posts mode we keep results list behavior (open a specific post from results grid).
@@ -591,10 +593,13 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                 </View>
             ) : hasQuery ? (
                 <ScrollView style={styles.resultsList} keyboardShouldPersistTaps="handled">
-                    {(searchMode === 'users' || searchMode === 'nearby') && (
+                    {(searchMode === 'users' || searchMode === 'nearby' || filteredUsers.length > 0) && (
                         <View>
+                            {searchMode !== 'users' && searchMode !== 'nearby' && filteredUsers.length > 0 ? (
+                                <Text style={styles.sectionLabel}>PEOPLE</Text>
+                            ) : null}
                             {filteredUsers.map((u: any) => (
-                                <TouchableOpacity key={u.handle} onPress={() => goToUser(u.handle)} style={styles.resultItem}>
+                                <TouchableOpacity key={u.handle || u.id} onPress={() => goToUser(u.handle)} style={styles.resultItem}>
                                     <Avatar src={u.avatar_url || u.avatarUrl} name={(u.handle || 'User').split('@')[0]} size={ox(40)} />
                                     <View style={styles.resultInfo}>
                                         <Text style={styles.resultName}>{u.handle}</Text>
@@ -602,7 +607,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                     </View>
                                 </TouchableOpacity>
                             ))}
-                            {!!sections.users?.nextCursor && (
+                            {!!sections.users?.nextCursor && (searchMode === 'users' || searchMode === 'nearby') && (
                                 <TouchableOpacity style={styles.loadMoreButton} onPress={() => void loadMoreSection('users')}>
                                     {sectionLoadingMore.users ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.loadMoreText}>Load more users</Text>}
                                 </TouchableOpacity>

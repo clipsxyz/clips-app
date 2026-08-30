@@ -54,7 +54,7 @@ class UserController extends Controller
         }
 
         $viewer = Auth::user() ?: $this->resolveViewer($request);
-        if ($viewer && !$user->canViewProfile($viewer)) {
+        if (! $this->viewerCanSeeProfile($user, $viewer instanceof User ? $viewer : null)) {
             return response()->json([
                 'error' => 'Profile is private',
                 'is_private' => true,
@@ -74,7 +74,12 @@ class UserController extends Controller
             );
         }
 
+        $counts = $user->syncLiveAudienceCounts(false);
         $userData = $user->toArray();
+        $followersCount = $counts['followers_count'];
+        $followingCount = $counts['following_count'];
+        $userData['followers_count'] = $followersCount;
+        $userData['following_count'] = $followingCount;
         $viewerId = $viewer instanceof User ? $viewer->id : null;
         $userData['is_following'] = $viewerId
             ? DB::table('user_follows')
@@ -102,8 +107,8 @@ class UserController extends Controller
             'likes_count' => $userData['likes_count'],
             'views' => $userData['views_count'],
             'views_count' => $userData['views_count'],
-            'followers' => (int) ($userData['followers_count'] ?? 0),
-            'following' => (int) ($userData['following_count'] ?? 0),
+            'followers' => $followersCount,
+            'following' => $followingCount,
         ];
 
         return response()->json($userData);
@@ -121,7 +126,7 @@ class UserController extends Controller
         }
 
         $viewer = Auth::user() ?: $this->resolveViewer($request);
-        if ($viewer instanceof User && !$user->canViewProfile($viewer)) {
+        if (! $this->viewerCanSeeProfile($user, $viewer instanceof User ? $viewer : null)) {
             return response()->json([
                 'error' => 'Profile is private',
                 'is_private' => true,
@@ -272,44 +277,56 @@ class UserController extends Controller
     }
 
     /**
-     * Get user's followers
+     * People who follow this profile. Public for public profiles (same as GET /users/{handle}).
      */
     public function followers(Request $request, string $handle): JsonResponse
+    {
+        return $this->paginateConnections($request, $handle, 'followers');
+    }
+
+    /**
+     * People this profile follows. Public for public profiles (same as GET /users/{handle}).
+     */
+    public function following(Request $request, string $handle): JsonResponse
+    {
+        return $this->paginateConnections($request, $handle, 'following');
+    }
+
+    /**
+     * Followers / following totals only. Used by View Profile so counts do not
+     * depend on the heavy profile+posts payload.
+     */
+    public function audience(Request $request, string $handle): JsonResponse
     {
         $user = $this->resolveProfileUser($handle);
         if (!$user) {
             return response()->json(['error' => 'User not found'], 404);
         }
-        $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
-        $limit = (int) $request->get('limit', 20);
 
-        $query = $user->followers()
-            ->select('users.id', 'users.username', 'users.display_name', 'users.handle', 'users.avatar_url', 'users.bio', 'user_follows.created_at as followed_at')
-            ->orderBy('user_follows.created_at', 'desc')
-            ->orderBy('users.id', 'desc');
-
-        if ($cursorState['created_at'] && $cursorState['id']) {
-            $query->where(function ($q) use ($cursorState) {
-                $q->where('user_follows.created_at', '<', $cursorState['created_at'])
-                    ->orWhere(function ($q2) use ($cursorState) {
-                        $q2->where('user_follows.created_at', '=', $cursorState['created_at'])
-                            ->where('users.id', '<', $cursorState['id']);
-                    });
-            });
+        $viewer = Auth::user() ?: $this->resolveViewer($request);
+        if (! $this->viewerCanSeeProfile($user, $viewer instanceof User ? $viewer : null)) {
+            return response()->json([
+                'error' => 'Profile is private',
+                'is_private' => true,
+                'can_view' => false,
+            ], 403);
         }
 
-        $followers = $query->limit($limit)->get();
-
-        $last = $followers->last();
-        $nextCursor = null;
-        if ($followers->count() === $limit && $last) {
-            $nextCursor = $this->encodeConnectionsCursor((string) $last->followed_at, (string) $last->id);
-        }
+        $counts = $user->syncLiveAudienceCounts(false);
+        $viewerId = $viewer instanceof User ? (string) $viewer->id : null;
 
         return response()->json([
-            'items' => $followers,
-            'nextCursor' => $nextCursor,
-            'hasMore' => $nextCursor !== null
+            'handle' => $user->handle,
+            'followers_count' => $counts['followers_count'],
+            'following_count' => $counts['following_count'],
+            'avatar_url' => $user->avatar_url,
+            'is_following' => $viewerId
+                ? DB::table('user_follows')
+                    ->where('follower_id', $viewerId)
+                    ->where('following_id', $user->id)
+                    ->where('status', 'accepted')
+                    ->exists()
+                : false,
         ]);
     }
 
@@ -431,19 +448,29 @@ class UserController extends Controller
     }
 
     /**
-     * Get user's following
+     * @param  'followers'|'following'  $relation
      */
-    public function following(Request $request, string $handle): JsonResponse
+    private function paginateConnections(Request $request, string $handle, string $relation): JsonResponse
     {
         $user = $this->resolveProfileUser($handle);
         if (!$user) {
             return response()->json(['error' => 'User not found'], 404);
         }
-        $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
-        $limit = (int) $request->get('limit', 20);
 
-        $query = $user->following()
-            ->select('users.id', 'users.username', 'users.display_name', 'users.handle', 'users.avatar_url', 'users.bio', 'user_follows.created_at as followed_at')
+        $viewer = Auth::user() ?: $this->resolveViewer($request);
+        if (! $this->viewerCanSeeProfile($user, $viewer instanceof User ? $viewer : null)) {
+            return response()->json([
+                'error' => 'Profile is private',
+                'is_private' => true,
+                'can_view' => false,
+            ], 403);
+        }
+
+        $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
+        $limit = max(1, min((int) $request->get('limit', 20), 200));
+
+        $query = $user->{$relation}()
+            ->select('users.id', 'users.display_name', 'users.handle', 'users.avatar_url', 'users.bio', 'user_follows.created_at as followed_at')
             ->orderBy('user_follows.created_at', 'desc')
             ->orderBy('users.id', 'desc');
 
@@ -457,27 +484,55 @@ class UserController extends Controller
             });
         }
 
-        $following = $query->limit($limit)->get();
-
-        $last = $following->last();
+        $rows = $query->limit($limit)->get();
+        $last = $rows->last();
         $nextCursor = null;
-        if ($following->count() === $limit && $last) {
+        if ($rows->count() === $limit && $last) {
             $nextCursor = $this->encodeConnectionsCursor((string) $last->followed_at, (string) $last->id);
         }
 
         return response()->json([
-            'items' => $following,
+            'items' => $rows->map(fn (User $person) => $this->connectionItem($person))->values(),
             'nextCursor' => $nextCursor,
-            'hasMore' => $nextCursor !== null
+            'hasMore' => $nextCursor !== null,
+            'total' => $user->{$relation}()->count(),
         ]);
+    }
+
+    /**
+     * @return array{id: string, handle: string, display_name: ?string, avatar_url: ?string, bio: ?string}
+     */
+    private function connectionItem(User $person): array
+    {
+        return [
+            'id' => (string) $person->id,
+            'handle' => (string) $person->handle,
+            'display_name' => $person->display_name,
+            'avatar_url' => $person->avatar_url,
+            'bio' => $person->bio,
+        ];
     }
 
     /**
      * Resolve profile owner by UUID or handle (case-insensitive, optional leading @).
      */
+    private function decodeRouteIdentifier(string $identifier): string
+    {
+        $raw = trim($identifier);
+        for ($i = 0; $i < 2; $i++) {
+            $decoded = rawurldecode($raw);
+            if ($decoded === $raw) {
+                break;
+            }
+            $raw = $decoded;
+        }
+
+        return trim($raw);
+    }
+
     private function resolveProfileUser(string $identifier): ?User
     {
-        $raw = urldecode(trim($identifier));
+        $raw = $this->decodeRouteIdentifier($identifier);
         if ($raw === '') {
             return null;
         }
@@ -500,12 +555,37 @@ class UserController extends Controller
             }
         }
 
+        $byUsername = User::whereRaw('LOWER(username) = ?', [mb_strtolower($withoutAt)])->first();
+        if ($byUsername) {
+            return $byUsername;
+        }
+
+        if (!str_contains($withoutAt, '@')) {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($withoutAt));
+            $matches = User::query()
+                ->whereRaw('LOWER(handle) LIKE ? ESCAPE \'\\\'', [$escaped.'@%'])
+                ->limit(2)
+                ->get();
+            if ($matches->count() === 1) {
+                return $matches->first();
+            }
+        }
+
         return null;
+    }
+
+    private function viewerCanSeeProfile(User $profile, ?User $viewer): bool
+    {
+        if (! $profile->is_private) {
+            return true;
+        }
+
+        return $viewer instanceof User && $profile->canViewProfile($viewer);
     }
 
     private function resolveViewer(Request $request): ?User
     {
-        $viewer = Auth::user();
+        $viewer = Auth::user() ?: Auth::guard('sanctum')->user();
         if ($viewer instanceof User) {
             return $viewer;
         }
@@ -698,8 +778,8 @@ class UserController extends Controller
                 'likes_count' => $likesTotal,
                 'views' => $viewsTotal,
                 'views_count' => $viewsTotal,
-                'followers' => (int) $user->followers_count,
-                'following' => (int) $user->following_count,
+                'followers' => (int) $user->followers()->count(),
+                'following' => (int) $user->following()->count(),
             ],
         ];
     }

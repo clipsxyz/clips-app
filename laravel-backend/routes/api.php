@@ -219,6 +219,16 @@ Route::prefix('posts')->group(function () {
 Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken'])
     ->middleware('throttle:30,1');
 
+// Public profile reads (guest viewing). Send Bearer when logged in so private
+// profiles and Boost still resolve the viewer. `{handle}` allows `@` / `%40`.
+Route::prefix('users')->group(function () {
+    Route::get('/{handle}/posts', [UserController::class, 'posts'])->where('handle', '[^/]+');
+    Route::get('/{handle}/audience', [UserController::class, 'audience'])->where('handle', '[^/]+');
+    Route::get('/{handle}/followers', [UserController::class, 'followers'])->where('handle', '[^/]+');
+    Route::get('/{handle}/following', [UserController::class, 'following'])->where('handle', '[^/]+');
+    Route::get('/{handle}', [UserController::class, 'show'])->where('handle', '[^/]+');
+});
+
 // Protected routes
 Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])->group(function () {
     Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);
@@ -287,16 +297,12 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/{id}/like', [CommentController::class, 'toggleLike']);
     });
 
-    // Users routes
+    // Users routes (profile GET is public above — follow/privacy still require auth)
     Route::prefix('users')->group(function () {
         Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe']);
-        Route::get('/{handle}/posts', [UserController::class, 'posts']);
-        Route::get('/{handle}', [UserController::class, 'show']);
-        Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
-        Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);
-        Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest']);
-        Route::get('/{handle}/followers', [UserController::class, 'followers']);
-        Route::get('/{handle}/following', [UserController::class, 'following']);
+        Route::post('/{handle}/follow', [UserController::class, 'toggleFollow'])->where('handle', '[^/]+');
+        Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest'])->where('handle', '[^/]+');
+        Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest'])->where('handle', '[^/]+');
         Route::post('/privacy/toggle', [UserController::class, 'togglePrivacy']);
     });
 
@@ -346,6 +352,9 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);
         Route::post('/{id}/reply', [StoryController::class, 'addReply']);
     });
+
+    // Authenticated "my collections" alias — same as GET /collections
+    Route::get('/me/collections', [CollectionController::class, 'index']);
 
     // Collections routes
     Route::prefix('collections')->group(function () {

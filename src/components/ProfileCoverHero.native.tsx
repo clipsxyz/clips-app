@@ -12,6 +12,7 @@ import {
 type Props = {
     coverUrl?: string | null;
     avatarUrl?: string;
+    handle?: string;
     name?: string;
     hasStory?: boolean;
     onAvatarPress?: () => void;
@@ -23,6 +24,7 @@ type Props = {
 export default function ProfileCoverHero({
     coverUrl,
     avatarUrl,
+    handle,
     name,
     hasStory,
     onAvatarPress,
@@ -67,10 +69,10 @@ export default function ProfileCoverHero({
                 <View style={styles.identityStack}>
                     {onAvatarPress ? (
                         <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
-                            <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
+                            <Avatar src={avatarUrl} name={name || 'User'} handle={handle} size={88} hasStory={hasStory} />
                         </TouchableOpacity>
                     ) : (
-                        <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
+                        <Avatar src={avatarUrl} name={name || 'User'} handle={handle} size={88} hasStory={hasStory} />
                     )}
                     {children}
                 </View>

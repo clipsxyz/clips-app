@@ -3,11 +3,17 @@ import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { posts, getPostById, decorateForUser, setBookmarkState, transformLaravelPost } from './posts';
 import { resolvePublicMediaUrl } from './apiBaseUrl';
+import { getAuthTokenAsync } from '../utils/authTokenBridge';
 
 // Storage key for collections
 const COLLECTIONS_STORAGE_KEY = 'clips_app_collections';
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 const normalizeUserId = (value: string | number | undefined | null): string => String(value ?? '').trim();
+
+function isPlaceholderUserId(userId: string): boolean {
+    const id = normalizeUserId(userId).toLowerCase();
+    return !id || id === 'me' || id === 'anon';
+}
 const MAX_INLINE_PREVIEW_URL_LENGTH = 4000;
 type CollectionWithPreviewMap = Collection & {
     postPreviewMap?: Record<string, Partial<Post>>;
@@ -603,10 +609,21 @@ export async function createCollection(userId: string, name: string, isPrivate: 
  * Get all collections for a user
  */
 export async function getUserCollections(userId: string): Promise<Collection[]> {
+    const normalizedUserId = normalizeUserId(userId);
+    const useMeEndpoint = isPlaceholderUserId(normalizedUserId);
+
     if (isLiveCollectionsApi()) {
         try {
-            const payload = await apiClient.fetchCollections();
-            return mapApiCollections(payload, userId).sort((a, b) => b.updatedAt - a.updatedAt);
+            const token = (await getAuthTokenAsync())?.trim();
+            if (!token) {
+                return [];
+            }
+            const payload = useMeEndpoint
+                ? await apiClient.fetchMyCollections()
+                : await apiClient.fetchCollections();
+            return mapApiCollections(payload, useMeEndpoint ? 'me' : normalizedUserId).sort(
+                (a, b) => b.updatedAt - a.updatedAt,
+            );
         } catch (error) {
             console.warn('Laravel getUserCollections failed:', error);
             throw error;
@@ -614,7 +631,6 @@ export async function getUserCollections(userId: string): Promise<Collection[]> 
     }
 
     await delay(100);
-    const normalizedUserId = normalizeUserId(userId);
 
     const collections = await loadCollectionsFromPersistence();
     ensureDefaultCollection(collections, normalizedUserId);

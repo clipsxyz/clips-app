@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class AuthControllerTest extends TestCase
@@ -164,5 +165,45 @@ class AuthControllerTest extends TestCase
         $response->assertStatus(200)
             ->assertJsonStructure(['id', 'username', 'email', 'handle'])
             ->assertJson(['id' => $user->id]);
+    }
+
+    public function test_me_returns_live_follow_counts_when_columns_are_stale(): void
+    {
+        $user = User::factory()->create([
+            'followers_count' => 0,
+            'following_count' => 0,
+        ]);
+        $follower = User::factory()->create();
+        $following = User::factory()->create();
+
+        DB::table('user_follows')->insert([
+            [
+                'follower_id' => $follower->id,
+                'following_id' => $user->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'follower_id' => $user->id,
+                'following_id' => $following->id,
+                'status' => 'accepted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me');
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'id' => $user->id,
+                'followers_count' => 1,
+                'following_count' => 1,
+            ]);
+
+        $this->assertEquals(1, $user->fresh()->followers_count);
+        $this->assertEquals(1, $user->fresh()->following_count);
     }
 }
