@@ -794,6 +794,8 @@ const FeedPostMedia = React.memo(
     const mediaAspect = isLandscapeMedia ? 16 / 9 : 4 / 5;
     const frameHeight =
         width > 0 ? Math.min(width / mediaAspect, height) : height;
+    // Explicit height (not only aspectRatio): ColorOS TextureView ignores overflow
+    // and expands to the MP4's 9:16, bleeding into the carousel thumb rail.
     const frameStyle = fillViewport
         ? {
               width: '100%' as const,
@@ -806,8 +808,9 @@ const FeedPostMedia = React.memo(
           }
         : {
               width: '100%' as const,
+              height: frameHeight,
+              maxHeight: frameHeight,
               alignSelf: 'stretch' as const,
-              aspectRatio: mediaAspect,
               overflow: 'hidden' as const,
               backgroundColor: '#121212',
               marginRight: 0,

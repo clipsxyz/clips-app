@@ -41,7 +41,9 @@ import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
-import { ensureCameraPermission, ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { ensureCameraCapturePermission } from '../utils/galleryMediaPermissionsNative';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { launchNativeCamera } from '../utils/launchNativeCamera';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import { ox } from '../constants/nativeOpticalScale';
 import {
@@ -214,42 +216,28 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
     const addCarouselFromPicker = useCallback(() => {
         void (async () => {
-            const allowed = await ensureGalleryMediaPermission();
-            if (!allowed) return;
             const remaining = CAROUSEL_MAX - carouselItems.length;
             if (remaining <= 0) {
                 Alert.alert('Carousel full', `You can add up to ${CAROUSEL_MAX} photos or videos.`);
                 return;
             }
-            ImagePicker.launchImageLibrary(
-                {
-                    mediaType: 'mixed',
-                    selectionLimit: remaining > 1 ? remaining : 1,
-                    quality: 0.9,
-                    videoQuality: 'high',
-                    includeExtra: true,
-                },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        Alert.alert('Media error', response.errorMessage || 'Could not open your gallery.');
-                        return;
-                    }
-                    const assets = response.assets || [];
-                    if (assets.length < 1) return;
-                    const toAdd = assetsToCarouselItems(assets, remaining);
-                    if (toAdd.length === 0) return;
-                    setCarouselItems((prev) => {
-                        const existingUris = new Set(prev.map((item) => item.uri));
-                        const merged = [
-                            ...prev,
-                            ...toAdd.filter((item) => !existingUris.has(item.uri)),
-                        ];
-                        return merged.slice(0, CAROUSEL_MAX);
-                    });
-                    setCardTab('carousel');
-                },
-            );
+            try {
+                const picked = await pickFromFullGallery(remaining);
+                if (picked === 'denied' || picked === 'cancel') return;
+                const toAdd = assetsToCarouselItems(picked, remaining);
+                if (toAdd.length === 0) return;
+                setCarouselItems((prev) => {
+                    const existingUris = new Set(prev.map((item) => item.uri));
+                    const merged = [
+                        ...prev,
+                        ...toAdd.filter((item) => !existingUris.has(item.uri)),
+                    ];
+                    return merged.slice(0, CAROUSEL_MAX);
+                });
+                setCardTab('carousel');
+            } catch (err: any) {
+                Alert.alert('Media error', err?.message || 'Could not open your gallery.');
+            }
         })();
     }, [carouselItems.length]);
 
@@ -269,47 +257,45 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
         if (autoStart.source === 'library') {
             void (async () => {
-                const allowed = await ensureGalleryMediaPermission();
-                if (!allowed) {
+                try {
+                    const picked = await pickFromFullGallery(
+                        autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
+                    );
+                    if (picked === 'denied' || picked === 'cancel') {
+                        navigation.goBack();
+                        return;
+                    }
+                    const ok = applyAssets(picked);
+                    if (!ok) navigation.goBack();
+                } catch (err: any) {
+                    Alert.alert('Media error', err?.message || 'Could not open your library.');
                     navigation.goBack();
-                    return;
                 }
-                ImagePicker.launchImageLibrary(
-                    {
-                        mediaType: autoStart.mediaType ?? 'mixed',
-                        selectionLimit: autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
-                        quality: 0.9,
-                        videoQuality: 'high',
-                    },
-                    (response) => {
-                        if (response.didCancel) {
-                            navigation.goBack();
-                            return;
-                        }
-                        if (response.errorCode) {
-                            Alert.alert('Media error', response.errorMessage || 'Could not open your library.');
-                            navigation.goBack();
-                            return;
-                        }
-                        const ok = applyAssets(response.assets || []);
-                        if (!ok) navigation.goBack();
-                    },
-                );
             })();
             return;
         }
 
         if (autoStart.source === 'camera') {
             void (async () => {
-                const allowed = await ensureCameraPermission();
+                const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
+                const allowed = await ensureCameraCapturePermission(mediaType);
                 if (!allowed) {
-                    Alert.alert('Camera access needed', 'Allow camera access in Settings to take a photo.');
+                    Alert.alert(
+                        mediaType === 'video' ? 'Camera and microphone needed' : 'Camera access needed',
+                        mediaType === 'video'
+                            ? 'Allow camera and microphone in Settings to record a video.'
+                            : 'Allow camera access in Settings to take a photo.',
+                    );
                     navigation.goBack();
                     return;
                 }
-                const mediaType = autoStart.mediaType === 'video' ? 'video' : 'photo';
-                ImagePicker.launchCamera(
-                    { mediaType, quality: mediaType === 'video' ? 0.8 : 0.9, videoQuality: 'high', saveToPhotos: true },
+                launchNativeCamera(
+                    {
+                        mediaType,
+                        quality: mediaType === 'video' ? 0.8 : 0.9,
+                        saveToPhotos: true,
+                        durationLimitSec: mediaType === 'video' ? 60 : 0,
+                    },
                     (response) => {
                         if (response.didCancel) {
                             navigation.goBack();

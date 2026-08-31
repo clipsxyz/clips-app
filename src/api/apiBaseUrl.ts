@@ -1,7 +1,10 @@
 import {
+    DEV_LAN_API_BASE_URL,
     getConfiguredApiEnvUrl,
     getReactNativeDefaultApiBaseUrl,
+    isLoopbackApiHost,
     isReactNativeRuntime,
+    rewriteLoopbackApiUrlToLan,
 } from '../config/runtimeEnv';
 
 function isViteDev(): boolean {
@@ -29,97 +32,87 @@ function getBrowserHostname(): string {
     return '';
 }
 
-/** Emulator-only host — remaps to localhost for physical devices + `adb reverse`. */
-function preferLocalhostOverEmulatorLoopback(url: string): string {
-    try {
-        const parsed = new URL(url);
-        if (parsed.hostname === '10.0.2.2') {
-            parsed.hostname = 'localhost';
-            return parsed.toString().replace(/\/$/, '');
-        }
-    } catch {
-        /* ignore */
-    }
-    return String(url || '').replace(/\/$/, '');
-}
-
-const FALLBACK_API = 'http://localhost:8000/api';
+const FALLBACK_API = DEV_LAN_API_BASE_URL;
 
 /**
  * Resolve Laravel API base URL for web and React Native.
- * Prefers `EXPO_PUBLIC_API_BASE_URL`, then legacy `VITE_API_URL`.
- * Web Vite dev uses `http://<page-hostname>:8000/api` so a phone on Wi-Fi
- * hits the laptop Laravel, not the phone's own localhost.
- * RN physical devices: keep `http://localhost:8000/api` for `adb reverse tcp:8000`.
+ * Prefers `EXPO_PUBLIC_API_BASE_URL` / `EXPO_PUBLIC_API_URL` / `REACT_NATIVE_API_URL`,
+ * then legacy `VITE_API_URL`. Web Vite dev uses same-origin `/api`.
+ * RN physical devices use the Mac LAN IP (not localhost).
  */
+function isDomBrowser(): boolean {
+    try {
+        return (
+            typeof window !== 'undefined' &&
+            typeof window.document?.createElement === 'function' &&
+            !!getBrowserHostname()
+        );
+    } catch {
+        return false;
+    }
+}
+
 export function getApiBaseUrl(): string {
     const envUrl = getConfiguredApiEnvUrl();
     const browserHost = getBrowserHostname();
+
+    // Real browser (including react-native-web): never use RN localhost / adb-reverse URLs.
+    if (isDomBrowser()) {
+        const protocol =
+            typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'https' : 'http';
+        if (isViteDev()) {
+            return '/api';
+        }
+        const onNetwork = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
+        if (onNetwork && envUrl) {
+            try {
+                const parsed = new URL(envUrl, window.location?.origin);
+                if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+                    parsed.hostname = browserHost;
+                    return parsed.toString().replace(/\/$/, '');
+                }
+            } catch {
+                // relative env URL
+            }
+        }
+        if (envUrl) return envUrl.replace(/\/$/, '');
+        if (onNetwork) return `${protocol}://${browserHost}:8000/api`;
+        return '/api';
+    }
+
     const isRn = isReactNativeRuntime() || !browserHost;
 
     // React Native / no real window.location — never touch `.hostname` on undefined location.
+    // Physical phones cannot reach the Mac's localhost. Keep 10.0.2.2 (emulator) and
+    // production hosts as-is; only rewrite loopback env URLs to the LAN IP.
     if (isRn) {
-        const rnFromScript = getReactNativeDefaultApiBaseUrl();
-        const scriptIsLan =
-            !!rnFromScript &&
-            !/localhost|127\.0\.0\.1/i.test(rnFromScript);
-        // Wireless ADB reverse drops constantly; if Metro loaded over Wi‑Fi, use that host for Laravel too.
-        if (scriptIsLan) {
-            return preferLocalhostOverEmulatorLoopback(rnFromScript) || FALLBACK_API;
+        const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
+        if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
+            return trimmedEnv;
         }
-        if (envUrl) {
-            try {
-                const parsed = new URL(envUrl);
-                if (parsed.hostname === '10.0.2.2') {
-                    parsed.hostname = 'localhost';
-                    return parsed.toString().replace(/\/$/, '') || FALLBACK_API;
-                }
-                if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-                    return envUrl.replace(/\/$/, '') || FALLBACK_API;
-                }
-            } catch {
-                // ignore malformed env URL
-            }
-            return preferLocalhostOverEmulatorLoopback(envUrl) || FALLBACK_API;
+        const fromMetro = getReactNativeDefaultApiBaseUrl();
+        if (fromMetro) return fromMetro.replace(/\/$/, '');
+        if (trimmedEnv) {
+            return rewriteLoopbackApiUrlToLan(trimmedEnv) || FALLBACK_API;
         }
-        const rn = getReactNativeDefaultApiBaseUrl();
-        if (rn) return preferLocalhostOverEmulatorLoopback(rn) || FALLBACK_API;
         return FALLBACK_API;
     }
 
-    // Vite dev: always hit Laravel on the same hostname the page was opened with.
-    // Phone browsers cannot reach the laptop via `localhost` (CONNECTION_REFUSED),
-    // and relative `/api` leaves media URLs as http://localhost:8000/... which also fail on device.
-    if (isViteDev()) {
-        const protocol =
-            typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'https' : 'http';
-        return `${protocol}://${browserHost}:8000/api`;
-    }
-
-    const hostname = browserHost;
-    const protocol =
-        typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'https' : 'http';
-    const onNetwork = hostname !== 'localhost' && hostname !== '127.0.0.1';
-
-    if (onNetwork && envUrl) {
-        try {
-            const parsed = new URL(envUrl, typeof window !== 'undefined' ? window.location?.origin : undefined);
-            if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-                parsed.hostname = hostname;
-                return parsed.toString().replace(/\/$/, '');
-            }
-        } catch {
-            // relative env URL
-        }
-    }
-
-    if (envUrl) return envUrl.replace(/\/$/, '');
-    if (onNetwork) return `${protocol}://${hostname}:8000/api`;
-    return '/api';
+    return FALLBACK_API;
 }
 
 function currentApiOrigin(): string {
     const apiBase = getApiBaseUrl().replace(/\/$/, '');
+    if (apiBase === '/api' || (apiBase.startsWith('/') && !apiBase.startsWith('//'))) {
+        try {
+            if (typeof window !== 'undefined' && window.location?.origin) {
+                return window.location.origin;
+            }
+        } catch {
+            /* ignore */
+        }
+        return '';
+    }
     return apiBase.replace(/\/api$/i, '');
 }
 
@@ -141,7 +134,7 @@ function remapDevMediaHostToApiOrigin(absoluteUrl: string): string {
     try {
         const parsed = new URL(absoluteUrl);
         const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
-        if (port !== '8000' || !isDevMediaHost(parsed.hostname)) return absoluteUrl;
+        if ((port !== '8000' && port !== '5173') || !isDevMediaHost(parsed.hostname)) return absoluteUrl;
         const current = new URL(origin);
         parsed.protocol = current.protocol;
         parsed.hostname = current.hostname;
@@ -160,8 +153,33 @@ export function resolvePublicMediaUrl(url: string | null | undefined): string {
     if (/^https?:\/\//i.test(raw)) return remapDevMediaHostToApiOrigin(raw);
     let origin = currentApiOrigin();
     if (!origin || !/^https?:\/\//i.test(origin)) {
-        origin = isReactNativeRuntime() ? 'http://localhost:8000' : origin;
+        origin = isReactNativeRuntime() ? DEV_LAN_API_BASE_URL.replace(/\/api$/i, '') : origin;
     }
     if (raw.startsWith('/')) return origin ? `${origin}${raw}` : raw;
     return origin ? `${origin}/${raw}` : raw;
+}
+
+/**
+ * Phone browsers cannot reach Laravel on :8000 (firewall). On web, point stored
+ * `http://localhost:8000/storage/...` URLs at the Vite origin so `/storage` is proxied.
+ */
+export function rewriteMediaUrlForClient(url: string): string {
+    const resolved = resolvePublicMediaUrl(url);
+    if (!resolved) return '';
+    try {
+        if (
+            typeof window !== 'undefined' &&
+            typeof window.document?.createElement === 'function' &&
+            window.location?.origin
+        ) {
+            const origin = window.location.origin.replace(/\/$/, '');
+            return resolved.replace(
+                /https?:\/\/(?:localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3}):8000/gi,
+                origin,
+            );
+        }
+    } catch {
+        /* ignore */
+    }
+    return resolved;
 }

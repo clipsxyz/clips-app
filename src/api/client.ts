@@ -341,6 +341,7 @@ export async function loginUser(email: string, password: string): Promise<{
         }
 
         await persistAuthToken(token);
+        clearLaravelUnreachable();
 
         return {
             user: data.user && typeof data.user === 'object' ? data.user : {},
@@ -830,7 +831,7 @@ export async function updateAuthProfile(data: {
     });
 }
 
-// Posts API (6s timeout for faster fallback on slow mobile networks)
+// Posts API (20s so feed GETs survive Laravel busy with uploads; default apiRequest is 8s)
 export async function fetchPostsPage(
     cursor: number | string | null = 0,
     limit: number = 10,
@@ -866,7 +867,7 @@ export async function fetchPostsPage(
     console.log('[fetchPostsPage/client] Authorization header present=', Boolean(authHeader.Authorization));
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 20_000);
 
     try {
         const response = await fetch(url, {

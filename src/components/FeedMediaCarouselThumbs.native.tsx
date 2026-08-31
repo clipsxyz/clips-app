@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import CarouselSlideThumb from './CarouselSlideThumb.native';
 import {
     FEED_CARD_CAROUSEL_COUNT,
     FEED_CARD_CAROUSEL_HEADER,
@@ -17,12 +18,6 @@ export type CarouselThumbItem = {
     thumbnailUrl?: string;
     thumbnail_url?: string;
 };
-
-function thumbUri(item: CarouselThumbItem): string | undefined {
-    const poster = item.posterUrl || item.thumbnailUrl || item.thumbnail_url;
-    if (item.type === 'video') return poster || undefined;
-    return poster || item.url || undefined;
-}
 
 type Props = {
     items: CarouselThumbItem[];
@@ -44,7 +39,6 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={FEED_CARD_CAROUSEL_RAIL}>
                 {items.map((item, index) => {
                     const active = index === activeIndex;
-                    const uri = thumbUri(item);
                     return (
                         <TouchableOpacity
                             key={`thumb-${index}`}
@@ -52,13 +46,17 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
                             onPress={() => onSelect(index)}
                             activeOpacity={0.9}
                         >
-                            {uri ? (
-                                <Image source={{ uri }} style={styles.thumbImg} />
-                            ) : (
-                                <View style={styles.thumbFallback} />
-                            )}
+                            <CarouselSlideThumb
+                                size={56}
+                                uri={item.url}
+                                type={item.type}
+                                posterUrl={item.posterUrl}
+                                thumbnailUrl={item.thumbnailUrl}
+                                thumbnail_url={item.thumbnail_url}
+                                allowPausedVideo
+                            />
                             {item.type === 'video' ? (
-                                <View style={styles.vidBadge}>
+                                <View style={styles.vidBadge} pointerEvents="none">
                                     <Text style={styles.vidBadgeText}>VID</Text>
                                 </View>
                             ) : null}
@@ -71,19 +69,6 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
 }
 
 const styles = StyleSheet.create({
-    thumbImgWrap: {
-        width: '100%',
-        height: '100%',
-    },
-    thumbImg: {
-        width: '100%',
-        height: '100%',
-    },
-    thumbFallback: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#121212',
-    },
     vidBadge: {
         position: 'absolute',
         right: 4,
@@ -92,6 +77,7 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         paddingHorizontal: 4,
         paddingVertical: 1,
+        zIndex: 2,
     },
     vidBadgeText: {
         color: '#FFFFFF',

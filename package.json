@@ -23,7 +23,7 @@
     "setup:ffmpeg-native": "node scripts/setup-ffmpeg-native.mjs",
     "sync:env": "node scripts/sync-firebase-env.mjs",
     "check:secrets": "node scripts/check-no-secrets-staged.mjs",
-    "prepare": "node scripts/install-git-hooks.mjs && node scripts/patch-react-native-fragment-props.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs && node scripts/patch-react-native-fragment-props.mjs && node scripts/patch-image-picker-options.mjs && node scripts/patch-crop-picker-gallery.mjs",
     "patch:rn-fragment": "node scripts/patch-react-native-fragment-props.mjs",
     "clean:cache": "node -e \"const fs = require('fs'); const path = require('path'); const rimraf = (dir) => { try { fs.rmSync(dir, { recursive: true, force: true }); console.log('Cleared:', dir); } catch(e) {} }; rimraf(path.join(process.cwd(), 'node_modules/.vite')); rimraf(path.join(process.cwd(), 'dist')); console.log('Cache cleared!');\""
   },

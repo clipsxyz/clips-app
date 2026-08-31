@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel } from '../theme/gazetteerAmbientNative';
 import * as ImagePicker from 'react-native-image-picker';
+import { launchNativeCamera } from '../utils/launchNativeCamera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/Auth';
 import { loginUser, registerUser, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
@@ -752,13 +753,12 @@ export default function LoginScreen({ navigation, route }: any) {
             );
             return;
         }
-        ImagePicker.launchCamera(
+        launchNativeCamera(
             {
                 mediaType: 'photo',
                 quality: 0.9,
                 saveToPhotos: true,
                 cameraType: 'front',
-                includeBase64: false,
             },
             (response) => applyProfileAsset(response, 'Camera'),
         );

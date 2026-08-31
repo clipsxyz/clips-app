@@ -155,6 +155,7 @@ export function pendingUploadToPost(job: PendingFeedUploadJob): Post {
             ? job.localMediaItems.map((item) => ({
                   url: item.uri,
                   type: item.type,
+                  posterUrl: item.type === 'image' ? item.uri : undefined,
               }))
             : undefined;
     const firstCarousel = job.localMediaItems?.[0];

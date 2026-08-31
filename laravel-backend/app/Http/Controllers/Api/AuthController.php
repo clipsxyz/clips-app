@@ -256,6 +256,7 @@ class AuthController extends Controller
     private function findUserByLoginIdentifier(string $raw): ?User
     {
         $identifier = strtolower(trim($raw));
+        $identifier = ltrim($identifier, '@');
         if ($identifier === '') {
             return null;
         }

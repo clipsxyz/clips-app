@@ -9,7 +9,7 @@ import {
 } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { isMockMode } from './apiMode';
-import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
+import { getApiBaseUrl, rewriteMediaUrlForClient } from './apiBaseUrl';
 import { mapApiLinkPreview } from '../utils/linkPreview';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
@@ -1454,7 +1454,7 @@ function normalizeCaptionFields<T extends Post>(post: T): T {
 /** Rewrite localhost / relative media URLs so they load on device. */
 function rewriteMediaUrlForNetwork(url: string): string {
   if (!url || typeof url !== 'string') return url;
-  const resolved = resolvePublicMediaUrl(url) || url;
+  const resolved = rewriteMediaUrlForClient(url) || url;
 
   // RN polyfills `window` without a real `location` — never read `.hostname` blindly.
   let browserHost = '';
@@ -1468,6 +1468,15 @@ function rewriteMediaUrlForNetwork(url: string): string {
     }
   } catch {
     browserHost = '';
+  }
+
+  // Web already remapped :8000 → Vite origin. Don't send the phone to :8000.
+  try {
+    if (typeof window !== 'undefined' && typeof window.document?.createElement === 'function') {
+      return resolved;
+    }
+  } catch {
+    /* ignore */
   }
 
   let targetHost = browserHost;

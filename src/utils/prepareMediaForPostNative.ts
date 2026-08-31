@@ -4,7 +4,7 @@ import {
     compressImageForUploadNative,
     transcodeVideoForUploadNative,
 } from './transcodeVideoForUploadNative';
-import { uploadFileFromUri } from './uploadFileNative';
+import { normalizeUploadUri, uploadFileFromUri } from './uploadFileNative';
 
 type NativeMediaType = 'image' | 'video' | null;
 
@@ -101,7 +101,7 @@ export async function prepareMediaForPostNative({
         return {};
     }
 
-    const normalizedUrl = mediaUrl.trim();
+    const normalizedUrl = normalizeUploadUri(mediaUrl.trim());
     if (!normalizedUrl) {
         return {};
     }

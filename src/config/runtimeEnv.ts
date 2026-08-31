@@ -31,6 +31,15 @@ export function getRuntimeEnv(key: string): string | undefined {
 }
 
 export function isReactNativeRuntime(): boolean {
+  // Vite aliases `react-native` → `react-native-web`, which still exports Platform.
+  // A real DOM means this is the web app — never treat it as RN (that forced localhost API).
+  try {
+    if (typeof window !== 'undefined' && typeof window.document?.createElement === 'function') {
+      return false;
+    }
+  } catch {
+    /* ignore */
+  }
   try {
     if (typeof navigator !== 'undefined' && (navigator as any).product === 'ReactNative') {
       return true;
@@ -42,7 +51,9 @@ export function isReactNativeRuntime(): boolean {
     if (typeof require !== 'undefined') {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const rn = require('react-native');
-      return !!rn?.Platform;
+      const os = rn?.Platform?.OS as string | undefined;
+      if (os === 'web') return false;
+      return os === 'ios' || os === 'android';
     }
   } catch {
     /* ignore */
@@ -82,15 +93,48 @@ export function isMockMode(): boolean {
   return String(raw ?? '').trim().toLowerCase() === 'true';
 }
 
+/** Mac LAN IP used when the phone cannot reach localhost (adb reverse drops). */
+export const DEV_LAN_API_HOST = '192.168.1.9';
+export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
+
 /**
- * Prefer migration env `EXPO_PUBLIC_API_BASE_URL`, then legacy `VITE_API_URL`.
+ * Prefer migration env `EXPO_PUBLIC_API_BASE_URL`, then
+ * `EXPO_PUBLIC_API_URL` / `REACT_NATIVE_API_URL`, then legacy `VITE_API_URL`.
  */
 export function getConfiguredApiEnvUrl(): string | undefined {
   return (
     getRuntimeEnv('EXPO_PUBLIC_API_BASE_URL') ||
+    getRuntimeEnv('EXPO_PUBLIC_API_URL') ||
+    getRuntimeEnv('REACT_NATIVE_API_URL') ||
     getRuntimeEnv('VITE_API_URL') ||
     undefined
   );
+}
+
+export function isLoopbackApiHost(url: string): boolean {
+  try {
+    const host = new URL(String(url || '').trim()).hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+/** Physical devices cannot use localhost; map loopback API URLs to the LAN host. */
+export function rewriteLoopbackApiUrlToLan(url: string): string {
+  const trimmed = String(url || '').trim().replace(/\/$/, '');
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      parsed.hostname = DEV_LAN_API_HOST;
+      if (!parsed.port) parsed.port = '8000';
+      return parsed.toString().replace(/\/$/, '');
+    }
+  } catch {
+    /* ignore malformed */
+  }
+  return trimmed;
 }
 
 export function isLaravelApiEnabled(): boolean {
@@ -99,7 +143,6 @@ export function isLaravelApiEnabled(): boolean {
   const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');
   if (raw === 'false') return false;
   // Live migration mode: EXPO_PUBLIC_USE_MOCK=false enables Laravel for migrated routes.
-  // RN keeps localhost API hosts for `adb reverse tcp:8000` (see getApiBaseUrl).
   if (raw === 'true' || getRuntimeEnv('EXPO_PUBLIC_USE_MOCK') === 'false') {
     return true;
   }
@@ -118,10 +161,8 @@ export function isViteDevMode(): boolean {
 
 /**
  * Default Laravel API URL when running under Metro (no window.location).
- *
- * Physical Android: prefer `http://localhost:8000/api` with
- * `adb reverse tcp:8000 tcp:8000` (never 10.0.2.2 — that only works on emulators).
- * Wi‑Fi Metro (e.g. 192.168.x.x:8081) may use the same LAN host for Laravel.
+ * Physical phones cannot reach the Mac's localhost; use the LAN IP
+ * (or Metro's Wi‑Fi host) instead of adb reverse.
  */
 export function getReactNativeDefaultApiBaseUrl(): string | null {
   if (typeof require === 'undefined') return null;
@@ -129,28 +170,23 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { NativeModules } = require('react-native') as typeof import('react-native');
     const port = '8000';
-    const localhostApi = `http://localhost:${port}/api`;
 
     const scriptUrl = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
     if (scriptUrl) {
       try {
         const parsed = new URL(scriptUrl);
         const host = parsed.hostname;
-        // LAN / Wi‑Fi Metro → same host for Laravel when not using ADB reverse for API.
-        if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        const protocol = String(parsed.protocol || '').replace(/:$/, '');
+        if (protocol === 'file' || !host) return null;
+        if (host !== 'localhost' && host !== '127.0.0.1') {
           return `http://${host}:${port}/api`;
-        }
-        // USB / wireless ADB with Metro on localhost — API via `adb reverse tcp:8000`.
-        if (host === 'localhost' || host === '127.0.0.1') {
-          return localhostApi;
         }
       } catch {
         /* ignore malformed script URL */
       }
     }
 
-    // Physical device + emulator fallback: localhost (requires adb reverse on hardware).
-    return localhostApi;
+    return null;
   } catch {
     return null;
   }

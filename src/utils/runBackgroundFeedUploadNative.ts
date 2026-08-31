@@ -112,6 +112,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
                 url: item.url,
                 type: item.type,
                 duration: item.duration,
+                posterUrl: item.posterUrl,
             }));
             carouselVideoPoster =
                 prepared.videoPosterUrl ||

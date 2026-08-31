@@ -1,6 +1,7 @@
 import type { ImageSourcePropType } from 'react-native';
 import type { Post, Story } from '../types';
-import { getReactNativeDefaultApiBaseUrl, isReactNativeRuntime } from '../config/runtimeEnv';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
+import { isReactNativeRuntime } from '../config/runtimeEnv';
 import {
     isMockDemoVideoPath,
     mockFeedVideoSource,
@@ -38,8 +39,8 @@ export function resolveStoryMediaUrl(url?: string | null): string | undefined {
         return demoVideoPathFromUrl(raw) || raw;
     }
 
-    const apiBase = getReactNativeDefaultApiBaseUrl();
-    if (!apiBase) return raw;
+    const apiBase = getApiBaseUrl();
+    if (!apiBase || apiBase === '/api') return raw;
 
     try {
         const api = new URL(apiBase);

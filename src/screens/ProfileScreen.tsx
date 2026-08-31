@@ -95,7 +95,8 @@ import {
     resetNotificationPreferences,
     type NotificationPreferences,
 } from '../services/notifications';
-import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
+import { getRuntimeEnv, isLaravelApiEnabled } from '../config/runtimeEnv';
 import { ensureContactsPermission } from '../utils/contactsPermissionNative';
 import { buildInviteShareUrl } from '../utils/profileShareUrl';
 import { maskPhoneNumber, toE164Phone } from '../utils/maskPhoneNumber';
@@ -992,7 +993,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const inviteShareUrl = useMemo(() => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiBase = getApiBaseUrl() || 'http://192.168.1.9:8000/api';
         return buildInviteShareUrl(String(user?.handle || ''), apiBase);
     }, [user?.handle]);
 

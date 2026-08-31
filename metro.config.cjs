@@ -3,7 +3,7 @@ const { withNativeWind } = require('nativewind/metro');
 const fs = require('fs');
 const path = require('path');
 
-/** Load repo `.env` into process.env so Metro/babel see EXPO_PUBLIC_* / VITE_* at bundle time. */
+/** Load repo `.env` into process.env so Metro/babel see EXPO_PUBLIC_* / VITE_* / REACT_NATIVE_API_URL at bundle time. */
 function loadRootEnvIntoProcess() {
   try {
     const envPath = path.resolve(__dirname, '.env');
@@ -15,7 +15,7 @@ function loadRootEnvIntoProcess() {
       const eq = line.indexOf('=');
       if (eq <= 0) continue;
       const key = line.slice(0, eq).trim();
-      if (!/^(VITE_|EXPO_PUBLIC_)/.test(key)) continue;
+      if (!/^(VITE_|EXPO_PUBLIC_|REACT_NATIVE_API_URL$)/.test(key)) continue;
       let value = line.slice(eq + 1).trim();
       if (
         (value.startsWith('"') && value.endsWith('"')) ||

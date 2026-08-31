@@ -12,7 +12,7 @@ export default defineConfig({
     'process.env': {},
   },
   // Expose both Vite and Expo-style public env keys to the client bundle.
-  envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
+  envPrefix: ['VITE_', 'EXPO_PUBLIC_', 'REACT_NATIVE_'],
   resolve: {
     // Prefer *.web.* so shared imports do not pull Metro-only files.
     extensions: ['.web.tsx', '.web.ts', '.web.jsx', '.web.js', '.mjs', '.tsx', '.ts', '.jsx', '.js', '.json'],
@@ -83,10 +83,14 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        secure: false, // Allow self-signed certificates
-        rewrite: (path) => path.replace(/^\/api/, '/api'),
+        secure: false,
+      },
+      '/storage': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
       },
     },
   },

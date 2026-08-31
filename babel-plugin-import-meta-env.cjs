@@ -1,6 +1,6 @@
 /**
  * Hermes does not support import.meta. Map Vite-style env reads to process.env for Metro bundles.
- * Also inlines VITE_* / EXPO_PUBLIC_* values from the repo `.env` so RN can read them at runtime.
+ * Also inlines VITE_* / EXPO_PUBLIC_* / REACT_NATIVE_API_URL from the repo `.env` so RN can read them at runtime.
  */
 const fs = require('fs');
 const path = require('path');
@@ -17,7 +17,7 @@ function loadDotEnv() {
       const eq = line.indexOf('=');
       if (eq <= 0) continue;
       const key = line.slice(0, eq).trim();
-      if (!/^(VITE_|EXPO_PUBLIC_)/.test(key)) continue;
+      if (!/^(VITE_|EXPO_PUBLIC_|REACT_NATIVE_API_URL$)/.test(key)) continue;
       let value = line.slice(eq + 1).trim();
       if (
         (value.startsWith('"') && value.endsWith('"')) ||
@@ -72,7 +72,7 @@ module.exports = function importMetaEnvForHermes({ types: t }) {
   }
 
   function inlineEnvValue(key) {
-    if (!key || !/^(VITE_|EXPO_PUBLIC_)/.test(key)) return null;
+    if (!key || !/^(VITE_|EXPO_PUBLIC_|REACT_NATIVE_API_URL$)/.test(key)) return null;
     // Re-read `.env` on each transform so Metro picks up flag flips without a full process restart
     // (still recommend `--reset-cache` after changing env — transform cache may retain old ASTs).
     const fileEnv = loadDotEnv();

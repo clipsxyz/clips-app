@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
+import { launchNativeCamera } from '../utils/launchNativeCamera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
@@ -22,9 +23,9 @@ import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarous
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import {
-    ensureCameraPermission,
-    ensureGalleryMediaPermission,
+    ensureCameraCapturePermission,
 } from '../utils/galleryMediaPermissionsNative';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 type PickerMode = 'feed' | 'story24';
@@ -276,90 +277,84 @@ export default function InstantCreateScreen({ navigation, route }: any) {
 
     const pickGalleryMedia = useCallback(
         async (mode: PickerMode = 'feed') => {
-            const allowed = await ensureGalleryMediaPermission();
-            if (!allowed) {
+            try {
+                const picked = await pickFromFullGallery(MAX_GALLERY_ITEMS);
+                if (picked === 'denied') {
+                    setHubAlert({
+                        title: 'Gallery access needed',
+                        message:
+                            'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                    return;
+                }
+                if (picked === 'cancel') return;
+                const supported = picked.filter(assetIsSupportedGalleryItem);
+                if (supported.length === 0) {
+                    setHubAlert({
+                        title: 'No Supported Files',
+                        message: 'Please select images or videos from your gallery.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                    return;
+                }
+
+                const proceed = () => {
+                    const items = supported.slice(0, MAX_GALLERY_ITEMS);
+                    navigateFromAssets(items, mode, items.length >= 2);
+                };
+
+                if (supported.length > MAX_GALLERY_ITEMS) {
+                    setHubAlert({
+                        title: 'Too Many Items',
+                        message: `You can select up to ${MAX_GALLERY_ITEMS} items for a carousel.`,
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                        onConfirm: () => {
+                            setHubAlert(null);
+                            proceed();
+                        },
+                    });
+                    return;
+                }
+
+                proceed();
+            } catch (err: any) {
                 setHubAlert({
-                    title: 'Gallery access needed',
-                    message: 'Allow photo and video access in Settings to upload from your gallery.',
+                    title: 'Media error',
+                    message: err?.message || 'Could not open your gallery.',
                     icon: 'alert',
                     confirmButtonText: 'OK',
                 });
-                return;
             }
-            ImagePicker.launchImageLibrary(
-                {
-                    mediaType: 'mixed',
-                    quality: 0.9,
-                    selectionLimit: MAX_GALLERY_ITEMS,
-                    videoQuality: 'high',
-                },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        setHubAlert({
-                            title: 'Media error',
-                            message: response.errorMessage || 'Could not open your gallery.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-                    const rawAssets = response.assets || [];
-                    const supported = rawAssets.filter(assetIsSupportedGalleryItem);
-                    if (supported.length === 0) {
-                        setHubAlert({
-                            title: 'No Supported Files',
-                            message: 'Please select images or videos from your gallery.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-
-                    const proceed = () => {
-                        const items = supported.slice(0, MAX_GALLERY_ITEMS);
-                        navigateFromAssets(items, mode, items.length >= 2);
-                    };
-
-                    if (supported.length > MAX_GALLERY_ITEMS) {
-                        setHubAlert({
-                            title: 'Too Many Items',
-                            message: `You can select up to ${MAX_GALLERY_ITEMS} items for a carousel.`,
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                            onConfirm: () => {
-                                setHubAlert(null);
-                                proceed();
-                            },
-                        });
-                        return;
-                    }
-
-                    proceed();
-                },
-            );
         },
         [navigateFromAssets],
     );
 
     const pickCameraMedia = useCallback(
-        async (mode: PickerMode = 'feed') => {
-            const allowed = await ensureCameraPermission();
+        async (mode: PickerMode = 'feed', capture: 'photo' | 'video' = 'photo') => {
+            const allowed = await ensureCameraCapturePermission(capture);
             if (!allowed) {
                 setHubAlert({
-                    title: 'Camera access needed',
-                    message: 'Allow camera access in Settings to take a photo for your post.',
+                    title: capture === 'video' ? 'Camera and microphone needed' : 'Camera access needed',
+                    message:
+                        capture === 'video'
+                            ? 'Allow camera and microphone in Settings to record a video for your post.'
+                            : 'Allow camera access in Settings to take a photo for your post.',
                     icon: 'alert',
                     confirmButtonText: 'OK',
                 });
                 return;
             }
-            ImagePicker.launchCamera(
+            launchNativeCamera(
                 {
-                    mediaType: 'photo',
-                    quality: 0.9,
+                    mediaType: capture,
+                    quality: capture === 'video' ? 0.8 : 0.9,
                     saveToPhotos: true,
                     cameraType: 'back',
+                    durationLimitSec: capture === 'video' ? 60 : 0,
                 },
                 (response) => {
                     if (response.didCancel) return;
@@ -376,8 +371,11 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                     const supported = rawAssets.filter(assetIsSupportedGalleryItem);
                     if (supported.length === 0) {
                         setHubAlert({
-                            title: 'No photo',
-                            message: 'No photo was captured. Try again.',
+                            title: capture === 'video' ? 'No video' : 'No photo',
+                            message:
+                                capture === 'video'
+                                    ? 'No video was recorded. Try again.'
+                                    : 'No photo was captured. Try again.',
                             icon: 'alert',
                             confirmButtonText: 'OK',
                         });
@@ -404,9 +402,14 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                         onPress: () => void pickGalleryMedia(mode),
                     },
                     {
-                        label: 'Camera',
+                        label: 'Take photo',
                         icon: 'camera-outline',
-                        onPress: () => void pickCameraMedia(mode),
+                        onPress: () => void pickCameraMedia(mode, 'photo'),
+                    },
+                    {
+                        label: 'Record video',
+                        icon: 'videocam-outline',
+                        onPress: () => void pickCameraMedia(mode, 'video'),
                     },
                     ...(isStory
                         ? [

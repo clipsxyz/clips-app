@@ -1103,13 +1103,21 @@ const FeedCard = React.memo(function FeedCard({
     const textOnlyPost = isTextOnlyPost(post);
     const hasFeedMedia = !textOnlyPost && Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
     const hasTaggedUsers = Boolean(post.taggedUsers && post.taggedUsers.length > 0);
-    const carouselThumbItems = React.useMemo(
-        () =>
-            (post.mediaItems || []).filter(
-                (item) => item?.type === 'image' || item?.type === 'video',
-            ),
-        [post.mediaItems],
-    );
+    const carouselThumbItems = React.useMemo(() => {
+        const items = (post.mediaItems || []).filter(
+            (item) => item?.type === 'image' || item?.type === 'video',
+        );
+        const firstVideo = items.find((item) => item.type === 'video');
+        return items.map((item) => ({
+            ...item,
+            posterUrl:
+                item.posterUrl ||
+                item.thumbnailUrl ||
+                item.thumbnail_url ||
+                (item.type === 'image' ? item.url : undefined) ||
+                (item.type === 'video' && item === firstVideo ? post.videoPosterUrl : undefined),
+        }));
+    }, [post.mediaItems, post.videoPosterUrl]);
     const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
     const captionWithoutLink = React.useMemo(
         () => getPostCaptionWithoutLink(post, displayCaption),
@@ -1282,7 +1290,12 @@ const FeedCard = React.memo(function FeedCard({
                             }}
                         >
                         <View
-                            style={{ width: '100%' }}
+                            style={{
+                                width: '100%',
+                                height: mediaFrameHeight,
+                                maxHeight: mediaFrameHeight,
+                                overflow: 'hidden',
+                            }}
                             ref={mediaWrapRef}
                             collapsable={false}
                         >
@@ -3015,7 +3028,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setInitialLoading(true);
         }
         setError(null);
-        const timeoutMs = Platform.OS === 'web' ? 12000 : 15000;
+        // Longer than the feed GET timeout so a busy Laravel (e.g. carousel upload)
+        // can finish instead of racing an immediate dropout.
+        const timeoutMs = Platform.OS === 'web' ? 20000 : 25000;
 
         const makeLoadTimeout = () => {
             let loadTimeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -3038,8 +3053,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             applyFeedPageResult(result.items, result.nextCursor, result.followingCount, requestedFilter);
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
-            console.error('Error loading feed:', err);
             const errMsg = err instanceof Error ? err.message : String(err ?? '');
+            const isTransientNetwork =
+                (err instanceof TypeError && /network request failed|failed to fetch/i.test(errMsg)) ||
+                (err instanceof Error &&
+                    (err.name === 'AbortError' ||
+                        err.name === 'ConnectionRefused' ||
+                        /network request failed|failed to fetch|CONNECTION_REFUSED|timed out/i.test(
+                            errMsg,
+                        )));
+            if (__DEV__) {
+                console.warn('Feed load failed gracefully:', err);
+            } else if (!isTransientNetwork) {
+                console.warn('Error loading feed:', errMsg.slice(0, 120));
+            }
             const looksLikeCorruptJson =
                 err instanceof SyntaxError ||
                 /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(errMsg);
@@ -3061,7 +3088,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }
             }
 
-            if (isLaravelApiEnabled()) {
+            if (isLaravelApiEnabled() && !isTransientNetwork) {
                 // Soft-fail only: don't poison the whole session so login/upload keep working.
                 console.warn('[FeedScreen] feed load failed (Laravel still enabled for auth/upload)');
             }
@@ -3073,18 +3100,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 applyFeedPageResult(retryResult.items, retryResult.nextCursor, retryResult.followingCount, requestedFilter);
                 return;
             } catch (retryErr) {
-                console.error('Feed recover retry failed:', retryErr);
+                if (__DEV__) console.warn('Feed recovery retry failed gracefully:', retryErr);
             } finally {
                 retryTimeout.clear();
             }
 
             const msg = err instanceof Error ? err.message : '';
             setError(
-                msg.includes('timed out')
-                    ? 'Feed load timed out — tap Retry'
-                    : msg
-                      ? `Failed to load feed (${msg.slice(0, 100)})`
-                      : 'Failed to load feed',
+                isTransientNetwork || /network request failed|failed to fetch/i.test(msg)
+                    ? 'Couldn’t reach Gazetteer — tap Retry'
+                    : msg.includes('timed out')
+                      ? 'Feed load timed out — tap Retry'
+                      : msg
+                        ? `Failed to load feed (${msg.slice(0, 100)})`
+                        : 'Failed to load feed',
             );
             // Keep whatever cards we already have. Applying [] here used to look like
             // "You're early to this feed" after a timeout or dropped adb reverse.

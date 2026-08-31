@@ -16,6 +16,7 @@ import PlaceAutocompleteField from '../PlaceAutocompleteField.native';
 import type { LocationSuggestion } from '../../api/locations';
 import { INSTANT_FILTER_NAMES, getFilterOverlayStyle, type InstantFilterName } from '../../utils/instantFiltersNative';
 import type { LocalCarouselItem } from '../../utils/prepareCarouselMediaForPostNative';
+import CarouselSlideThumb from '../CarouselSlideThumb.native';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../../constants';
 
 export type GalleryPickerTab = 'caption' | 'location' | 'carousel' | 'filters';
@@ -367,13 +368,12 @@ export default function GalleryPreviewComposerPanel({
                                                 draggingIndex === index && styles.carouselThumbWrapDragging,
                                             ]}
                                         >
-                                            {item.type === 'video' ? (
-                                                <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={18} color="#E5E7EB" />
-                                                </View>
-                                            ) : (
-                                                <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
-                                            )}
+                                            <CarouselSlideThumb
+                                                size={72}
+                                                uri={item.uri}
+                                                type={item.type}
+                                                allowPausedVideo
+                                            />
                                             <View style={styles.carouselIndexBadge}>
                                                 <Text style={styles.carouselIndexText}>{index + 1}</Text>
                                             </View>
@@ -629,7 +629,7 @@ const styles = StyleSheet.create({
         width: 72,
         height: 72,
         borderRadius: 10,
-        overflow: 'hidden',
+        backgroundColor: '#111827',
         borderWidth: 2,
         borderColor: 'transparent',
     },

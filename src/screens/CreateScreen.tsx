@@ -14,7 +14,6 @@ import {
     Keyboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import * as ImagePicker from 'react-native-image-picker';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import Video, { type VideoRef } from 'react-native-video';
 import VideoCoverControls from '../components/VideoCoverControls.native';
@@ -36,6 +35,7 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
+import CarouselSlideThumb from '../components/CarouselSlideThumb.native';
 import TextStickerModalNative from '../components/TextStickerModal.native';
 import type { Sticker, StickerOverlay } from '../types';
 import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
@@ -50,7 +50,7 @@ import {
     type InstantFilterName,
 } from '../utils/instantFiltersNative';
 import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNative';
-import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
@@ -403,53 +403,37 @@ export default function CreateScreen({ navigation, route }: any) {
     }, [previewCoverTime, previewType, previewUri, carouselActiveIndex]);
 
     const handleSelectMedia = useCallback(async () => {
-        const allowed = await ensureGalleryMediaPermission();
-        if (!allowed) {
-            Alert.alert(
-                'Gallery access needed',
-                'Allow photo and video access in Settings to upload from your gallery.',
-            );
-            return;
-        }
-
-        // Web-parity: open the system gallery directly (no Photo/Video/Carousel chooser).
-        ImagePicker.launchImageLibrary(
-            {
-                mediaType: 'mixed',
-                selectionLimit: isStory24Flow ? 1 : 10,
-                quality: 0.9,
-                videoQuality: 'high',
-                includeExtra: true,
-            },
-            (response) => {
-                if (response.didCancel) return;
-                if (response.errorCode) {
-                    Alert.alert(
-                        'Media error',
-                        response.errorMessage || 'Could not open your photo library.',
-                    );
-                    return;
-                }
-                const assets = response.assets || [];
-                if (assets.length === 0) {
-                    Alert.alert('Media error', 'No media was selected.');
-                    return;
-                }
-                if (!isStory24Flow && assets.length >= 2) {
-                    applyCarouselFromAssets(assets);
-                    return;
-                }
-                const asset = assets[0];
-                if (!asset?.uri) {
-                    Alert.alert('Media error', 'No media was selected.');
-                    return;
-                }
-                applySingleMedia(
-                    normalizeMediaUri(asset.uri),
-                    assetIsVideo(asset) ? 'video' : 'image',
+        try {
+            const picked = await pickFromFullGallery(isStory24Flow ? 1 : 10);
+            if (picked === 'denied') {
+                Alert.alert(
+                    'Gallery access needed',
+                    'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
                 );
-            },
-        );
+                return;
+            }
+            if (picked === 'cancel') return;
+            const assets = picked;
+            if (assets.length === 0) {
+                Alert.alert('Media error', 'No media was selected.');
+                return;
+            }
+            if (!isStory24Flow && assets.length >= 2) {
+                applyCarouselFromAssets(assets);
+                return;
+            }
+            const asset = assets[0];
+            if (!asset?.uri) {
+                Alert.alert('Media error', 'No media was selected.');
+                return;
+            }
+            applySingleMedia(
+                normalizeMediaUri(asset.uri),
+                assetIsVideo(asset) ? 'video' : 'image',
+            );
+        } catch (err: any) {
+            Alert.alert('Media error', err?.message || 'Could not open your photo library.');
+        }
     }, [applyCarouselFromAssets, applySingleMedia, isStory24Flow]);
 
     const handleTakePhoto = async () => {
@@ -819,7 +803,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                             },
                                         },
                                         {
-                                            label: 'Camera',
+                                            label: 'Take photo',
                                             icon: 'camera-outline',
                                             onPress: () => {
                                                 navigation.replace('GalleryPreview', {
@@ -827,6 +811,20 @@ export default function CreateScreen({ navigation, route }: any) {
                                                         source: 'camera',
                                                         kind: 'single',
                                                         mediaType: 'photo',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        {
+                                            label: 'Record video',
+                                            icon: 'videocam-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'video',
                                                     },
                                                     story24: isStory24Flow || undefined,
                                                 });
@@ -853,15 +851,45 @@ export default function CreateScreen({ navigation, route }: any) {
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={() => {
-                                navigation.replace('GalleryPreview', {
-                                    autoStart: { source: 'camera', kind: 'single', mediaType: 'photo' },
-                                    story24: isStory24Flow || undefined,
+                                setMediaSourceMenu({
+                                    title: 'Camera',
+                                    subtitle: 'Photo or video',
+                                    options: [
+                                        {
+                                            label: 'Take photo',
+                                            icon: 'camera-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'photo',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        {
+                                            label: 'Record video',
+                                            icon: 'videocam-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'video',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                    ],
                                 });
                             }}
                             style={styles.mediaButton}
                         >
                             <Icon name="camera" size={ox(32)} color="#8B5CF6" />
-                            <Text style={styles.mediaButtonText}>Take Photo</Text>
+                            <Text style={styles.mediaButtonText}>Camera</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -909,17 +937,20 @@ export default function CreateScreen({ navigation, route }: any) {
                                             ]}
                                         >
                                             {item.type === 'video' ? (
-                                                <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={ox(22)} color="#E5E7EB" />
-                                                </View>
+                                                <>
+                                                    <CarouselSlideThumb
+                                                        size={ox(72)}
+                                                        uri={item.uri}
+                                                        type="video"
+                                                        allowPausedVideo
+                                                    />
+                                                    <View style={styles.carouselVidBadge}>
+                                                        <Text style={styles.carouselVidBadgeText}>MP4</Text>
+                                                    </View>
+                                                </>
                                             ) : (
-                                                <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
+                                                <CarouselSlideThumb size={ox(72)} uri={item.uri} type="image" />
                                             )}
-                                            {item.type === 'video' ? (
-                                                <View style={styles.carouselVidBadge}>
-                                                    <Text style={styles.carouselVidBadgeText}>MP4</Text>
-                                                </View>
-                                            ) : null}
                                             {isActive && item.type === 'video' ? (
                                                 <View style={styles.carouselCoverBadge}>
                                                     <Text style={styles.carouselCoverBadgeText}>Cover</Text>
@@ -1416,7 +1447,6 @@ const styles = StyleSheet.create({
         width: ox(72),
         height: ox(72),
         borderRadius: ox(10),
-        overflow: 'hidden',
         backgroundColor: '#111827',
         borderWidth: 2,
         borderColor: 'transparent',

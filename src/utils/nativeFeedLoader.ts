@@ -86,7 +86,7 @@ export async function fetchVisibleFeedPage(
             followingCount: page.followingCount,
         };
     } catch (err) {
-        console.error('fetchVisibleFeedPage failed:', err);
+        if (__DEV__) console.warn('fetchVisibleFeedPage failed gracefully:', err);
         throw err;
     }
 }

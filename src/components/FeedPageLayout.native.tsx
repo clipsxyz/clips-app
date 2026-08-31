@@ -216,9 +216,12 @@ export const FEED_CARD_ENGAGEMENT_LEFT = {
 export const FEED_CARD_CAROUSEL_WRAP = {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: '#000000',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.1)',
+    zIndex: 8,
+    elevation: 12,
+    overflow: 'hidden' as const,
 };
 
 export const FEED_CARD_CAROUSEL_HEADER = {
@@ -252,7 +255,7 @@ export const FEED_CARD_CAROUSEL_THUMB = {
     width: 56,
     height: 56,
     borderRadius: 8,
-    overflow: 'hidden' as const,
+    backgroundColor: '#111827',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
 };

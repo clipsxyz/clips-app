@@ -21,16 +21,19 @@ class VideoThumbnailService
                 $this->mergePosterIntoMediaItems($post, $existing);
                 $post->save();
             }
-            return $existing;
+            $this->ensurePerSlidePosters($post);
+            return $post->resolvedThumbnailUrl() ?: $existing;
         }
 
         if (!$this->isVideoPost($post)) {
-            return null;
+            $this->ensurePerSlidePosters($post);
+            return $post->resolvedThumbnailUrl();
         }
 
         $source = $this->videoSourceUrl($post);
         if ($source === null) {
-            return null;
+            $this->ensurePerSlidePosters($post);
+            return $post->resolvedThumbnailUrl();
         }
 
         $sibling = $this->siblingJpegUrl($source);
@@ -38,19 +41,64 @@ class VideoThumbnailService
             $post->thumbnail_url = $sibling;
             $this->mergePosterIntoMediaItems($post, $sibling);
             $post->save();
-            return $sibling;
+            $this->ensurePerSlidePosters($post);
+            return $post->resolvedThumbnailUrl() ?: $sibling;
         }
 
         $url = $this->extractJpeg($source, (string) $post->id);
         if ($url === null) {
-            return null;
+            $this->ensurePerSlidePosters($post);
+            return $post->resolvedThumbnailUrl();
         }
 
         $post->thumbnail_url = $url;
         $this->mergePosterIntoMediaItems($post, $url);
         $post->save();
+        $this->ensurePerSlidePosters($post);
 
-        return $url;
+        return $post->resolvedThumbnailUrl() ?: $url;
+    }
+
+    /** JPEG cover for every video slide, not only the first. */
+    private function ensurePerSlidePosters(Post $post): void
+    {
+        $items = is_array($post->media_items) ? $post->media_items : [];
+        if ($items === []) {
+            return;
+        }
+        $changed = false;
+        foreach ($items as $index => $item) {
+            if (!is_array($item) || ($item['type'] ?? null) !== 'video') {
+                continue;
+            }
+            $hasPoster = false;
+            foreach (['posterUrl', 'poster_url', 'thumbnail_url', 'thumbnailUrl'] as $key) {
+                if (is_string($item[$key] ?? null) && trim((string) $item[$key]) !== '') {
+                    $hasPoster = true;
+                    break;
+                }
+            }
+            if ($hasPoster) {
+                continue;
+            }
+            $source = is_string($item['url'] ?? null) ? $item['url'] : '';
+            if ($source === '') {
+                continue;
+            }
+            $poster = $this->siblingJpegUrl($source) ?? $this->extractJpeg($source, $post->id.'-'.$index);
+            if (!is_string($poster) || $poster === '') {
+                continue;
+            }
+            $items[$index]['posterUrl'] = $poster;
+            $items[$index]['poster_url'] = $poster;
+            $items[$index]['thumbnail_url'] = $poster;
+            $items[$index]['thumbnailUrl'] = $poster;
+            $changed = true;
+        }
+        if ($changed) {
+            $post->media_items = $items;
+            $post->save();
+        }
     }
 
     public function extractJpeg(string $videoUrl, string $postId): ?string
@@ -69,10 +117,14 @@ class VideoThumbnailService
         Storage::disk('public')->makeDirectory('thumbnails');
         $output = Storage::disk('public')->path($relative);
 
+        // Cover a 320×320 square then crop from the center so 9:16 clips keep
+        // faces in frame (top/bottom trimmed equally, not top-aligned).
+        $vf = 'scale=320:320:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=320:320,setsar=1';
         $cmd = sprintf(
-            '%s -y -ss 0.1 -i %s -frames:v 1 -q:v 2 %s 2>&1',
+            '%s -y -ss 0.15 -i %s -vf %s -frames:v 1 -q:v 2 %s 2>&1',
             escapeshellarg($ffmpeg),
             escapeshellarg($input),
+            escapeshellarg($vf),
             escapeshellarg($output)
         );
         $outputLines = [];

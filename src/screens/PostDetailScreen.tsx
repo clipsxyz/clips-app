@@ -111,13 +111,21 @@ export default function PostDetailScreen({ route, navigation }: any) {
         if (next?.id) setScenesPostUpdate(next);
     }, []);
 
-    const carouselThumbItems = useMemo(
-        () =>
-            (post?.mediaItems || []).filter(
-                (item) => item?.type === 'image' || item?.type === 'video',
-            ),
-        [post?.mediaItems],
-    );
+    const carouselThumbItems = useMemo(() => {
+        const items = (post?.mediaItems || []).filter(
+            (item) => item?.type === 'image' || item?.type === 'video',
+        );
+        const firstVideo = items.find((item) => item.type === 'video');
+        return items.map((item) => ({
+            ...item,
+            posterUrl:
+                item.posterUrl ||
+                item.thumbnailUrl ||
+                item.thumbnail_url ||
+                (item.type === 'image' ? item.url : undefined) ||
+                (item.type === 'video' && item === firstVideo ? post?.videoPosterUrl : undefined),
+        }));
+    }, [post?.mediaItems, post?.videoPosterUrl]);
 
     const mediaSizingUrl = useMemo(() => {
         if (!post || isTextOnlyPost(post)) return null;

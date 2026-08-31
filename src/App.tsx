@@ -37,6 +37,7 @@ import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
 import { getAvatarForHandle } from './api/users';
+import { rewriteMediaUrlForClient } from './api/apiBaseUrl';
 import VerifiedBadge from './components/VerifiedBadge';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
@@ -2828,16 +2829,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   // Rewrite localhost media URLs for network access (e.g. phone at 192.168.1.7:5173)
   const rewriteMediaUrl = React.useCallback((u: string): string => {
     if (!u || typeof u !== 'string') return u;
-    const h = typeof window !== 'undefined' ? window.location.hostname : '';
     if (u.startsWith('blob:')) return resolveMockFeedVideoUrl(u);
-    let out = u;
-    if (h !== 'localhost' && h !== '127.0.0.1') {
-      out = u
-        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
-    }
-    return resolveMockFeedVideoUrl(out);
+    return resolveMockFeedVideoUrl(rewriteMediaUrlForClient(u));
   }, []);
 
   // Determine if we have multiple media items (carousel); rewrite URLs for network (e.g. phone)
@@ -5039,15 +5032,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const carouselThumbRailRef = React.useRef<HTMLDivElement | null>(null);
   const rewriteMediaUrlForThumbs = React.useCallback((u?: string): string => {
     if (!u || typeof u !== 'string') return '';
-    const h = typeof window !== 'undefined' ? window.location.hostname : '';
-    let out = u;
-    if (h !== 'localhost' && h !== '127.0.0.1' && !u.startsWith('blob:')) {
-      out = u
-        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
-    }
-    return resolveMockFeedVideoUrl(out);
+    if (u.startsWith('blob:')) return resolveMockFeedVideoUrl(u);
+    return resolveMockFeedVideoUrl(rewriteMediaUrlForClient(u));
   }, []);
   const carouselThumbItems = React.useMemo(
     () =>
@@ -5512,7 +5498,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                     <>
                       <video
                         src={item.url}
-                        className="w-full h-full object-cover pointer-events-none"
+                        className="w-full h-full object-cover object-center pointer-events-none"
                         muted
                         playsInline
                         preload="metadata"
@@ -5521,7 +5507,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                       <div className="absolute right-1 bottom-1 text-white text-[9px] font-bold bg-black/60 rounded px-1">VID</div>
                     </>
                   ) : (
-                    <img src={item.url} alt="" className="w-full h-full object-cover pointer-events-none" />
+                    <img src={item.url} alt="" className="w-full h-full object-cover object-center pointer-events-none" />
                   )}
                 </button>
               );

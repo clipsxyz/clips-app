@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
-import { loginUser, registerUser, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
+import { loginUser, registerUser, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode, uploadFile, updateAuthProfile } from '../api/client';
 import { isMockMode } from '../api/apiMode';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
@@ -11,6 +11,8 @@ import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
 import { persistAuthToken } from '../utils/authTokenBridge';
+import { setAvatarForHandle } from '../api/users';
+import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import { db } from '../utils/db';
 import { buildGazetteerHandle } from '../utils/gazetteerHandle';
 
@@ -349,6 +351,29 @@ export default function LoginPage() {
         // ignore
       }
       const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
+      let hostedAvatar = (mapped.avatarUrl as string | undefined) || undefined;
+      if (profilePicture && /^data:/i.test(profilePicture)) {
+        try {
+          const blob = await (await fetch(profilePicture)).blob();
+          const file = new File([blob], 'profile-avatar.jpg', { type: blob.type || 'image/jpeg' });
+          const uploaded = await uploadFile(file);
+          const remote = String((uploaded as { fileUrl?: string; url?: string })?.fileUrl || (uploaded as { url?: string })?.url || '').trim();
+          if (remote) {
+            let persistUrl = remote;
+            try {
+              const parsed = new URL(remote);
+              if (parsed.pathname.startsWith('/storage/')) persistUrl = parsed.pathname;
+            } catch {
+              /* already relative */
+            }
+            await updateAuthProfile({ avatar_url: persistUrl });
+            hostedAvatar = persistUrl;
+            setAvatarForHandle(handle, persistUrl);
+          }
+        } catch (avatarErr) {
+          console.warn('[signup] profile photo did not upload to Laravel', avatarErr);
+        }
+      }
       const mergedUser = {
         ...userData,
         id: mapped.id ?? userData.id,
@@ -357,7 +382,7 @@ export default function LoginPage() {
         local: String(mapped.local || userData.local),
         regional: String(mapped.regional || userData.regional),
         national: String(mapped.national || userData.national),
-        avatarUrl: (mapped.avatarUrl as string | undefined) || userData.avatarUrl,
+        avatarUrl: hostedAvatar || userData.avatarUrl,
         accountType: (mapped.accountType as 'personal' | 'business') || userData.accountType,
         is_private: mapped.is_private,
       };
@@ -425,8 +450,9 @@ export default function LoginPage() {
       return;
     }
     setLoginLoading(true);
+    clearLaravelUnreachable();
     try {
-      const res = await loginUser(loginEmail.trim(), loginPassword);
+      const res = await loginUser(loginEmail.trim().replace(/^@+/, ''), loginPassword);
       const token = (res as { token?: string }).token;
       const apiUser = (res as { user?: any }).user;
       if (token) await persistAuthToken(token);
@@ -452,15 +478,30 @@ export default function LoginPage() {
         };
         login(userData);
         nav(getPostAuthRedirect(), { replace: true });
+        return;
       }
+      setLoginError('Login succeeded but the server did not return a user session.');
     } catch (err: any) {
+      // Live Laravel: seeded users are not in localStorage. Do not treat a miss as "backend down".
+      if (!isMockMode()) {
+        const msg = String(err?.message || 'Login failed');
+        const isConnection =
+          err?.name === 'ConnectionRefused' ||
+          msg === 'CONNECTION_REFUSED' ||
+          msg.includes('Failed to fetch') ||
+          msg.includes('ERR_CONNECTION_REFUSED');
+        if (isConnection) {
+          setLoginError('Cannot reach the server. Check Laravel is running and try again.');
+        } else {
+          setLoginError('Invalid email or password.');
+        }
+        return;
+      }
+
       const isConnectionError =
         err?.message === 'CONNECTION_REFUSED' ||
         err?.name === 'ConnectionRefused' ||
         err?.message?.includes('Failed to fetch');
-      const is401 = err?.status === 401;
-
-      // Fallback: if backend is down or invalid credentials, try local (mock) registrations from sign-up
       const key = loginEmail.trim().toLowerCase();
       const localReg = getLocalRegistrations();
       const stored = localReg[key];
@@ -469,7 +510,6 @@ export default function LoginPage() {
         nav(getPostAuthRedirect(), { replace: true });
         return;
       }
-      // Also try current user in localStorage (e.g. signed up before we stored localRegistrations)
       try {
         const savedUser = localStorage.getItem('user');
         if (savedUser) {
@@ -694,12 +734,15 @@ export default function LoginPage() {
               </div>
               <div className="space-y-3">
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   value={loginEmail}
                   onChange={e => setLoginEmail(e.target.value)}
-                  placeholder="Email"
+                  placeholder="Email or handle"
                   className={signupInputClass}
-                  autoComplete="email"
+                  autoComplete="username"
                 />
                 <div className="relative">
                   <input

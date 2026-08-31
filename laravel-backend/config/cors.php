@@ -33,9 +33,11 @@ return [
     ],
     
     'allowed_origins_patterns' => [
-        '/^https?:\/\/192\.168\.\d+\.\d+:5173$/', // Allow any local network IP (HTTP or HTTPS)
-        '/^https?:\/\/localhost:5173$/', // Allow localhost with HTTP or HTTPS
-        '/^https?:\/\/127\.0\.0\.1:5173$/', // Allow 127.0.0.1 with HTTP or HTTPS
+        '/^https?:\/\/192\.168\.\d+\.\d+:5173$/',
+        '/^https?:\/\/10\.\d+\.\d+\.\d+:5173$/',
+        '/^https?:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:5173$/',
+        '/^https?:\/\/localhost:5173$/',
+        '/^https?:\/\/127\.0\.0\.1:5173$/',
     ],
 
     'allowed_headers' => ['*'],
