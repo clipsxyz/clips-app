@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
+import VerifiedBadge from '../VerifiedBadge.native';
 import type { StoryMetadataItem } from '../../utils/storyViewerMeta';
 
 type Props = {
     avatarRef: React.RefObject<View | null>;
     avatarUrl?: string;
     userHandle: string;
+    accountType?: string | null;
     showFollowBadge: boolean;
+    followLoading?: boolean;
     metadataItems: StoryMetadataItem[];
     showVideoMute: boolean;
     isMuted: boolean;
     onAvatarPress: () => void;
+    /** Instagram-style: + on avatar follows immediately */
+    onFollowPress?: () => void;
     onToggleMute: () => void;
     onClose: () => void;
 };
@@ -34,19 +39,24 @@ export default function StoryViewerHeader({
     avatarRef,
     avatarUrl,
     userHandle,
+    accountType,
     showFollowBadge,
+    followLoading,
     metadataItems,
     showVideoMute,
     isMuted,
     onAvatarPress,
+    onFollowPress,
     onToggleMute,
     onClose,
 }: Props) {
     const [metaIndex, setMetaIndex] = useState(0);
 
+    const metaKey = metadataItems.map((m) => `${m.type}:${m.label}`).join('|');
+
     useEffect(() => {
         setMetaIndex(0);
-    }, [metadataItems.map((m) => m.label).join('|')]);
+    }, [metaKey]);
 
     useEffect(() => {
         if (metadataItems.length <= 1) return;
@@ -59,26 +69,38 @@ export default function StoryViewerHeader({
     const currentMeta = metadataItems[metaIndex];
 
     return (
-        <View style={styles.header}>
-            <TouchableOpacity style={styles.left} onPress={onAvatarPress} activeOpacity={0.85}>
+        <View style={styles.header} pointerEvents="box-none">
+            <View style={styles.left} pointerEvents="box-none">
                 <View ref={avatarRef} collapsable={false}>
                     <View style={styles.avatarWrap}>
-                        <Avatar
-                            src={avatarUrl}
-                            name={userHandle.split('@')[0]}
-                            size="sm"
-                        />
+                        <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
+                            <Avatar
+                                src={avatarUrl}
+                                name={userHandle.split('@')[0]}
+                                size="sm"
+                            />
+                        </TouchableOpacity>
                         {showFollowBadge ? (
-                            <View style={styles.followBadge}>
+                            <TouchableOpacity
+                                style={styles.followBadge}
+                                onPress={onFollowPress}
+                                disabled={followLoading || !onFollowPress}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Follow"
+                            >
                                 <Icon name="add" size={10} color="#fff" />
-                            </View>
+                            </TouchableOpacity>
                         ) : null}
                     </View>
                 </View>
-                <View style={styles.nameCol}>
-                    <Text style={styles.handle} numberOfLines={1}>
-                        {userHandle}
-                    </Text>
+                <TouchableOpacity style={styles.nameCol} onPress={onAvatarPress} activeOpacity={0.85}>
+                    <View style={styles.handleRow}>
+                        <Text style={styles.handle} numberOfLines={1}>
+                            {userHandle}
+                        </Text>
+                        <VerifiedBadge accountType={accountType} size={13} />
+                    </View>
                     {currentMeta ? (
                         <View style={styles.metaPill}>
                             <Icon
@@ -91,8 +113,8 @@ export default function StoryViewerHeader({
                             </Text>
                         </View>
                     ) : null}
-                </View>
-            </TouchableOpacity>
+                </TouchableOpacity>
+            </View>
 
             <View style={styles.right}>
                 {showVideoMute ? (
@@ -122,7 +144,8 @@ const styles = StyleSheet.create({
         top: 12,
         left: 16,
         right: 16,
-        zIndex: 50,
+        zIndex: 130,
+        elevation: Platform.OS === 'android' ? 130 : 0,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -148,9 +171,17 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(0,0,0,0.5)',
         alignItems: 'center',
         justifyContent: 'center',
+        zIndex: 2,
     },
     nameCol: { flex: 1, minWidth: 0, gap: 2 },
-    handle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    handleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        minWidth: 0,
+        maxWidth: '100%',
+    },
+    handle: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
     metaPill: {
         flexDirection: 'row',
         alignItems: 'center',

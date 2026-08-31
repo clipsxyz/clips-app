@@ -4,16 +4,46 @@ import {
     getTextOnlyFallbackBackground,
 } from './effectiveTextPostStyle';
 
+/** Body copy for text-only posts (create / API / caption fallbacks). */
+export function getPostBodyText(post: Partial<Post> | null | undefined): string {
+    if (!post) return '';
+    const raw =
+        post.text ||
+        (post as { text_content?: string }).text_content ||
+        post.caption ||
+        post.imageText ||
+        '';
+    return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function hasRenderableVisualMedia(post: Partial<Post> | null | undefined): boolean {
+    if (!post) return false;
+    const mediaUrl = typeof post.mediaUrl === 'string' ? post.mediaUrl.trim() : '';
+    if (mediaUrl) return true;
+    if (!Array.isArray(post.mediaItems) || post.mediaItems.length === 0) return false;
+    return post.mediaItems.some(
+        (item) =>
+            !!item &&
+            (item.type === 'image' || item.type === 'video') &&
+            typeof item.url === 'string' &&
+            item.url.trim().length > 0,
+    );
+}
+
 export function isTextOnlyPost(post: Post): boolean {
-    const hasMediaItems = Array.isArray(post.mediaItems) && post.mediaItems.length > 0;
-    return Boolean(post.text?.trim()) && !post.mediaUrl && !hasMediaItems;
+    return getPostBodyText(post).length > 0 && !hasRenderableVisualMedia(post);
 }
 
 export function isVideoPost(post: Post): boolean {
-    const first = post.mediaItems?.[0];
+    if (isTextOnlyPost(post)) return false;
+    const first = (post.mediaItems || []).find(
+        (item) => item?.type === 'image' || item?.type === 'video',
+    );
     const type = first?.type || post.mediaType;
     if (type === 'video') return true;
-    const url = (first?.url || post.mediaUrl || '').toLowerCase();
+    const extra = post as Post & { video_url?: string; videoUrl?: string };
+    if (extra.video_url || extra.videoUrl || post.finalVideoUrl) return true;
+    const url = (first?.url || post.mediaUrl || extra.video_url || '').toLowerCase();
     return /\.(mp4|mov|m4v|webm)(\?|$)/i.test(url);
 }
 

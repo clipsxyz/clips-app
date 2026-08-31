@@ -1,20 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { resolveAvatarImageUri } from '../api/users';
+import { useResolvedAuthorAvatar } from '../hooks/useResolvedAuthorAvatar';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
-import { useMutualFollow } from '../hooks/useMutualFollow';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import Avatar from './Avatar';
-import Flag from './Flag.native';
+import VerifiedBadge from './VerifiedBadge.native';
 import FeedPostMetaCarousel from './FeedPostMetaCarousel.native';
 import {
     buildPostMetadataItems,
     getPostSocialSourceLabel,
     getReclipDisplay,
 } from '../utils/feedPostMeta';
+import { FEED_UI } from '../constants/feedUiTokens';
+import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
+import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
+import { useMutualFollow } from '../hooks/useMutualFollow';
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -29,6 +35,7 @@ export type FeedPostHeaderProps = {
     onOverflowPress?: () => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onHasStoryChange?: (hasStory: boolean) => void;
+    menuAnchorRef?: React.Ref<View>;
 };
 
 export default function FeedPostHeader({
@@ -43,24 +50,45 @@ export default function FeedPostHeader({
     onOverflowPress,
     onRegisterDmAnchor,
     onHasStoryChange,
+    menuAnchorRef,
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
-    const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
-
-    const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
-    const metadataItems = useMemo(() => buildPostMetadataItems(post), [post]);
+    const { isReclip, displayHandle, profileHandle, originalHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
+    const originalDisplayHandle = String(originalHandle || post.originalUserHandle || '').trim();
+    const originalAvatarSrc = resolveAvatarImageUri(post.originalUserAvatarUrl, originalDisplayHandle);
+    const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
+    const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
+    const metadataItems = useMemo(() => {
+        const items = buildPostMetadataItems(post);
+        const hasLocation = items.some((item) => item.type === 'location');
+        if (hasLocation) return items;
+        const raw = String(post.locationLabel || '').trim();
+        const label = raw && raw !== 'Unknown Location' ? raw : 'Gazetteer';
+        return [{ label, type: 'location' as const }, ...items];
+    }, [post]);
     const socialSourceLabel = getPostSocialSourceLabel(post);
-    const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const isFollowing = post.isFollowing === true;
+    const viewer = viewerHandle ?? user?.handle;
+    const hasPendingRequest = Boolean(
+        !isCurrentUser &&
+            !isFollowing &&
+            viewer &&
+            isProfilePrivate(safeProfileHandle) &&
+            hasPendingFollowRequest(viewer, safeProfileHandle),
+    );
+    const isMutualFollow = useMutualFollow(post, isCurrentUser);
 
-    const avatarSrc = isCurrentUser
-        ? user?.avatarUrl
-        : getAvatarForHandle(profileHandle);
+    const avatarSrc = useResolvedAuthorAvatar({
+        handle: safeProfileHandle,
+        explicitUrl: (isCurrentUser ? user?.avatarUrl : undefined) || post.userAvatarUrl,
+        viewerHandle: viewer,
+        viewerAvatarUrl: user?.avatarUrl,
+    });
 
-    const flagValue = isCurrentUser
-        ? user?.countryFlag || ''
-        : getFlagForHandle(isReclip ? post.originalUserHandle! : post.userHandle) || '';
+    const verifiedAccountType = resolveVerifiedAccountType(
+        isCurrentUser ? user?.accountType : post.userAccountType,
+    );
 
     const textPrimary = isOverlaid ? '#FFFFFF' : '#F3F4F6';
     const textMuted = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
@@ -70,10 +98,10 @@ export default function FeedPostHeader({
         let cancelled = false;
         async function checkStory() {
             try {
-                const anyStory = await userHasStoriesByHandle(profileHandle);
+                const anyStory = await userHasStoriesByHandle(safeProfileHandle);
                 let ring = anyStory;
                 if (!isCurrentUser) {
-                    ring = await userHasUnviewedStoriesByHandle(profileHandle);
+                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle, user?.id);
                 }
                 if (!cancelled) {
                     setHasStory(ring);
@@ -84,23 +112,14 @@ export default function FeedPostHeader({
             }
         }
         checkStory();
+        const unsub = subscribeStoriesRefresh(() => {
+            void checkStory();
+        });
         return () => {
             cancelled = true;
+            unsub();
         };
-    }, [profileHandle, isCurrentUser, onHasStoryChange]);
-
-    useEffect(() => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        if (!isCurrentUser && onFollow && post.isFollowing) {
-            setShowFollowCheck(true);
-            timer = setTimeout(() => setShowFollowCheck(false), 2500);
-        } else {
-            setShowFollowCheck(false);
-        }
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [post.isFollowing, isCurrentUser, onFollow]);
+    }, [safeProfileHandle, isCurrentUser, onHasStoryChange, user?.id]);
 
     const showAvatar = variant === 'default';
 
@@ -109,35 +128,48 @@ export default function FeedPostHeader({
             style={styles.avatarWrap}
             ref={(r) => {
                 onRegisterDmAnchor?.(`post:${post.id}`, r);
-                onRegisterDmAnchor?.(`handle:${post.userHandle}`, r);
+                onRegisterDmAnchor?.(`handle:${post.userHandle || safeHandle}`, r);
             }}
             collapsable={false}
         >
             <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
                 <Avatar
                     src={avatarSrc}
-                    name={displayHandle.split('@')[0]}
-                    size={32}
+                    name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                    handle={safeProfileHandle}
+                    size={FEED_UI.icon.avatar}
                     hasStory={hasStory}
                 />
             </TouchableOpacity>
-            {!isCurrentUser && onFollow && !isFollowing ? (
+            {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
-                    <Icon name="add" size={12} color="#FFFFFF" />
+                    <Icon name="add" size={10} color="#FFFFFF" />
                 </TouchableOpacity>
+            ) : null}
+            {!isCurrentUser && hasPendingRequest ? (
+                <View style={styles.requestedPill} pointerEvents="none">
+                    <Text style={styles.requestedPillText}>Req</Text>
+                </View>
             ) : null}
             {!isCurrentUser && isMutualFollow && onOpenDM ? (
                 <TouchableOpacity
                     style={styles.dmButton}
                     onPress={() => onOpenDM(post.userHandle, post.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send message"
                 >
-                    <Icon name="paper-plane" size={11} color="#EF4444" />
+                    <Icon name="paper-plane" size={10} color="#EF4444" />
                 </TouchableOpacity>
             ) : null}
-            {!isCurrentUser && isFollowing && !isMutualFollow && showFollowCheck ? (
-                <View style={styles.followCheck}>
-                    <Icon name="checkmark" size={12} color="#FFFFFF" />
-                </View>
+            {!isCurrentUser && isFollowing && onFollow && !isMutualFollow ? (
+                <TouchableOpacity
+                    style={styles.followCheck}
+                    onPress={() => void onFollow()}
+                    accessibilityRole="button"
+                    accessibilityLabel="Unfollow"
+                >
+                    <Icon name="checkmark" size={10} color="#FFFFFF" />
+                </TouchableOpacity>
             ) : null}
         </View>
     ) : null;
@@ -145,9 +177,9 @@ export default function FeedPostHeader({
     const handleRow = (
         <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85} style={styles.handleBtn}>
             <Text style={[styles.handleText, { color: textPrimary }]} numberOfLines={1}>
-                {displayHandle}
+                {safeHandle}
             </Text>
-            <Flag value={flagValue} national={isCurrentUser ? user?.national : undefined} size={14} />
+            <VerifiedBadge accountType={verifiedAccountType} size={FEED_UI.icon.flag} />
         </TouchableOpacity>
     );
 
@@ -156,15 +188,27 @@ export default function FeedPostHeader({
             <View style={[styles.left, showAvatar && styles.leftWithAvatar]}>
                 {avatarBlock}
                 <View style={styles.infoCol}>
+                    {handleRow}
                     {isReclip ? (
                         <View style={styles.reclipRow}>
-                            <Icon name="repeat" size={12} color={reclipColor} />
+                            <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
                             <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                                {post.userHandle} reclipped
+                                reclipped
+                            </Text>
+                            <Avatar
+                                src={originalAvatarSrc}
+                                name={
+                                    originalDisplayHandle.replace(/^@/, '').split('@')[0] ||
+                                    'User'
+                                }
+                                handle={originalDisplayHandle}
+                                size={16}
+                            />
+                            <Text style={[styles.reclipText, { color: reclipColor, flexShrink: 1 }]} numberOfLines={1}>
+                                {originalDisplayHandle || 'a post'}
                             </Text>
                         </View>
                     ) : null}
-                    {handleRow}
                     {socialSourceLabel ? (
                         <View
                             style={[
@@ -189,32 +233,43 @@ export default function FeedPostHeader({
                     <FeedPostMetaCarousel items={metadataItems} overlaid={isOverlaid} align="right" />
                 ) : null}
                 {onOverflowPress ? (
-                    <TouchableOpacity
+                    <GesturePressable
                         onPress={onOverflowPress}
                         style={styles.overflowBtn}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Post options"
                     >
                         <Icon
-                            name="ellipsis-horizontal"
-                            size={20}
+                            name="list-outline"
+                            size={16}
                             color={isOverlaid ? '#FFFFFF' : '#9CA3AF'}
                         />
-                    </TouchableOpacity>
+                    </GesturePressable>
                 ) : null}
             </View>
         </View>
     );
 
     if (variant === 'textOnlyChrome') {
-        return <View style={styles.textOnlyChromeWrap}>{chrome}</View>;
+        return (
+            <View ref={menuAnchorRef} collapsable={false} style={styles.textOnlyChromeWrap}>
+                {chrome}
+            </View>
+        );
     }
 
     return (
-        <View style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}>
+        <View
+            ref={menuAnchorRef}
+            collapsable={false}
+            style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}
+            pointerEvents="box-none"
+        >
             {isOverlaid ? (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}
-                    style={StyleSheet.absoluteFill}
+                    style={styles.headerScrim}
                     pointerEvents="none"
                 />
             ) : null}
@@ -224,18 +279,33 @@ export default function FeedPostHeader({
 }
 
 const styles = StyleSheet.create({
+    // Web PostHeader: `px-3 pt-3 pb-2`
     wrap: {
+        position: 'relative',
+        width: '100%',
+        minHeight: 56,
         paddingHorizontal: 12,
-        paddingTop: 10,
-        paddingBottom: 6,
+        paddingTop: 12,
+        paddingBottom: 8,
+        justifyContent: 'center',
+        backgroundColor: '#030712',
+        overflow: 'hidden',
     },
     wrapOverlaid: {
         position: 'absolute',
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 20,
-        paddingTop: 8,
+        zIndex: 30,
+        backgroundColor: 'transparent',
+        overflow: 'hidden',
+    },
+    headerScrim: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        height: 64,
     },
     content: {
         zIndex: 1,
@@ -257,21 +327,22 @@ const styles = StyleSheet.create({
     left: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         minWidth: 0,
         paddingRight: 8,
     },
+    // Web: `gap-3` between avatar and text
     leftWithAvatar: {
-        gap: 10,
+        gap: 12,
     },
     infoCol: {
         flex: 1,
         minWidth: 0,
-        gap: 2,
+        gap: 0,
     },
     right: {
         alignItems: 'flex-end',
-        gap: 4,
+        gap: 2,
         flexShrink: 0,
     },
     avatarWrap: {
@@ -289,6 +360,26 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 1.5,
         borderColor: '#030712',
+    },
+    requestedPill: {
+        position: 'absolute',
+        right: -10,
+        bottom: -2,
+        minWidth: 28,
+        height: 18,
+        paddingHorizontal: 4,
+        borderRadius: 9,
+        backgroundColor: 'rgba(61, 155, 143, 0.95)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#030712',
+    },
+    requestedPillText: {
+        color: '#FFFFFF',
+        fontSize: 8,
+        fontWeight: '700',
+        letterSpacing: 0.2,
     },
     dmButton: {
         position: 'absolute',
@@ -320,9 +411,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
+        marginBottom: 4,
+        minWidth: 0,
+        maxWidth: '100%',
     },
+    // Web: `text-xs` — optically bumped for phone Instagram weight
     reclipText: {
-        fontSize: 11,
+        fontSize: FEED_UI.type.reclip,
     },
     handleBtn: {
         flexDirection: 'row',
@@ -330,8 +425,9 @@ const styles = StyleSheet.create({
         gap: 6,
         maxWidth: '100%',
     },
+    // Web feed: `text-xs font-semibold`
     handleText: {
-        fontSize: 14,
+        fontSize: FEED_UI.type.handle,
         fontWeight: '600',
         flexShrink: 1,
     },
@@ -355,7 +451,12 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '600',
     },
+    // Web: `p-2 min-w/h-[40px]`, icon `w-4 h-4`
     overflowBtn: {
-        padding: 4,
+        minWidth: 40,
+        minHeight: 40,
+        padding: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

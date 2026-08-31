@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiList, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -26,24 +26,32 @@ import {
   type SuggestedFollowerSuggestion,
 } from './utils/suggestedFollowerFeed';
 import { resolveStories24OpenTarget } from './utils/stories24Rail';
+import {
+  getFeedNewPostsPollMs,
+  getHeaderCountsPollMs,
+  getInboxUnreadPollMs,
+  getStoriesRailPollMs,
+} from './utils/backgroundPollMs';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
-import { getFlagForHandle, getAvatarForHandle } from './api/users';
-import Flag from './components/Flag';
+import { getAvatarForHandle } from './api/users';
+import VerifiedBadge from './components/VerifiedBadge';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isMockFeedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost, clearLocalFeedPostsStorage } from './api/posts';
+import { isMockMode } from './api/apiMode';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
-import { loadFeed, saveFeed } from './utils/feedCache';
+import { loadFeed, saveFeed, clearFeed } from './utils/feedCache';
+import { MOCK_FEED_VIDEO_REMOTE_FALLBACK, resolveMockFeedVideoUrl } from './constants/mockFeedVideos';
 import { getStableUserId } from './utils/userId';
 import {
   filterPostsByContentPrefs,
@@ -103,6 +111,7 @@ import {
 } from './utils/feedTextBubble';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from './utils/globalVideoMute';
 import { postHasVideoMedia } from './utils/postMedia';
+import { excludeLinkShareFeedPosts, getPostCaptionWithoutLink, isLinkShareFeedPost } from './utils/linkPreview';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -348,7 +357,9 @@ export default function App() {
   const isClipPage = loc.pathname === '/clip';
   const isFeedPage = loc.pathname === '/feed';
   const isCreateFullscreen =
-    loc.pathname === '/create/instant' || loc.pathname === '/create/gallery-preview';
+    loc.pathname === '/create/instant' ||
+    loc.pathname === '/create/gallery-preview' ||
+    loc.pathname === '/create/story-link';
   const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen; // No scroll, no bottom nav
 
   // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesnâ€™t shift fixed chrome
@@ -392,6 +403,7 @@ export default function App() {
           && loc.pathname !== '/search'
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
+          && loc.pathname !== '/create/story-link'
           && loc.pathname !== '/create/instant'
           && loc.pathname !== '/create/gallery-preview'
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
@@ -410,6 +422,7 @@ export default function App() {
           && loc.pathname !== '/create/gallery-preview'
           && loc.pathname !== '/create/text-only'
           && loc.pathname !== '/create/text-only/details'
+          && loc.pathname !== '/create/story-link'
           && loc.pathname !== '/payment'
           && loc.pathname !== '/clip'
           && loc.pathname !== '/create'
@@ -513,6 +526,8 @@ function PillTabs(props: {
   const [questionsCount, setQuestionsCount] = React.useState(0);
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [showFeedSwitchCue, setShowFeedSwitchCue] = React.useState(false);
+  const [showFeedSwitchBurst, setShowFeedSwitchBurst] = React.useState(false);
   const [locationQuery, setLocationQuery] = React.useState('');
   const [locationSuggestions, setLocationSuggestions] = React.useState<HeaderSuggestion[]>([]);
   const [usingFallbackSuggestions, setUsingFallbackSuggestions] = React.useState(false);
@@ -587,7 +602,7 @@ function PillTabs(props: {
     updateCounts();
 
     // Poll for updates every 10 seconds
-    const interval = setInterval(updateCounts, 10000);
+    const interval = setInterval(updateCounts, getHeaderCountsPollMs());
 
     // Listen for notification updates
     const handleNotificationUpdate = (_event: CustomEvent) => {
@@ -632,19 +647,26 @@ function PillTabs(props: {
     return () => window.clearTimeout(timeout);
   }, []);
 
+  // Peek badge (same motion as footer Create “Add Yours”) so the feed control reads as tappable.
+  React.useEffect(() => {
+    const appears = window.setTimeout(() => setShowFeedSwitchCue(true), 700);
+    const bursts = window.setTimeout(() => setShowFeedSwitchBurst(true), 3400);
+    const hides = window.setTimeout(() => {
+      setShowFeedSwitchCue(false);
+      setShowFeedSwitchBurst(false);
+    }, 4100);
+    return () => {
+      window.clearTimeout(appears);
+      window.clearTimeout(bursts);
+      window.clearTimeout(hides);
+    };
+  }, []);
+
   React.useEffect(() => {
     if (!menuOpen) return;
     setLocationQuery(props.customLocation || '');
     setLocationSuggestions([]);
-    const handleOutsideClick = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [menuOpen]);
+  }, [menuOpen, props.customLocation]);
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -891,12 +913,23 @@ function PillTabs(props: {
           <div ref={menuRef} className="relative flex justify-center">
             <button
               type="button"
-              aria-haspopup="menu"
+              aria-haspopup="dialog"
               aria-expanded={menuOpen}
               aria-label="Change feed"
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="relative inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
+              {showFeedSwitchCue && !menuOpen ? (
+                <span
+                  className={`contribute-badge-pop pointer-events-none absolute top-full mt-2 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white bg-black text-white text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(0,0,0,0.45)] ${showFeedSwitchBurst ? 'contribute-badge-burst' : ''}`}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <FiMapPin className="w-3.5 h-3.5 text-white" />
+                    <span>Switch feed</span>
+                  </span>
+                  <span className="absolute left-1/2 -top-1 -translate-x-1/2 w-2 h-2 bg-black border-l border-t border-white rotate-45 rounded-[2px]" />
+                </span>
+              ) : null}
               <span className="shrink-0" aria-hidden>
                 {props.customFilterType === 'venue' ? (
                   <FiHome className="h-4 w-4 text-white" />
@@ -925,117 +958,154 @@ function PillTabs(props: {
               />
             </button>
 
-            {menuOpen && (
+            {menuOpen && createPortal(
               <div
-                role="menu"
-                className="absolute top-[calc(100%+6px)] left-1/2 z-[160] w-[220px] -translate-x-1/2 overflow-hidden rounded-[22px] border border-white/10 bg-[#272b35]/92 shadow-[0_14px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                className="fixed inset-0 z-[220] flex items-end justify-center px-4"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Change feed"
               >
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    submitLocationSearch();
-                  }}
-                  className="px-3 pt-3"
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/60"
+                  aria-label="Dismiss"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  className="relative w-full max-w-[400px] overflow-hidden rounded-t-[1.5rem] border border-white/10 border-b-0 bg-[#060d16] shadow-[0_-12px_40px_rgba(0,0,0,0.55)] pb-[max(1rem,env(safe-area-inset-bottom))] animate-[feedSwitchSheetUp_280ms_cubic-bezier(0.22,1,0.36,1)_both]"
                 >
-                  <div className="flex items-center gap-2 rounded-full border border-white bg-transparent px-3 py-2">
-                    <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
-                    <input
-                      type="text"
-                      value={locationQuery}
-                      onChange={(e) => setLocationQuery(e.target.value)}
-                      placeholder={searchHints[searchHintIndex]}
-                      onFocus={() => setSearchInputFocused(true)}
-                      onBlur={() => setSearchInputFocused(false)}
-                      className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                      style={{ WebkitAppearance: 'none', appearance: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
-                      aria-label="Search location feed"
-                    />
+                  <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                  <div className="relative z-10">
+                  <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-white/30" aria-hidden />
+                  <div className="relative px-4 pt-1 pb-1">
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={() => setMenuOpen(false)}
+                      className="absolute right-3 top-0 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/15"
+                    >
+                      <FiX className="h-5 w-5" strokeWidth={2.2} />
+                    </button>
+                    <p className="text-center text-[12px] font-semibold tracking-[0.12em] uppercase text-[#3d9b8f]">
+                      Gazetteer says
+                    </p>
+                    <h3
+                      className="mt-2 text-center text-white"
+                      style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif' }}
+                    >
+                      Switch feed
+                    </h3>
+                    <p className="mt-1 text-center text-[14px] leading-snug text-[#a3a3a3]">
+                      Nearby, city, country, Discover, or Following
+                    </p>
                   </div>
-                  <div className="px-1 pt-1.5 text-[11px] text-white/45">
-                    Tip: use <span className="text-white/65">venue:</span> or <span className="text-white/65">landmark:</span>
-                  </div>
-                </form>
-                <div className="py-1.5">
-                  {locationQuery.trim().length >= 2 && (
-                    <div className="px-3 pb-1">
-                      {loadingSuggestions ? (
-                        <div className="px-2 py-1.5 text-xs text-white/60">Searching places...</div>
-                      ) : locationSuggestions.length > 0 ? (
-                        <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                          {locationSuggestions.map((s, idx) => (
-                            <button
-                              key={`${s.name}-${idx}`}
-                              type="button"
-                              onClick={() => {
-                                const raw = locationQuery.trim();
-                                const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
-                                  ? 'venue'
-                                  : /^landmark\s*:/i.test(raw)
-                                    ? 'landmark'
-                                    : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
-                                      ? 'venue'
-                                      : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
-                                        ? 'landmark'
-                                        : 'location');
-                                setLocationQuery(s.name);
-                                const filter = s.filter ?? s.name;
-                                props.onSearchLocation?.(filter, mode, {
-                                  label: s.label ?? s.name,
-                                  placeId: s.placeId ?? null,
-                                  scope: s.scope,
-                                });
-                                setMenuOpen(false);
-                              }}
-                              className="w-full px-3 py-2 text-left hover:bg-white/10 transition-colors"
-                            >
-                              <span className="text-sm text-white/90">{s.name}</span>
-                              {s.type === 'venue' ? (
-                                <span className="ml-1 text-xs text-emerald-300/80">Â· venue</span>
-                              ) : s.type === 'landmark' ? (
-                                <span className="ml-1 text-xs text-amber-300/80">Â· landmark</span>
-                              ) : usingFallbackSuggestions ? (
-                                <span className="ml-1 text-xs text-white/45">Â· quick suggestion</span>
-                              ) : s.country ? (
-                                <span className="ml-1 text-xs text-white/55">Â· {s.country}</span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="px-2 py-1.5 text-xs text-white/50">No matches yet</div>
-                      )}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      submitLocationSearch();
+                    }}
+                    className="px-4 pt-2"
+                  >
+                    <div className="flex items-center gap-2 rounded-full border border-white bg-transparent px-3 py-2.5">
+                      <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
+                      <input
+                        type="text"
+                        value={locationQuery}
+                        onChange={(e) => setLocationQuery(e.target.value)}
+                        placeholder={searchHints[searchHintIndex]}
+                        onFocus={() => setSearchInputFocused(true)}
+                        onBlur={() => setSearchInputFocused(false)}
+                        className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                        style={{ WebkitAppearance: 'none', appearance: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
+                        aria-label="Search location feed"
+                      />
                     </div>
-                  )}
-                  {props.customLocation && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        props.onClearCustom?.();
-                        setMenuOpen(false);
-                      }}
-                      className="w-full px-4 py-2.5 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
-                      style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
-                    >
-                      <span className="shrink-0"><FiHome className="h-4 w-4 text-white/80" /></span>
-                      <span className="truncate">Back to home feed</span>
-                    </button>
-                  )}
-                  {menuItems.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      role="menuitem"
-                      onClick={item.onClick}
-                      className="w-full px-4 py-2.5 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
-                      style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
-                    >
-                      <span className="shrink-0">{item.icon}</span>
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  ))}
+                    <div className="px-1 pt-1.5 text-[11px] text-white/45">
+                      Tip: use <span className="text-white/65">venue:</span> or <span className="text-white/65">landmark:</span>
+                    </div>
+                  </form>
+                  <div className="max-h-[min(48vh,360px)] overflow-y-auto py-2">
+                    {locationQuery.trim().length >= 2 && (
+                      <div className="px-4 pb-2">
+                        {loadingSuggestions ? (
+                          <div className="px-2 py-1.5 text-xs text-white/60">Searching places...</div>
+                        ) : locationSuggestions.length > 0 ? (
+                          <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                            {locationSuggestions.map((s, idx) => (
+                              <button
+                                key={`${s.name}-${idx}`}
+                                type="button"
+                                onClick={() => {
+                                  const raw = locationQuery.trim();
+                                  const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
+                                    ? 'venue'
+                                    : /^landmark\s*:/i.test(raw)
+                                      ? 'landmark'
+                                      : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
+                                        ? 'venue'
+                                        : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
+                                          ? 'landmark'
+                                          : 'location');
+                                  setLocationQuery(s.name);
+                                  const filter = s.filter ?? s.name;
+                                  props.onSearchLocation?.(filter, mode, {
+                                    label: s.label ?? s.name,
+                                    placeId: s.placeId ?? null,
+                                    scope: s.scope,
+                                  });
+                                  setMenuOpen(false);
+                                }}
+                                className="w-full px-3 py-2.5 text-left hover:bg-white/10 transition-colors"
+                              >
+                                <span className="text-sm text-white/90">{s.name}</span>
+                                {s.type === 'venue' ? (
+                                  <span className="ml-1 text-xs text-emerald-300/80">· venue</span>
+                                ) : s.type === 'landmark' ? (
+                                  <span className="ml-1 text-xs text-amber-300/80">· landmark</span>
+                                ) : usingFallbackSuggestions ? (
+                                  <span className="ml-1 text-xs text-white/45">· quick suggestion</span>
+                                ) : s.country ? (
+                                  <span className="ml-1 text-xs text-white/55">· {s.country}</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="px-2 py-1.5 text-xs text-white/50">No matches yet</div>
+                        )}
+                      </div>
+                    )}
+                    {props.customLocation && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          props.onClearCustom?.();
+                          setMenuOpen(false);
+                        }}
+                        className="w-full px-4 py-3 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
+                        style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                      >
+                        <span className="shrink-0"><FiHome className="h-4 w-4 text-white/80" /></span>
+                        <span className="truncate">Back to home feed</span>
+                      </button>
+                    )}
+                    {menuItems.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={item.onClick}
+                        className="w-full px-4 py-3 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
+                        style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                      >
+                        <span className="shrink-0">{item.icon}</span>
+                        <span className="truncate">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
 
@@ -1319,6 +1389,7 @@ function PostHeader({
   onMenuClick,
   variant = 'default',
   children,
+  textOnlyLead,
   textOnlyFooter,
 }: {
   post: Post;
@@ -1329,6 +1400,8 @@ function PostHeader({
   variant?: 'default' | 'textOnlyFeed';
   /** Main text card; for `textOnlyFeed` use `textOnlyFooter` for tagged users etc. */
   children?: React.ReactNode;
+  /** Full-width block between chrome and the bubble row (e.g. link preview). */
+  textOnlyLead?: React.ReactNode;
   /** Below the card row on text-only feed posts (e.g. tagged avatars). */
   textOnlyFooter?: React.ReactNode;
 }) {
@@ -1370,7 +1443,9 @@ function PostHeader({
   // Check if this is the current user's post
   const isCurrentUser = user?.handle === post.userHandle;
   // Use current user's avatarUrl if it's their post, otherwise get from handle
-  const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(post.userHandle);
+  const avatarSrc = isCurrentUser
+    ? user?.avatarUrl
+    : post.userAvatarUrl || getAvatarForHandle(post.userHandle);
 
   // Check if user has unviewed stories using API
   React.useEffect(() => {
@@ -1653,14 +1728,15 @@ function PostHeader({
                 className={`text-left w-full min-w-0 transition-opacity ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
               >
                 <span
-                  className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`}
+                  className={`text-xs font-semibold flex items-center gap-1 leading-tight ${textColorClass}`}
                   style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
                 >
                   <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
-                  <Flag
-                    value={isCurrentUser ? user?.countryFlag || '' : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ''}
-                    national={isCurrentUser ? user?.national : undefined}
-                    size={16}
+                  <VerifiedBadge
+                    accountType={
+                      isCurrentUser ? user?.accountType : post.userAccountType
+                    }
+                    size={12}
                   />
                 </span>
               </button>
@@ -1723,17 +1799,19 @@ function PostHeader({
                       ? 'text-white hover:opacity-70'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
                   }`}
-                  aria-label="More options"
-                  title="More options"
+                  aria-label="Post options"
+                  title="Post options"
                 >
-                  <FiMoreHorizontal className="w-4 h-4" />
+                  <FiList className="w-4 h-4" />
                 </button>
               ) : null}
             </div>
           </div>
 
           {profileMenuOpen && (
-            <div className="absolute left-0 top-full z-[200] mt-1 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+            <div className="absolute left-0 top-full z-[200] mt-1 w-56 overflow-hidden rounded-2xl border border-white/20 bg-[#060d16] shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
+            <DiscoverAmbientCanvas fixed={false} variant="passport" />
+            <div className="relative z-10">
             <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
               <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
               <button
@@ -1845,9 +1923,12 @@ function PostHeader({
                 <span className="font-medium text-violet-300">View stories</span>
               </button>
             )}
+            </div>
           </div>
           )}
         </div>
+
+        {textOnlyLead != null ? <div className="relative z-0 mt-2 w-full">{textOnlyLead}</div> : null}
 
         {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
         <div className="relative z-0 mt-2 flex w-full min-w-0 items-end justify-end gap-2">
@@ -1865,7 +1946,7 @@ function PostHeader({
     <div className="relative flex items-start justify-between px-3 pt-3 pb-2">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
-        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
+        <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
       )}
 
       {/* Content layer - above scrim */}
@@ -1956,12 +2037,13 @@ function PostHeader({
               }}
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
-              <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <h3 id={titleId} className={`text-xs font-semibold flex items-center gap-1 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
-                <Flag
-                  value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
-                  national={isCurrentUser ? user?.national : undefined}
-                  size={16}
+                <VerifiedBadge
+                  accountType={
+                    isCurrentUser ? user?.accountType : post.userAccountType
+                  }
+                  size={12}
                 />
               </h3>
             </button>
@@ -2018,10 +2100,10 @@ function PostHeader({
                 ? 'text-white hover:opacity-70'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
-              aria-label="More options"
-              title="More options"
+              aria-label="Post options"
+              title="Post options"
             >
-              <FiMoreHorizontal className="w-4 h-4" />
+              <FiList className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -2029,7 +2111,9 @@ function PostHeader({
 
       {/* Inline profile actions card (Visit profile / Follow-Unfollow / View stories) */}
       {profileMenuOpen && (
-        <div className="absolute left-4 top-full mt-2 z-40 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+        <div className="absolute left-4 top-full mt-2 z-40 w-56 overflow-hidden rounded-2xl border border-white/20 bg-[#060d16] shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
+          <DiscoverAmbientCanvas fixed={false} variant="passport" />
+          <div className="relative z-10">
           <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
             <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
             <button
@@ -2142,6 +2226,7 @@ function PostHeader({
             </button>
           )}
 
+          </div>
         </div>
       )}
     </div>
@@ -2702,7 +2787,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, postUserAccountType, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; postUserAccountType?: string | null; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2744,15 +2829,15 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const rewriteMediaUrl = React.useCallback((u: string): string => {
     if (!u || typeof u !== 'string') return u;
     const h = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (h === 'localhost' || h === '127.0.0.1') return u;
-    // Blob URLs are origin-bound and won't work from phone when created on laptop
-    // Keep `blob:` URLs so media still renders when created on the same device/session.
-    // If the blob can't be resolved, the Media component will show its error/placeholder UI.
-    if (u.startsWith('blob:')) return u;
-    return u
-      .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-      .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-      .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    if (u.startsWith('blob:')) return resolveMockFeedVideoUrl(u);
+    let out = u;
+    if (h !== 'localhost' && h !== '127.0.0.1') {
+      out = u
+        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
+        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
+        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    }
+    return resolveMockFeedVideoUrl(out);
   }, []);
 
   // Determine if we have multiple media items (carousel); rewrite URLs for network (e.g. phone)
@@ -3194,6 +3279,19 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   };
 
   const handleVideoError = (_e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = videoRef.current;
+    const src = v?.currentSrc || v?.src || currentItem?.url || '';
+    if (
+      v &&
+      src.includes('/demo-videos/') &&
+      !src.includes(MOCK_FEED_VIDEO_REMOTE_FALLBACK)
+    ) {
+      v.src = MOCK_FEED_VIDEO_REMOTE_FALLBACK;
+      v.load();
+      setIsLoading(true);
+      setHasError(false);
+      return;
+    }
     setIsLoading(false);
     setHasError(true);
   };
@@ -3518,13 +3616,16 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Feed images: force Instagram-style 4:5 frame so cards are consistently tall.
-    // Still images open in Threads-style fullscreen; only videos open Scenes.
+    // Images stay Instagram 4:5. Videos default to 4:5 (vertical) or 16:9 (landscape).
     if (currentItem?.type === 'image') {
+      const imageRatio = hasMultipleItems
+        ? (carouselFrameAspectRatio ?? aspectRatio)
+        : aspectRatio;
+      const isLandscape = imageRatio != null && imageRatio < 1;
       return {
         width: '100%',
-        height: window.innerWidth * FEED_TARGET_ASPECT,
-        maxHeight: '82vh',
+        height: window.innerWidth * (isLandscape ? 9 / 16 : FEED_TARGET_ASPECT),
+        maxHeight: '58vh',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3533,19 +3634,35 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Portrait-first feed policy:
-    // - keep tall media at 4:5 max
-    // - keep normal/square media near natural height
-    // - lift very wide media to at least 3:4 so cards still feel immersive
+    const FEED_VIDEO_LANDSCAPE_ASPECT = 9 / 16;
     const activeAspectRatio = hasMultipleItems
       ? (carouselFrameAspectRatio ?? aspectRatio)
       : aspectRatio;
+    if (currentItem?.type === 'video') {
+      const isLandscape = activeAspectRatio != null && activeAspectRatio < 1;
+      const feedAspect = isLandscape ? FEED_VIDEO_LANDSCAPE_ASPECT : FEED_TARGET_ASPECT;
+      return {
+        width: '100%',
+        height: window.innerWidth * feedAspect,
+        maxHeight: '58vh',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box'
+      };
+    }
+
+    // Portrait-first feed policy for remaining media:
+    // - keep tall media at 4:5 max
+    // - keep normal/square media near natural height
+    // - lift very wide media to at least 3:4 so cards still feel immersive
     if (activeAspectRatio) {
       const feedAspect = Math.min(Math.max(activeAspectRatio, FEED_MIN_ASPECT), FEED_TARGET_ASPECT);
       return {
         width: '100%',
         height: window.innerWidth * feedAspect,
-        maxHeight: '82vh',
+        maxHeight: '58vh',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -3554,10 +3671,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Default while loading: Instagram-like 4:5 frame.
+    // Default while loading: Instagram-like 4:5 frame, capped to one screen.
     return {
       aspectRatio: '4/5',
-      maxHeight: '82vh',
+      maxHeight: '58vh',
       width: '100%',
       position: 'relative',
       display: 'flex',
@@ -3659,6 +3776,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 item.type === 'video' && item.url && item.url.trim().length > 0;
               let slideElement: React.ReactNode = hasValidVideoSrc ? (
                 <video
+                  key={item.url}
                   src={item.url}
                   className="w-full h-full"
                   style={{ objectFit: 'cover' }}
@@ -3748,8 +3866,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                         <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
                           <span>{postUserHandle || 'User'}</span>
                           {postUserHandle && (
-                            <Flag
-                              value={getFlagForHandle(postUserHandle) || ''}
+                            <VerifiedBadge
+                              accountType={postUserAccountType}
                               size={14}
                             />
                           )}
@@ -3776,10 +3894,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             );
           }
 
-          // Match create post page exactly - use object-cover in fixed aspect container
+          // Full-frame video in the feed — contain so vertical overlays are not cropped.
           const hasValidVideoSrc = currentItem.type === 'video' && currentItem.url && currentItem.url.trim().length > 0;
           let mediaElement = hasValidVideoSrc ? (
             <video
+              key={currentItem.url}
               ref={videoRef}
               src={currentItem.url}
               className="w-full h-full"
@@ -3858,11 +3977,14 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
               {/* Error State */}
               {hasError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-50">
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-50">
                   <div className="text-center text-white px-4">
-                    <div className="text-2xl mb-2">âš ï¸</div>
-                    <div className="text-sm">Failed to load {currentItem.type}</div>
-                    <div className="text-xs text-gray-400 mt-1">Check your connection</div>
+                    <div className="text-sm font-medium">
+                      {currentItem.type === 'video' ? 'Video could not play' : `Failed to load ${currentItem.type}`}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {currentItem.type === 'video' ? 'Showing cover image · check connection' : 'Check your connection'}
+                    </div>
                   </div>
                 </div>
               )}
@@ -4245,6 +4367,7 @@ function EngagementBar({
   const [comments, setComments] = React.useState(post.stats.comments);
   const [shares, setShares] = React.useState(post.stats.shares);
   const [reclips, setReclips] = React.useState(post.stats.reclips);
+  const [saves, setSaves] = React.useState(post.stats.saves ?? 0);
   const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
   const [busy, setBusy] = React.useState(false);
   const likeCooldownRef = React.useRef(0);
@@ -4286,7 +4409,7 @@ function EngagementBar({
   );
 
   const openLikesSheet = React.useCallback(() => {
-    if (!user || likes <= 0) return;
+    if (!user) return;
     setShowLikesSheet(true);
     setLikersLoading(true);
     void fetchPostLikers(post.id, user.id, likes, views)
@@ -4316,8 +4439,9 @@ function EngagementBar({
     setComments(post.stats.comments);
     setShares(post.stats.shares);
     setReclips(post.stats.reclips);
+    setSaves(post.stats.saves ?? 0);
     setUserReclipped(post.userReclipped || false);
-  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
+  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.stats.saves, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
@@ -4336,6 +4460,12 @@ function EngagementBar({
       setUserReclipped(true); // so the reclip icon turns green
     };
 
+    const handleSavesUpdated = (event: Event) => {
+      const d = (event as CustomEvent).detail;
+      if (typeof d?.saves === 'number') setSaves(Math.max(0, d.saves));
+      else if (typeof d?.delta === 'number') setSaves((prev) => Math.max(0, prev + d.delta));
+    };
+
     const handleViewAdded = () => {
       setViews(prev => prev + 1);
     };
@@ -4349,6 +4479,7 @@ function EngagementBar({
     window.addEventListener(`commentAdded-${post.id}`, handleCommentAdded);
     window.addEventListener(`shareAdded-${post.id}`, handleShareAdded);
     window.addEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
+    window.addEventListener(`postSaves-${post.id}`, handleSavesUpdated as EventListener);
     window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
@@ -4365,6 +4496,7 @@ function EngagementBar({
       window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
       window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
       window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
+      window.removeEventListener(`postSaves-${post.id}`, handleSavesUpdated as EventListener);
       window.removeEventListener(`viewAdded-${post.id}`, handleViewAdded);
       window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
       window.removeEventListener(`postUpdated-${post.id}`, handlePostUpdated);
@@ -4531,7 +4663,7 @@ function EngagementBar({
             title={isSaved ? 'Saved' : 'Save post'}
           >
             <FiBookmark className={`${iconSize} ${isSaved ? 'text-[#7A8AF0] fill-[#7A8AF0]' : 'text-white'}`} />
-            <span className="text-xs text-white tabular-nums">{isSaved ? 'Saved' : 'Save'}</span>
+            <span className="text-xs text-white tabular-nums">{saves}</span>
           </button>
 
         </div>
@@ -4540,12 +4672,13 @@ function EngagementBar({
         <div className={`flex items-center flex-shrink-0 ${rowGap}`}>
           {/* Share â€“ VS Code Live Share style icon (VscLiveShare) */}
           <button
-            className={`flex items-center justify-center w-11 h-11 rounded-full transition-opacity hover:opacity-70 active:opacity-50`}
+            className={`flex items-center gap-1 min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50`}
             onClick={() => _onShare?.()}
-            aria-label="Share post"
+            aria-label={`Share post, ${shares} shares`}
             title="Share post"
           >
             <VscLiveShare className="w-6 h-6 text-white" />
+            <span className="text-xs text-white tabular-nums">{shares}</span>
           </button>
 
           {showBoostButton && onBoost && (
@@ -4575,52 +4708,54 @@ function EngagementBar({
         />
       </div>
 
-      {/* Likes & plays sheet */}
+      {/* Likes & plays sheet — View Profile passport canvas */}
       {showLikesSheet && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center px-3 pb-4"
           onClick={() => setShowLikesSheet(false)}
         >
           <div
-            className="w-full max-w-md bg-[#030712] rounded-3xl rounded-b-none pt-3 pb-4 px-4 shadow-xl border border-white/5 max-h-[70vh] flex flex-col"
+            className="relative w-full max-w-md overflow-hidden rounded-3xl rounded-b-none border border-white/10 border-b-0 bg-[#060d16] pt-3 pb-4 shadow-xl max-h-[70vh] flex flex-col text-[#e8eef2]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-center mb-3">
-              <div className="w-10 h-1 rounded-full bg-white/20" />
+            <DiscoverAmbientCanvas fixed={false} variant="passport" />
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col px-4">
+            <div className="flex items-center justify-center mb-3 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full bg-white/30" />
             </div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs uppercase tracking-[0.16em] text-gray-400">
+            <div className="flex items-center justify-between mb-3 flex-shrink-0">
+              <span className="text-xs uppercase tracking-[0.16em] text-white/55">
                 Likes and plays
               </span>
               <button
                 onClick={() => setShowLikesSheet(false)}
-                className="p-1.5 rounded-full hover:bg-white/10 text-gray-400"
+                className="p-1.5 rounded-full hover:bg-white/10 text-white/55"
                 aria-label="Close"
               >
                 <FiX className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex items-center justify-between mb-4 text-sm text-gray-200">
+            <div className="flex items-center justify-between mb-4 text-sm text-[#e8eef2] flex-shrink-0">
               <div className="flex items-center gap-2">
                 <FiThumbsUp className="w-4 h-4 text-pink-400" />
-                <span className="text-xs text-gray-400">Likes</span>
+                <span className="text-xs text-white/55">Likes</span>
                 <span className="font-semibold text-sm">{sheetLikes.toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-2">
                 <FiEye className="w-4 h-4 text-blue-400" />
-                <span className="text-xs text-gray-400">Views</span>
+                <span className="text-xs text-white/55">Views</span>
                 <span className="font-semibold text-sm">{sheetViews.toLocaleString()}</span>
               </div>
             </div>
 
-            <div className="border-t border-white/10 -mx-4 mb-2" />
+            <div className="border-t border-white/10 -mx-4 mb-2 flex-shrink-0" />
 
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
               {likersLoading ? (
-                <div className="py-8 text-center text-xs text-gray-500">Loading…</div>
+                <div className="py-8 text-center text-xs text-white/45">Loading…</div>
               ) : likers.length === 0 ? (
-                <div className="py-8 text-center text-xs text-gray-500">
+                <div className="py-8 text-center text-xs text-white/45">
                   No likes yet.
                 </div>
               ) : (
@@ -4641,15 +4776,15 @@ function EngagementBar({
                       >
                         <Avatar
                           name={row.display_name || row.handle}
-                          src={row.avatar_url || getAvatarForHandle(row.handle)}
+                          src={row.avatar_url}
                           size="sm"
                         />
                         <div className="min-w-0">
-                          <div className="text-sm font-medium text-gray-100 truncate">
+                          <div className="text-sm font-medium text-[#e8eef2] truncate">
                             {row.display_name || row.handle}
                           </div>
                           {row.display_name ? (
-                            <div className="text-xs text-gray-400 truncate">{row.handle}</div>
+                            <div className="text-xs text-white/55 truncate">{row.handle}</div>
                           ) : null}
                         </div>
                       </button>
@@ -4659,8 +4794,8 @@ function EngagementBar({
                           onClick={() => void handleToggleFollowFromLikes(row.handle)}
                           className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide ${
                             isFollowing
-                              ? 'bg-white/5 text-gray-200 border border-white/20'
-                              : 'bg-blue-500 text-white border border-blue-400'
+                              ? 'bg-[rgba(15,36,48,0.72)] text-white/70 border border-white/15'
+                              : 'bg-[#3d9b8f]/35 text-white border border-[#3d9b8f]/55'
                           }`}
                         >
                           {isFollowing ? 'Following' : 'Follow'}
@@ -4670,6 +4805,7 @@ function EngagementBar({
                   );
                 })
               )}
+            </div>
             </div>
           </div>
         </div>
@@ -4904,12 +5040,14 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const rewriteMediaUrlForThumbs = React.useCallback((u?: string): string => {
     if (!u || typeof u !== 'string') return '';
     const h = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (h === 'localhost' || h === '127.0.0.1') return u;
-    if (u.startsWith('blob:')) return u;
-    return u
-      .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
-      .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
-      .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    let out = u;
+    if (h !== 'localhost' && h !== '127.0.0.1' && !u.startsWith('blob:')) {
+      out = u
+        .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
+        .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
+        .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+    }
+    return resolveMockFeedVideoUrl(out);
   }, []);
   const carouselThumbItems = React.useMemo(
     () =>
@@ -5004,6 +5142,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       (post as any).captionText
     );
   }, [post.caption, post.text, post.imageText, post]);
+  const captionWithoutLink = React.useMemo(
+    () => getPostCaptionWithoutLink(post, displayCaption),
+    [post, displayCaption],
+  );
   const likeButtonRef = React.useRef<HTMLButtonElement>(null);
   const articleRef = React.useRef<HTMLElement>(null);
 
@@ -5125,13 +5267,23 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     setIsQuickSaving(true);
     try {
       if (isSaved) {
-        await unsavePost(user.id, post.id);
+        const unsaved = await unsavePost(user.id, post.id);
         setIsSaved(false);
+        window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+          detail: typeof unsaved.savesCount === 'number'
+            ? { saves: unsaved.savesCount }
+            : { delta: -1 },
+        }));
         window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
         showToast('Removed from saved');
       } else {
-        await savePostToDefaultCollection(user.id, post.id, post);
+        const saved = await savePostToDefaultCollection(user.id, post.id, post);
         setIsSaved(true);
+        window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+          detail: typeof saved.savesCount === 'number'
+            ? { saves: saved.savesCount }
+            : { delta: 1 },
+        }));
         window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
         showToast('Saved', 2600, {
           actionLabel: 'Save to collection',
@@ -5229,6 +5381,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             }}
           />
         )}
+        {isTileBoostMode && (
+          <div className="absolute left-1.5 right-1.5 bottom-1.5 z-30 pointer-events-none flex flex-wrap gap-1">
+            <span className="inline-flex items-center rounded-full border border-white/30 bg-black/70 px-2 py-1 text-[10px] font-bold text-white">
+              Tap to boost
+            </span>
+          </div>
+        )}
         {/* PostHeader overlaid on media for posts with media */}
         {hasMedia && (
           <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
@@ -5259,20 +5418,30 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               ) : undefined
             }
           >
-            <TextCard
-              text={post.text || ''}
-              onDoubleLike={onLike}
-              onHeartAnimation={(clientX, clientY) => {
-                setTimeout(() => {
-                  setHeartAnimation({ startX: clientX, startY: clientY });
-                }, 50);
-              }}
-              textStyle={effectiveTextStyle}
-              stickers={post.stickers}
-              isFromViewer={viewerIsAuthor}
-              feedHeadlineByline={textOnlyFeedByline}
-              feedCardTitleId={titleId}
-            />
+            {(() => {
+              const leftover = getPostCaptionWithoutLink(post, post.text || '');
+              const showBubble = (leftover || post.text || '').length > 0;
+              return (
+                <>
+                  {showBubble ? (
+                    <TextCard
+                      text={leftover || post.text || ''}
+                      onDoubleLike={onLike}
+                      onHeartAnimation={(clientX, clientY) => {
+                        setTimeout(() => {
+                          setHeartAnimation({ startX: clientX, startY: clientY });
+                        }, 50);
+                      }}
+                      textStyle={effectiveTextStyle}
+                      stickers={post.stickers}
+                      isFromViewer={viewerIsAuthor}
+                      feedHeadlineByline={textOnlyFeedByline}
+                      feedCardTitleId={titleId}
+                    />
+                  ) : null}
+                </>
+              );
+            })()}
           </PostHeader>
         )
         ) : (
@@ -5304,6 +5473,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             postUserHandle={post.userHandle}
             postLocationLabel={post.locationLabel}
             postCreatedAt={post.createdAt?.toString()}
+            postUserAccountType={post.userAccountType}
             videoPosterUrl={post.videoPosterUrl}
             priority={priority}
             tileMode={isTileBoostMode}
@@ -5360,13 +5530,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         </div>
       ) : null}
       {/* Caption + engagement are intentionally hidden for tile-grid boost posts (phone Instagram style). */}
-      {!isTileBoostMode && (
+          {!isTileBoostMode && (
         <>
-          {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
+          {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && captionWithoutLink.length > 0 && (
             <div className="px-3 py-2.5">
-              {displayCaption.length > 0 && (
-                <CaptionText caption={displayCaption} />
-              )}
+              <CaptionText caption={captionWithoutLink} />
             </div>
           )}
           <EngagementBar
@@ -5535,6 +5703,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             userId={user.id}
             isOpen={saveModalOpen}
             onClose={() => setSaveModalOpen(false)}
+            onSaved={(detail) => {
+              if (typeof detail?.savesCount === 'number') {
+                window.dispatchEvent(new CustomEvent(`postSaves-${post.id}`, {
+                  detail: { saves: detail.savesCount },
+                }));
+              }
+            }}
           />
           <EditPostModal
             post={post}
@@ -5594,14 +5769,28 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             comments: post.stats.comments,
             shares: post.stats.shares,
             reclips: post.stats.reclips,
+            saves: post.stats.saves ?? 0,
+            views: post.stats.views,
             userLiked: post.userLiked,
             userReclipped: !!post.userReclipped,
             userHandle: post.userHandle,
             currentUserHandle: user?.handle,
+            isFollowing: !!post.isFollowing,
+            viewerAvatarUrl: user?.avatarUrl,
+            viewerName: user?.name || user?.handle,
             onLike,
             onComment: handleImageFullscreenComment,
             onReclip: handleImageFullscreenReclip,
             onShare,
+            onFollow,
+            onSave: () => setSaveModalOpen(true),
+            isSaved,
+            onVisitProfile: () => {
+              handleCloseImageFullscreen();
+              navigate(`/user/${encodeURIComponent(post.userHandle)}`, {
+                state: { sourcePostId: post.id },
+              });
+            },
           }}
         />
       )}
@@ -5911,11 +6100,14 @@ function Stories24FeedRail({
   stories24Items,
   navigate,
   onBeforeOpenStoryFromRail,
+  previewVideosPaused = false,
 }: {
   stories24Items: Stories24RailItem[];
   navigate: ReturnType<typeof useNavigate>;
   /** Snapshot main feed scroll so /feed can restore after remount (route switch unmounts the feed). */
   onBeforeOpenStoryFromRail?: () => void;
+  /** Pause rail MP4 previews while the main feed is scrolling or tab is hidden. */
+  previewVideosPaused?: boolean;
 }) {
   const [expandingStory, setExpandingStory] = React.useState<{
     item: Stories24RailItem;
@@ -5972,6 +6164,11 @@ function Stories24FeedRail({
       window.clearTimeout(timer);
     };
   }, [expandingStory, openStoryFromRail]);
+
+  const firstStoryPreviewHandle = React.useMemo(
+    () => stories24Items.find((item) => item.handle !== '__add_yours__')?.handle ?? null,
+    [stories24Items],
+  );
 
   if (stories24Items.length === 0) return null;
   return (
@@ -6043,7 +6240,9 @@ function Stories24FeedRail({
               className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
             >
               <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
-              {storyItem.previewVideoUrl ? (
+              {storyItem.previewVideoUrl &&
+              storyItem.handle === firstStoryPreviewHandle &&
+              !previewVideosPaused ? (
                 <video
                   src={storyItem.previewVideoUrl}
                   className="absolute inset-0 w-full h-full object-cover"
@@ -6409,7 +6608,7 @@ function FeedPageWrapper() {
   }, [routerLocation.search]);
   const previewSuggestedCards = React.useMemo(() => {
     const irelandFeed = !customLocation && active.trim().toLowerCase() === 'ireland';
-    return previewSuggestedCardsFromQuery || irelandFeed;
+    return previewSuggestedCardsFromQuery || (isMockMode() && irelandFeed);
   }, [previewSuggestedCardsFromQuery, customLocation, active]);
   const [suggestedCardsV2LocalOverride, setSuggestedCardsV2LocalOverride] = React.useState<boolean | null>(() => {
     try {
@@ -6514,8 +6713,7 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     let cancelled = false;
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
-    const useLaravel =
-      typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false' && !!token;
+    const useLaravel = !isMockMode() && !!token;
 
     if (!useLaravel || !user || customLocation) {
       setServerPlaceSuggestions(undefined);
@@ -6669,6 +6867,23 @@ function FeedPageWrapper() {
   // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
   const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
   const feedScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [feedScrolling, setFeedScrolling] = React.useState(false);
+  const feedScrollIdleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [feedTabVisible, setFeedTabVisible] = React.useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible',
+  );
+  React.useEffect(() => {
+    const onVisibility = () => {
+      setFeedTabVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+  const markFeedScrolling = React.useCallback(() => {
+    setFeedScrolling(true);
+    if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+    feedScrollIdleTimerRef.current = setTimeout(() => setFeedScrolling(false), 180);
+  }, []);
   const snapshotStories24FeedScrollForRail = React.useCallback(() => {
     try {
       const y = feedScrollRef.current?.scrollTop ?? 0;
@@ -6858,7 +7073,7 @@ function FeedPageWrapper() {
     updateUnreadCount();
 
     // Poll for updates every 10 seconds
-    const interval = setInterval(updateUnreadCount, 10000);
+    const interval = setInterval(updateUnreadCount, getInboxUnreadPollMs());
 
     // Listen for unread changes
     const handleUnreadChanged = (event: CustomEvent) => {
@@ -6980,6 +7195,12 @@ function FeedPageWrapper() {
     requestTokenRef.current++;
   }, [currentFilter]);
 
+  // Live mode: drop leftover Sarah/Bob/Ava seed posts from localStorage (native FeedScreen does this too).
+  React.useEffect(() => {
+    if (isMockMode()) return;
+    void clearLocalFeedPostsStorage();
+  }, []);
+
   // Cache-first for location feeds; Following (discover) always fetches fresh so we never show wrong posts
   React.useEffect(() => {
     const params = new URLSearchParams(routerLocation.search);
@@ -6997,13 +7218,19 @@ function FeedPageWrapper() {
     (async () => {
       try {
         // In mock mode, skip cache and always fetch fresh so new posts appear immediately
-        const useMock = (import.meta as any).env?.VITE_USE_LARAVEL_API === 'false';
+        const useMock = isMockMode();
+        if (useMock) {
+          await clearFeed(userId, currentFilter).catch(() => {});
+        }
         const cached = useMock ? null : await loadFeed(userId, currentFilter);
         if (cancelled) return;
-        const hasCache = cached && cached.length > 0;
+        const liveCached = (cached || [])
+          .map((page) => page.filter((p) => !isMockFeedPost(p)))
+          .filter((page) => page.length > 0);
+        const hasCache = liveCached.length > 0;
         if (hasCache) {
           pagesLoadedForFilterRef.current = currentFilter;
-          setPages(cached);
+          setPages(liveCached);
           loadMore(true);
         } else {
           loadMore(false);
@@ -7136,7 +7363,22 @@ function FeedPageWrapper() {
           seenInChunk.add(x.id);
           return true;
         });
-        const next = isFirstPageCursor ? [dedupedChunk] : [...prev, dedupedChunk];
+        // Keep very recent locally-injected posts if a concurrent first-page fetch omitted them —
+        // but only when they belong on THIS location feed (never leak Finglas → Rome/Berlin).
+        const recentInjected = isFirstPageCursor
+          ? prev.flat().filter((p) => {
+              const ageMs = Date.now() - (Number(p.createdAt) || 0);
+              if (!(ageMs >= 0 && ageMs < 120_000 && !dedupedChunk.some((x) => String(x.id) === String(p.id)))) {
+                return false;
+              }
+              const tab = String(filterForRequest || currentFilterRef.current || '').trim();
+              if (!tab || tab.toLowerCase() === 'discover') return true;
+              return postMatchesLocationTab(p, tab);
+            })
+          : [];
+        const mergedFirst = recentInjected.length > 0 ? [...recentInjected, ...dedupedChunk] : dedupedChunk;
+        const liveSafeFirst = isMockMode() ? mergedFirst : mergedFirst.filter((p) => !isMockFeedPost(p));
+        const next = isFirstPageCursor ? [liveSafeFirst] : [...prev, dedupedChunk.filter((p) => isMockMode() || !isMockFeedPost(p))];
         if (isFirstPageCursor) {
           pagesLoadedForFilterRef.current = filterForRequest;
           if (!page.fromMock) saveFeed(userId, currentFilter, next).catch(() => {});
@@ -7159,13 +7401,15 @@ function FeedPageWrapper() {
   // Listen for new posts and refresh feed
   React.useEffect(() => {
     const handlePostCreated = () => {
-      // Reset feed state; initial load effect will trigger loadMore when cursor becomes 0
+      // Reset feed state and force the initial-load effect to re-run even when cursor is already 0.
       setPages([]);
       setCursor(0);
       setEnd(false);
       setLoading(false);
       setError(null);
       latestPostIdRef.current = null;
+      pagesLoadedForFilterRef.current = null;
+      setDiscoverRefreshTrigger((t) => t + 1);
     };
 
     window.addEventListener('postCreated', handlePostCreated);
@@ -7261,7 +7505,7 @@ function FeedPageWrapper() {
       } catch (e) {
         console.error('Error polling for new posts:', e);
       }
-    }, 10000); // Poll every 10 seconds
+    }, getFeedNewPostsPollMs());
 
     return () => clearInterval(pollInterval);
   }, [pages.length, loading, end, currentFilter, userId, user?.local, user?.regional, user?.national]);
@@ -7412,13 +7656,35 @@ function FeedPageWrapper() {
     navigate('/feed', { replace: true, state: {} });
   }, [routerLocation.pathname, routerLocation.state]);
 
-  // Deterministic injection path: when create flows navigate to /feed with createdPost in route state.
+  // Deterministic injection path: when create flows navigate to /feed with createdPost / createdPostId.
   React.useEffect(() => {
-    const state = routerLocation.state as { createdPost?: Post; forceRefreshAt?: number } | null;
-    if (routerLocation.pathname !== '/feed' || !state?.createdPost) return;
-    const createdPost = state.createdPost;
+    const state = routerLocation.state as {
+      createdPost?: Post;
+      createdPostId?: string;
+      forceRefreshAt?: number;
+    } | null;
+    if (routerLocation.pathname !== '/feed') return;
+    const createdPost =
+      state?.createdPost ||
+      (state?.createdPostId
+        ? postsStore.find((p) => String(p.id) === String(state.createdPostId))
+        : undefined);
+    if (!createdPost) return;
+    if (isLinkShareFeedPost(createdPost)) {
+      navigate('/feed', { replace: true, state: {} });
+      return;
+    }
     if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
       postsStore.unshift(createdPost);
+    }
+    // Only pin onto the feed when the author location matches the open tab.
+    if (
+      currentFilter &&
+      String(currentFilter).toLowerCase() !== 'discover' &&
+      !postMatchesLocationTab(createdPost, currentFilter)
+    ) {
+      navigate('/feed', { replace: true, state: {} });
+      return;
     }
     const decorated = decorateForUser(userId, createdPost);
     pagesLoadedForFilterRef.current = currentFilter;
@@ -7436,14 +7702,22 @@ function FeedPageWrapper() {
       const customEvent = event as CustomEvent<{ post?: Post }>;
       const createdPost = customEvent.detail?.post;
       if (!createdPost) return;
+      if (isLinkShareFeedPost(createdPost)) return;
 
       // Keep shared store warm in case persistence is delayed/fails on phone.
       if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
         postsStore.unshift(createdPost);
       }
 
-      // If we're currently on feed, inject at top immediately.
+      // If we're currently on feed, inject at top immediately — only for matching location.
       if (routerLocation.pathname === '/feed') {
+        if (
+          currentFilter &&
+          String(currentFilter).toLowerCase() !== 'discover' &&
+          !postMatchesLocationTab(createdPost, currentFilter)
+        ) {
+          return;
+        }
         const decorated = decorateForUser(userId, createdPost);
         // Mark this filter as loaded so the flat memo does not hide injected posts.
         pagesLoadedForFilterRef.current = currentFilter;
@@ -7467,6 +7741,13 @@ function FeedPageWrapper() {
     if (!postsStore.some((p) => String(p.id) === String(pending.id))) {
       postsStore.unshift(pending);
     }
+    if (
+      currentFilter &&
+      String(currentFilter).toLowerCase() !== 'discover' &&
+      !postMatchesLocationTab(pending, currentFilter)
+    ) {
+      return;
+    }
     const decorated = decorateForUser(userId, pending);
     pagesLoadedForFilterRef.current = currentFilter;
     setPages((prev) => {
@@ -7485,7 +7766,13 @@ function FeedPageWrapper() {
       setFeedPrefsVersion((v) => v + 1);
       setPages((prev) =>
         prev
-          .map((page) => filterPostsByContentPrefs(page, prefs))
+          .map((page) =>
+            excludeLinkShareFeedPosts(
+              filterPostsByContentPrefs(page, prefs, {
+                isProtectedDevMockVideo: isDevMockFeedVideoPost,
+              }),
+            ),
+          )
           .filter((page) => page.length > 0),
       );
     });
@@ -7497,7 +7784,13 @@ function FeedPageWrapper() {
   const applyFeedContentPrefsToPages = React.useCallback(() => {
     setPages((prev) =>
       prev
-        .map((page) => filterPostsByContentPrefs(page, feedContentPrefsRef.current))
+        .map((page) =>
+          excludeLinkShareFeedPosts(
+            filterPostsByContentPrefs(page, feedContentPrefsRef.current, {
+              isProtectedDevMockVideo: isDevMockFeedVideoPost,
+            }),
+          ),
+        )
         .filter((page) => page.length > 0),
     );
     setFeedPrefsVersion((v) => v + 1);
@@ -7567,9 +7860,9 @@ function FeedPageWrapper() {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
-    // Dev / explicit flag: optional layout QA tile â€” only for feeds where Ava's author location matches (e.g. Ireland/Galway), never London/Paris/Following.
+    // Explicit flag only — never inject Ava mock cards in live Vite dev.
     const showAvaFeedDemo =
-      import.meta.env.DEV || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
+      isMockMode() || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
     const avaDemoId = 'ava-normal-ireland-demo';
     const avaDemoPost = getAvaNormalPost();
     const withAvaDemo =
@@ -7596,8 +7889,14 @@ function FeedPageWrapper() {
     }).map((p) => bestByKey.get(idKey(p))!);
 
     // Apply current follow/like/bookmark state so UI is correct after cache or tab switch
-    const decoratedPosts = uniquePosts.map(p => decorateForUser(userId, p));
-    const visiblePosts = filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current);
+    const decoratedPosts = uniquePosts
+      .filter((p) => isMockMode() || !isMockFeedPost(p))
+      .map(p => decorateForUser(userId, p));
+    const visiblePosts = excludeLinkShareFeedPosts(
+      filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current, {
+        isProtectedDevMockVideo: isDevMockFeedVideoPost,
+      }),
+    );
 
     // Merge posts and ads, sort by epoch time (createdAt) - newest first
     const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [
@@ -8109,7 +8408,9 @@ function FeedPageWrapper() {
     };
 
     loadStoriesRail();
-    const interval = setInterval(loadStoriesRail, 12000);
+    const storiesRailPollMs = getStoriesRailPollMs();
+    const interval =
+      storiesRailPollMs != null ? setInterval(loadStoriesRail, storiesRailPollMs) : null;
     const refreshStoriesRail = () => { loadStoriesRail(); };
     window.addEventListener('storyCreated', refreshStoriesRail as EventListener);
     window.addEventListener('storiesUpdated', refreshStoriesRail as EventListener);
@@ -8120,7 +8421,7 @@ function FeedPageWrapper() {
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       window.removeEventListener('storyCreated', refreshStoriesRail as EventListener);
       window.removeEventListener('storiesUpdated', refreshStoriesRail as EventListener);
       window.removeEventListener('storiesViewed', refreshStoriesRail as EventListener);
@@ -8255,10 +8556,7 @@ function FeedPageWrapper() {
               }
 
               // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
-              const useLaravelApi =
-                typeof import.meta !== 'undefined' &&
-                import.meta.env?.VITE_USE_LARAVEL_API !== 'false' &&
-                import.meta.env?.VITE_DEV_MODE !== 'true';
+              const useLaravelApi = !isMockMode();
               if (!useLaravelApi) {
                 const newFollowing = !wasFollowing;
                 setFollowState(userId, p.userHandle, newFollowing);
@@ -8567,6 +8865,7 @@ function FeedPageWrapper() {
         ref={feedScrollRef}
         className="flex-1 min-h-0 overflow-y-auto overscroll-y-auto pb-2"
         style={{ WebkitOverflowScrolling: 'touch' }}
+        onScroll={markFeedScrolling}
         onTouchStart={handleFeedPullStart}
         onTouchMove={handleFeedPullMove}
         onTouchEnd={handleFeedPullEnd}
@@ -8888,6 +9187,7 @@ function FeedPageWrapper() {
                   stories24Items={stories24Items}
                   navigate={navigate}
                   onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
+                  previewVideosPaused={feedScrolling || !feedTabVisible}
                 />
               )}
               {showPreviewBusinessAfterThisPost && (
@@ -9195,6 +9495,12 @@ function FeedPageWrapper() {
             setShareModalOpen(false);
             setSelectedPostForShare(null);
           }}
+          onShareSuccess={(postId) =>
+            updateOne(postId, (p) => ({
+              ...p,
+              stats: { ...p.stats, shares: p.stats.shares + 1 },
+            }))
+          }
         />
       )}
 
@@ -9344,7 +9650,7 @@ function FeedPageWrapper() {
               }
 
               // PUBLIC PROFILES â€“ in mock-only mode skip API and use local follow state
-              const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+              const useLaravelApi = !isMockMode();
               if (!useLaravelApi) {
                 const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                 updateOne(p.id, post => ({ ...post, isFollowing: updated.isFollowing }));
@@ -9657,39 +9963,6 @@ function BoostPageWrapper() {
     return { active, ready, ended, total: posts.length };
   }, [posts, classifyBoostStatus]);
 
-  const getQualityLabel = React.useCallback((p: Post): { label: string; tone: string } => {
-    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / Math.max(1, p.stats.views || 1);
-    if (engagement >= 0.07 && (p.stats.views || 0) >= 250) return { label: 'Best candidate', tone: 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10' };
-    if (engagement >= 0.035) return { label: 'Good candidate', tone: 'text-sky-300 border-sky-400/40 bg-sky-500/10' };
-    return { label: 'Needs stronger post', tone: 'text-amber-300 border-amber-400/40 bg-amber-500/10' };
-  }, []);
-
-  const getQualityReason = React.useCallback((p: Post): string => {
-    const views = Math.max(1, p.stats.views || 1);
-    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / views;
-    const postAgeDays = (Date.now() - (p.createdAt || 0)) / (1000 * 60 * 60 * 24);
-    if (engagement >= 0.07 && views >= 250) {
-      return 'High engagement and strong recent performance.';
-    }
-    if (engagement >= 0.035) {
-      return postAgeDays <= 7
-        ? 'Solid engagement with fresh recency signal.'
-        : 'Solid engagement; likely to perform with broader reach.';
-    }
-    return views < 120
-      ? 'Try growing organic engagement first before boosting.'
-      : 'Consider improving hook/caption for better conversion.';
-  }, []);
-
-  const estimateReachTeaser = React.useCallback((p: Post): string => {
-    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / Math.max(1, p.stats.views || 1);
-    const base = Math.max(800, Math.round((p.stats.views || 0) * 2.2 + (engagement * 1000)));
-    const low = Math.round(base * 0.78);
-    const high = Math.round(base * 1.32);
-    const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
-    return `Estimated reach ${fmt(low)}-${fmt(high)}`;
-  }, []);
-
   const sparklineBars = React.useCallback((values: number[]): string => {
     if (!values.length) return 'â€”';
     const bars = ['â–', 'â–‚', 'â–ƒ', 'â–„', 'â–…', 'â–†', 'â–‡', 'â–ˆ'];
@@ -9918,11 +10191,10 @@ function BoostPageWrapper() {
             );
           })}
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-gray-500 font-semibold">Sort</span>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {([
-            { id: 'best' as const, label: 'Best candidates' },
-            { id: 'recent' as const, label: 'Most recent' },
+            { id: 'best' as const, label: 'Best' },
+            { id: 'recent' as const, label: 'Recent' },
           ]).map((opt) => {
             const active = boostSort === opt.id;
             return (
@@ -9940,9 +10212,6 @@ function BoostPageWrapper() {
               </button>
             );
           })}
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-gray-500 font-semibold">Insights range</span>
           {([
             { id: '24h' as const, label: '24h' },
             { id: '7d' as const, label: '7d' },
@@ -9956,7 +10225,7 @@ function BoostPageWrapper() {
                 onClick={() => setInsightsRange(opt.id)}
                 className={`min-h-[30px] px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
                   active
-                    ? 'bg-sky-500 text-white border-sky-400'
+                    ? 'bg-sky-500/30 text-sky-100 border-sky-400/50'
                     : 'bg-black/40 text-gray-300 border-white/20 hover:bg-white/10'
                 }`}
               >
@@ -9975,38 +10244,10 @@ function BoostPageWrapper() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-[6px] px-2 pb-2 sm:grid-cols-3 md:grid-cols-4">
+        <div className="grid grid-cols-3 gap-x-[6px] gap-y-2.5 px-2 pb-2 sm:grid-cols-3 md:grid-cols-4">
           {sortedBoostPosts.map(p => {
-            const status = classifyBoostStatus(p);
-            const quality = getQualityLabel(p);
-            const qualityReason = getQualityReason(p);
             return (
-              <div key={p.id}>
-                <div className="hidden sm:block mt-2 mb-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${quality.tone}`}>
-                    {quality.label}
-                  </span>
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                    status === 'active'
-                      ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10'
-                      : status === 'ended'
-                        ? 'text-gray-300 border-gray-400/30 bg-gray-500/10'
-                        : 'text-sky-300 border-sky-400/40 bg-sky-500/10'
-                  }`}>
-                    {status === 'active' ? 'Active boost' : status === 'ended' ? 'Ended boost' : 'Ready to boost'}
-                  </span>
-                </div>
-                <p className="mt-1 text-[11px] text-gray-500">{qualityReason}</p>
-                <p className="mt-1 text-xs text-gray-400">{estimateReachTeaser(p)} from base â‚¬4.99</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => { void handleViewBoostInsights(p); }}
-                className="mb-1 w-full min-h-[32px] rounded-lg border border-sky-400/30 bg-sky-500/10 text-[11px] font-semibold text-sky-200 hover:bg-sky-500/20"
-              >
-                View insights
-              </button>
+              <div key={p.id} className="min-w-0">
               <FeedCard
                 post={p}
                 showBoostIcon={true}
@@ -10119,6 +10360,13 @@ function BoostPageWrapper() {
                 }}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
+              <button
+                type="button"
+                onClick={() => { void handleViewBoostInsights(p); }}
+                className="mt-1.5 w-full min-h-[28px] rounded-lg border border-sky-400/35 bg-sky-500/10 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20"
+              >
+                Insights
+              </button>
               </div>
             );
           })}
@@ -10143,6 +10391,12 @@ function BoostPageWrapper() {
             setShareModalOpen(false);
             setSelectedPostForShare(null);
           }}
+          onShareSuccess={(postId) =>
+            updateOne(postId, (p) => ({
+              ...p,
+              stats: { ...p.stats, shares: p.stats.shares + 1 },
+            }))
+          }
         />
       )}
 

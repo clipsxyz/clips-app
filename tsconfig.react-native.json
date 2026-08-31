@@ -2,22 +2,14 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "jsx": "react-native",
-    "lib": ["ES2020", "ES2021"],
-    "types": ["react-native", "@types/react-native"]
+    "lib": ["ES2020"],
+    "types": ["react-native"]
   },
   "include": [
-    "src/screens/**/*"
+    "src/screens/**/*",
+    "src/types/**/*.d.ts",
+    "nativewind-env.d.ts",
+    "App.native.tsx"
   ],
-  "exclude": [
-    "node_modules"
-  ]
+  "exclude": ["node_modules"]
 }
-
-
-
-
-
-
-
-
-

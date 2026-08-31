@@ -18,7 +18,14 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSearch, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { createPost } from '../api/posts';
 import { publishTextStory24 } from '../utils/publishStoryNative';
-import { saveDraft } from '../api/drafts';
+import { saveDraft } from '../api/drafts.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import {
+  failedToSaveSheet,
+  nothingToSaveSheet,
+  savedToDraftsSheet,
+  type DraftSaveSheetState,
+} from '../utils/draftSaveSheetNative';
 import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
 import { navigateMainTab } from '../navigation/mainTabs';
@@ -28,6 +35,7 @@ import {
     NATIVE_TEXT_STORY_TEMPLATES,
 } from '../utils/textStoryTemplatesNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 type TagUser = { handle: string; displayName?: string };
 
@@ -46,6 +54,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
   const [tagSearchLoading, setTagSearchLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     route.params?.textTemplateId || route.params?.templateId || 'broadcast-blue',
   );
@@ -57,7 +66,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
 
   const previewTextStyle = useMemo(() => {
     if (!activeTemplate) {
-      return { color: '#ffffff', fontSize: 16 };
+      return { color: '#ffffff', fontSize: ox(16) };
     }
     const size =
       activeTemplate.textSize === 'small' ? 14 : activeTemplate.textSize === 'large' ? 20 : 16;
@@ -205,7 +214,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
 
   const handleSaveToDrafts = async () => {
     if (!canPost) {
-      Alert.alert('Text required', 'Add some text to save a draft.');
+      setDraftAlert(nothingToSaveSheet('Add some text to save a draft.'));
       return;
     }
     if (isSavingDraft) return;
@@ -223,11 +232,10 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
         textTemplateId: selectedTemplateId || undefined,
       });
       hapticLight();
-      Alert.alert('Saved to drafts', 'You can find it in your profile. Tap a draft to continue and post.', [
-        { text: 'Done', onPress: finishToFeed },
-      ]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      setDraftAlert(savedToDraftsSheet(finishToFeed));
     } catch (err: any) {
-      Alert.alert('Draft failed', err?.message || 'Could not save draft. Please try again.');
+      setDraftAlert(failedToSaveSheet(err?.message));
     } finally {
       setIsSavingDraft(false);
     }
@@ -272,10 +280,10 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
             }
             style={styles.headerBack}
           >
-            <Icon name="arrow-back" size={24} color="#FFFFFF" />
+            <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.logoMark}>
-            <Icon name="location" size={18} color="#FFFFFF" />
+            <Icon name="location" size={ox(18)} color="#FFFFFF" />
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -339,7 +347,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
           </ScrollView>
 
           <View style={styles.fieldRow}>
-            <Icon name="location-outline" size={20} color="#9CA3AF" />
+            <Icon name="location-outline" size={ox(20)} color="#9CA3AF" />
             <TextInput
               value={locationText}
               onChangeText={setLocationText}
@@ -350,7 +358,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
           </View>
 
           <View style={styles.fieldRow}>
-            <Icon name="business-outline" size={20} color="#9CA3AF" />
+            <Icon name="business-outline" size={ox(20)} color="#9CA3AF" />
             <TextInput
               value={venueText}
               onChangeText={setVenueText}
@@ -361,7 +369,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
           </View>
 
           <View style={styles.fieldRow}>
-            <Icon name="flag-outline" size={20} color="#9CA3AF" />
+            <Icon name="flag-outline" size={ox(20)} color="#9CA3AF" />
             <TextInput
               value={landmarkText}
               onChangeText={setLandmarkText}
@@ -372,7 +380,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
           </View>
 
           <TouchableOpacity style={styles.tagRow} onPress={() => setShowUserTagging(true)}>
-            <Icon name="person-outline" size={20} color="#9CA3AF" />
+            <Icon name="person-outline" size={ox(20)} color="#9CA3AF" />
             <View style={styles.tagCopy}>
               <Text style={styles.tagTitle}>Tag People</Text>
               <Text style={styles.tagSubtitle}>
@@ -405,11 +413,11 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Tag People</Text>
               <TouchableOpacity onPress={() => setShowUserTagging(false)}>
-                <Icon name="close" size={24} color="#FFFFFF" />
+                <Icon name="close" size={ox(24)} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
             <View style={styles.tagSearchRow}>
-              <Icon name="search" size={18} color="#9CA3AF" />
+              <Icon name="search" size={ox(18)} color="#9CA3AF" />
               <TextInput
                 value={tagSearchQuery}
                 onChangeText={setTagSearchQuery}
@@ -429,7 +437,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
                     onPress={() => setTaggedUsers((prev) => prev.filter((h) => h !== handle))}
                   >
                     <Text style={styles.selectedTagText}>@{handle}</Text>
-                    <Icon name="close-circle" size={16} color="#f472b6" />
+                    <Icon name="close-circle" size={ox(16)} color="#f472b6" />
                   </TouchableOpacity>
                 ))}
               </View>
@@ -457,7 +465,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
                       <Text style={styles.searchUserName}>{item.displayName || item.handle}</Text>
                       <Text style={styles.searchUserHandle}>@{item.handle}</Text>
                     </View>
-                    <Icon name="add-circle-outline" size={22} color="#f472b6" />
+                    <Icon name="add-circle-outline" size={ox(22)} color="#f472b6" />
                   </TouchableOpacity>
                 )}
               />
@@ -465,6 +473,19 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
           </View>
         </View>
       </Modal>
+      <GazetteerAlertSheet
+        visible={draftAlert != null}
+        title={draftAlert?.title ?? ''}
+        message={draftAlert?.message}
+        icon={draftAlert?.icon ?? 'alert'}
+        confirmButtonText={draftAlert?.confirmButtonText ?? 'OK'}
+        onConfirm={() => {
+          const action = draftAlert?.onConfirm;
+          setDraftAlert(null);
+          action?.();
+        }}
+        onDismiss={() => setDraftAlert(null)}
+      />
     </GazetteerScreenShell>
   );
 }
@@ -475,27 +496,27 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 10,
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(12),
+    gap: ox(10),
     ...gazetteerHeader,
   },
-  headerBack: { padding: 4 },
+  headerBack: { padding: ox(4) },
   logoMark: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: ox(32),
+    height: ox(32),
+    borderRadius: ox(8),
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerActions: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
-  draftBtn: { color: '#E5E7EB', fontSize: 13, fontWeight: '600' },
+  headerActions: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: ox(8) },
+  draftBtn: { color: '#E5E7EB', fontSize: ox(13), fontWeight: '600' },
   postBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: ox(14),
+    paddingVertical: ox(8),
+    borderRadius: ox(999),
     backgroundColor: '#374151',
   },
   postBtnActive: {
@@ -503,64 +524,64 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(244, 114, 182, 0.55)',
   },
-  postBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  postBtnText: { color: '#FFFFFF', fontSize: ox(14), fontWeight: '700' },
   disabledText: { color: '#6B7280' },
-  scrollContent: { padding: 16, gap: 12, paddingBottom: 32 },
+  scrollContent: { padding: ox(16), gap: ox(12), paddingBottom: ox(32) },
   previewBox: {
-    padding: 14,
-    borderRadius: 14,
-    marginBottom: 4,
+    padding: ox(14),
+    borderRadius: ox(14),
+    marginBottom: ox(4),
     ...glassPanel,
   },
-  previewText: { fontWeight: '600', lineHeight: 22 },
-  sectionLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  templateRow: { gap: 8, paddingBottom: 4 },
+  previewText: { fontWeight: '600', lineHeight: ox(22) },
+  sectionLabel: { color: '#9CA3AF', fontSize: ox(12), fontWeight: '700', marginBottom: ox(6) },
+  templateRow: { gap: ox(8), paddingBottom: ox(4) },
   templateChip: {
-    minWidth: 88,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    minWidth: ox(88),
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(10),
+    borderRadius: ox(12),
     borderWidth: 2,
     borderColor: 'transparent',
   },
   templateChipActive: {
     borderColor: '#f472b6',
   },
-  templateChipText: { fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  templateChipText: { fontSize: ox(12), fontWeight: '700', textAlign: 'center' },
   fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    gap: ox(10),
+    borderRadius: ox(14),
+    paddingHorizontal: ox(14),
+    paddingVertical: ox(12),
     ...glassSearch,
   },
-  fieldInput: { flex: 1, color: '#FFFFFF', fontSize: 15 },
+  fieldInput: { flex: 1, color: '#FFFFFF', fontSize: ox(15) },
   tagRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    gap: ox(10),
+    borderRadius: ox(14),
+    paddingHorizontal: ox(14),
+    paddingVertical: ox(14),
     ...glassSearch,
   },
   tagCopy: { flex: 1 },
-  tagTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  tagSubtitle: { color: '#9CA3AF', fontSize: 13, marginTop: 2 },
-  tagAvatars: { flexDirection: 'row', gap: 4 },
+  tagTitle: { color: '#FFFFFF', fontSize: ox(15), fontWeight: '600' },
+  tagSubtitle: { color: '#9CA3AF', fontSize: ox(13), marginTop: ox(2) },
+  tagAvatars: { flexDirection: 'row', gap: ox(4) },
   tagAvatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: ox(26),
+    height: ox(26),
+    borderRadius: ox(13),
     backgroundColor: '#3B82F6',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tagAvatarText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  tagAvatarText: { color: '#FFFFFF', fontSize: ox(11), fontWeight: '700' },
   tagAvatarMore: { backgroundColor: '#4B5563' },
-  tagAvatarMoreText: { color: '#D1D5DB', fontSize: 10, fontWeight: '700' },
+  tagAvatarMoreText: { color: '#D1D5DB', fontSize: ox(10), fontWeight: '700' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.65)',
@@ -571,69 +592,69 @@ const styles = StyleSheet.create({
     backgroundColor: '#120a1c',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    paddingBottom: 24,
+    paddingBottom: ox(24),
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: ox(16),
+    paddingVertical: ox(14),
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.08)',
   },
-  modalTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  modalTitle: { color: '#FFFFFF', fontSize: ox(17), fontWeight: '700' },
   tagSearchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 8,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: ox(8),
+    marginHorizontal: ox(16),
+    marginTop: ox(12),
+    marginBottom: ox(8),
+    borderRadius: ox(12),
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(10),
     ...glassSearch,
   },
-  tagSearchInput: { flex: 1, color: '#FFFFFF', fontSize: 15 },
+  tagSearchInput: { flex: 1, color: '#FFFFFF', fontSize: ox(15) },
   selectedTagsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    gap: ox(8),
+    paddingHorizontal: ox(16),
+    marginBottom: ox(8),
   },
   selectedTagChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+    gap: ox(6),
+    paddingHorizontal: ox(10),
+    paddingVertical: ox(6),
+    borderRadius: ox(999),
     backgroundColor: 'rgba(244, 114, 182, 0.15)',
   },
-  selectedTagText: { color: '#F9A8D4', fontSize: 13, fontWeight: '600' },
-  tagLoader: { marginVertical: 20 },
+  selectedTagText: { color: '#F9A8D4', fontSize: ox(13), fontWeight: '600' },
+  tagLoader: { marginVertical: ox(20) },
   searchUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: ox(10),
+    paddingHorizontal: ox(16),
+    paddingVertical: ox(12),
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   searchUserAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: ox(36),
+    height: ox(36),
+    borderRadius: ox(18),
     backgroundColor: '#312E81',
     alignItems: 'center',
     justifyContent: 'center',
   },
   searchUserAvatarText: { color: '#FFFFFF', fontWeight: '700' },
   searchUserCopy: { flex: 1 },
-  searchUserName: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  searchUserHandle: { color: '#9CA3AF', fontSize: 13, marginTop: 2 },
-  emptySearch: { color: '#6B7280', textAlign: 'center', padding: 20, fontSize: 14 },
+  searchUserName: { color: '#FFFFFF', fontSize: ox(15), fontWeight: '600' },
+  searchUserHandle: { color: '#9CA3AF', fontSize: ox(13), marginTop: ox(2) },
+  emptySearch: { color: '#6B7280', textAlign: 'center', padding: ox(20), fontSize: ox(14) },
 });

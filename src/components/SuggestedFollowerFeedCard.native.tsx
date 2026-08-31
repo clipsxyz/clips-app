@@ -11,10 +11,18 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
 import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
+import PassportSheetCanvas, { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import Video, { type VideoRef } from 'react-native-video';
+import {
+    isMockDemoVideoPath,
+    mockFeedVideoSource,
+} from '../constants/mockFeedVideos.native';
+import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 
 type Props = {
   suggestion: SuggestedFollowerSuggestion;
@@ -29,10 +37,70 @@ function formatViews(n: number): string {
   return String(n);
 }
 
+function looksLikeVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url) || isMockDemoVideoPath(url);
+}
+
+/** Muted looping preview — same pattern as Stories 24 rail cards. */
+const PREVIEW_LOOP_SEC = 2;
+
+function SuggestedThumbPreviewVideo({
+  url,
+  posterUri,
+}: {
+  url: string;
+  posterUri?: string;
+}) {
+  const videoRef = React.useRef<VideoRef>(null);
+  const [feedScrolling, setFeedScrolling] = React.useState(getFeedScrollBusy());
+  React.useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
+
+  const posterSource =
+    posterUri &&
+    posterUri.trim().length > 0 &&
+    !posterUri.startsWith('#') &&
+    !looksLikeVideoUrl(posterUri)
+      ? { uri: posterUri }
+      : undefined;
+
+  if (feedScrolling && posterSource) {
+    return (
+      <Image
+        source={posterSource}
+        style={styles.thumbImage}
+        resizeMode="cover"
+        pointerEvents="none"
+      />
+    );
+  }
+
+  return (
+    <Video
+      ref={videoRef}
+      source={mockFeedVideoSource(url)}
+      style={styles.thumbImage}
+      resizeMode="cover"
+      paused={feedScrolling}
+      muted
+      repeat
+      controls={false}
+      playInBackground={false}
+      playWhenInactive={false}
+      ignoreSilentSwitch="obey"
+      {...androidListSafeVideoProps()}
+      pointerEvents="none"
+      onProgress={({ currentTime }) => {
+        if (currentTime > PREVIEW_LOOP_SEC) {
+          videoRef.current?.seek(0);
+        }
+      }}
+    />
+  );
+}
+
 export default function SuggestedFollowerFeedCard({
   suggestion,
   onFollow,
-  onDismiss,
   onNotInterested,
   onOpenProfile,
 }: Props) {
@@ -60,14 +128,9 @@ export default function SuggestedFollowerFeedCard({
 
   return (
     <View style={styles.card}>
-      <DiscoverAmbientCanvas variant="discover" />
-
-      <View style={styles.content}>
+      <PassportSheetCanvas contentStyle={styles.content}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => setInfoOpen((v) => !v)} accessibilityLabel="Info">
-          <Icon name="information-circle-outline" size={20} color="#9CA3AF" />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnRight]} onPress={onDismiss} accessibilityLabel="Dismiss">
-          <Icon name="close" size={20} color="#9CA3AF" />
+          <Icon name="information-circle-outline" size={20} color="rgba(232,238,242,0.62)" />
         </TouchableOpacity>
 
         {infoOpen ? (
@@ -84,7 +147,7 @@ export default function SuggestedFollowerFeedCard({
           <Text style={styles.handle}>{suggestion.userHandle}</Text>
           <Text style={styles.context}>{suggestion.contextLabel}</Text>
           <View style={styles.badgeRow}>
-            <Icon name="business-outline" size={12} color="#d91b5c" />
+            <Icon name="business-outline" size={12} color={PASSPORT_PALETTE.wavePrimary} />
             <Text style={styles.badgeText}>Suggested by Gazetteer</Text>
           </View>
         </TouchableOpacity>
@@ -93,7 +156,27 @@ export default function SuggestedFollowerFeedCard({
           style={[styles.thumbRow, previewCount === 1 && styles.thumbRowSingle]}
           onLayout={onThumbRowLayout}
         >
-          {suggestion.previews.map((preview) => (
+          {suggestion.previews.map((preview) => {
+            const rawVideo =
+              preview.isVideo
+                ? preview.mediaUrl ||
+                  (looksLikeVideoUrl(preview.thumbnailUrl) || isMockDemoVideoPath(preview.thumbnailUrl)
+                    ? preview.thumbnailUrl
+                    : undefined)
+                : undefined;
+            const videoUrl =
+              rawVideo &&
+              (isMockDemoVideoPath(rawVideo) || looksLikeVideoUrl(rawVideo))
+                ? rawVideo
+                : undefined;
+            const posterUri =
+              preview.thumbnailUrl &&
+              !looksLikeVideoUrl(preview.thumbnailUrl) &&
+              !isMockDemoVideoPath(preview.thumbnailUrl) &&
+              !preview.thumbnailUrl.startsWith('#')
+                ? preview.thumbnailUrl
+                : undefined;
+            return (
             <TouchableOpacity
               key={preview.postId}
               onPress={() => onOpenProfile(suggestion.userHandle)}
@@ -104,7 +187,17 @@ export default function SuggestedFollowerFeedCard({
                 },
               ]}
             >
-              <Image source={{ uri: preview.thumbnailUrl }} style={styles.thumbImage} resizeMode="cover" />
+              {videoUrl ? (
+                <SuggestedThumbPreviewVideo url={videoUrl} posterUri={posterUri} />
+              ) : posterUri ? (
+                <Image
+                  source={{ uri: posterUri }}
+                  style={styles.thumbImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.thumbImage, styles.thumbPlaceholder]} />
+              )}
               <View style={styles.viewsOverlay}>
                 <Icon name="play" size={10} color="#fff" />
                 <Text style={styles.viewsText}>{formatViews(preview.views)}</Text>
@@ -115,7 +208,8 @@ export default function SuggestedFollowerFeedCard({
                 </View>
               ) : null}
             </TouchableOpacity>
-          ))}
+            );
+          })}
         </View>
 
         <View style={styles.actions}>
@@ -124,17 +218,10 @@ export default function SuggestedFollowerFeedCard({
           </TouchableOpacity>
           <TouchableOpacity style={styles.primaryBtnWrap} onPress={handleFollow} disabled={followBusy}>
             <LinearGradient
-              colors={['#0b0711', '#201138', '#0b0711']}
-              locations={[0, 0.55, 1]}
+              colors={[...PASSPORT_SHEET_WASH]}
+              locations={[0, 0.22, 0.52, 0.78, 1]}
               start={{ x: 0.1, y: 0 }}
               end={{ x: 0.9, y: 1 }}
-              style={StyleSheet.absoluteFill}
-            />
-            <LinearGradient
-              colors={['rgba(217,27,92,0.4)', 'rgba(32,17,56,0.2)', 'transparent']}
-              locations={[0, 0.5, 1]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
             {followBusy ? (
@@ -144,7 +231,7 @@ export default function SuggestedFollowerFeedCard({
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </PassportSheetCanvas>
     </View>
   );
 }
@@ -156,7 +243,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#0b0711',
+    backgroundColor: PASSPORT_ABYSS,
     overflow: 'hidden',
     minHeight: 300,
   },
@@ -164,7 +251,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
     paddingTop: 8,
-    zIndex: 2,
+    minHeight: 300,
   },
   iconBtn: {
     position: 'absolute',
@@ -173,22 +260,18 @@ const styles = StyleSheet.create({
     zIndex: 10,
     padding: 6,
   },
-  iconBtnRight: {
-    left: undefined,
-    right: 8,
-  },
   infoBox: {
     marginTop: 36,
     marginBottom: 8,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(26,21,36,0.95)',
+    backgroundColor: 'rgba(15, 36, 48, 0.88)',
     padding: 10,
   },
   infoText: {
     fontSize: 11,
-    color: '#D1D5DB',
+    color: 'rgba(232,238,242,0.78)',
     lineHeight: 16,
   },
   profileBlock: {
@@ -205,7 +288,7 @@ const styles = StyleSheet.create({
   context: {
     marginTop: 4,
     fontSize: 12,
-    color: '#9CA3AF',
+    color: 'rgba(232,238,242,0.62)',
     textAlign: 'center',
   },
   badgeRow: {
@@ -216,7 +299,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontSize: 10,
-    color: 'rgba(217,27,92,0.9)',
+    color: PASSPORT_PALETTE.wavePrimary,
   },
   thumbRow: {
     flexDirection: 'row',
@@ -237,6 +320,9 @@ const styles = StyleSheet.create({
   thumbImage: {
     width: '100%',
     height: '100%',
+  },
+  thumbPlaceholder: {
+    backgroundColor: '#121212',
   },
   viewsOverlay: {
     position: 'absolute',
@@ -259,7 +345,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
-    backgroundColor: 'rgba(217,27,92,0.9)',
+    backgroundColor: 'rgba(61,155,143,0.92)',
     borderRadius: 4,
     paddingHorizontal: 4,
     paddingVertical: 2,
@@ -278,7 +364,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(26,21,36,0.8)',
+    backgroundColor: 'rgba(15, 36, 48, 0.72)',
     paddingVertical: 11,
     alignItems: 'center',
   },

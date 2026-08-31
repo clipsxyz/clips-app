@@ -25,7 +25,7 @@ type DiscoverAmbientCanvasProps = {
     fixed?: boolean;
     /** Keep full-screen gradient when the mobile keyboard opens (do not shrink to visualViewport). */
     lockViewport?: boolean;
-    /** `goldChrome` — Stories 24 gold + silver wave palette. */
+    /** `goldChrome` — Stories 24 gold + silver. `passport` — night atlas for profiles. */
     variant?: DiscoverAmbientVariant;
 };
 
@@ -36,7 +36,11 @@ export default function DiscoverAmbientCanvas({
 }: DiscoverAmbientCanvasProps) {
     const palette = getAmbientPalette(variant);
     const halftoneClass =
-        variant === 'goldChrome' ? 'gold-chrome-halftone-overlay' : 'discover-halftone-overlay';
+        variant === 'goldChrome'
+            ? 'gold-chrome-halftone-overlay'
+            : variant === 'passport'
+              ? 'passport-halftone-overlay'
+              : 'discover-halftone-overlay';
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const frameRef = useRef<number | undefined>(undefined);
     const timeRef = useRef(0);
@@ -84,6 +88,19 @@ export default function DiscoverAmbientCanvas({
             window.visualViewport?.addEventListener('scroll', resize);
         }
 
+        // Sheet/card parents often grow after mount (e.g. likers load) without a window
+        // resize — observe the parent so absolute canvases rematch content height.
+        let parentObserver: ResizeObserver | undefined;
+        if (!fixed && typeof ResizeObserver !== 'undefined') {
+            const parent = canvas.parentElement;
+            if (parent) {
+                parentObserver = new ResizeObserver(() => {
+                    resize();
+                });
+                parentObserver.observe(parent);
+            }
+        }
+
         const onVisibility = () => {
             paused = document.hidden;
             if (paused) drawDiscoverAmbientWave(ctx, width, height, timeRef.current, palette);
@@ -91,16 +108,19 @@ export default function DiscoverAmbientCanvas({
 
         document.addEventListener('visibilitychange', onVisibility);
 
+        const cleanupListeners = () => {
+            window.removeEventListener('resize', resize);
+            if (!lockViewport) {
+                window.visualViewport?.removeEventListener('resize', resize);
+                window.visualViewport?.removeEventListener('scroll', resize);
+            }
+            document.removeEventListener('visibilitychange', onVisibility);
+            parentObserver?.disconnect();
+        };
+
         if (reducedMotion) {
             drawDiscoverAmbientWave(ctx, width, height, 0, palette);
-            return () => {
-                window.removeEventListener('resize', resize);
-                if (!lockViewport) {
-                    window.visualViewport?.removeEventListener('resize', resize);
-                    window.visualViewport?.removeEventListener('scroll', resize);
-                }
-                document.removeEventListener('visibilitychange', onVisibility);
-            };
+            return cleanupListeners;
         }
 
         const animate = () => {
@@ -114,12 +134,7 @@ export default function DiscoverAmbientCanvas({
         frameRef.current = requestAnimationFrame(animate);
 
         return () => {
-            window.removeEventListener('resize', resize);
-            if (!lockViewport) {
-                window.visualViewport?.removeEventListener('resize', resize);
-                window.visualViewport?.removeEventListener('scroll', resize);
-            }
-            document.removeEventListener('visibilitychange', onVisibility);
+            cleanupListeners();
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
         };
     }, [fixed, lockViewport, variant, palette]);

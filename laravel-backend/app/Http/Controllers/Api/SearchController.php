@@ -103,7 +103,14 @@ class SearchController extends Controller
                             ];
                         })
                         ->filter(function ($item) use ($mode, $level, $countryName, $regionName) {
-                            if ($mode !== 'all' && ($item['type'] ?? 'location') !== $mode) {
+                            $kind = (string) ($item['type'] ?? 'location');
+                            if ($mode === 'landmark') {
+                                // Keep attractions / parks / natural features even if Google also tags them as venues.
+                                if (! in_array($kind, ['landmark', 'venue'], true)
+                                    && ! $this->looksLikeLandmarkName((string) ($item['name'] ?? ''))) {
+                                    return false;
+                                }
+                            } elseif ($mode !== 'all' && $kind !== $mode) {
                                 return false;
                             }
                             if ($level === '') {
@@ -219,7 +226,7 @@ class SearchController extends Controller
         ]);
 
         $qRaw = trim($request->query('q', ''));
-        $q = strtolower($qRaw);
+        $q = strtolower(ltrim($qRaw, '@'));
         $typesStr = $request->query('types', 'users,locations,posts');
         $types = array_filter(array_map('trim', explode(',', $typesStr)));
 
@@ -286,14 +293,22 @@ class SearchController extends Controller
         if (in_array('users', $types)) {
             $offset = $usersCursor * $usersLimit;
             $users = User::query()
-                ->where(function ($query) use ($q) {
-                    $query->whereRaw("LOWER(handle) LIKE ?", ["%$q%"])
-                        ->orWhereRaw("LOWER(display_name) LIKE ?", ["%$q%"]);
+                ->where(function ($query) use ($qRaw) {
+                    $this->applyUserSearchFilter($query, $qRaw);
                 })
-                ->select('id', 'username', 'display_name', 'handle', 'avatar_url')
+                ->select(
+                    'id',
+                    'username',
+                    'display_name',
+                    'handle',
+                    'avatar_url',
+                    'location_local',
+                    'location_regional',
+                    'location_national'
+                )
                 ->orderByRaw(
                     "CASE WHEN LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ? THEN 0 ELSE 1 END",
-                    ["$q%", "$q%"]
+                    ["{$q}%", "{$q}%"]
                 )
                 ->orderByRaw(
                     "CASE WHEN LOWER(handle) = ? THEN 0 WHEN LOWER(display_name) = ? THEN 1 ELSE 2 END",
@@ -311,7 +326,7 @@ class SearchController extends Controller
             $nextCursor = $hasMore ? $usersCursor + 1 : null;
 
             $sections['users'] = [
-                'items' => $users->values(),
+                'items' => $users->map(fn (User $u) => $this->presentSearchUser($u))->values(),
                 'nextCursor' => $nextCursor,
                 'hasMore' => $hasMore,
             ];
@@ -363,16 +378,28 @@ class SearchController extends Controller
      * @return array<string, mixed>|null
      */
     /**
-     * Map app search tab → Google Places Autocomplete types restriction.
-     * @see https://developers.google.com/maps/documentation/places/web-service/autocomplete
+     * Map app search tab → Google Places Autocomplete `types` values.
+     * Landmark needs multiple calls — Autocomplete allows only one type per request.
+     *
+     * @return list<?string>
      */
-    private function googleAutocompleteTypesForMode(string $mode): ?string
+    private function googleAutocompleteTypeQueriesForMode(string $mode): array
     {
         return match ($mode) {
-            'venue' => 'establishment',
-            'location' => 'geocode',
-            default => null,
+            'venue' => ['establishment'],
+            'location' => ['geocode'],
+            // Rivers, parks, attractions — unrestricted autocomplete returns cities first.
+            'landmark' => ['tourist_attraction', 'natural_feature', 'park'],
+            default => [null],
         };
+    }
+
+    /** @deprecated Use googleAutocompleteTypeQueriesForMode */
+    private function googleAutocompleteTypesForMode(string $mode): ?string
+    {
+        $queries = $this->googleAutocompleteTypeQueriesForMode($mode);
+
+        return $queries[0] ?? null;
     }
 
     private function classifyPlaceKind(array $lowerTypes): string
@@ -380,6 +407,8 @@ class SearchController extends Controller
         $landmarkHints = [
             'tourist_attraction', 'natural_feature', 'park', 'museum', 'church',
             'mosque', 'synagogue', 'hindu_temple', 'university', 'cemetery',
+            'aquarium', 'zoo', 'amusement_park', 'art_gallery', 'place_of_worship',
+            'city_hall', 'library', 'landmark', 'premise',
         ];
         $venueHints = [
             'establishment', 'point_of_interest', 'restaurant', 'bar', 'cafe',
@@ -398,6 +427,18 @@ class SearchController extends Controller
         }
 
         return 'location';
+    }
+
+    private function looksLikeLandmarkName(string $name): bool
+    {
+        $lower = strtolower($name);
+        foreach (['river', 'park', 'bridge', 'tower', 'castle', 'cathedral', 'museum', 'falls', 'lake', 'mountain', 'monument', 'statue'] as $hint) {
+            if (str_contains($lower, $hint)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function autocompleteInputForLevel(string $qRaw, string $level, string $countryName, string $regionName): string
@@ -506,7 +547,8 @@ class SearchController extends Controller
         return match ($level) {
             'country' => '(regions)',
             'region' => '(regions)',
-            'local' => '(cities)',
+            // Neighborhoods / suburbs often are not `(cities)` — leave unrestricted for local tier.
+            'local' => null,
             default => null,
         };
     }
@@ -518,18 +560,57 @@ class SearchController extends Controller
         string $level = '',
         ?string $countryIso = null
     ): ?array {
+        $signupTypes = $this->googleAutocompleteTypesForSignupLevel($level);
+        if ($signupTypes !== null) {
+            return $this->googlePlaceAutocompleteSingle($input, $apiKey, $signupTypes, $countryIso);
+        }
+
+        $typeQueries = $this->googleAutocompleteTypeQueriesForMode($mode);
+        $merged = [];
+        $seen = [];
+
+        foreach ($typeQueries as $types) {
+            $payload = $this->googlePlaceAutocompleteSingle($input, $apiKey, $types, $countryIso);
+            if (! is_array($payload)) {
+                continue;
+            }
+            $predictions = is_array($payload['predictions'] ?? null) ? $payload['predictions'] : [];
+            foreach ($predictions as $prediction) {
+                if (! is_array($prediction)) {
+                    continue;
+                }
+                $placeId = (string) ($prediction['place_id'] ?? '');
+                $key = $placeId !== '' ? $placeId : strtolower((string) ($prediction['description'] ?? ''));
+                if ($key === '' || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $merged[] = $prediction;
+            }
+        }
+
+        if ($merged === []) {
+            return null;
+        }
+
+        return [
+            'status' => 'OK',
+            'predictions' => $merged,
+        ];
+    }
+
+    private function googlePlaceAutocompleteSingle(
+        string $input,
+        string $apiKey,
+        ?string $types,
+        ?string $countryIso
+    ): ?array {
         $query = [
             'input' => $input,
             'key' => $apiKey,
         ];
-        $signupTypes = $this->googleAutocompleteTypesForSignupLevel($level);
-        if ($signupTypes !== null) {
-            $query['types'] = $signupTypes;
-        } else {
-            $types = $this->googleAutocompleteTypesForMode($mode);
-            if ($types !== null) {
-                $query['types'] = $types;
-            }
+        if ($types !== null && $types !== '') {
+            $query['types'] = $types;
         }
         if ($countryIso !== null && $countryIso !== '') {
             $query['components'] = 'country:'.strtolower($countryIso);
@@ -561,11 +642,64 @@ class SearchController extends Controller
             return null;
         }
         $payload = json_decode($body, true);
-        if (!is_array($payload) || ($payload['status'] ?? '') !== 'OK') {
+        if (! is_array($payload) || ($payload['status'] ?? '') !== 'OK') {
             return null;
         }
 
         return $payload;
+    }
+
+    /**
+     * Match Name@Place handles, @prefix queries, usernames, and home locations.
+     * "New York State" must find Donny@NewYorkState; "@Donny" must find Donny@….
+     */
+    private function applyUserSearchFilter($query, string $qRaw): void
+    {
+        $q = strtolower(ltrim(trim($qRaw), '@'));
+        if ($q === '') {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+
+        $like = '%'.$q.'%';
+        $compact = strtolower((string) preg_replace('/[^a-z0-9]+/', '', $q));
+        $compactSql = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(%s, ''), ' ', ''), '@', ''), '-', ''), '_', ''), '.', ''))";
+
+        $query->whereRaw('LOWER(handle) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(display_name, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(username, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(location_local, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(location_regional, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(COALESCE(location_national, \'\')) LIKE ?', [$like])
+            ->orWhereRaw('LOWER(handle) LIKE ?', [$q.'@%']);
+
+        if (strlen($compact) >= 2) {
+            $compactLike = '%'.$compact.'%';
+            foreach (['handle', 'display_name', 'username', 'location_local', 'location_regional', 'location_national'] as $col) {
+                $query->orWhereRaw(sprintf($compactSql, $col).' LIKE ?', [$compactLike]);
+            }
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentSearchUser(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'username' => $user->username,
+            'display_name' => $user->display_name,
+            'handle' => $user->handle,
+            'avatar_url' => $user->avatar_url,
+            'location_local' => $user->location_local,
+            'location_regional' => $user->location_regional,
+            'location_national' => $user->location_national,
+            'local' => $user->location_local,
+            'regional' => $user->location_regional,
+            'national' => $user->location_national,
+        ];
     }
 }
 

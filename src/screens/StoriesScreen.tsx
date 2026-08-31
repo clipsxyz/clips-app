@@ -10,10 +10,22 @@ import {
     ActivityIndicator,
     Modal,
     Alert,
+    Pressable,
 } from 'react-native';
+import Animated, {
+    Easing,
+    cancelAnimation,
+    interpolate,
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
 import StorySharedPostViewer from '../components/stories/StorySharedPostViewer.native';
 import StoryProfileCard from '../components/stories/StoryProfileCard.native';
@@ -31,12 +43,11 @@ import { useAuth } from '../context/Auth';
 import { 
     fetchFollowedUsersStoryGroups,
     fetchStoryGroupByHandle,
-    fetchUserStories, 
     markStoryViewed, 
-    incrementStoryViews,
     addStoryReaction,
     addStoryReply,
     voteOnPoll,
+    type StoryViewMetrics,
 } from '../api/stories';
 import StoryPollOverlay from '../components/stories/StoryPollOverlay.native';
 import {
@@ -46,8 +57,11 @@ import {
     readStories24RailOpenHandle,
 } from '../utils/stories24Rail';
 import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
-import { isStoryVideo } from '../utils/storyMediaNative';
-import { getStoryTextContent } from '../utils/storyTextStyleNative';
+import { isStoryVideo, resolveStoryVideoPlaybackUrl } from '../utils/storyMediaNative';
+import {
+    deliverStoryReactionToInbox,
+    deliverStoryReplyToInbox,
+} from '../utils/sendStoryInteractionToInbox';
 import {
     buildStoryMetadataItems,
     getStoryOverlayText,
@@ -58,17 +72,45 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { getFollowedUsers, getPostById, getState, getFollowState, setFollowState } from '../api/posts';
-import { toggleFollow } from '../api/client';
-import { getAvatarForHandle } from '../api/users';
-import { appendMessage } from '../api/messages';
+import { getFollowedUsers, getPostById, getState, getFollowState, getAccountTypeForHandle, toggleLike, reclipPost, fetchComments, setBookmarkState } from '../api/posts';
+import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
+import { followOrRequest } from '../utils/followOrRequest';
+import { hasPendingFollowRequest } from '../api/privacy';
+import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
+import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
 import type { Post, Story, StoryGroup } from '../types';
+
+function applyStoryInteractionMetrics(story: Story, metrics: StoryViewMetrics): Story {
+    return {
+        ...story,
+        views: metrics.views_count,
+        views_count: metrics.views_count,
+        reactions_count: Math.max(Number(story.reactions_count ?? 0) || 0, metrics.reactions_count),
+        replies_count: Math.max(Number(story.replies_count ?? 0) || 0, metrics.replies_count),
+        reactions: metrics.reactions ?? story.reactions,
+        replies: metrics.replies ?? story.replies,
+        hasViewed: true,
+    };
+}
 import Avatar from '../components/Avatar';
+import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
+import PostCommentsSheet from '../components/PostCommentsSheet';
+import FeedShareModal from '../components/FeedShareModal';
+import SavePostModal from '../components/SavePostModal.native';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
+import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
+import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
 const STORY_SAFE_ZONE_TOP = 18;
 const STORY_SAFE_ZONE_BOTTOM = 82;
+/** Clean fade-out for MP4 close — no half-slide that looks like a stuck nudge. */
+const STORY_DISMISS_MS = 280;
+const STORY_DISMISS_EASE = Easing.out(Easing.cubic);
+
 export default function StoriesScreen({ route, navigation }: any) {
     const {
         openUserHandle,
@@ -77,9 +119,12 @@ export default function StoriesScreen({ route, navigation }: any) {
         railHandles: railHandlesParam,
         previewThumb: routePreviewThumb,
         previewVideoUrl: routePreviewVideoUrl,
+        skipStories24RailReturn,
+        forceRefreshAt,
     } = route.params || {};
     const railHandles = Array.isArray(railHandlesParam) ? railHandlesParam : [];
     const railHandlesKey = railHandles.join('|');
+    const shouldReturnToStories24Rail = skipStories24RailReturn !== true;
     const normalizedOpenUserHandle = React.useMemo(() => {
         if (!openUserHandle || typeof openUserHandle !== 'string') return '';
         try {
@@ -89,6 +134,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
     }, [openUserHandle]);
     const { user } = useAuth();
+    const isFocused = useIsFocused();
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
     const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
@@ -96,6 +142,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [viewingStories, setViewingStories] = useState(false);
     const [stories24OpenFromFeedRail, setStories24OpenFromFeedRail] = useState(fromStories24Rail === true);
     const [stories24HoldMinReady, setStories24HoldMinReady] = useState(false);
+    const [stories24HoldConsumed, setStories24HoldConsumed] = useState(false);
     const [progress, setProgress] = useState(0);
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
@@ -113,16 +160,55 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [sharedPostFetchFailed, setSharedPostFetchFailed] = useState(false);
     const [showStoryProfileCard, setShowStoryProfileCard] = useState(false);
     const [isFollowingStoryUser, setIsFollowingStoryUser] = useState(false);
+    const [storyFollowRequested, setStoryFollowRequested] = useState(false);
     const [isFollowLoading, setIsFollowLoading] = useState(false);
     const [showSharedPostModal, setShowSharedPostModal] = useState(false);
+    /** Tear down story ExoPlayer before Scenes mounts the same URL (avoids lagged audio). */
+    const [suspendStoryMedia, setSuspendStoryMedia] = useState(false);
+    const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
+    const [fullscreenCommentsPost, setFullscreenCommentsPost] = useState<Post | null>(null);
+    const [fullscreenSharePost, setFullscreenSharePost] = useState<Post | null>(null);
+    const [fullscreenSavePost, setFullscreenSavePost] = useState<Post | null>(null);
+    const [fullscreenPostSaved, setFullscreenPostSaved] = useState(false);
     const [deliveryFx, setDeliveryFx] = useState<StoryDeliveryFxState | null>(null);
     const [localReactionByStoryId, setLocalReactionByStoryId] = useState<Record<string, string>>({});
     const avatarRef = useRef<View>(null);
     const lastLikeTapAtRef = useRef(0);
     const lastMuteToggleAtRef = useRef(0);
+    const openedFullPostRef = useRef(false);
+    const fullscreenHoldRef = useRef<Post | null>(null);
     const deliveryFxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const deliveryFxFlyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const showInlineReplyComposerRef = useRef(false);
+    const isSendingReplyRef = useRef(false);
+    const pausedRef = useRef(false);
+    const viewingStoriesRef = useRef(false);
+    const screenFocusedRef = useRef(true);
+    const suspendStoryMediaRef = useRef(false);
+    const nextStoryRef = useRef<() => void>(() => {});
+    const dismissingRef = useRef(false);
+    const dismissProgress = useSharedValue(0);
+    const screenHSv = useSharedValue(Dimensions.get('window').height);
+
+    const dismissShellStyle = useAnimatedStyle(() => {
+        const p = dismissProgress.value;
+        return {
+            flex: 1,
+            opacity: interpolate(p, [0, 1], [1, 0]),
+        };
+    });
+    const dismissBackdropStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(dismissProgress.value, [0, 1], [1, 0]),
+    }));
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const currentStoryIndexRef = useRef(0);
+    const currentGroupIndexRef = useRef(0);
+    const storyGroupsRef = useRef(storyGroups);
+    const recordedStoryViewIdsRef = useRef(new Set<string>());
+    currentStoryIndexRef.current = currentStoryIndex;
+    currentGroupIndexRef.current = currentGroupIndex;
+    storyGroupsRef.current = storyGroups;
     const formatRelativeTime = (timestamp?: number) => {
         if (!timestamp || Number.isNaN(timestamp)) return 'just now';
         const diffMs = Date.now() - timestamp;
@@ -152,7 +238,17 @@ export default function StoriesScreen({ route, navigation }: any) {
         handles.forEach((handle) => {
             updates[handle] = getAvatarForHandle(handle);
         });
-        setInsightsAvatarMap((prev) => ({ ...prev, ...updates }));
+        setInsightsAvatarMap((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            Object.keys(updates).forEach((handle) => {
+                if (next[handle] !== updates[handle]) {
+                    next[handle] = updates[handle];
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
     }, [storyGroups, currentGroupIndex, currentStoryIndex]);
 
     useEffect(() => {
@@ -166,13 +262,29 @@ export default function StoriesScreen({ route, navigation }: any) {
     const currentGroup = storyGroups[currentGroupIndex];
     const currentStory = currentGroup?.stories[currentStoryIndex];
     const isViewingOwnStory = Boolean(
-        user?.id && currentStory && currentGroup && currentStory.userId === user.id,
+        user?.id &&
+            currentStory &&
+            currentGroup &&
+            (currentStory.userId === user.id || currentGroup.userHandle === user.handle),
     );
+    const storyViewsCount = Number(currentStory?.views_count ?? currentStory?.views ?? 0) || 0;
+    const storyReactionsCount = Number(
+        currentStory?.reactions_count ??
+            currentStory?.reactions?.filter(
+                (r) =>
+                    (r.userHandle || '').trim().toLowerCase() !==
+                    (user?.handle || '').trim().toLowerCase(),
+            ).length ??
+            0,
+    ) || 0;
+    const storyRepliesCount = Number(
+        currentStory?.replies_count ?? currentStory?.replies?.length ?? 0,
+    ) || 0;
 
     useEffect(() => {
         if (!viewingStories || !currentStory?.sharedFromPost || !user?.id) {
-            setOriginalPost(null);
-            setSharedPostFetchFailed(false);
+            setOriginalPost((prev) => (prev === null ? prev : null));
+            setSharedPostFetchFailed((prev) => (prev === false ? prev : false));
             return;
         }
         setSharedPostFetchFailed(false);
@@ -208,34 +320,93 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         if (!viewingStories || !currentGroup?.userHandle || !user?.id) {
-            setIsFollowingStoryUser(false);
+            setIsFollowingStoryUser((prev) => (prev === false ? prev : false));
+            setStoryFollowRequested((prev) => (prev === false ? prev : false));
             return;
         }
         if (currentGroup.userHandle === user.handle) {
-            setIsFollowingStoryUser(false);
+            setIsFollowingStoryUser((prev) => (prev === false ? prev : false));
+            setStoryFollowRequested((prev) => (prev === false ? prev : false));
             return;
         }
         if (user?.id) {
             const cached = getFollowState(getState(user.id).follows || {}, currentGroup.userHandle);
             setIsFollowingStoryUser(cached);
+            setStoryFollowRequested(
+                Boolean(
+                    user.handle &&
+                        !cached &&
+                        hasPendingFollowRequest(user.handle, currentGroup.userHandle),
+                ),
+            );
         }
     }, [viewingStories, currentGroup?.userHandle, user?.id, user?.handle]);
 
     useEffect(() => {
-        if (
-            showInsightsSheet ||
+        pausedRef.current = paused;
+    }, [paused]);
+
+    useEffect(() => {
+        viewingStoriesRef.current = viewingStories;
+    }, [viewingStories]);
+
+    useEffect(() => {
+        screenFocusedRef.current = isFocused;
+    }, [isFocused]);
+
+    useEffect(() => {
+        suspendStoryMediaRef.current = suspendStoryMedia;
+    }, [suspendStoryMedia]);
+
+    const storyPauseLocked = Boolean(
+        showInsightsSheet ||
             showStoryShareModal ||
             showSharedPostModal ||
+            imageFullscreenPost ||
+            fullscreenCommentsPost ||
+            fullscreenSharePost ||
+            fullscreenSavePost ||
             showStoryProfileCard ||
-            deliveryFx
-        ) {
-            setPaused(true);
+            deliveryFx ||
+            showInlineReplyComposer ||
+            isSendingReply ||
+            isHoldingToPause ||
+            suspendStoryMedia,
+    );
+
+    useEffect(() => {
+        if (!viewingStories) return;
+        setPaused((prev) => (prev === storyPauseLocked ? prev : storyPauseLocked));
+    }, [viewingStories, storyPauseLocked]);
+
+    useEffect(() => {
+        showInlineReplyComposerRef.current = showInlineReplyComposer;
+    }, [showInlineReplyComposer]);
+
+    useEffect(() => {
+        isSendingReplyRef.current = isSendingReply;
+    }, [isSendingReply]);
+
+    const clearDeliveryFx = useCallback(() => {
+        if (deliveryFxTimerRef.current) {
+            clearTimeout(deliveryFxTimerRef.current);
+            deliveryFxTimerRef.current = null;
         }
-    }, [showInsightsSheet, showStoryShareModal, showSharedPostModal, showStoryProfileCard, deliveryFx]);
+        if (deliveryFxFlyTimerRef.current) {
+            clearTimeout(deliveryFxFlyTimerRef.current);
+            deliveryFxFlyTimerRef.current = null;
+        }
+        setDeliveryFx(null);
+    }, []);
+
+    const handleDeliveryFxComplete = useCallback(() => {
+        clearDeliveryFx();
+    }, [clearDeliveryFx]);
 
     useEffect(() => {
         return () => {
             if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
+            if (deliveryFxFlyTimerRef.current) clearTimeout(deliveryFxFlyTimerRef.current);
         };
     }, []);
 
@@ -259,7 +430,11 @@ export default function StoriesScreen({ route, navigation }: any) {
         return () => {
             cancelled = true;
         };
-    }, [fromStories24Rail, normalizedOpenUserHandle]);
+    }, [forceRefreshAt, fromStories24Rail, normalizedOpenUserHandle]);
+
+    useEffect(() => {
+        setStories24HoldConsumed((prev) => (prev === false ? prev : false));
+    }, [forceRefreshAt, normalizedOpenUserHandle]);
 
     useEffect(() => {
         if (!stories24OpenFromFeedRail || !normalizedOpenUserHandle) {
@@ -269,24 +444,58 @@ export default function StoriesScreen({ route, navigation }: any) {
         setStories24HoldMinReady(false);
         const t = setTimeout(() => setStories24HoldMinReady(true), STORIES24_LOADING_HOLD_MS);
         return () => clearTimeout(t);
-    }, [stories24OpenFromFeedRail, normalizedOpenUserHandle]);
+    }, [forceRefreshAt, stories24OpenFromFeedRail, normalizedOpenUserHandle]);
 
     const stories24ContentReady = !loading && viewingStories;
     const showStories24HoldScreen =
+        !stories24HoldConsumed &&
         stories24OpenFromFeedRail &&
         !!normalizedOpenUserHandle &&
         (!stories24ContentReady || !stories24HoldMinReady);
+
+    useEffect(() => {
+        if (stories24ContentReady && stories24HoldMinReady) {
+            setStories24HoldConsumed((prev) => (prev === true ? prev : true));
+        }
+    }, [stories24ContentReady, stories24HoldMinReady]);
+
+    useEffect(() => {
+        if (!stories24OpenFromFeedRail || loading) return;
+        const want = (normalizedOpenUserHandle || '').trim().toLowerCase().replace(/^@/, '');
+        if (!want) return;
+        const hasTarget = storyGroups.some(
+            (g) =>
+                String(g.userHandle || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^@/, '') === want,
+        );
+        if (hasTarget) return;
+        setStories24HoldConsumed(true);
+        if (navigation?.canGoBack?.()) {
+            navigation.goBack();
+        }
+    }, [
+        loading,
+        storyGroups,
+        normalizedOpenUserHandle,
+        stories24OpenFromFeedRail,
+        navigation,
+    ]);
 
     useEffect(() => {
         loadStories();
     }, [user?.id, normalizedOpenUserHandle, railHandlesKey]);
 
     useEffect(() => {
-        if (normalizedOpenUserHandle && storyGroups.length > 0) {
-            const targetGroup = storyGroups.find(g => g.userHandle === normalizedOpenUserHandle);
-            if (targetGroup) {
-                startViewingStories(targetGroup, openStoryId);
-            }
+        if (!normalizedOpenUserHandle || storyGroups.length === 0) return;
+        if (viewingStoriesRef.current) return;
+        const want = normalizedOpenUserHandle.trim().toLowerCase().replace(/^@/, '');
+        const targetGroup = storyGroups.find(
+            (g) => String(g.userHandle || '').trim().toLowerCase().replace(/^@/, '') === want,
+        );
+        if (targetGroup) {
+            void startViewingStories(targetGroup, openStoryId);
         }
     }, [normalizedOpenUserHandle, openStoryId, storyGroups.length]);
 
@@ -306,18 +515,45 @@ export default function StoriesScreen({ route, navigation }: any) {
             );
 
             const followedUserHandles = await getFollowedUsers(user.id);
+            const follows = getState(user.id).follows;
+            const selfHandle = (user.handle || '').trim().toLowerCase().replace(/^@/, '');
+            const isAllowedStoryHandle = (handle: string, storyUserId?: string) => {
+                const n = String(handle || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^@/, '');
+                if (selfHandle && n === selfHandle) return true;
+                if (
+                    storyUserId &&
+                    String(storyUserId) === String(user.id) &&
+                    (!n || n === selfHandle)
+                ) {
+                    return true;
+                }
+                return getFollowState(follows, handle);
+            };
+            const allowedRequestedHandles = requestedHandles.filter((handle) =>
+                isAllowedStoryHandle(handle),
+            );
 
             const [mainGroups, requestedGroupsResults] = await Promise.all([
                 fetchFollowedUsersStoryGroups(user.id, followedUserHandles),
-                requestedHandles.length > 0
-                    ? Promise.all(requestedHandles.map((handle) => fetchStoryGroupByHandle(handle)))
+                allowedRequestedHandles.length > 0
+                    ? Promise.all(
+                          allowedRequestedHandles.map((handle) => fetchStoryGroupByHandle(handle)),
+                      )
                     : Promise.resolve([] as (StoryGroup | null)[]),
             ]);
 
-            let groups = mainGroups;
+            let groups = mainGroups.filter((g) => isAllowedStoryHandle(g.userHandle, g.userId));
             for (const storyGroup of requestedGroupsResults) {
-                if (!storyGroup) continue;
-                const existingGroupIndex = groups.findIndex((g) => g.userHandle === storyGroup.userHandle);
+                if (!storyGroup || !isAllowedStoryHandle(storyGroup.userHandle, storyGroup.userId))
+                    continue;
+                const existingGroupIndex = groups.findIndex(
+                    (g) =>
+                        String(g.userHandle || '').trim().toLowerCase() ===
+                        String(storyGroup.userHandle || '').trim().toLowerCase(),
+                );
                 if (existingGroupIndex === -1) {
                     groups.push(storyGroup);
                 } else {
@@ -339,7 +575,48 @@ export default function StoriesScreen({ route, navigation }: any) {
                 });
             }
 
-            setStoryGroups(withGazetteerWorldGroup(groups));
+            // Match web StoriesPage: mock handles (e.g. Ava@galway) resolve via getAvatarForHandle
+            const groupsWithAvatars = await Promise.all(
+                groups.map(async (group) => {
+                    if (group.userId === user.id && user.avatarUrl) {
+                        return { ...group, avatarUrl: user.avatarUrl };
+                    }
+                    let avatarUrl =
+                        resolveAvatarImageUri(group.avatarUrl, group.userHandle) ||
+                        getAvatarForHandle(group.userHandle);
+                    if (!avatarUrl) {
+                        try {
+                            const { fetchProfileAudience } = await import('../api/client');
+                            const audience = await fetchProfileAudience(group.userHandle);
+                            if (audience?.avatar_url) {
+                                avatarUrl = resolveAvatarImageUri(
+                                    audience.avatar_url,
+                                    group.userHandle,
+                                );
+                            }
+                        } catch {
+                            /* keep undefined — Avatar shows initials */
+                        }
+                    }
+                    return { ...group, avatarUrl };
+                }),
+            );
+
+            let nextGroups: StoryGroup[] = groupsWithAvatars;
+            if (normalizedOpenUserHandle && railHandles.length === 0) {
+                const want = normalizedOpenUserHandle.trim().toLowerCase().replace(/^@/, '');
+                const only = groupsWithAvatars.filter(
+                    (g) =>
+                        String(g.userHandle || '')
+                            .trim()
+                            .toLowerCase()
+                            .replace(/^@/, '') === want,
+                );
+                nextGroups = only;
+            } else {
+                nextGroups = withGazetteerWorldGroup(groupsWithAvatars);
+            }
+            setStoryGroups(nextGroups);
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
@@ -350,38 +627,27 @@ export default function StoriesScreen({ route, navigation }: any) {
     const startViewingStories = async (group: StoryGroup, preferredStoryId?: string) => {
         if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
 
-        if (isGazetteerWorldGroup(group)) {
-            const groupIndex = storyGroups.findIndex((g) => isGazetteerWorldGroup(g));
-            if (groupIndex === -1) return;
-            const initialStoryIndex = preferredStoryId
-                ? Math.max(0, (group.stories || []).findIndex((s) => s.id === preferredStoryId))
-                : 0;
-            setCurrentGroupIndex(groupIndex);
-            setCurrentStoryIndex(initialStoryIndex);
-            setViewingStories(true);
-            setProgress(0);
-            setPaused(false);
-            progressRef.current = 0;
-            startProgress();
-            return;
-        }
-
-        const followedUserHandles = await getFollowedUsers(user.id);
-        const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
-        if (!stories || stories.length === 0) return;
-
-        const groupIndex = storyGroups.findIndex(g => g.userId === group.userId);
+        // Same fast path as web: use stories already on the group.
+        // Refetching via fetchUserStories (followed-feed) was dropping the shared postcard.
+        const groups = storyGroupsRef.current;
+        const groupIndex = isGazetteerWorldGroup(group)
+            ? groups.findIndex((g) => isGazetteerWorldGroup(g))
+            : groups.findIndex(
+                  (g) =>
+                      g.userId === group.userId ||
+                      String(g.userHandle || '')
+                          .trim()
+                          .toLowerCase() === String(group.userHandle || '').trim().toLowerCase(),
+              );
         if (groupIndex === -1) return;
 
-        setStoryGroups(prev => {
-            const updated = [...prev];
-            updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
-            return updated;
-        });
-
         const initialStoryIndex = preferredStoryId
-            ? Math.max(0, stories.findIndex((s) => s.id === preferredStoryId))
+            ? Math.max(0, group.stories.findIndex((s) => s.id === preferredStoryId))
             : 0;
+
+        viewingStoriesRef.current = true;
+        currentGroupIndexRef.current = groupIndex;
+        currentStoryIndexRef.current = initialStoryIndex;
         setCurrentGroupIndex(groupIndex);
         setCurrentStoryIndex(initialStoryIndex);
         setViewingStories(true);
@@ -397,95 +663,145 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
 
         timerRef.current = setInterval(() => {
-            if (paused) return;
+            if (pausedRef.current) return;
 
             progressRef.current += 50;
             const newProgress = Math.min((progressRef.current / STORY_DURATION) * 100, 100);
             setProgress(newProgress);
 
             if (newProgress >= 100) {
-                nextStory();
+                nextStoryRef.current();
             }
         }, 50);
     };
 
-    const nextStory = () => {
+    const goToNextStory = (source: 'user' | 'timer') => {
+        if (dismissingRef.current) return;
+        if (source === 'timer' && (!screenFocusedRef.current || suspendStoryMediaRef.current)) {
+            return;
+        }
         if (timerRef.current) {
             clearInterval(timerRef.current);
         }
 
-        const currentGroup = storyGroups[currentGroupIndex];
+        const groups = storyGroupsRef.current;
+        const groupIndex = currentGroupIndexRef.current;
+        const storyIndex = currentStoryIndexRef.current;
+        const currentGroup = groups[groupIndex];
         if (!currentGroup) return;
 
-        if (currentStoryIndex < currentGroup.stories.length - 1) {
-            setCurrentStoryIndex(currentStoryIndex + 1);
+        if (storyIndex < currentGroup.stories.length - 1) {
+            const nextIndex = storyIndex + 1;
+            currentStoryIndexRef.current = nextIndex;
+            setCurrentStoryIndex(nextIndex);
+            setProgress(0);
+            progressRef.current = 0;
+            startProgress();
+        } else if (groupIndex < groups.length - 1) {
+            const nextGroup = groupIndex + 1;
+            currentGroupIndexRef.current = nextGroup;
+            currentStoryIndexRef.current = 0;
+            setCurrentGroupIndex(nextGroup);
+            setCurrentStoryIndex(0);
             setProgress(0);
             progressRef.current = 0;
             startProgress();
         } else {
-            if (currentGroupIndex < storyGroups.length - 1) {
-                setCurrentGroupIndex(currentGroupIndex + 1);
-                setCurrentStoryIndex(0);
-                setProgress(0);
-                progressRef.current = 0;
-                startProgress();
-            } else {
-                closeStories();
-            }
+            closeStories();
         }
     };
+
+    const nextStory = () => goToNextStory('user');
 
     const previousStory = () => {
         if (timerRef.current) {
             clearInterval(timerRef.current);
         }
 
-        if (currentStoryIndex > 0) {
-            setCurrentStoryIndex(currentStoryIndex - 1);
+        const groups = storyGroupsRef.current;
+        const groupIndex = currentGroupIndexRef.current;
+        const storyIndex = currentStoryIndexRef.current;
+
+        if (storyIndex > 0) {
+            const prevIndex = storyIndex - 1;
+            currentStoryIndexRef.current = prevIndex;
+            setCurrentStoryIndex(prevIndex);
             setProgress(0);
             progressRef.current = 0;
             startProgress();
-        } else {
-            if (currentGroupIndex > 0) {
-                setCurrentGroupIndex(currentGroupIndex - 1);
-                const prevGroup = storyGroups[currentGroupIndex - 1];
-                setCurrentStoryIndex(prevGroup?.stories.length - 1 || 0);
-                setProgress(0);
-                progressRef.current = 0;
-                startProgress();
-            }
+        } else if (groupIndex > 0) {
+            const prevGroupIndex = groupIndex - 1;
+            const prevGroup = groups[prevGroupIndex];
+            const prevIndex = prevGroup?.stories.length - 1 || 0;
+            currentGroupIndexRef.current = prevGroupIndex;
+            currentStoryIndexRef.current = prevIndex;
+            setCurrentGroupIndex(prevGroupIndex);
+            setCurrentStoryIndex(prevIndex);
+            setProgress(0);
+            progressRef.current = 0;
+            startProgress();
         }
     };
 
-    const closeStories = () => {
-        if (timerRef.current) {
-            clearInterval(timerRef.current);
-        }
+    nextStoryRef.current = () => goToNextStory('timer');
 
-        if (stories24OpenFromFeedRail && normalizedOpenUserHandle) {
-            const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
-            const mediaUrl = currentStory?.mediaUrl;
-            const isVideo =
-                currentStory?.mediaType === 'video' ||
-                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
-            const previewThumb =
-                routePreviewThumb ||
-                (!isVideo && mediaUrl ? mediaUrl : undefined) ||
-                undefined;
-
-            void persistStories24RailReturn({
-                handle: normalizedOpenUserHandle,
-                previewThumb,
-                previewVideoUrl: routePreviewVideoUrl,
-            });
-            void clearStories24RailOpenHandle();
-        }
-
+    const finalizeCloseNavigation = useCallback(() => {
         setViewingStories(false);
         setProgress(0);
         setPaused(false);
         progressRef.current = 0;
+        dismissingRef.current = false;
+        dismissProgress.value = 0;
         navigation.goBack();
+    }, [dismissProgress, navigation]);
+
+    const closeStories = () => {
+        flushScenesPostUpdates();
+        if (dismissingRef.current) return;
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+        }
+
+        const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+        const mediaUrl = currentStory?.mediaUrl;
+        const isVideo =
+            currentStory?.mediaType === 'video' ||
+            (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+
+        // MP4 from Stories 24 rail: cut straight back to feed (no fade-to-black gap).
+        if (stories24OpenFromFeedRail && isVideo && viewingStories) {
+            navigation.setOptions({ animation: 'none' });
+            void clearStories24RailOpenHandle();
+            finalizeCloseNavigation();
+            return;
+        }
+
+        if (stories24OpenFromFeedRail && normalizedOpenUserHandle) {
+            const avatarUrl = getAvatarForHandle(normalizedOpenUserHandle);
+            const rawThumb =
+                routePreviewThumb ||
+                (!isVideo && mediaUrl ? mediaUrl : undefined) ||
+                undefined;
+            // Don't shrink back onto a profile pic for shared/video stories.
+            const previewThumb =
+                rawThumb && avatarUrl && rawThumb === avatarUrl ? undefined : rawThumb;
+            const previewVideoUrl =
+                routePreviewVideoUrl ||
+                (isVideo ? resolveStoryVideoPlaybackUrl(mediaUrl) : undefined);
+
+            // Disable native modal dismiss — custom Apple-TV shrink runs on the feed rail.
+            navigation.setOptions({ animation: 'none' });
+            if (shouldReturnToStories24Rail) {
+                void persistStories24RailReturn({
+                    handle: normalizedOpenUserHandle,
+                    previewThumb,
+                    previewVideoUrl,
+                });
+            }
+            void clearStories24RailOpenHandle();
+        }
+
+        finalizeCloseNavigation();
     };
 
     const openStoryLink = async (rawUrl?: string) => {
@@ -513,14 +829,10 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const pauseForHold = () => {
         setIsHoldingToPause(true);
-        setPaused(true);
     };
 
     const releaseHold = () => {
         setIsHoldingToPause(false);
-        if (!showInlineReplyComposer && !isSendingReply) {
-            setPaused(false);
-        }
     };
 
     const toggleGlobalMute = useCallback(() => {
@@ -536,52 +848,227 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, []);
 
     const handleStoryFollowQuickToggle = async () => {
-        if (!currentGroup?.userHandle || !user?.id || isFollowLoading) return;
+        if (!currentGroup?.userHandle || !user?.id || !user?.handle || isFollowLoading) return;
         const handle = currentGroup.userHandle;
+        const wasRequested = storyFollowRequested;
+        const nextFollowing = isFollowingStoryUser ? false : wasRequested ? false : true;
         setIsFollowLoading(true);
+        setShowStoryProfileCard(false);
         try {
-            const result = await toggleFollow(handle);
-            const resolved =
-                typeof result?.following === 'boolean'
-                    ? result.following
-                    : result?.status === 'accepted'
-                      ? true
-                      : result?.status === 'unfollowed'
-                        ? false
-                        : !isFollowingStoryUser;
-            setIsFollowingStoryUser(resolved);
-            setFollowState(user.id, handle, resolved);
+            const result = await followOrRequest({
+                userId: String(user.id),
+                targetHandle: handle,
+                viewerHandle: user.handle,
+                nextFollowing,
+            });
+            setIsFollowingStoryUser(result.following);
+            setStoryFollowRequested(result.requested);
+            if (result.requested && !wasRequested) {
+                Alert.alert(
+                    'Follow Request Sent',
+                    `Your follow request was sent to ${handle}. You'll be notified when they respond.`,
+                );
+            }
         } catch {
-            const fallback = !isFollowingStoryUser;
-            setIsFollowingStoryUser(fallback);
-            setFollowState(user.id, handle, fallback);
+            // Keep prior local follow on hard failure
+            setIsFollowingStoryUser(isFollowingStoryUser);
+            setStoryFollowRequested(storyFollowRequested);
         } finally {
             setIsFollowLoading(false);
         }
     };
 
+    const closeSharedPostModal = () => {
+        setShowSharedPostModal(false);
+        if (!showInlineReplyComposer) setPaused(false);
+    };
+
     const openFullPostFromStory = () => {
         if (!originalPost) return;
         setShowSharedPostModal(false);
-        const video =
-            originalPost.mediaType === 'video' ||
-            originalPost.mediaItems?.some((m) => m.type === 'video');
-        if (video) {
-            navigation.navigate('Scenes', {
-                initialPostId: originalPost.id,
-                posts: [originalPost],
-            });
-        } else {
-            navigation.navigate('PostDetail', { postId: originalPost.id });
+        setPaused(true);
+        setIsMuted(true);
+
+        // Scenes is video-only — still images + text use the fullscreen overlay (wired actions).
+        if (postHasVideoMedia(originalPost)) {
+            openedFullPostRef.current = true;
+            // Unmount story TextureView first so Scenes doesn't fight the same audio session.
+            setSuspendStoryMedia(true);
+            const post = originalPost;
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            setScenesLaunchPayload({
+                                initialPostId: post.id,
+                                posts: [post],
+                                feedLabel: 'Stories',
+                                initialMuted: true,
+                            });
+                            navigation.navigate('Scenes', {
+                                initialPostId: post.id,
+                                feedLabel: 'Stories',
+                                initialMuted: true,
+                            });
+                        }, 40);
+                    });
+            return;
+        }
+
+        if (
+            collectFeedImageUrls(originalPost).length > 0 ||
+            isTextOnlyPost(originalPost) ||
+            Boolean((originalPost.text || originalPost.caption || '').trim())
+        ) {
+            setImageFullscreenPost(originalPost);
+            return;
+        }
+
+        openedFullPostRef.current = true;
+        navigation.navigate('PostDetail', { postId: originalPost.id });
+    };
+
+    const syncFullscreenPost = useCallback((updated: Post) => {
+        setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
+        setOriginalPost((prev) => (prev?.id === updated.id ? updated : prev));
+        setFullscreenCommentsPost((prev) => (prev?.id === updated.id ? updated : prev));
+        if (fullscreenHoldRef.current?.id === updated.id) {
+            fullscreenHoldRef.current = updated;
+        }
+        setScenesPostUpdate(updated);
+        flushScenesPostUpdates();
+    }, []);
+
+    /** RN Modal cannot host another Modal/BottomSheet — park fullscreen first. */
+    const dismissFullscreenForOverlay = useCallback(() => {
+        setImageFullscreenPost((prev) => {
+            if (prev) fullscreenHoldRef.current = prev;
+            return null;
+        });
+    }, []);
+
+    const restoreFullscreenFromHold = useCallback(() => {
+        const held = fullscreenHoldRef.current;
+        fullscreenHoldRef.current = null;
+        if (held) setImageFullscreenPost(held);
+    }, []);
+
+    const handleFullscreenLike = async () => {
+        if (!imageFullscreenPost || !user?.id) return;
+        try {
+            const updated = await toggleLike(user.id, imageFullscreenPost.id, imageFullscreenPost);
+            syncFullscreenPost(updated);
+        } catch (error) {
+            console.error('Fullscreen like failed:', error);
+            Alert.alert('Could not like', 'Please try again.');
         }
     };
 
-    const startDeliveryFx = useCallback((kind: 'message' | 'like', toHandle: string) => {
+    const handleFullscreenComment = () => {
+        if (!imageFullscreenPost) return;
+        setFullscreenCommentsPost(imageFullscreenPost);
+    };
+
+    const handleFullscreenReclip = async () => {
+        if (!imageFullscreenPost || !user?.id || !user?.handle) return;
+        const norm = (h?: string) => String(h || '').trim().toLowerCase();
+        if (norm(imageFullscreenPost.userHandle) === norm(user.handle)) {
+            Alert.alert('Cannot reclip', 'You can’t reclip your own post.');
+            return;
+        }
+        try {
+            const result = await reclipPost(user.id, imageFullscreenPost.id, user.handle);
+            const prevReclips = Number(imageFullscreenPost.stats?.reclips) || 0;
+            if (result?.originalPost) {
+                syncFullscreenPost({
+                    ...imageFullscreenPost,
+                    ...result.originalPost,
+                    id: imageFullscreenPost.id,
+                    userReclipped: true,
+                    stats: {
+                        ...imageFullscreenPost.stats,
+                        ...result.originalPost.stats,
+                        reclips: Math.max(
+                            Number(result.originalPost.stats?.reclips) || 0,
+                            prevReclips + 1,
+                            1,
+                        ),
+                    },
+                });
+            } else {
+                syncFullscreenPost({
+                    ...imageFullscreenPost,
+                    userReclipped: true,
+                    stats: {
+                        ...imageFullscreenPost.stats,
+                        reclips: prevReclips + 1,
+                    },
+                });
+            }
+            Alert.alert('Reposted', 'Post added to your Following feed and profile.');
+        } catch (error) {
+            console.error('Fullscreen reclip failed:', error);
+            Alert.alert('Could not repost', 'Please try again.');
+        }
+    };
+
+    const handleFullscreenShare = () => {
+        if (!imageFullscreenPost) return;
+        setFullscreenSharePost(imageFullscreenPost);
+    };
+
+    const handleFullscreenSave = () => {
+        if (!imageFullscreenPost) return;
+        setFullscreenSavePost(imageFullscreenPost);
+    };
+
+    useEffect(() => {
+        if (!imageFullscreenPost?.id || !user?.id) {
+            setFullscreenPostSaved(false);
+            return;
+        }
+        let cancelled = false;
+        void getCollectionsForPost(user.id, imageFullscreenPost.id)
+            .then((cols) => {
+                if (!cancelled) setFullscreenPostSaved(cols.length > 0);
+            })
+            .catch(() => {
+                if (!cancelled) setFullscreenPostSaved(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [imageFullscreenPost?.id, user?.id]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!openedFullPostRef.current) return;
+            openedFullPostRef.current = false;
+            setSuspendStoryMedia(false);
+            if (!showInlineReplyComposerRef.current) setPaused(false);
+        }, []),
+    );
+
+    useFocusEffect(
+        useCallback(() => {
+            return () => {
+                flushScenesPostUpdates();
+            };
+        }, []),
+    );
+
+    const startDeliveryFx = useCallback((
+        kind: 'message' | 'like' | 'react',
+        toHandle: string,
+        emoji?: string,
+    ) => {
         if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
-        setPaused(true);
+        if (deliveryFxFlyTimerRef.current) clearTimeout(deliveryFxFlyTimerRef.current);
+
         const startX = width / 2;
         const startY = height - 112;
-        const applyTarget = (targetX: number, targetY: number) => {
+        let targetX = 40;
+        let targetY = 42;
+
+        const beginFx = () => {
             setDeliveryFx({
                 kind,
                 toHandle,
@@ -590,30 +1077,107 @@ export default function StoriesScreen({ route, navigation }: any) {
                 targetX,
                 targetY,
                 phase: 'start',
+                emoji,
             });
-            deliveryFxTimerRef.current = setTimeout(() => {
+            deliveryFxFlyTimerRef.current = setTimeout(() => {
                 setDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
             }, 14);
+            deliveryFxTimerRef.current = setTimeout(() => {
+                clearDeliveryFx();
+            }, 4300);
         };
+
+        // Always start FX + resume timer immediately (measureInWindow can hang on Android).
+        beginFx();
+
         const node = avatarRef.current;
         if (node && typeof node.measureInWindow === 'function') {
             node.measureInWindow((x, y, w, h) => {
-                applyTarget(x + w / 2, y + h / 2);
+                if (w <= 0 || h <= 0) return;
+                const measuredX = x + w / 2;
+                const measuredY = y + h / 2;
+                setDeliveryFx((prev) =>
+                    prev ? { ...prev, targetX: measuredX, targetY: measuredY } : null,
+                );
             });
-        } else {
-            applyTarget(40, 42);
         }
-    }, []);
+    }, [clearDeliveryFx]);
 
     const handleReaction = async (emoji: string) => {
         if (!currentStory || !user?.id || !user?.handle) return;
-        setPaused(true);
+        const toHandle = currentGroup?.userHandle;
+        // Optimistic UI — mock store may miss API-loaded stories; still show selection.
+        setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
         try {
-            await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
-            setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
+            setStoryGroups((groups) =>
+                groups.map((group) => ({
+                    ...group,
+                    stories: group.stories.map((story) => {
+                        if (story.id !== currentStory.id) return story;
+                        const hadReaction = !!(
+                            story.userReaction ||
+                            (story.reactions || []).some((r) => r.userId === user.id)
+                        );
+                        const reactions = [
+                            ...(story.reactions || []).filter((r) => r.userId !== user.id),
+                            {
+                                id: `reaction-${Date.now()}`,
+                                userId: user.id,
+                                userHandle: user.handle,
+                                emoji,
+                                createdAt: Date.now(),
+                            },
+                        ];
+                        return {
+                            ...story,
+                            reactions,
+                            userReaction: emoji,
+                            reactions_count: hadReaction
+                                ? Math.max(Number(story.reactions_count ?? 0) || 0, reactions.length)
+                                : (Number(story.reactions_count ?? 0) || 0) + 1,
+                        };
+                    }),
+                })),
+            );
+            const metrics = await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
+            if (metrics) {
+                setStoryGroups((groups) =>
+                    groups.map((group) => ({
+                        ...group,
+                        stories: group.stories.map((story) =>
+                            story.id !== currentStory.id
+                                ? story
+                                : {
+                                      ...applyStoryInteractionMetrics(story, metrics),
+                                      userReaction: emoji,
+                                  },
+                        ),
+                    })),
+                );
+            }
+            if (
+                toHandle &&
+                toHandle.trim().toLowerCase() !== user.handle.trim().toLowerCase()
+            ) {
+                try {
+                    await deliverStoryReactionToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        emoji,
+                    });
+                } catch (inboxError) {
+                    console.warn('Story reaction inbox delivery failed:', inboxError);
+                }
+            }
         } catch (error) {
             console.error('Error adding reaction:', error);
-            if (!deliveryFx) setPaused(false);
+            setLocalReactionByStoryId((prev) => {
+                const next = { ...prev };
+                delete next[currentStory.id];
+                return next;
+            });
         }
     };
 
@@ -624,61 +1188,61 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (currentGroup?.userHandle) {
             startDeliveryFx('like', currentGroup.userHandle);
         }
-        void handleReaction('👍');
+        void handleReaction('❤️');
+    };
+
+    const triggerQuickReact = (emoji: string) => {
+        const now = Date.now();
+        if (now - lastLikeTapAtRef.current < 260) return;
+        lastLikeTapAtRef.current = now;
+        if (currentGroup?.userHandle) {
+            startDeliveryFx('react', currentGroup.userHandle, emoji);
+        }
+        void handleReaction(emoji);
     };
 
     const handleReply = async () => {
         const currentGroup = storyGroups[currentGroupIndex];
         const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !user?.handle || !replyText.trim() || isSendingReply) return;
-        
+
+        const toHandle = currentGroup?.userHandle;
+        const normalizedReply = replyText.trim();
+        const isSelfStory =
+            !!toHandle &&
+            !!user.handle &&
+            toHandle.trim().toLowerCase() === user.handle.trim().toLowerCase();
+
         try {
             setIsSendingReply(true);
-            setPaused(true);
-            await addStoryReply(currentStory.id, user.id, user.handle, replyText);
-            if (currentGroup?.userHandle) {
-                const sharedPost =
-                    currentStory.sharedFromPost && !currentStory.mediaUrl
-                        ? await getPostById(currentStory.sharedFromPost, user.id)
-                        : null;
-                const mediaUrl = (
-                    (currentStory.mediaUrl || '').trim() ||
-                    (sharedPost?.mediaUrl || '').trim() ||
-                    (sharedPost?.mediaItems?.find((m) => m.type === 'image' || m.type === 'video')?.url || '').trim() ||
-                    ''
-                );
-                const contextOwner =
-                    (currentStory.sharedFromUser || sharedPost?.userHandle || currentGroup.userHandle) as string;
-                const contextSnippet = (
-                    (sharedPost?.text || sharedPost?.caption || currentStory.text || '') as string
-                )
-                    .trim()
-                    .slice(0, 120);
-                const normalizedReply = replyText.trim();
-                const isVisualStory = !!mediaUrl;
-                if (isVisualStory && mediaUrl) {
-                    await appendMessage(user.handle, currentGroup.userHandle, {
-                        imageUrl: mediaUrl,
-                        storyId: currentStory.id,
-                        storyContextOwner: contextOwner,
-                        storyContextText: contextSnippet || undefined,
+            const metrics = await addStoryReply(currentStory.id, user.id, user.handle, normalizedReply);
+
+            if (toHandle && !isSelfStory) {
+                try {
+                    await deliverStoryReplyToInbox({
+                        fromHandle: user.handle,
+                        toHandle,
+                        story: currentStory,
+                        originalPost,
+                        replyText: normalizedReply,
                     });
-                } else {
-                    const contextBubbleText = contextSnippet
-                        ? `Replying to @${contextOwner}'s story:\n"${contextSnippet}"`
-                        : `Replying to @${contextOwner}'s story`;
-                    await appendMessage(user.handle, currentGroup.userHandle, {
-                        text: contextBubbleText,
-                        isSystemMessage: true,
-                    });
+                } catch (inboxError) {
+                    console.warn('Story reply inbox delivery failed:', inboxError);
+                    Alert.alert(
+                        'Reply saved',
+                        'Your reply was sent, but it may not show in Messages yet.',
+                    );
                 }
-                await appendMessage(user.handle, currentGroup.userHandle, {
-                    text: normalizedReply,
-                    storyId: currentStory.id,
-                    storyContextOwner: contextOwner,
-                    storyContextText: isVisualStory ? undefined : (contextSnippet || undefined),
-                });
+                startDeliveryFx('message', toHandle);
+            } else if (isSelfStory) {
+                Alert.alert(
+                    'Your story',
+                    'That reply stays on your story insights. Messages in Inbox are for when other people reply or react to your story.',
+                );
+            } else if (toHandle) {
+                startDeliveryFx('message', toHandle);
             }
+
             setStoryGroups((prev) =>
                 prev.map((group, groupIdx) => {
                     if (groupIdx !== currentGroupIndex) return group;
@@ -686,6 +1250,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         ...group,
                         stories: group.stories.map((story, storyIdx) => {
                             if (storyIdx !== currentStoryIndex) return story;
+                            if (metrics) return applyStoryInteractionMetrics(story, metrics);
                             return {
                                 ...story,
                                 replies: [
@@ -694,23 +1259,21 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         id: `reply-${Date.now()}`,
                                         userId: user.id,
                                         userHandle: user.handle,
-                                        text: replyText.trim(),
+                                        text: normalizedReply,
                                         createdAt: Date.now(),
                                     },
                                 ],
+                                replies_count: (Number(story.replies_count ?? story.replies?.length ?? 0) || 0) + 1,
                             };
                         }),
                     };
-                })
+                }),
             );
             setReplyText('');
             setShowInlineReplyComposer(false);
-            if (currentGroup?.userHandle) {
-                startDeliveryFx('message', currentGroup.userHandle);
-            }
         } catch (error) {
             console.error('Error adding reply:', error);
-            setPaused(false);
+            Alert.alert('Could not send reply', 'Please try again in a moment.');
         } finally {
             setIsSendingReply(false);
         }
@@ -725,9 +1288,48 @@ export default function StoriesScreen({ route, navigation }: any) {
         const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !viewingStories) return;
 
-        markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
-        incrementStoryViews(currentStory.id).catch(console.error);
-    }, [currentGroupIndex, currentStoryIndex, viewingStories]);
+        let cancelled = false;
+        const storyId = currentStory.id;
+        const alreadyRecorded = recordedStoryViewIdsRef.current.has(storyId);
+        if (!alreadyRecorded) {
+            recordedStoryViewIdsRef.current.add(storyId);
+            setStoryGroups((groups) =>
+                groups.map((group) => ({
+                    ...group,
+                    stories: group.stories.map((story) => {
+                        if (story.id !== storyId) return story;
+                        const nextViews = (Number(story.views_count ?? story.views ?? 0) || 0) + 1;
+                        return {
+                            ...story,
+                            views: nextViews,
+                            views_count: nextViews,
+                            hasViewed: true,
+                        };
+                    }),
+                })),
+            );
+        }
+
+        void markStoryViewed(storyId, user.id, user.handle)
+            .then((metrics) => {
+                if (cancelled || !metrics) return;
+                setStoryGroups((groups) =>
+                    groups.map((group) => ({
+                        ...group,
+                        stories: group.stories.map((story) =>
+                            story.id !== storyId
+                                ? story
+                                : applyStoryInteractionMetrics(story, metrics),
+                        ),
+                    })),
+                );
+            })
+            .catch(console.error);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentGroupIndex, currentStoryIndex, viewingStories, currentStory?.id, user?.id]);
 
     const handlePollVote = useCallback(
         async (option: 'option1' | 'option2' | 'option3') => {
@@ -777,13 +1379,6 @@ export default function StoriesScreen({ route, navigation }: any) {
     );
 
     useEffect(() => {
-        if (!viewingStories) return;
-        if (showInlineReplyComposer || isSendingReply) {
-            setPaused(true);
-        }
-    }, [viewingStories, showInlineReplyComposer, isSendingReply]);
-
-    useEffect(() => {
         if (viewingStories && !paused) {
             startProgress();
         } else if (paused && timerRef.current) {
@@ -799,8 +1394,8 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     if (showStories24HoldScreen) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="goldChrome">
-                <StoriesPopIcon size={80} />
+            <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="passport">
+                <StoriesPopIcon size={ox(80)} />
                 <Text style={styles.storiesOpeningText}>Opening stories…</Text>
                 <Text style={styles.stories24HoldSubtext}>Stories 24</Text>
             </GazetteerScreenShell>
@@ -808,22 +1403,26 @@ export default function StoriesScreen({ route, navigation }: any) {
     }
 
     if (loading) {
+        const fromProfile =
+            Boolean(normalizedOpenUserHandle) && !stories24OpenFromFeedRail;
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
-                {normalizedOpenUserHandle && !stories24OpenFromFeedRail ? (
+            <GazetteerScreenShell
+                contentStyle={styles.loadingShell}
+                ambientVariant="passport"
+            >
+                {fromProfile ? (
                     <>
-                        <ActivityIndicator size="large" color="#f472b6" />
+                        <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
                         <Text style={styles.storiesOpeningText}>Opening story...</Text>
                     </>
                 ) : (
-                    <ActivityIndicator size="large" color="#f472b6" />
+                    <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
                 )}
             </GazetteerScreenShell>
         );
     }
 
     const isCurrentStoryVideo = isStoryVideo(currentStory, originalPost);
-    const storyDisplayText = getStoryTextContent(currentStory);
     const currentStoryText = getStoryOverlayText(currentStory);
     const storyMetadataItems = buildStoryMetadataItems(currentStory, originalPost);
     const sharedCredit = shouldShowSharedStoryCredit(
@@ -831,18 +1430,16 @@ export default function StoriesScreen({ route, navigation }: any) {
         originalPost,
         currentGroup?.userHandle,
     );
-    const showTextOnlyOverlay =
-        !!storyDisplayText &&
-        !currentStory?.sharedFromPost &&
-        !(currentStory?.mediaUrl && currentStory.mediaUrl.trim());
+    // Captions on media stories only — text-only body is rendered by StoryViewerMedia /
+    // StorySharedPostViewer (a second overlay was duplicating shared feed statements).
     const showMediaTextOverlay =
         !!currentStoryText &&
         !currentStory?.sharedFromPost &&
         !!currentStory?.mediaUrl &&
         !currentStory.mediaUrl.startsWith('data:image');
-    const hasStoryReaction = Boolean(
-        (currentStory && localReactionByStoryId[currentStory.id]) || currentStory?.userReaction,
-    );
+    const heartReaction =
+        (currentStory && localReactionByStoryId[currentStory.id]) || currentStory?.userReaction;
+    const hasHeartReaction = heartReaction === '❤️' || heartReaction === '♥️' || heartReaction === '❤';
 
     if (!viewingStories) {
         // Story list view
@@ -850,14 +1447,14 @@ export default function StoriesScreen({ route, navigation }: any) {
             <GazetteerScreenShell>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => navigation.goBack()}>
-                        <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                        <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Clips 24</Text>
-                    <View style={{ width: 24 }} />
+                    <View style={{ width: ox(24) }} />
                 </View>
 
                 <View style={styles.storyList}>
-                    {storyGroups.map((group, index) => (
+                    {storyGroups.map((group) => (
                         <TouchableOpacity
                             key={group.userId}
                             onPress={() => startViewingStories(group)}
@@ -879,7 +1476,12 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     // Story viewer
     return (
-        <View style={styles.storyViewer}>
+        <View style={styles.storyViewerRoot}>
+            <Animated.View
+                pointerEvents="none"
+                style={[styles.storyDismissBackdrop, dismissBackdropStyle]}
+            />
+            <Animated.View style={[styles.storyViewer, dismissShellStyle]}>
             {/* Progress bars */}
             <View style={styles.progressContainer}>
                 {currentGroup?.stories.map((_, index) => (
@@ -893,14 +1495,25 @@ export default function StoriesScreen({ route, navigation }: any) {
             {currentStory && currentGroup && (
                 <>
                     <StorySwipeLayer
-                        enabled={!showInlineReplyComposer && !deliveryFx}
+                        enabled={
+                            !showInlineReplyComposer &&
+                            !deliveryFx &&
+                            !showStoryProfileCard &&
+                            !showSharedPostModal &&
+                            !imageFullscreenPost &&
+                            !suspendStoryMedia
+                        }
                         style={styles.mediaLayer}
+                        captureTaps={!currentStory.sharedFromPost}
                         onSwipeLeft={nextStory}
                         onSwipeRight={previousStory}
                         onHoldStart={pauseForHold}
                         onHoldEnd={releaseHold}
                     >
                         {currentStory.sharedFromPost ? (
+                            suspendStoryMedia ? (
+                                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} />
+                            ) : (
                             <StorySharedPostViewer
                                 story={currentStory}
                                 originalPost={originalPost}
@@ -918,6 +1531,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     }, 100);
                                 }}
                             />
+                            )
+                        ) : suspendStoryMedia ? (
+                            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} />
                         ) : (
                             <StoryViewerMedia
                                 story={currentStory}
@@ -931,12 +1547,19 @@ export default function StoriesScreen({ route, navigation }: any) {
                         avatarRef={avatarRef}
                         avatarUrl={currentGroup.avatarUrl}
                         userHandle={currentGroup.userHandle}
+                        accountType={
+                            user?.handle === currentGroup.userHandle
+                                ? user?.accountType
+                                : getAccountTypeForHandle(currentGroup.userHandle)
+                        }
                         showFollowBadge={
                             !!currentGroup.userHandle &&
                             !!user?.handle &&
                             currentGroup.userHandle !== user.handle &&
-                            !isFollowingStoryUser
+                            !isFollowingStoryUser &&
+                            !storyFollowRequested
                         }
+                        followLoading={isFollowLoading}
                         metadataItems={storyMetadataItems}
                         showVideoMute={isCurrentStoryVideo}
                         isMuted={isMuted}
@@ -944,13 +1567,15 @@ export default function StoriesScreen({ route, navigation }: any) {
                             setShowStoryProfileCard((v) => !v);
                             setPaused(true);
                         }}
+                        onFollowPress={() => void handleStoryFollowQuickToggle()}
                         onToggleMute={toggleGlobalMute}
                         onClose={closeStories}
                     />
                     {showStoryProfileCard && currentGroup.userHandle !== user?.handle ? (
-                        <View style={styles.profileCardHost}>
+                        <View style={styles.profileCardHost} pointerEvents="box-none">
                             <StoryProfileCard
                                 isFollowing={isFollowingStoryUser}
+                                isRequested={storyFollowRequested}
                                 followLoading={isFollowLoading}
                                 isOwnStory={false}
                                 onViewProfile={() => {
@@ -980,23 +1605,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                             }}
                         >
                             <Text style={styles.ownerInsightsText}>
-                                {(currentStory.views ?? 0)} views • {(currentStory.replies?.length ?? 0)} replies • tap for insights
+                                {storyViewsCount} views • {storyReactionsCount} reactions • {storyRepliesCount} replies
                             </Text>
                         </TouchableOpacity>
-                    ) : null}
-
-                    {showTextOnlyOverlay ? (
-                        <StoryTextOverlay
-                            text={storyDisplayText}
-                            taggedUsers={currentStory.taggedUsers}
-                            textColor={currentStory.textColor || '#fff'}
-                            onMentionPress={(handle) => {
-                                closeStories();
-                                setTimeout(() => {
-                                    navigation.navigate('ViewProfile', { handle });
-                                }, 100);
-                            }}
-                        />
                     ) : null}
 
                     {currentStory.poll ? (
@@ -1067,7 +1678,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         ]}
                                     >
                                         <View style={styles.storyLinkIconTile}>
-                                            <Icon name="link-outline" size={15} color={iconColor} />
+                                            <Icon name="link-outline" size={ox(15)} color={iconColor} />
                                         </View>
                                         <Text numberOfLines={1} style={[styles.storyLinkLabel, { color: labelColor }]}>
                                             {label}
@@ -1078,13 +1689,18 @@ export default function StoriesScreen({ route, navigation }: any) {
 
                     <StoryBottomBar
                         hidden={isHoldingToPause}
-                        showReplyComposer={showInlineReplyComposer}
+                        ownerMode={isViewingOwnStory}
+                        showReplyComposer={showInlineReplyComposer && !isViewingOwnStory}
                         replyText={replyText}
-                        replyPlaceholder={`Reply to ${currentGroup.userHandle || 'story'}`}
+                        replyPlaceholder="Message..."
                         isSending={isSendingReply}
-                        hasReaction={hasStoryReaction}
+                        hasReaction={hasHeartReaction}
+                        activeQuickEmoji={
+                            heartReaction === '😍' || heartReaction === '😂' ? heartReaction : null
+                        }
                         onReplyTextChange={setReplyText}
                         onOpenReply={() => {
+                            if (isViewingOwnStory) return;
                             setShowInlineReplyComposer(true);
                             setPaused(true);
                         }}
@@ -1095,20 +1711,12 @@ export default function StoriesScreen({ route, navigation }: any) {
                         }}
                         onSendReply={() => void handleReply()}
                         onLike={triggerLikeAction}
-                        onShare={() => {
-                            setShowStoryShareModal(true);
-                            setPaused(true);
-                        }}
+                        onShare={() => setShowStoryShareModal(true)}
+                        onQuickReact={triggerQuickReact}
                     />
 
                     {deliveryFx ? (
-                        <StoryDeliveryFx
-                            fx={deliveryFx}
-                            onComplete={() => {
-                                setDeliveryFx(null);
-                                if (!showInlineReplyComposer && !isSendingReply) setPaused(false);
-                            }}
-                        />
+                        <StoryDeliveryFx fx={deliveryFx} onComplete={handleDeliveryFxComplete} />
                     ) : null}
                 </>
             )}
@@ -1117,22 +1725,61 @@ export default function StoriesScreen({ route, navigation }: any) {
                 visible={showSharedPostModal}
                 transparent
                 animationType="fade"
-                onRequestClose={() => {
-                    setShowSharedPostModal(false);
-                    if (!showInlineReplyComposer) setPaused(false);
-                }}
+                onRequestClose={closeSharedPostModal}
             >
-                <View style={styles.replyModal}>
-                    <View style={styles.replyModalContent}>
-                        <Text style={styles.replyModalTitle}>View original post</Text>
+                <View style={styles.sharedPostBackdrop}>
+                    <Pressable
+                        style={StyleSheet.absoluteFillObject}
+                        onPress={closeSharedPostModal}
+                        accessibilityRole="button"
+                        accessibilityLabel="Dismiss"
+                    />
+                    <View style={styles.sharedPostCard}>
+                        <View style={styles.sharedPostCardHeader}>
+                            <Text style={styles.sharedPostCardTitle}>View original post</Text>
+                            <TouchableOpacity
+                                onPress={closeSharedPostModal}
+                                style={styles.sharedPostCloseBtn}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Close"
+                            >
+                                <Icon name="close" size={ox(22)} color="#9CA3AF" />
+                            </TouchableOpacity>
+                        </View>
+
                         {originalPost ? (
                             <Text style={styles.sharedModalSub}>
-                                This story was shared from {originalPost.userHandle}
+                                This story was shared from a post by{' '}
+                                <Text style={styles.sharedModalSubStrong}>
+                                    {originalPost.userHandle}
+                                </Text>
                             </Text>
-                        ) : null}
-                        <TouchableOpacity style={styles.sheetActionButton} onPress={openFullPostFromStory}>
+                        ) : sharedPostFetchFailed ? (
+                            <Text style={styles.sharedModalSub}>
+                                Couldn’t load the original post.
+                            </Text>
+                        ) : (
+                            <View style={styles.sharedPostLoadingRow}>
+                                <ActivityIndicator size="small" color="#60A5FA" />
+                                <Text style={[styles.sharedModalSub, { marginBottom: 0 }]}>
+                                    Loading post…
+                                </Text>
+                            </View>
+                        )}
+
+                        <TouchableOpacity
+                            style={[
+                                styles.sheetActionButton,
+                                styles.sheetActionPrimary,
+                                !originalPost && styles.sheetActionDisabled,
+                            ]}
+                            onPress={openFullPostFromStory}
+                            disabled={!originalPost}
+                        >
                             <Text style={styles.sheetActionText}>View full post</Text>
                         </TouchableOpacity>
+
                         {originalPost ? (
                             <TouchableOpacity
                                 style={[styles.sheetActionButton, styles.sheetActionSecondary]}
@@ -1149,26 +1796,158 @@ export default function StoriesScreen({ route, navigation }: any) {
                                 <Text style={styles.sheetActionTextSecondary}>View profile</Text>
                             </TouchableOpacity>
                         ) : null}
-                        <TouchableOpacity
-                            onPress={() => {
-                                setShowSharedPostModal(false);
-                                if (!showInlineReplyComposer) setPaused(false);
-                            }}
-                            style={styles.replyCancelButton}
-                        >
-                            <Text style={styles.replyCancelText}>Close</Text>
-                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
 
+            <ImageFullscreenModal
+                post={imageFullscreenPost}
+                visible={Boolean(imageFullscreenPost)}
+                closeLocked={Boolean(
+                    fullscreenCommentsPost || fullscreenSharePost || fullscreenSavePost,
+                )}
+                onClose={() => {
+                    fullscreenHoldRef.current = null;
+                    setImageFullscreenPost(null);
+                    if (
+                        !showInlineReplyComposer &&
+                        !fullscreenCommentsPost &&
+                        !fullscreenSharePost &&
+                        !fullscreenSavePost
+                    ) {
+                        setPaused(false);
+                    }
+                }}
+                onLike={() => void handleFullscreenLike()}
+                onComment={handleFullscreenComment}
+                onReclip={() => void handleFullscreenReclip()}
+                onShare={handleFullscreenShare}
+                onSave={handleFullscreenSave}
+                isSaved={fullscreenPostSaved}
+            />
+
+            <Modal
+                visible={fullscreenCommentsPost !== null}
+                transparent
+                animationType="slide"
+                statusBarTranslucent
+                hardwareAccelerated
+                onRequestClose={() => setFullscreenCommentsPost(null)}
+            >
+                <View style={styles.fullscreenOverlayRoot}>
+                    <Pressable
+                        style={styles.fullscreenOverlayBackdrop}
+                        onPress={() => setFullscreenCommentsPost(null)}
+                        accessibilityLabel="Dismiss comments"
+                    />
+                    <View style={styles.fullscreenCommentsSheet}>
+                        {fullscreenCommentsPost ? (
+                            <PostCommentsSheet
+                                variant="scenesEmbed"
+                                postId={fullscreenCommentsPost.id}
+                                post={fullscreenCommentsPost}
+                                isOpen={fullscreenCommentsPost !== null}
+                                commentAuthorHandle={user?.handle || ''}
+                                currentUserHandle={user?.handle}
+                                onCommentCountChange={(n) => {
+                                    const closed = fullscreenCommentsPost;
+                                    if (!closed?.id) return;
+                                    syncFullscreenPost({
+                                        ...closed,
+                                        stats: {
+                                            ...closed.stats,
+                                            comments: Math.max(0, n),
+                                        },
+                                    });
+                                }}
+                                onClose={() => {
+                                    const closed = fullscreenCommentsPost;
+                                    setFullscreenCommentsPost(null);
+                                    if (!closed?.id) return;
+                                    void fetchComments(closed.id)
+                                        .then((list) => {
+                                            syncFullscreenPost({
+                                                ...closed,
+                                                stats: {
+                                                    ...closed.stats,
+                                                    comments: Math.max(closed.stats.comments || 0, list.length),
+                                                },
+                                            });
+                                        })
+                                        .catch(() => {});
+                                }}
+                            />
+                        ) : null}
+                    </View>
+                </View>
+            </Modal>
+
+            <FeedShareModal
+                post={fullscreenSharePost}
+                isOpen={fullscreenSharePost !== null}
+                onClose={() => {
+                    setFullscreenSharePost(null);
+                    restoreFullscreenFromHold();
+                }}
+                onShareSuccess={(postId: string) => {
+                    const current = fullscreenSharePost || originalPost;
+                    if (!current || current.id !== postId) return;
+                    syncFullscreenPost({
+                        ...current,
+                        stats: {
+                            ...current.stats,
+                            shares: (current.stats?.shares ?? 0) + 1,
+                        },
+                    });
+                }}
+            />
+
+            {fullscreenSavePost && user?.id ? (
+                <SavePostModal
+                    post={fullscreenSavePost}
+                    userId={user.id}
+                    visible={fullscreenSavePost !== null}
+                    onClose={() => {
+                        setFullscreenSavePost(null);
+                        restoreFullscreenFromHold();
+                    }}
+                    onSaved={async (detail) => {
+                        if (!user?.id || !fullscreenSavePost) return;
+                        const post = fullscreenSavePost;
+                        try {
+                            const cols = await getCollectionsForPost(user.id, post.id);
+                            const saved = cols.length > 0;
+                            setFullscreenPostSaved(saved);
+                            setBookmarkState(user.id, post.id, saved);
+                            syncFullscreenPost({
+                                ...post,
+                                isBookmarked: saved,
+                                stats: {
+                                    ...post.stats,
+                                    saves: applyUniqueSavesCount(
+                                        Number(post.stats?.saves) || 0,
+                                        post.isBookmarked === true,
+                                        saved,
+                                        detail?.savesCount,
+                                    ),
+                                },
+                            });
+                        } catch {
+                            setFullscreenPostSaved(true);
+                            setBookmarkState(user.id, post.id, true);
+                            syncFullscreenPost({
+                                ...post,
+                                isBookmarked: true,
+                            });
+                        }
+                    }}
+                />
+            ) : null}
+
             {currentStory && currentGroup ? (
                 <StoryShareSheet
                     visible={showStoryShareModal}
-                    onClose={() => {
-                        setShowStoryShareModal(false);
-                        if (!showInlineReplyComposer) setPaused(false);
-                    }}
+                    onClose={() => setShowStoryShareModal(false)}
                     userHandle={currentGroup.userHandle}
                     storyId={currentStory.id}
                 />
@@ -1189,6 +1968,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     onBeforeNavigate={closeStories}
                 />
             ) : null}
+        </Animated.View>
         </View>
     );
 }
@@ -1197,45 +1977,68 @@ const styles = StyleSheet.create({
     loadingShell: {
         justifyContent: 'center',
         alignItems: 'center',
-        gap: 16,
+        gap: ox(16),
     },
     storiesOpeningText: {
-        marginTop: 8,
-        fontSize: 14,
+        marginTop: ox(8),
+        fontSize: ox(14),
         fontWeight: '600',
         color: 'rgba(255,255,255,0.7)',
     },
     stories24HoldSubtext: {
-        marginTop: 4,
-        fontSize: 11,
+        marginTop: ox(4),
+        fontSize: ox(11),
         color: 'rgba(255,255,255,0.35)',
+    },
+    fullscreenOverlayRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    fullscreenOverlayBackdrop: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    fullscreenCommentsSheet: {
+        height: Math.round(Dimensions.get('window').height * 0.78),
+        backgroundColor: 'transparent',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: 'hidden',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     headerTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     storyList: {
         flex: 1,
-        padding: 16,
+        padding: ox(16),
     },
     storyItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        marginBottom: 16,
+        gap: ox(12),
+        marginBottom: ox(16),
     },
     storyUserName: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#FFFFFF',
         fontWeight: '500',
+    },
+    storyViewerRoot: {
+        flex: 1,
+        backgroundColor: 'transparent',
+    },
+    storyDismissBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
     },
     storyViewer: {
         flex: 1,
@@ -1248,7 +2051,8 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 72,
         left: 16,
-        zIndex: 70,
+        zIndex: 140,
+        elevation: 140,
     },
     ownerInsightsBar: {
         position: 'absolute',
@@ -1256,29 +2060,29 @@ const styles = StyleSheet.create({
         left: 16,
         right: 16,
         zIndex: 65,
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         backgroundColor: 'rgba(0,0,0,0.45)',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
     ownerInsightsText: {
         color: 'rgba(255,255,255,0.9)',
-        fontSize: 11,
+        fontSize: ox(11),
         textAlign: 'center',
     },
     progressContainer: {
         flexDirection: 'row',
-        paddingHorizontal: 8,
-        paddingTop: 8,
-        gap: 4,
+        paddingHorizontal: ox(8),
+        paddingTop: ox(8),
+        gap: ox(4),
     },
     progressBarContainer: {
         flex: 1,
         height: 3,
         backgroundColor: 'rgba(255, 255, 255, 0.3)',
-        borderRadius: 2,
+        borderRadius: ox(2),
         overflow: 'hidden',
     },
     progressBar: {
@@ -1294,33 +2098,33 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        paddingTop: 40,
+        padding: ox(16),
+        paddingTop: ox(40),
     },
     storyHeaderLeft: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: ox(12),
     },
     storyHeaderName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     storyHeaderTime: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#D1D5DB',
     },
     audienceBadge: {
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.35)',
         backgroundColor: 'rgba(0, 0, 0, 0.45)',
-        borderRadius: 999,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(2),
     },
     audienceBadgeText: {
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
         color: '#FFFFFF',
     },
@@ -1331,8 +2135,8 @@ const styles = StyleSheet.create({
         right: 16,
     },
     storyText: {
-        fontSize: 18,
-        lineHeight: 24,
+        fontSize: ox(18),
+        lineHeight: ox(24),
         color: '#FFFFFF',
         fontWeight: '600',
         flexShrink: 1,
@@ -1350,12 +2154,12 @@ const styles = StyleSheet.create({
         right: 16,
         bottom: 128,
         zIndex: 55,
-        borderRadius: 16,
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: 'rgba(0,0,0,0.3)',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         maxWidth: 400,
         alignSelf: 'center',
     },
@@ -1365,19 +2169,19 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        borderRadius: 999,
+        gap: ox(8),
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
         backgroundColor: 'rgba(0,0,0,0.6)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
         zIndex: 75,
     },
-    sharedCreditText: { color: 'rgba(255,255,255,0.9)', fontSize: 12 },
+    sharedCreditText: { color: 'rgba(255,255,255,0.9)', fontSize: ox(12) },
     sharedCreditBold: { fontWeight: '700', color: '#fff' },
     storyTextCredit: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: 'rgba(255,255,255,0.9)',
         fontWeight: '700',
         textShadowColor: 'rgba(0, 0, 0, 0.65)',
@@ -1392,13 +2196,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
         zIndex: 24,
     },
     sharedAuthorAvatar: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: ox(20),
+        height: ox(20),
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.35)',
     },
@@ -1409,7 +2213,7 @@ const styles = StyleSheet.create({
         right: 16,
         flexDirection: 'row',
         justifyContent: 'center',
-        gap: 32,
+        gap: ox(32),
         zIndex: 10,
     },
     storyActionsHidden: {
@@ -1421,61 +2225,61 @@ const styles = StyleSheet.create({
         right: 12,
         bottom: 104,
         zIndex: 16,
-        borderRadius: 14,
+        borderRadius: ox(14),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         backgroundColor: 'rgba(3, 7, 18, 0.92)',
-        padding: 8,
+        padding: ox(8),
     },
     inlineReplyInput: {
         flex: 1,
         backgroundColor: 'rgba(31,41,55,0.95)',
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
         color: '#FFFFFF',
-        fontSize: 14,
-        minHeight: 36,
+        fontSize: ox(14),
+        minHeight: ox(36),
     },
     inlineReplyActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: ox(8),
     },
     quickReactionButton: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(17),
         backgroundColor: 'rgba(31,41,55,0.95)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     quickReactionText: {
-        fontSize: 14,
+        fontSize: ox(14),
     },
     inlineReplyCancelButton: {
-        paddingHorizontal: 10,
-        paddingVertical: 7,
-        borderRadius: 999,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(7),
+        borderRadius: ox(999),
         backgroundColor: '#374151',
         alignItems: 'center',
     },
     inlineReplyCancelText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     inlineReplySendButton: {
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-        borderRadius: 999,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(7),
+        borderRadius: ox(999),
         backgroundColor: '#3B82F6',
         alignItems: 'center',
     },
     actionButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(24),
         backgroundColor: 'rgba(0, 0, 0, 0.3)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -1499,8 +2303,8 @@ const styles = StyleSheet.create({
     storyLinkSticker: {
         position: 'absolute',
         width: 176,
-        height: 32,
-        borderRadius: 16,
+        height: ox(32),
+        borderRadius: ox(16),
         backgroundColor: 'rgba(255,255,255,0.72)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.52)',
@@ -1515,10 +2319,10 @@ const styles = StyleSheet.create({
         zIndex: 25,
     },
     storyLinkIconTile: {
-        width: 18,
-        height: 18,
+        width: ox(18),
+        height: ox(18),
         marginLeft: 6,
-        borderRadius: 9,
+        borderRadius: ox(9),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.68)',
         backgroundColor: 'rgba(255,255,255,0.58)',
@@ -1529,11 +2333,11 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 7,
         marginRight: 7,
-        fontSize: 11,
-        lineHeight: 11.5,
+        fontSize: ox(11),
+        lineHeight: ox(11.5),
         fontFamily: 'Inter-SemiBold',
         fontWeight: '600',
-        letterSpacing: 0.05,
+        letterSpacing: ox(0.05),
         color: '#0B1220',
     },
     replyModal: {
@@ -1545,45 +2349,45 @@ const styles = StyleSheet.create({
         backgroundColor: '#030712',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        padding: 20,
-        paddingBottom: 40,
+        padding: ox(20),
+        paddingBottom: ox(40),
     },
     replyModalTitle: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     replyInput: {
         backgroundColor: '#1F2937',
-        borderRadius: 12,
-        padding: 16,
+        borderRadius: ox(12),
+        padding: ox(16),
         color: '#FFFFFF',
-        fontSize: 16,
-        minHeight: 100,
+        fontSize: ox(16),
+        minHeight: ox(100),
         textAlignVertical: 'top',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     replyModalActions: {
         flexDirection: 'row',
-        gap: 12,
+        gap: ox(12),
     },
     replyCancelButton: {
         flex: 1,
-        padding: 12,
-        borderRadius: 8,
+        padding: ox(12),
+        borderRadius: ox(8),
         backgroundColor: '#1F2937',
         alignItems: 'center',
     },
     replyCancelText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     replySendButton: {
         flex: 1,
-        padding: 12,
-        borderRadius: 8,
+        padding: ox(12),
+        borderRadius: ox(8),
         backgroundColor: '#3B82F6',
         alignItems: 'center',
     },
@@ -1592,51 +2396,108 @@ const styles = StyleSheet.create({
     },
     replySendText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     sheetActionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        borderRadius: 10,
+        justifyContent: 'center',
+        gap: ox(10),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        marginBottom: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        marginBottom: ox(10),
+    },
+    sheetActionPrimary: {
+        backgroundColor: '#3B82F6',
+        borderColor: '#3B82F6',
     },
     sheetActionText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     sheetActionSecondary: {
         backgroundColor: '#1f2937',
+        marginBottom: 0,
     },
     sheetActionTextSecondary: {
         color: '#e5e7eb',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     sharedModalSub: {
-        color: '#9ca3af',
-        fontSize: 13,
-        marginBottom: 12,
+        color: '#9CA3AF',
+        fontSize: ox(14),
+        lineHeight: ox(20),
+        marginBottom: ox(16),
+    },
+    sharedModalSubStrong: {
+        color: '#F3F4F6',
+        fontWeight: '600',
+    },
+    sharedPostBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: ox(20),
+    },
+    sharedPostCard: {
+        width: '100%',
+        maxWidth: ox(400),
+        borderRadius: ox(16),
+        backgroundColor: '#111827',
+        borderWidth: 1,
+        borderColor: '#1F2937',
+        padding: ox(20),
+    },
+    sharedPostCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: ox(12),
+    },
+    sharedPostCardTitle: {
+        flex: 1,
+        fontSize: ox(18),
+        fontWeight: '700',
+        color: '#FFFFFF',
+        paddingRight: ox(8),
+    },
+    sharedPostCloseBtn: {
+        width: ox(36),
+        height: ox(36),
+        borderRadius: ox(18),
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+    },
+    sharedPostLoadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(10),
+        marginBottom: ox(16),
+    },
+    sheetActionDisabled: {
+        opacity: 0.45,
     },
     insightsTabRow: {
         flexDirection: 'row',
-        gap: 10,
-        marginBottom: 12,
+        gap: ox(10),
+        marginBottom: ox(12),
     },
     insightsTabBtn: {
         flex: 1,
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingVertical: 8,
+        paddingVertical: ox(8),
         alignItems: 'center',
     },
     insightsTabBtnActive: {
@@ -1645,7 +2506,7 @@ const styles = StyleSheet.create({
     },
     insightsTabBtnText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     insightsTabBtnTextActive: {
@@ -1653,21 +2514,21 @@ const styles = StyleSheet.create({
     },
     insightsScroll: {
         maxHeight: 280,
-        marginBottom: 14,
+        marginBottom: ox(14),
     },
     insightsScrollContent: {
-        gap: 8,
+        gap: ox(8),
     },
     insightRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderRadius: 10,
+        borderRadius: ox(10),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
     },
     insightRowInner: {
         flexDirection: 'row',
@@ -1680,24 +2541,24 @@ const styles = StyleSheet.create({
     },
     insightPrimary: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     insightSecondary: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginTop: 4,
+        fontSize: ox(12),
+        marginTop: ox(4),
     },
     insightTertiary: {
         color: '#6B7280',
-        fontSize: 11,
-        marginTop: 4,
+        fontSize: ox(11),
+        marginTop: ox(4),
     },
     emptyInsightsText: {
         color: '#9CA3AF',
-        fontSize: 13,
+        fontSize: ox(13),
         textAlign: 'center',
-        paddingVertical: 20,
+        paddingVertical: ox(20),
     },
 });
 

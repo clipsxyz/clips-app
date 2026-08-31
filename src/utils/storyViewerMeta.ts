@@ -40,6 +40,10 @@ export function shouldShowSharedStoryCredit(
     groupHandle: string | undefined,
 ): { show: boolean; authorDisplay: string } {
     if (!story) return { show: false, authorDisplay: '' };
+    // Shared-post viewer already shows author (media card or text statement card).
+    if (story.sharedFromPost) {
+        return { show: false, authorDisplay: '' };
+    }
     const isVisualShare =
         !!story.mediaUrl || story.mediaType === 'image' || story.mediaType === 'video';
     const hasOriginalMedia = Boolean(
@@ -47,7 +51,7 @@ export function shouldShowSharedStoryCredit(
             ((originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '') ||
                 (originalPost.mediaItems && originalPost.mediaItems.length > 0)),
     );
-    const showExtraBar = !isVisualShare && !(story.sharedFromPost && hasOriginalMedia);
+    const showExtraBar = !isVisualShare && !hasOriginalMedia;
     const author = (story.sharedFromUser || '').trim();
     const display = author.startsWith('@') ? author.slice(1) : author;
     const show =

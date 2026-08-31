@@ -187,12 +187,22 @@ async function ensureWebFirebaseConfig(projectId, serviceAccount) {
 
 function upsertEnvLines(existing, updates) {
     const lines = existing.split(/\r?\n/);
-    const keys = new Set(Object.keys(updates));
+    const pending = new Map(
+        Object.entries(updates).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+    );
     const out = [];
 
     for (const line of lines) {
         const match = line.match(/^([A-Z0-9_]+)=/);
-        if (match && keys.has(match[1])) {
+        if (match && Object.prototype.hasOwnProperty.call(updates, match[1])) {
+            const key = match[1];
+            if (pending.has(key)) {
+                out.push(`${key}=${pending.get(key)}`);
+                pending.delete(key);
+            } else {
+                // Keep existing value when sync has nothing new (avoid wiping APP_ID / keys).
+                out.push(line);
+            }
             continue;
         }
         out.push(line);
@@ -202,8 +212,7 @@ function upsertEnvLines(existing, updates) {
         out.pop();
     }
 
-    for (const [key, value] of Object.entries(updates)) {
-        if (value === undefined || value === null || value === '') continue;
+    for (const [key, value] of pending) {
         out.push(`${key}=${value}`);
     }
     out.push('');
@@ -224,6 +233,14 @@ function getMapsKeyFromLaravelEnv(text) {
     const google = text.match(/^GOOGLE_MAPS_API_KEY=(.+)$/m)?.[1]?.trim();
     if (google) return google;
     return text.match(/^Maps_API_KEY=(.+)$/m)?.[1]?.trim() || '';
+}
+
+function getMapsKeyFromRootEnv(text) {
+    return (
+        text.match(/^VITE_GOOGLE_MAPS_API_KEY=(.+)$/m)?.[1]?.trim() ||
+        text.match(/^EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=(.+)$/m)?.[1]?.trim() ||
+        ''
+    );
 }
 
 async function main() {
@@ -261,18 +278,28 @@ async function main() {
     }
 
     const laravelEnv = readEnvFile('laravel-backend/.env');
-    const mapsKey = getMapsKeyFromLaravelEnv(laravelEnv) || webOverride?.mapsApiKey || '';
+    const rootEnv = readEnvFile('.env');
+    const mapsKey =
+        getMapsKeyFromLaravelEnv(laravelEnv) ||
+        getMapsKeyFromRootEnv(rootEnv) ||
+        webOverride?.mapsApiKey ||
+        '';
 
-    const existingEnv = readEnvFile('.env');
+    const existingEnv = rootEnv;
     const existingWebApiKey =
         existingEnv.match(/^VITE_FIREBASE_API_KEY=(.+)$/m)?.[1]?.trim() || '';
+    const existingWebAppId =
+        existingEnv.match(/^VITE_FIREBASE_APP_ID=(.+)$/m)?.[1]?.trim() || '';
+    const existingMeasurementId =
+        existingEnv.match(/^VITE_FIREBASE_MEASUREMENT_ID=(.+)$/m)?.[1]?.trim() || '';
     const webApiKey = webOverride?.apiKey || existingWebApiKey || '';
-    const webAppId = webOverride?.appId || '';
+    const webAppId = webOverride?.appId || existingWebAppId || '';
     const vapidKey = webOverride?.vapidKey || existingEnv.match(/^VITE_FIREBASE_VAPID_KEY=(.+)$/m)?.[1]?.trim() || '';
-    const measurementId = webOverride?.measurementId || '';
+    const measurementId = webOverride?.measurementId || existingMeasurementId || '';
 
     const viteUpdates = {
         VITE_GOOGLE_MAPS_API_KEY: mapsKey,
+        EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: mapsKey,
         VITE_FIREBASE_API_KEY: webApiKey,
         VITE_FIREBASE_AUTH_DOMAIN: `${base.projectId}.firebaseapp.com`,
         VITE_FIREBASE_PROJECT_ID: base.projectId,

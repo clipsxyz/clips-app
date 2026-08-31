@@ -3,13 +3,14 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 export type StoryDeliveryFxState = {
-    kind: 'message' | 'like';
+    kind: 'message' | 'like' | 'react';
     toHandle: string;
     startX: number;
     startY: number;
     targetX: number;
     targetY: number;
     phase: 'start' | 'fly';
+    emoji?: string;
 };
 
 type Props = {
@@ -24,13 +25,13 @@ const BUBBLE_H = 48;
 /** Fly-from-bottom confirmation toward header avatar (web story-delivery-drop parity). */
 export default function StoryDeliveryFx({ fx, onComplete }: Props) {
     const progress = useRef(new Animated.Value(0)).current;
+    const onCompleteRef = useRef(onComplete);
+    onCompleteRef.current = onComplete;
 
     const dx = fx.targetX - fx.startX;
     const dy = fx.targetY - fx.startY;
     const originX = fx.startX - BUBBLE_W / 2;
     const originY = fx.startY - BUBBLE_H / 2;
-    const endX = fx.targetX - BUBBLE_W / 2;
-    const endY = fx.targetY - BUBBLE_H / 2;
 
     useEffect(() => {
         progress.setValue(0);
@@ -39,21 +40,21 @@ export default function StoryDeliveryFx({ fx, onComplete }: Props) {
             toValue: 1,
             duration: DURATION_MS,
             easing: Easing.bezier(0.16, 1, 0.3, 1),
-            useNativeDriver: false,
+            useNativeDriver: true,
         });
         anim.start(({ finished }) => {
-            if (finished) onComplete();
+            if (finished) onCompleteRef.current();
         });
         return () => anim.stop();
-    }, [fx.phase, fx.kind, onComplete, progress]);
+    }, [fx.phase, fx.kind, fx.startX, fx.startY, fx.targetX, fx.targetY, progress]);
 
-    const left = progress.interpolate({
+    const translateX = progress.interpolate({
         inputRange: [0, 0.22, 0.74, 1],
-        outputRange: [originX, originX + dx * 0.05, originX + dx * 0.82, endX],
+        outputRange: [0, dx * 0.05, dx * 0.82, dx],
     });
-    const top = progress.interpolate({
+    const translateY = progress.interpolate({
         inputRange: [0, 0.22, 0.74, 1],
-        outputRange: [originY, originY + dy * 0.05 - 8, originY + dy * 0.82 - 10, endY],
+        outputRange: [0, dy * 0.05 - 8, dy * 0.82 - 10, dy],
     });
     const scale = progress.interpolate({
         inputRange: [0, 0.22, 0.74, 1],
@@ -64,29 +65,44 @@ export default function StoryDeliveryFx({ fx, onComplete }: Props) {
         outputRange: [1, 1, 0.9, 0.06],
     });
 
-    const staticLeft = originX;
-    const staticTop = originY;
-
     return (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <Animated.View
                 style={[
                     styles.bubble,
-                    fx.phase === 'fly'
-                        ? { left, top, opacity, transform: [{ scale }] }
-                        : { left: staticLeft, top: staticTop, opacity: 1, transform: [{ scale: 1 }] },
+                    {
+                        left: originX,
+                        top: originY,
+                        opacity: fx.phase === 'fly' ? opacity : 1,
+                        transform: fx.phase === 'fly' ? [{ translateX }, { translateY }, { scale }] : [],
+                    },
                 ]}
             >
-                <View style={styles.iconWrap}>
-                    <Icon
-                        name={fx.kind === 'message' ? 'send' : 'thumbs-up'}
-                        size={14}
-                        color="#fff"
-                    />
+                <View
+                    style={[
+                        styles.iconWrap,
+                        fx.kind === 'like' || fx.kind === 'react'
+                            ? styles.iconWrapLike
+                            : styles.iconWrapMessage,
+                    ]}
+                >
+                    {fx.kind === 'react' && fx.emoji ? (
+                        <Text style={styles.emojiIcon}>{fx.emoji}</Text>
+                    ) : (
+                        <Icon
+                            name={fx.kind === 'message' ? 'send' : 'heart'}
+                            size={14}
+                            color="#fff"
+                        />
+                    )}
                 </View>
                 <View style={styles.textWrap}>
                     <Text style={styles.title}>
-                        {fx.kind === 'message' ? 'Message sent' : 'Like sent'}
+                        {fx.kind === 'message'
+                            ? 'Message sent'
+                            : fx.kind === 'react'
+                              ? 'Reaction sent'
+                              : 'Like sent'}
                     </Text>
                     <Text style={styles.handle} numberOfLines={1}>
                         @{fx.toHandle.replace(/^@/, '')}
@@ -111,14 +127,24 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 8,
         zIndex: 95,
+        elevation: 12,
     },
     iconWrap: {
         width: 28,
         height: 28,
         borderRadius: 14,
-        backgroundColor: 'rgba(6,182,212,0.9)',
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    iconWrapMessage: {
+        backgroundColor: 'rgba(6,182,212,0.9)',
+    },
+    iconWrapLike: {
+        backgroundColor: 'rgba(255,45,85,0.95)',
+    },
+    emojiIcon: {
+        fontSize: 14,
+        lineHeight: 18,
     },
     textWrap: { flex: 1, minWidth: 0 },
     title: { color: '#fff', fontSize: 11, fontWeight: '700' },

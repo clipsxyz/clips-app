@@ -1,36 +1,33 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     AccessibilityInfo,
     AppState,
-    LayoutChangeEvent,
-    Platform,
     StyleSheet,
     View,
     useWindowDimensions,
 } from 'react-native';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
-import HalftoneOverlay from './HalftoneOverlay.native';
 import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
 import {
+    discoverAmbientTimeFromElapsedMs,
     getAmbientPalette,
     getDiscoverAmbientWaveGeometry,
+    PASSPORT_ABYSS,
     type DiscoverAmbientVariant,
 } from '../utils/discoverAmbientPalette';
 
 type Props = {
-    /** Fill the parent (feed card). When false, uses explicit or window size. */
     fillParent?: boolean;
     variant?: DiscoverAmbientVariant;
-    /** Explicit pixel size — used for full-screen feed background (from parent onLayout). */
     width?: number;
     height?: number;
 };
 
-const TIME_STEP_PER_MS = 0.006 / (1000 / 60);
-const FRAME_MS = Platform.OS === 'android' ? 33 : 16;
-/** Stories 24 card shell background — matches rail inner fill. */
 const GOLD_CHROME_BASE = '#0a1323';
 
+/**
+ * JS-thread ambient only — no Reanimated, no LinearGradient, no SVG.
+ * Those native surfaces were painting above Discover greeting/search on Nokia.
+ */
 export default function DiscoverAmbientCanvas({
     fillParent = true,
     variant = 'discover',
@@ -38,190 +35,113 @@ export default function DiscoverAmbientCanvas({
     height: heightProp,
 }: Props) {
     const { width: winW, height: winH } = useWindowDimensions();
-    const [layout, setLayout] = useState({ width: 0, height: 0 });
-    const [time, setTime] = useState(0);
-    const timeRef = useRef(0);
-    const frameRef = useRef<number | undefined>(undefined);
-    const lastFrameAtRef = useRef(0);
-    const pausedRef = useRef(false);
-    const reducedMotionRef = useRef(false);
-    const uid = useId().replace(/:/g, '');
-
-    const width =
-        widthProp && widthProp > 0
-            ? widthProp
-            : fillParent
-              ? layout.width
-              : winW;
-    const height =
-        heightProp && heightProp > 0
-            ? heightProp
-            : fillParent
-              ? layout.height
-              : winH;
-
+    const width = widthProp && widthProp > 0 ? widthProp : winW;
+    const height = heightProp && heightProp > 0 ? heightProp : winH;
     const palette = getAmbientPalette(variant);
-    const baseFill = variant === 'goldChrome' ? GOLD_CHROME_BASE : GAZETTEER_ABYSS;
-    const geometry =
-        width > 0 && height > 0 ? getDiscoverAmbientWaveGeometry(width, height, time) : null;
-    const useParentLayout = fillParent && !(widthProp && heightProp);
+    const baseFill =
+        variant === 'goldChrome'
+            ? GOLD_CHROME_BASE
+            : variant === 'passport'
+              ? PASSPORT_ABYSS
+              : GAZETTEER_ABYSS;
+
+    const [tick, setTick] = useState(0);
+    const [reduceMotion, setReduceMotion] = useState(false);
+    const [paused, setPaused] = useState(false);
 
     useEffect(() => {
         let mounted = true;
         void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-            if (!mounted) return;
-            reducedMotionRef.current = enabled;
-            if (enabled) {
-                timeRef.current = 0;
-                setTime(0);
-            }
+            if (mounted) setReduceMotion(!!enabled);
         });
-        const reduceSub = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-            reducedMotionRef.current = enabled;
-            if (enabled) {
-                timeRef.current = 0;
-                setTime(0);
-            }
+        const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+            setReduceMotion(!!enabled);
         });
         return () => {
             mounted = false;
-            reduceSub.remove();
+            sub.remove();
         };
     }, []);
 
     useEffect(() => {
-        let mounted = true;
+        const onAppState = (next: string) => setPaused(next !== 'active');
+        const appSub = AppState.addEventListener('change', onAppState);
+        setPaused(AppState.currentState !== 'active');
+        return () => appSub.remove();
+    }, []);
 
-        const stopLoop = () => {
-            if (frameRef.current != null) {
-                cancelAnimationFrame(frameRef.current);
-                frameRef.current = undefined;
-            }
-        };
+    useEffect(() => {
+        if (reduceMotion || paused || width <= 0 || height <= 0) return;
+        const started = Date.now();
+        const id = setInterval(() => {
+            setTick(discoverAmbientTimeFromElapsedMs(Date.now() - started));
+        }, 48);
+        return () => clearInterval(id);
+    }, [reduceMotion, paused, width, height]);
 
-        const startLoop = () => {
-            stopLoop();
-            lastFrameAtRef.current = 0;
-            const tick = (now: number) => {
-                if (!mounted) return;
-                if (!pausedRef.current && !reducedMotionRef.current && width > 0 && height > 0) {
-                    if (lastFrameAtRef.current === 0) {
-                        lastFrameAtRef.current = now;
-                    }
-                    if (now - lastFrameAtRef.current >= FRAME_MS) {
-                        const delta = now - lastFrameAtRef.current;
-                        lastFrameAtRef.current = now;
-                        timeRef.current += TIME_STEP_PER_MS * delta;
-                        setTime(timeRef.current);
-                    }
-                }
-                frameRef.current = requestAnimationFrame(tick);
-            };
-            frameRef.current = requestAnimationFrame(tick);
-        };
+    if (width <= 0 || height <= 0) return null;
 
-        const onAppState = (next: string) => {
-            pausedRef.current = next !== 'active';
-            if (pausedRef.current) {
-                stopLoop();
-            } else {
-                startLoop();
-            }
-        };
+    const geo = getDiscoverAmbientWaveGeometry(width, height, tick);
+    const r1 = geo.wave1.radius * 0.65;
+    const r2 = geo.wave2.radius * 0.85;
 
-        const sub = AppState.addEventListener('change', onAppState);
-        pausedRef.current = AppState.currentState !== 'active';
-
-        if (reducedMotionRef.current) {
-            timeRef.current = 0;
-            setTime(0);
-        } else if (!pausedRef.current) {
-            startLoop();
-        }
-
-        return () => {
-            mounted = false;
-            sub.remove();
-            stopLoop();
-        };
-    }, [width, height]);
-
-    const onLayout = (e: LayoutChangeEvent) => {
-        const { width: w, height: h } = e.nativeEvent.layout;
-        if (w > 0 && h > 0) setLayout({ width: w, height: h });
-    };
-
-    const waveShell =
-        width > 0 && height > 0 && geometry ? (
-            <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
-                <Defs>
-                    <RadialGradient
-                        id={`${uid}-wave1`}
-                        gradientUnits="userSpaceOnUse"
-                        cx={geometry.wave1.x}
-                        cy={geometry.wave1.y}
-                        fx={geometry.wave1.x}
-                        fy={geometry.wave1.y}
-                        r={geometry.wave1.radius}
-                    >
-                        <Stop offset="0" stopColor={palette.wavePrimary} />
-                        <Stop offset="0.4" stopColor={palette.waveMid} />
-                        <Stop offset="1" stopColor={palette.waveDeep} />
-                    </RadialGradient>
-                    <RadialGradient
-                        id={`${uid}-wave2`}
-                        gradientUnits="userSpaceOnUse"
-                        cx={geometry.wave2.x}
-                        cy={geometry.wave2.y}
-                        fx={geometry.wave2.x}
-                        fy={geometry.wave2.y}
-                        r={geometry.wave2.radius}
-                    >
-                        <Stop offset="0" stopColor={palette.wave2Primary} />
-                        <Stop offset="0.5" stopColor={palette.wave2Mid} />
-                        <Stop offset="1" stopColor={palette.wave2End} />
-                    </RadialGradient>
-                </Defs>
-                <Rect x={0} y={0} width={width} height={height} fill={baseFill} />
-                <Rect x={0} y={0} width={width} height={height} fill={`url(#${uid}-wave1)`} />
-                <Rect
-                    x={0}
-                    y={0}
-                    width={width}
-                    height={height}
-                    fill={`url(#${uid}-wave2)`}
-                    mixBlendMode="screen"
-                />
-            </Svg>
-        ) : null;
-
-    const shell = (
+    const layer = (
         <View
-            style={[StyleSheet.absoluteFill, { width, height }]}
+            style={[styles.layer, { width, height, backgroundColor: baseFill }]}
             pointerEvents="none"
-            {...(Platform.OS === 'android' ? { needsOffscreenAlphaCompositing: true } : {})}
+            collapsable={false}
         >
-            {waveShell}
-            <HalftoneOverlay variant={variant} width={width} height={height} idPrefix={uid} />
+            <View
+                style={[
+                    styles.blob,
+                    {
+                        width: r1 * 2,
+                        height: r1 * 2,
+                        borderRadius: r1,
+                        left: geo.wave1.x - r1,
+                        top: geo.wave1.y - r1,
+                        backgroundColor: palette.wavePrimary,
+                        opacity: 0.38,
+                    },
+                ]}
+            />
+            <View
+                style={[
+                    styles.blob,
+                    {
+                        width: r2 * 2,
+                        height: r2 * 2,
+                        borderRadius: r2,
+                        left: geo.wave2.x - r2,
+                        top: geo.wave2.y - r2,
+                        backgroundColor: palette.wavePrimary,
+                        opacity: 0.22,
+                    },
+                ]}
+            />
         </View>
     );
 
-    if (useParentLayout) {
+    if (fillParent && !(widthProp && heightProp)) {
         return (
-            <View
-                style={StyleSheet.absoluteFill}
-                onLayout={onLayout}
-                pointerEvents="none"
-                collapsable={false}
-            >
-                {shell}
+            <View style={styles.parentClip} pointerEvents="none" collapsable={false}>
+                {layer}
             </View>
         );
     }
 
-    return (
-        <View style={[StyleSheet.absoluteFill, { width, height }]} pointerEvents="none" collapsable={false}>
-            {shell}
-        </View>
-    );
+    return layer;
 }
+
+const styles = StyleSheet.create({
+    parentClip: {
+        ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden',
+    },
+    layer: {
+        overflow: 'hidden',
+    },
+    blob: {
+        position: 'absolute',
+    },
+});

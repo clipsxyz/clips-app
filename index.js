@@ -29,14 +29,21 @@ if (typeof globalThis.localStorage === 'undefined') {
   };
 }
 
+import 'react-native-gesture-handler';
 import { AppRegistry, LogBox, Text, View } from 'react-native';
 import 'react-native-reanimated';
+import './src/utils/reanimatedBottomSheetCompat.native';
 // NativeWind global.css can prevent the first paint on some Android builds; styles live in StyleSheet on native screens.
 // import './global.css';
 import { name as appName } from './app.json';
 import { registerBackgroundMessageHandler } from './src/services/notifications';
 
-LogBox.ignoreLogs(['Sending `onAnimatedValueUpdate`']);
+LogBox.ignoreLogs([
+  'Sending `onAnimatedValueUpdate`',
+  'Invalid prop `parent` supplied to `React.Fragment`',
+  'Invalid prop `onLayout` supplied to `React.Fragment`',
+  'Invalid prop `style` supplied to `React.Fragment`',
+]);
 
 function Root() {
   try {

@@ -44,13 +44,8 @@ class Collection extends Model
     public function updateThumbnail()
     {
         $firstPost = $this->posts()->first();
-        if ($firstPost && $firstPost->media_url) {
-            $this->thumbnail_url = $firstPost->media_url;
-            $this->save();
-        } elseif (!$firstPost) {
-            $this->thumbnail_url = null;
-            $this->save();
-        }
+        $this->thumbnail_url = $firstPost?->collectionCoverUrl();
+        $this->save();
     }
 
     // Scopes

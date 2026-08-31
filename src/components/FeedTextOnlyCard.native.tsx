@@ -15,6 +15,7 @@ import {
 } from '../utils/feedTextBubble';
 import { gradientColorsFromCss } from '../utils/storyTextStyleNative';
 import IMessageDmBubbleShell from './IMessageDmBubbleShell.native';
+import { hasFinitePoint, safeLayoutNumber, safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 
 const FALLBACK_BACKGROUNDS = [
     '#1e3a8a',
@@ -56,6 +57,7 @@ export default function FeedTextOnlyCard({
     const lastTapRef = useRef(0);
     const clearBurstTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const bubbleMeasureRef = useRef<View>(null);
+    const safeMaxWidth = safePositiveLayoutNumber(maxWidth, 280);
 
     const text = post.text?.trim() || '';
     const shouldTruncate = text.length > 100;
@@ -66,7 +68,7 @@ export default function FeedTextOnlyCard({
         effectiveStyle?.background || FALLBACK_BACKGROUNDS[text.length % FALLBACK_BACKGROUNDS.length],
     );
     const textColor = effectiveStyle?.color || getTextOnlyTextColor(post);
-    const fontSize = getTextOnlyFontSize(post);
+    const fontSize = safePositiveLayoutNumber(getTextOnlyFontSize(post), 16);
     const tailColor = resolveTextCardTailFill(selectedBackground, isFromViewer);
     const parsedGradient =
         selectedBackground.includes('gradient') ? gradientColorsFromCss(selectedBackground) : [];
@@ -85,8 +87,12 @@ export default function FeedTextOnlyCard({
 
     const resolveLocalTap = (e: GestureResponderEvent): { x: number; y: number } => {
         const { locationX, locationY } = e.nativeEvent;
-        if (typeof locationX === 'number' && typeof locationY === 'number') {
-            return { x: locationX, y: locationY };
+        if (
+            typeof locationX === 'number' &&
+            typeof locationY === 'number' &&
+            hasFinitePoint(locationX, locationY)
+        ) {
+            return { x: safeLayoutNumber(locationX), y: safeLayoutNumber(locationY) };
         }
         if (bubbleSize.width > 0 && bubbleSize.height > 0) {
             return { x: bubbleSize.width / 2, y: bubbleSize.height / 2 };
@@ -100,8 +106,10 @@ export default function FeedTextOnlyCard({
 
         if (timeSinceLastTap < DOUBLE_TAP_MS) {
             const local = resolveLocalTap(e);
-            setTapPosition(local);
-            setBurstKey((k) => k + 1);
+            if (hasFinitePoint(local.x, local.y)) {
+                setTapPosition(local);
+                setBurstKey((k) => k + 1);
+            }
             onDoubleLike();
 
             if (clearBurstTimerRef.current) {
@@ -122,7 +130,7 @@ export default function FeedTextOnlyCard({
         <View
             style={[
                 styles.wrap,
-                { maxWidth },
+                { maxWidth: safeMaxWidth },
                 isFromViewer ? styles.alignEnd : styles.alignStart,
             ]}
         >

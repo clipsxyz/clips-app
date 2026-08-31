@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { FEED_UI } from '../constants/feedUiTokens';
 
 type Props = {
     caption: string;
@@ -8,7 +9,7 @@ type Props = {
 
 const HANDLE_RE = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 
-/** Matches web CaptionText in App.tsx: text-gray-100 text-[13px] leading-snug */
+/** Matches web CaptionText in App.tsx — optically scaled for RN phone parity. */
 export default function FeedCaptionText({ caption, onHandlePress }: Props) {
     const [expanded, setExpanded] = useState(false);
     const hasMore = caption.length > 120 || caption.includes('\n');
@@ -64,8 +65,8 @@ export default function FeedCaptionText({ caption, onHandlePress }: Props) {
 
 const styles = StyleSheet.create({
     body: {
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: FEED_UI.type.caption,
+        lineHeight: Math.round(FEED_UI.type.caption * 1.4),
         color: '#F3F4F6',
     },
     handleLink: {
@@ -73,7 +74,7 @@ const styles = StyleSheet.create({
     },
     more: {
         marginTop: 6,
-        fontSize: 11,
+        fontSize: FEED_UI.type.captionMore,
         fontWeight: '500',
         color: 'rgba(255,255,255,0.9)',
     },

@@ -35,6 +35,8 @@ export type User = {
   has_pending_request?: boolean; // Whether current user has pending follow request
   /** Explicit account classification from signup/profile. */
   accountType?: 'personal' | 'business';
+  phone_number?: string | null;
+  phone_verified_at?: string | null;
 };
 
 export type PostMediaItem = {
@@ -43,9 +45,24 @@ export type PostMediaItem = {
   duration?: number;
   /** Per-slide video poster in carousels (when type is video). */
   posterUrl?: string;
+  thumbnailUrl?: string;
+  thumbnail_url?: string;
   effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>;
   text?: string;
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
+};
+
+export type LinkPreview = {
+  url: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  siteName?: string;
+  source: string;
+  /** Direct .mp4 / HLS (or similar) URL — play inline instead of a still. */
+  isDirectVideo?: boolean;
+  /** Playable media file when different from the page `url` (e.g. og:video). */
+  videoUrl?: string;
 };
 
 export type Post = {
@@ -58,6 +75,10 @@ export type Post = {
   venue?: string;
   /** Named landmark (e.g. Eiffel Tower, River Liffey); optional; carousel + landmark feeds */
   landmark?: string;
+  /** Google Places id when the post was tagged to a real place */
+  placeId?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   /**
    * When the user created the post via Create → Shorts / TikTok / Reels gallery flow.
    * Shown as a small label on the feed card (not the same as posting to those apps).
@@ -68,6 +89,10 @@ export type Post = {
   finalVideoUrl?: string; // Final rendered video URL from backend (after processing)
   /** Stable preview frame used as `<video poster>` in feeds. */
   videoPosterUrl?: string;
+  /** JPEG grid thumbnail from API (`thumbnail_url`). */
+  thumbnailUrl?: string;
+  /** Open Graph card when the post body contains a web URL. */
+  linkPreview?: LinkPreview;
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
   /** Video framing preference chosen at upload time. */
   videoFrameMode?: 'crop' | 'fit' | 'original';
@@ -78,7 +103,7 @@ export type Post = {
   caption?: string; // Caption/description for image/video posts
   createdAt: number; // Epoch timestamp in milliseconds (like Date.now())
   created_at?: string; // Backend field (ISO string)
-  stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
+  stats: { likes: number; views: number; comments: number; shares: number; reclips: number; saves?: number };
   isBookmarked: boolean;
   isFollowing: boolean;
   /** True when the post author follows the current user (mutual follow → show DM icon). */
@@ -101,6 +126,8 @@ export type Post = {
   originalPostId?: string;
   original_post_id?: string; // Backend field
   originalUserHandle?: string; // Original poster's handle (for reclipped posts)
+  /** Original author's avatar when this row is a reclip. */
+  originalUserAvatarUrl?: string;
   reclippedBy?: string;
   reclipped_by?: string; // Backend field
   is_reclipped?: boolean; // Backend field
@@ -110,6 +137,8 @@ export type Post = {
   userNational?: string;
   /** Optional author account classification mirrored from backend/user profile. */
   userAccountType?: 'personal' | 'business';
+  /** Author profile photo from Laravel (`users.avatar_url`), rewritten for the device. */
+  userAvatarUrl?: string;
   // Boost data
   isBoosted?: boolean;
   boostExpiresAt?: number; // Epoch timestamp when boost expires
@@ -198,6 +227,9 @@ export type Story = {
   location?: string;
   venue?: string; // Venue / place name (metadata carousel on story view)
   views: number;
+  views_count?: number;
+  reactions_count?: number;
+  replies_count?: number;
   viewerHandles?: string[]; // Distinct viewer handles for owner insights
   hasViewed: boolean;
   reactions: StoryReaction[];
@@ -205,6 +237,9 @@ export type Story = {
   userReaction?: string; // Current user's reaction emoji
   sharedFromPost?: string; // Original post ID if this story is shared from a post
   sharedFromUser?: string; // Original post author if this story is shared from a post
+  /** Still frame for Stories 24 rail / hold screens (shared video posts). */
+  videoPosterUrl?: string;
+  linkPreview?: LinkPreview;
   poll?: {
     question: string;
     option1: string;

@@ -11,13 +11,15 @@ use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\CommentController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UploadController;
-use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\LinkPreviewController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\ChatGroupController;
 use App\Http\Controllers\Api\StoryController;
 use App\Http\Controllers\Api\CollectionController;
+use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\MusicController;
 use App\Http\Controllers\Api\MusicLibraryController;
 use App\Http\Controllers\Api\BoostController;
@@ -129,14 +131,20 @@ Route::get('/boost/stripe-status', function () {
 
 // Public search and location routes
 Route::get('/locations/search', [LocationController::class, 'search']);
+Route::get('/locations/geocode', [LocationController::class, 'geocode']);
+Route::get('/locations/details', [LocationController::class, 'details']);
 Route::get('/search', [SearchController::class, 'unified']);
 Route::get('/search/places', [SearchController::class, 'places']);
 Route::get('/search/places/summary', [SearchController::class, 'placeSummary']);
+Route::get('/search/places/details', [LocationController::class, 'details']);
 
 // Public routes
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/password/reset-local', [AuthController::class, 'resetPasswordLocal']);
+    Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
+    Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 });
 
 // Public music routes (no auth required)
@@ -198,6 +206,8 @@ Route::get('/dev/ava-follows-barry', function () {
     ]);
 });
 
+Route::get('/feed', [PostController::class, 'index']); // Alias of GET /api/posts (native / docs)
+
 // Public posts routes (allow viewing posts without auth)
 Route::prefix('posts')->group(function () {
     Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
@@ -212,6 +222,16 @@ Route::prefix('posts')->group(function () {
 // Public permanent share-link preview endpoint (guest-safe payload).
 Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken'])
     ->middleware('throttle:30,1');
+
+// Public profile reads (guest viewing). Send Bearer when logged in so private
+// profiles and Boost still resolve the viewer. `{handle}` allows `@` / `%40`.
+Route::prefix('users')->group(function () {
+    Route::get('/{handle}/posts', [UserController::class, 'posts'])->where('handle', '[^/]+');
+    Route::get('/{handle}/audience', [UserController::class, 'audience'])->where('handle', '[^/]+');
+    Route::get('/{handle}/followers', [UserController::class, 'followers'])->where('handle', '[^/]+');
+    Route::get('/{handle}/following', [UserController::class, 'following'])->where('handle', '[^/]+');
+    Route::get('/{handle}', [UserController::class, 'show'])->where('handle', '[^/]+');
+});
 
 // Protected routes
 Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])->group(function () {
@@ -232,7 +252,14 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/contacts/match', [AuthController::class, 'matchContacts']);
         Route::post('/phone/send-code', [AuthController::class, 'sendPhoneCode']);
         Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
+        Route::post('/phone/remove', [AuthController::class, 'removePhone']);
+        Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::post('/logout', [AuthController::class, 'logout']);
+    });
+
+    Route::get('/link-preview', [LinkPreviewController::class, 'show'])->middleware('throttle:30,1');
+    Route::prefix('v1')->group(function () {
+        Route::get('/parse-link', [LinkPreviewController::class, 'show'])->middleware('throttle:30,1');
     });
 
     // Posts routes (protected - require auth for actions)
@@ -273,18 +300,19 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/post/{postId}', [CommentController::class, 'getPostComments']);
         Route::post('/post/{postId}', [CommentController::class, 'store']);
         Route::post('/reply/{parentId}', [CommentController::class, 'reply']);
+        Route::get('/review-queue', [CommentController::class, 'reviewQueue']);
         Route::post('/{id}/like', [CommentController::class, 'toggleLike']);
+        Route::post('/{id}/hide', [CommentController::class, 'hide']);
+        Route::post('/{id}/approve', [CommentController::class, 'approve']);
+        Route::delete('/{id}', [CommentController::class, 'destroy']);
     });
 
-    // Users routes
+    // Users routes (profile GET is public above — follow/privacy still require auth)
     Route::prefix('users')->group(function () {
         Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe']);
-        Route::get('/{handle}', [UserController::class, 'show']);
-        Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
-        Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);
-        Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest']);
-        Route::get('/{handle}/followers', [UserController::class, 'followers']);
-        Route::get('/{handle}/following', [UserController::class, 'following']);
+        Route::post('/{handle}/follow', [UserController::class, 'toggleFollow'])->where('handle', '[^/]+');
+        Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest'])->where('handle', '[^/]+');
+        Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest'])->where('handle', '[^/]+');
         Route::post('/privacy/toggle', [UserController::class, 'togglePrivacy']);
     });
 
@@ -296,8 +324,9 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/mark-all-read', [NotificationController::class, 'markAllRead']);
         // FCM token and preferences routes
         Route::post('/fcm-token', [NotificationController::class, 'saveFCMToken']);
+        Route::get('/preferences', [NotificationController::class, 'getPreferences']);
         Route::post('/preferences', [NotificationController::class, 'savePreferences']);
-        Route::get('/preferences/{userHandle}', [NotificationController::class, 'getPreferences']);
+        Route::get('/preferences/{userHandle}', [NotificationController::class, 'getPreferencesForHandle']);
     });
 
     // Messages routes
@@ -328,11 +357,20 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     Route::prefix('stories')->group(function () {
         Route::get('/', [StoryController::class, 'index']);
         Route::get('/paged', [StoryController::class, 'paged']);
-        Route::get('/user/{handle}', [StoryController::class, 'getUserStories']);
+        Route::get('/user/{handle}', [StoryController::class, 'getUserStories'])->where('handle', '[^/]+');
         Route::post('/', [StoryController::class, 'store']);
         Route::post('/{id}/view', [StoryController::class, 'view']);
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);
         Route::post('/{id}/reply', [StoryController::class, 'addReply']);
+    });
+
+    // Authenticated "my collections" alias — same as GET /collections
+    Route::get('/me/collections', [CollectionController::class, 'index']);
+
+    Route::prefix('drafts')->group(function () {
+        Route::get('/', [DraftController::class, 'index']);
+        Route::post('/', [DraftController::class, 'store']);
+        Route::delete('/{id}', [DraftController::class, 'destroy']);
     });
 
     // Collections routes

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Image,
     StyleSheet,
     Text,
@@ -11,22 +10,35 @@ import {
 import * as ImagePicker from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
-import { hasCustomProfileCover, resolveProfileCoverUri, DEFAULT_PROFILE_COVER_URI } from '../utils/profileCoverNative';
+import { hasCustomProfileCover, resolveProfileCoverSource, DEFAULT_PROFILE_COVER_SOURCE } from '../utils/profileCoverNative';
 import type { User } from '../types';
+import { ox } from '../constants/nativeOpticalScale';
+
+type CoverAlertConfig = {
+    title: string;
+    message?: string;
+    icon?: 'success' | 'alert' | 'info';
+};
 
 export default function ProfileCoverScreen({ navigation }: any) {
     const { user, login } = useAuth();
     const [isSaving, setIsSaving] = useState(false);
+    const [coverAlert, setCoverAlert] = useState<CoverAlertConfig | null>(null);
+
+    const showCoverAlert = (config: CoverAlertConfig) => setCoverAlert(config);
 
     const coverUrl = user?.profileBackgroundUrl || '';
     const customCover = hasCustomProfileCover(coverUrl);
     const [previewFailed, setPreviewFailed] = useState(false);
-    const previewUri = previewFailed ? DEFAULT_PROFILE_COVER_URI : resolveProfileCoverUri(coverUrl);
+    const previewSource = previewFailed
+        ? DEFAULT_PROFILE_COVER_SOURCE
+        : resolveProfileCoverSource(coverUrl);
 
     useEffect(() => {
         setPreviewFailed(false);
@@ -67,12 +79,28 @@ export default function ProfileCoverScreen({ navigation }: any) {
             (response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
-                    Alert.alert('Photo error', response.errorMessage || 'Could not open your photo library.');
+                    showCoverAlert({
+                        title: 'Photo error',
+                        message: response.errorMessage || 'Could not open your photo library.',
+                        icon: 'alert',
+                    });
                     return;
                 }
                 const asset = response.assets?.[0];
                 if (!asset?.uri) {
-                    Alert.alert('Photo error', 'No image was selected.');
+                    showCoverAlert({
+                        title: 'Invalid file',
+                        message: 'Please choose an image file.',
+                        icon: 'alert',
+                    });
+                    return;
+                }
+                if (asset.type && !asset.type.startsWith('image/')) {
+                    showCoverAlert({
+                        title: 'Invalid file',
+                        message: 'Please choose an image file.',
+                        icon: 'alert',
+                    });
                     return;
                 }
                 void uploadCover(asset.uri, asset.type || 'image/jpeg', asset.fileName, asset.base64);
@@ -113,10 +141,18 @@ export default function ProfileCoverScreen({ navigation }: any) {
             }
 
             await saveCoverUrl(nextCoverUrl);
-            Alert.alert('Cover updated', 'Your profile cover image has been updated.');
+            showCoverAlert({
+                title: 'Cover updated',
+                message: 'Your profile cover image has been updated.',
+                icon: 'success',
+            });
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Could not update cover image.';
-            Alert.alert('Upload failed', message);
+            showCoverAlert({
+                title: 'Upload failed',
+                message,
+                icon: 'alert',
+            });
         } finally {
             setIsSaving(false);
         }
@@ -125,10 +161,18 @@ export default function ProfileCoverScreen({ navigation }: any) {
     const handleRemove = async () => {
         try {
             await saveCoverUrl('');
-            Alert.alert('Cover removed', 'Your profile is back to the default map background.');
+            showCoverAlert({
+                title: 'Cover removed',
+                message: 'Your profile is back to the default map background.',
+                icon: 'success',
+            });
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Could not remove cover image.';
-            Alert.alert('Update failed', message);
+            showCoverAlert({
+                title: 'Update failed',
+                message,
+                icon: 'alert',
+            });
         }
     };
 
@@ -136,21 +180,23 @@ export default function ProfileCoverScreen({ navigation }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <View style={styles.headerCopy}>
                     <Text style={styles.headerTitle}>Profile Cover</Text>
-                    <Text style={styles.headerSubtitle}>Background behind your profile picture</Text>
+                    <Text style={styles.headerSubtitle}>Choose the background shown behind your profile picture</Text>
                 </View>
             </View>
 
             <View style={styles.body}>
                 <View style={styles.previewCard}>
                     <Image
-                        source={{ uri: previewUri }}
+                        source={previewSource}
                         style={[styles.previewImage, (!customCover || previewFailed) && styles.previewImageMuted]}
                         resizeMode="cover"
-                        onError={() => setPreviewFailed(true)}
+                        onError={() => {
+                            if (customCover) setPreviewFailed(true);
+                        }}
                     />
                 </View>
 
@@ -164,7 +210,7 @@ export default function ProfileCoverScreen({ navigation }: any) {
                             <ActivityIndicator color="#111827" />
                         ) : (
                             <>
-                                <Icon name="image-outline" size={18} color="#111827" />
+                                <Icon name="image-outline" size={ox(18)} color="#111827" />
                                 <Text style={styles.primaryBtnText}>Upload image</Text>
                             </>
                         )}
@@ -174,11 +220,21 @@ export default function ProfileCoverScreen({ navigation }: any) {
                         onPress={handleRemove}
                         disabled={isSaving || !customCover}
                     >
-                        <Icon name="trash-outline" size={18} color="#FFFFFF" />
+                        <Icon name="trash-outline" size={ox(18)} color="#FFFFFF" />
                         <Text style={styles.secondaryBtnText}>Reset</Text>
                     </TouchableOpacity>
                 </View>
             </View>
+
+            <GazetteerAlertSheet
+                visible={coverAlert !== null}
+                title={coverAlert?.title ?? ''}
+                message={coverAlert?.message}
+                icon={coverAlert?.icon ?? 'alert'}
+                confirmButtonText="OK"
+                onConfirm={() => setCoverAlert(null)}
+                onDismiss={() => setCoverAlert(null)}
+            />
         </GazetteerScreenShell>
     );
 }
@@ -187,21 +243,21 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(14),
         ...gazetteerHeader,
     },
     headerCopy: { flex: 1 },
-    headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-    headerSubtitle: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-    body: { padding: 16, gap: 16 },
+    headerTitle: { color: '#FFFFFF', fontSize: ox(18), fontWeight: '700' },
+    headerSubtitle: { color: '#9CA3AF', fontSize: ox(12), marginTop: ox(2) },
+    body: { padding: ox(16), gap: ox(16) },
     previewCard: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'hidden',
+        ...glassPanel,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
-        ...glassPanel,
     },
     previewImage: {
         width: '100%',
@@ -212,21 +268,21 @@ const styles = StyleSheet.create({
     },
     actions: {
         flexDirection: 'row',
-        gap: 10,
+        gap: ox(10),
     },
     primaryBtn: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: ox(8),
         backgroundColor: '#FFFFFF',
-        borderRadius: 14,
-        paddingVertical: 14,
+        borderRadius: ox(14),
+        paddingVertical: ox(14),
     },
     primaryBtnText: {
         color: '#111827',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     secondaryBtn: {
@@ -234,16 +290,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        borderRadius: 14,
-        paddingVertical: 14,
+        gap: ox(8),
+        borderRadius: ox(14),
+        paddingVertical: ox(14),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     secondaryBtnText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
     },
     btnDisabled: {

@@ -63,7 +63,12 @@ export function mergeFeedContentPrefs(local: FeedContentPrefs, remote: FeedConte
     };
 }
 
-export function shouldFilterFeedPost(post: Post, prefs: FeedContentPrefs): boolean {
+export function shouldFilterFeedPost(
+    post: Post,
+    prefs: FeedContentPrefs,
+    opts?: { isProtectedDevMockVideo?: (post: Post) => boolean },
+): boolean {
+    if (opts?.isProtectedDevMockVideo?.(post)) return false;
     const handle = normalizeFeedHandle(post.userHandle || '');
     if (handle && (prefs.mutedHandles.has(handle) || prefs.blockedHandles.has(handle))) return true;
     if (post.id && prefs.hiddenPostIds.has(post.id)) return true;
@@ -71,6 +76,10 @@ export function shouldFilterFeedPost(post: Post, prefs: FeedContentPrefs): boole
     return false;
 }
 
-export function filterPostsByContentPrefs(posts: Post[], prefs: FeedContentPrefs): Post[] {
-    return posts.filter((p) => !shouldFilterFeedPost(p, prefs));
+export function filterPostsByContentPrefs(
+    posts: Post[],
+    prefs: FeedContentPrefs,
+    opts?: { isProtectedDevMockVideo?: (post: Post) => boolean },
+): Post[] {
+    return posts.filter((p) => !shouldFilterFeedPost(p, prefs, opts));
 }

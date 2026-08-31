@@ -5,6 +5,8 @@ import { isTextOnlyPost } from './effectiveTextPostStyleNative';
 export type SharePostToStoriesPayload = {
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
+    /** Prefer post.videoPosterUrl so Stories 24 rail does not fall back to demo BBB. */
+    videoPosterUrl?: string;
     shareText: string;
     isTextOnlyShare: boolean;
     textStyle?: Post['textStyle'];
@@ -31,6 +33,12 @@ export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPa
     const hasRealMediaItems = carouselMedia.length > 0 || Boolean(post.mediaUrl);
     const isTextOnlyShare = isTextOnlyPost(post);
     const shareText = (truncatedText || 'Shared from feed').trim();
+    const videoPosterUrl =
+        (typeof post.videoPosterUrl === 'string' && post.videoPosterUrl.trim()) ||
+        (firstCarousel?.type === 'video' &&
+            typeof (firstCarousel as { posterUrl?: string }).posterUrl === 'string' &&
+            (firstCarousel as { posterUrl?: string }).posterUrl?.trim()) ||
+        undefined;
 
     if (!mediaUrl && !isTextOnlyShare && !hasRealMediaItems) {
         mediaUrl = undefined;
@@ -40,6 +48,7 @@ export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPa
     return {
         mediaUrl: isTextOnlyShare ? undefined : mediaUrl,
         mediaType: isTextOnlyShare ? undefined : mediaType,
+        videoPosterUrl: isTextOnlyShare ? undefined : videoPosterUrl || undefined,
         shareText,
         isTextOnlyShare,
         textStyle:
@@ -53,7 +62,7 @@ export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPa
                 : undefined),
         locationLabel: post.locationLabel,
         venue: post.venue,
-        sharedFromPost: isTextOnlyShare ? undefined : post.id,
+        sharedFromPost: post.id,
         sharedFromUser: post.userHandle,
     };
 }

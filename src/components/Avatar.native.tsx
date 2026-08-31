@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -8,9 +8,10 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
+import PassportTravelingBorder from './PassportTravelingBorder.native';
+import { resolveAvatarImageUri } from '../api/users';
 
 export default function Avatar({
     src,
@@ -18,17 +19,25 @@ export default function Avatar({
     size = 'md',
     hasStory = false,
     onClick,
+    handle,
 }: AvatarProps) {
     const { dim, fontSize } = resolveAvatarDimensions(size);
     const initials = getAvatarInitials(name);
+    const handleHint =
+        handle || (typeof name === 'string' && name.includes('@') ? name : undefined);
+    const imageUri = resolveAvatarImageUri(src, handleHint);
     const [imageFailed, setImageFailed] = useState(false);
-    const showImage = src && !imageFailed;
+    const showImage = Boolean(imageUri) && !imageFailed;
+
+    useEffect(() => {
+        setImageFailed(false);
+    }, [imageUri]);
 
     const inner = (
         <View style={[styles.innerClip, { width: dim, height: dim, borderRadius: dim / 2 }]}>
             {showImage ? (
                 <Image
-                    source={{ uri: src }}
+                    source={{ uri: imageUri }}
                     style={StyleSheet.absoluteFill}
                     resizeMode="cover"
                     onError={() => setImageFailed(true)}
@@ -46,24 +55,15 @@ export default function Avatar({
         </View>
     );
 
+    const ringSize = dim + 4;
     const body = hasStory ? (
-        <LinearGradient
-            colors={['#f6e27a', '#d4af37', '#f4f4f4', '#bfc5cc', '#ffe8a3', '#d4af37']}
-            start={{ x: 0, y: 1 }}
-            end={{ x: 1, y: 0 }}
-            style={[
-                styles.storyRing,
-                {
-                    width: dim + 4,
-                    height: dim + 4,
-                    borderRadius: (dim + 4) / 2,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                },
-            ]}
+        <PassportTravelingBorder
+            borderRadius={ringSize / 2}
+            borderWidth={2}
+            style={{ width: ringSize, height: ringSize }}
         >
             {inner}
-        </LinearGradient>
+        </PassportTravelingBorder>
     ) : (
         inner
     );
@@ -94,11 +94,6 @@ const styles = StyleSheet.create({
     },
     pressed: {
         opacity: 0.85,
-    },
-    storyRing: {
-        padding: 2,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     innerClip: {
         overflow: 'hidden',

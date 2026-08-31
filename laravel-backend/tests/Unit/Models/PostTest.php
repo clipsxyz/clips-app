@@ -47,15 +47,24 @@ class PostTest extends TestCase
 
     public function test_by_location_scope_filters_by_location_label(): void
     {
-        $user = User::factory()->create();
+        $dublinUser = User::factory()->create([
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $londonUser = User::factory()->create([
+            'location_local' => 'London',
+            'location_regional' => 'London',
+            'location_national' => 'UK',
+        ]);
 
         $dublinPost = Post::factory()->create([
-            'user_id' => $user->id,
+            'user_id' => $dublinUser->id,
             'location_label' => 'Dublin, Ireland',
         ]);
 
         Post::factory()->create([
-            'user_id' => $user->id,
+            'user_id' => $londonUser->id,
             'location_label' => 'London, UK',
         ]);
 
@@ -63,6 +72,66 @@ class PostTest extends TestCase
 
         $this->assertContains($dublinPost->id, $results);
         $this->assertCount(1, $results);
+    }
+
+    public function test_by_location_ireland_includes_cork_authors(): void
+    {
+        $corkUser = User::factory()->create([
+            'location_local' => 'Cork',
+            'location_regional' => 'Cork',
+            'location_national' => null,
+        ]);
+        $londonUser = User::factory()->create([
+            'location_local' => 'London',
+            'location_regional' => 'London',
+            'location_national' => 'UK',
+        ]);
+
+        $corkPost = Post::factory()->create([
+            'user_id' => $corkUser->id,
+            'location_label' => 'Cork',
+        ]);
+        Post::factory()->create([
+            'user_id' => $londonUser->id,
+            'location_label' => 'London, UK',
+        ]);
+
+        $results = Post::byLocation('Ireland')->pluck('id')->all();
+
+        $this->assertContains($corkPost->id, $results);
+        $this->assertCount(1, $results);
+    }
+
+    public function test_by_location_usa_includes_new_york_state_authors(): void
+    {
+        $nyUser = User::factory()->create([
+            'location_local' => 'New York State',
+            'location_regional' => 'New York State',
+            'location_national' => null,
+        ]);
+        $dublinUser = User::factory()->create([
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+
+        $nyPost = Post::factory()->create([
+            'user_id' => $nyUser->id,
+            'location_label' => 'New York State',
+        ]);
+        Post::factory()->create([
+            'user_id' => $dublinUser->id,
+            'location_label' => 'Dublin, Ireland',
+        ]);
+
+        $results = Post::byLocation('USA')->pluck('id')->all();
+
+        $this->assertContains($nyPost->id, $results);
+        $this->assertCount(1, $results);
+
+        $mangled = Post::byLocation('Usa')->pluck('id')->all();
+        $this->assertContains($nyPost->id, $mangled);
+        $this->assertCount(1, $mangled);
     }
 
     public function test_is_liked_by_returns_true_when_like_exists(): void
@@ -122,6 +191,79 @@ class PostTest extends TestCase
         $author->followers()->attach($follower->id, ['status' => 'accepted']);
 
         $this->assertTrue($post->fresh()->isFollowingAuthor($follower));
+    }
+
+    public function test_following_scope_uses_accepted_user_follows_rows(): void
+    {
+        $author = User::factory()->create();
+        $follower = User::factory()->create();
+        $stranger = User::factory()->create();
+        $followedPost = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+        ]);
+        Post::factory()->create([
+            'user_id' => $stranger->id,
+            'user_handle' => $stranger->handle,
+        ]);
+
+        \Illuminate\Support\Facades\DB::table('user_follows')->insert([
+            'follower_id' => $follower->id,
+            'following_id' => $author->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $ids = Post::query()->following($follower->id)->pluck('id')->all();
+
+        $this->assertSame([$followedPost->id], $ids);
+    }
+
+    public function test_resolved_thumbnail_url_prefers_column_then_media_items_poster(): void
+    {
+        $user = User::factory()->create();
+        $fromColumn = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => 'https://example.com/from-column.jpg',
+        ]);
+        $fromItems = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => null,
+            'media_items' => [[
+                'url' => 'https://example.com/clip.mp4',
+                'type' => 'video',
+                'posterUrl' => 'https://example.com/from-items.jpg',
+            ]],
+        ]);
+
+        $this->assertSame('https://example.com/from-column.jpg', $fromColumn->resolvedThumbnailUrl());
+        $this->assertSame('https://example.com/from-items.jpg', $fromItems->resolvedThumbnailUrl());
+    }
+
+    public function test_collection_cover_url_prefers_still_then_media(): void
+    {
+        $user = User::factory()->create();
+        $withStill = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => 'https://example.com/poster.jpg',
+        ]);
+        $videoOnly = Post::factory()->create([
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => null,
+            'media_items' => null,
+        ]);
+
+        $this->assertSame('https://example.com/poster.jpg', $withStill->collectionCoverUrl());
+        $this->assertSame('https://example.com/clip.mp4', $videoOnly->collectionCoverUrl());
     }
 }
 

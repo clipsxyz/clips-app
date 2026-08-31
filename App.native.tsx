@@ -4,22 +4,27 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StatusBar, Text, useColorScheme, View } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorScheme, View, DeviceEventEmitter } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import { NavigationContainer } from '@react-navigation/native';
+import { rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
 import { getUnreadNotificationCount } from './src/api/notifications';
-import { navigateMainTab } from './src/navigation/mainTabs';
+import {
+  HomeTabStack,
+  BoostTabStack,
+  SearchTabStack,
+  InboxTabStack,
+} from './src/navigation/mainTabStacks.native';
 import MainTabBar from './src/components/MainTabBar.native';
 
 // Import screens
-import FeedScreen from './src/screens/FeedScreen';
 import BoostScreen from './src/screens/BoostScreen';
-import SearchScreen from './src/screens/SearchScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
 import ProfileCoverScreen from './src/screens/ProfileCoverScreen';
 import LiveStreamScreen from './src/screens/LiveStreamScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -29,12 +34,13 @@ import StoriesScreen from './src/screens/StoriesScreen';
 import ViewProfileScreen from './src/screens/ViewProfileScreen';
 import CreateScreen from './src/screens/CreateScreen';
 import InstantCreateScreen from './src/screens/InstantCreateScreen';
+import { GAZETTEER_ABYSS } from './src/theme/gazetteerAmbientNative';
 import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
 import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
 import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
+import StoryLinkCreateScreen from './src/screens/StoryLinkCreateScreen';
 import TextOnlyPostDetailsScreen from './src/screens/TextOnlyPostDetailsScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
-import InboxScreen from './src/screens/InboxScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 import VideoPlaybackSettingsScreen from './src/screens/VideoPlaybackSettingsScreen';
@@ -46,9 +52,11 @@ import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import ClipScreen from './src/screens/ClipScreen';
 import ClipPollScreen from './src/screens/ClipPollScreen';
+import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
+import { schedulePushNotificationNavigation } from './src/utils/pushNotificationNavigationNative';
 import UploadProgressToast from './src/components/UploadProgressToast.native';
 
 const Tab = createBottomTabNavigator();
@@ -90,55 +98,15 @@ class AppErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
-const navigationRef = createNavigationContainerRef();
 
 const TAB_BAR_STYLE = {
-  backgroundColor: 'rgba(11, 7, 17, 0.94)',
+  backgroundColor: '#030712',
   borderTopColor: 'rgba(255, 255, 255, 0.1)',
   borderTopWidth: 1,
 } as const;
 
-type FeedHomeBoundaryState = { error: Error | null };
-
-/** Catches Home feed crashes so the tab shows an error instead of a blank screen. */
-class FeedHomeErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  FeedHomeBoundaryState
-> {
-  state: FeedHomeBoundaryState = { error: null };
-
-  static getDerivedStateFromError(error: Error): FeedHomeBoundaryState {
-    return { error };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error('Home feed render error:', error);
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <View style={{ flex: 1, backgroundColor: '#0b0711', padding: 20, paddingTop: 48 }}>
-          <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
-            Home feed failed
-          </Text>
-          <ScrollView>
-            <Text style={{ color: '#e5e7eb', fontSize: 13 }}>{this.state.error.message}</Text>
-          </ScrollView>
-        </View>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-/** Home uses FeedScreen.tsx (same as web feed logic); wrapped for render-error visibility. */
-function HomeTabScreen(props: React.ComponentProps<typeof FeedScreen>) {
-  return (
-    <FeedHomeErrorBoundary>
-      <FeedScreen {...props} />
-    </FeedHomeErrorBoundary>
-  );
+function CreateTabPlaceholder() {
+  return <View style={styles.createTabPlaceholder} />;
 }
 
 function MainTabs() {
@@ -151,11 +119,12 @@ function MainTabs() {
       return;
     }
     let mounted = true;
+    const handle = user.handle;
     const refresh = async () => {
       try {
         const [notificationUnread, messageUnread] = await Promise.all([
-          getUnreadNotificationCount(user.handle).catch(() => 0),
-          getUnreadTotal(user.handle).catch(() => 0),
+          getUnreadNotificationCount(handle).catch(() => 0),
+          getUnreadTotal(handle).catch(() => 0),
         ]);
         if (mounted) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
       } catch {
@@ -163,10 +132,37 @@ function MainTabs() {
       }
     };
     void refresh();
-    const interval = setInterval(refresh, 12000);
+    const interval = setInterval(() => {
+      void refresh();
+    }, 8000);
+
+    const onInboxUnread = (payload?: { handle?: string; unread?: number }) => {
+      if (payload?.handle && payload.handle !== handle) return;
+      // Prefer live message unread when provided; still refresh notifications.
+      void refresh();
+    };
+    const onNotificationsChanged = (payload?: { handle?: string }) => {
+      if (payload?.handle && payload.handle !== handle) return;
+      void refresh();
+    };
+
+    const subs = [
+      DeviceEventEmitter.addListener('inboxUnreadChanged', onInboxUnread),
+      DeviceEventEmitter.addListener('notificationsUpdated', onNotificationsChanged),
+      DeviceEventEmitter.addListener('notificationCreated', onNotificationsChanged),
+      DeviceEventEmitter.addListener('conversationUpdated', () => {
+        void refresh();
+      }),
+    ];
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+
     return () => {
       mounted = false;
       clearInterval(interval);
+      subs.forEach((s) => s.remove());
+      appStateSub.remove();
     };
   }, [user?.handle]);
 
@@ -175,14 +171,38 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: TAB_BAR_STYLE,
+        sceneStyle: { backgroundColor: GAZETTEER_ABYSS },
+        lazy: true,
       }}
-      tabBar={(props) => <MainTabBar {...props} inboxBadgeCount={inboxBadgeCount} />}
+      tabBar={(props) => (
+        <MainTabBar
+          {...props}
+          inboxBadgeCount={inboxBadgeCount}
+          onCreatePress={() => {
+            if (navigationRef.isReady()) {
+              navigationRef.navigate('InstantCreate' as never);
+            }
+          }}
+        />
+      )}
     >
-      <Tab.Screen name="Home" component={HomeTabScreen} options={{ title: 'Home' }} />
-      <Tab.Screen name="Boost" component={BoostScreen} options={{ title: 'Boost' }} />
-      <Tab.Screen name="Create" component={InstantCreateScreen} options={{ title: 'Create' }} />
-      <Tab.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
-      <Tab.Screen name="Inbox" component={InboxScreen} options={{ title: 'Inbox' }} />
+      <Tab.Screen name="Home" component={HomeTabStack} options={{ title: 'Home' }} />
+      <Tab.Screen
+        name="Boost"
+        component={BoostTabStack}
+        options={{ title: 'Boost', lazy: false }}
+      />
+      <Tab.Screen
+        name="Create"
+        component={CreateTabPlaceholder}
+        options={{ title: 'Create' }}
+      />
+      <Tab.Screen name="Search" component={SearchTabStack} options={{ title: 'Search' }} />
+      <Tab.Screen
+        name="Inbox"
+        component={InboxTabStack}
+        options={{ title: 'Inbox', lazy: false }}
+      />
     </Tab.Navigator>
   );
 }
@@ -191,34 +211,7 @@ function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
 
   const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
-    if (!navigationRef.isReady()) return;
-    const nav = navigationRef as any;
-    const chatGroupId = data.chatGroupId || data.chat_group_id || data.groupId || data.group_id;
-    const fromHandle = data.fromHandle || data.from_handle || data.senderHandle || data.sender_handle;
-    const storyId = data.storyId || data.story_id;
-    const postId = data.postId || data.post_id;
-
-    if (chatGroupId) {
-      nav.navigate('Messages', { chatGroupId, kind: 'group' });
-      return;
-    }
-
-    if (fromHandle && storyId) {
-      nav.navigate('Stories', { openUserHandle: fromHandle, openStoryId: storyId });
-      return;
-    }
-
-    if (fromHandle) {
-      nav.navigate('Messages', { handle: fromHandle });
-      return;
-    }
-
-    if (postId) {
-      nav.navigate('PostDetail', { postId });
-      return;
-    }
-
-    navigateMainTab(nav, 'Inbox', { initialTab: 'notifications' });
+    schedulePushNotificationNavigation(() => navigationRef, data || {});
   }, []);
 
   React.useEffect(() => {
@@ -226,15 +219,28 @@ function App(): React.JSX.Element {
   }, []);
 
   React.useEffect(() => {
-    initializeNotifications({ onNotificationPress: handleNotificationPress }).catch((error) => {
-      console.warn('Native notification initialization failed:', error);
-    });
+    initializeNotifications({ onNotificationPress: handleNotificationPress })
+      .then(() =>
+        import('./src/services/notifications').then((mod) => {
+          const register =
+            'registerFcmTokenForCurrentUser' in mod
+              ? (mod as { registerFcmTokenForCurrentUser?: () => Promise<string | null> })
+                  .registerFcmTokenForCurrentUser
+              : undefined;
+          return register?.();
+        }),
+      )
+      .catch((error) => {
+        console.warn('Native notification initialization failed:', error);
+      });
     return () => teardownNotifications();
   }, [handleNotificationPress]);
 
   return (
     <AppErrorBoundary>
+    <GestureHandlerRootView style={styles.appRoot}>
     <AuthProvider>
+      <BottomSheetModalProvider>
       <SafeAreaProvider>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <UploadProgressToast />
@@ -243,13 +249,12 @@ function App(): React.JSX.Element {
             initialRouteName="Splash"
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: '#0b0711' },
+              contentStyle: { backgroundColor: GAZETTEER_ABYSS },
             }}
           >
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Discover" component={DiscoverScreen} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="ProfileCover" component={ProfileCoverScreen} />
           <Stack.Screen
             name="Boost"
@@ -266,12 +271,27 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="Stories"
             component={StoriesScreen}
-            options={{ presentation: 'fullScreenModal' }}
+            options={({ route }) => ({
+              presentation: 'fullScreenModal',
+              // Story viewer owns horizontal swipe — don't let the stack steal it.
+              gestureEnabled: false,
+              fullScreenGestureEnabled: false,
+              // From Stories 24 rail: no native transition — card morph hands off to fullscreen.
+              animation: (route.params as { fromStories24Rail?: boolean } | undefined)
+                ?.fromStories24Rail
+                ? 'none'
+                : 'default',
+            })}
           />
           <Stack.Screen
             name="Scenes"
             component={ScenesScreen as React.ComponentType}
-            options={{ presentation: 'fullScreenModal' }}
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'fade_from_bottom',
+              animationDuration: 200,
+              contentStyle: { backgroundColor: '#000000' },
+            }}
           />
           <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />
           <Stack.Screen
@@ -282,7 +302,7 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="InstantCreate"
             component={InstantCreateScreen}
-            options={{ presentation: 'modal' }}
+            options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen
             name="GalleryPreview"
@@ -297,7 +317,12 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="TextOnlyCreate"
             component={TextOnlyCreateScreen}
-            options={{ presentation: 'modal' }}
+            options={{ presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="StoryLinkCreate"
+            component={StoryLinkCreateScreen}
+            options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen
             name="TextOnlyPostDetails"
@@ -329,7 +354,16 @@ function App(): React.JSX.Element {
           <Stack.Screen name="Landing" component={LandingScreen} />
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
-          <Stack.Screen name="Clip" component={ClipScreen} />
+          <Stack.Screen
+            name="Clip"
+            component={ClipScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="Story24Composer"
+            component={Story24ComposerScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
           <Stack.Screen
             name="ClipPoll"
             component={ClipPollScreen}
@@ -338,9 +372,22 @@ function App(): React.JSX.Element {
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>
+      </BottomSheetModalProvider>
     </AuthProvider>
+    </GestureHandlerRootView>
     </AppErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  appRoot: {
+    flex: 1,
+    backgroundColor: '#030712',
+  },
+  createTabPlaceholder: {
+    flex: 1,
+    backgroundColor: GAZETTEER_ABYSS,
+  },
+});
 
 export default App;

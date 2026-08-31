@@ -14,7 +14,7 @@ export default function FeedRepeatIcon({
             <Polyline
                 points="17 1 21 5 17 9"
                 stroke={color}
-                strokeWidth={1.75}
+                strokeWidth={1.5}
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />

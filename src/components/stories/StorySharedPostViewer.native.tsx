@@ -6,17 +6,202 @@ import {
     TouchableOpacity,
     StyleSheet,
     ActivityIndicator,
+    Platform,
+    type ImageSourcePropType,
 } from 'react-native';
-import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from '../Avatar';
+import VerifiedBadge from '../VerifiedBadge.native';
+import StorySafeVideo from './StorySafeVideo.native';
 import type { Post, Story } from '../../types';
-import { getPostMediaUrl, isStoryVideo, postHasRealMedia } from '../../utils/storyMediaNative';
+import {
+    getPostMediaUrl,
+    getStoryVideoPosterFallback,
+    getStoryVideoPosterSource,
+    isStoryVideo,
+    postHasRealMedia,
+    resolveStoryMediaUrl,
+    storyVideoSource,
+} from '../../utils/storyMediaNative';
 import { getTextStoryStyle } from '../../utils/storyTextStyleNative';
 import { getAvatarForHandle } from '../../api/users';
 import { timeAgo } from '../../utils/timeAgo';
+import { ox } from '../../constants/nativeOpticalScale';
 
 const SHARED_BACKDROP = ['#0f172a', '#111827', '#1f2937'];
+/** Soft atlas wash behind text-only shares (not IG purple/magenta). */
+const TEXT_SHARE_FALLBACK_BACKDROP = ['#0f2430', '#060d16', '#12263a'];
+
+function resolvePosterSource(
+    mediaUrl?: string | null,
+    post?: Post | null,
+): ImageSourcePropType | undefined {
+    return (
+        getStoryVideoPosterSource(mediaUrl, post) ||
+        (() => {
+            const uri = getStoryVideoPosterFallback(mediaUrl, post);
+            return uri ? { uri } : undefined;
+        })()
+    );
+}
+
+function SharedBackdrop({
+    isVideo,
+    mediaUrl,
+    posterSource,
+}: {
+    isVideo: boolean;
+    mediaUrl: string;
+    posterSource?: ImageSourcePropType;
+}) {
+    // Never mount a second ExoPlayer for backdrop — it fights the card player on Android.
+    // pointerEvents none — TextureView would steal taps meant for the card / modal.
+    if (isVideo && posterSource) {
+        return (
+            <Image
+                source={posterSource}
+                style={[StyleSheet.absoluteFill, styles.backdropMedia]}
+                resizeMode="cover"
+                blurRadius={18}
+                pointerEvents="none"
+            />
+        );
+    }
+    if (isVideo) {
+        return <View style={[StyleSheet.absoluteFill, styles.backdropMedia]} pointerEvents="none" />;
+    }
+    return (
+        <Image
+            source={{ uri: mediaUrl }}
+            style={[StyleSheet.absoluteFill, styles.backdropMedia]}
+            resizeMode="cover"
+            blurRadius={12}
+            pointerEvents="none"
+        />
+    );
+}
+
+function SharedCardMedia({
+    isVideo,
+    mediaUrl,
+    posterSource,
+    isMuted,
+    paused,
+}: {
+    isVideo: boolean;
+    mediaUrl: string;
+    posterSource?: ImageSourcePropType;
+    isMuted: boolean;
+    paused: boolean;
+}) {
+    if (isVideo) {
+        const source = storyVideoSource(mediaUrl);
+        if (source) {
+            return (
+                <View style={styles.cardMediaFill} pointerEvents="none">
+                    <StorySafeVideo
+                        source={source}
+                        posterSource={posterSource}
+                        style={StyleSheet.absoluteFill}
+                        muted={isMuted}
+                        paused={paused}
+                    />
+                </View>
+            );
+        }
+        if (posterSource) {
+            return (
+                <Image
+                    source={posterSource}
+                    style={styles.cardMediaFill}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
+            );
+        }
+    }
+    return (
+        <Image
+            source={{ uri: mediaUrl }}
+            style={styles.cardMediaFill}
+            resizeMode="cover"
+            pointerEvents="none"
+        />
+    );
+}
+
+function SharedPostMediaCard({
+    handle,
+    avatarHandle,
+    caption,
+    imageText,
+    isCarousel,
+    isVideo,
+    mediaUrl,
+    posterSource,
+    isMuted,
+    paused,
+    onPress,
+}: {
+    handle: string;
+    avatarHandle: string;
+    caption: string;
+    imageText: string;
+    isCarousel: boolean;
+    isVideo: boolean;
+    mediaUrl: string;
+    posterSource?: ImageSourcePropType;
+    isMuted: boolean;
+    paused: boolean;
+    onPress: () => void;
+}) {
+    const displayHandle = handle.replace(/^@/, '');
+
+    return (
+        <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.95}>
+            <View style={styles.cardHeader}>
+                <Avatar
+                    src={getAvatarForHandle(avatarHandle)}
+                    name={displayHandle.split('@')[0] || displayHandle}
+                    size={ox(24)}
+                />
+                <Text style={styles.cardHeaderHandle} numberOfLines={1}>
+                    {displayHandle}
+                </Text>
+            </View>
+
+            <View style={styles.cardMediaWrap}>
+                <SharedCardMedia
+                    isVideo={isVideo}
+                    mediaUrl={mediaUrl}
+                    posterSource={posterSource}
+                    isMuted={isMuted}
+                    paused={paused}
+                />
+                {isCarousel ? (
+                    <View style={styles.carouselBadge} pointerEvents="none">
+                        <Icon name="copy-outline" size={ox(14)} color="#FFFFFF" />
+                    </View>
+                ) : null}
+                {!!imageText ? (
+                    <View style={styles.imageTextOverlay} pointerEvents="none">
+                        <Text style={styles.imageText}>{imageText}</Text>
+                    </View>
+                ) : null}
+            </View>
+
+            {!!caption ? (
+                <View style={styles.cardCaption}>
+                    <Text style={styles.cardCaptionText} numberOfLines={2}>
+                        <Text style={styles.cardCaptionHandle}>{displayHandle} </Text>
+                        {caption}
+                    </Text>
+                </View>
+            ) : null}
+        </TouchableOpacity>
+    );
+}
 
 type Props = {
     story: Story;
@@ -35,7 +220,7 @@ export default function StorySharedPostViewer({
     isMuted,
     paused,
     onOpenModal,
-    onOpenProfile,
+    onOpenProfile: _onOpenProfile,
 }: Props) {
     if (story.sharedFromPost && !originalPost && !sharedPostFetchFailed) {
         return (
@@ -45,9 +230,10 @@ export default function StorySharedPostViewer({
         );
     }
 
-    const fallbackUrl = (story.mediaUrl || '').trim();
+    const fallbackUrl = resolveStoryMediaUrl(story.mediaUrl) || '';
     const post = originalPost;
-    const mediaUrl = getPostMediaUrl(post) || fallbackUrl;
+    const mediaUrl = resolveStoryMediaUrl(getPostMediaUrl(post)) || fallbackUrl;
+    const posterSource = resolvePosterSource(mediaUrl || story.mediaUrl, post);
     const hasRealMedia = post ? postHasRealMedia(post) : !!fallbackUrl;
     const isVideo = isStoryVideo(story, post) || (!!fallbackUrl && /\.(mp4|webm|mov|m4v)/i.test(fallbackUrl));
     const caption = (
@@ -62,34 +248,22 @@ export default function StorySharedPostViewer({
     if (story.sharedFromPost && !post && sharedPostFetchFailed && fallbackUrl) {
         return (
             <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
-                {isVideo ? (
-                    <Video
-                        source={{ uri: fallbackUrl }}
-                        style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        resizeMode="cover"
-                        muted
-                        repeat
-                        paused
-                    />
-                ) : (
-                    <Image source={{ uri: fallbackUrl }} style={[StyleSheet.absoluteFill, styles.backdropMedia]} />
-                )}
+                <SharedBackdrop isVideo={isVideo} mediaUrl={fallbackUrl} posterSource={posterSource} />
                 <View style={styles.backdropDim} />
                 <View style={styles.cardColumn}>
-                    <TouchableOpacity style={styles.card} onPress={onOpenModal} activeOpacity={0.95}>
-                        {isVideo ? (
-                            <Video
-                                source={{ uri: fallbackUrl }}
-                                style={styles.cardMedia}
-                                resizeMode="cover"
-                                repeat
-                                muted={isMuted}
-                                paused={paused}
-                            />
-                        ) : (
-                            <Image source={{ uri: fallbackUrl }} style={styles.cardMedia} resizeMode="cover" />
-                        )}
-                    </TouchableOpacity>
+                    <SharedPostMediaCard
+                        handle={handle || story.sharedFromUser || 'post'}
+                        avatarHandle={handle || story.sharedFromUser || ''}
+                        caption={caption}
+                        imageText=""
+                        isCarousel={false}
+                        isVideo={isVideo}
+                        mediaUrl={fallbackUrl}
+                        posterSource={posterSource}
+                        isMuted={isMuted}
+                        paused={paused}
+                        onPress={onOpenModal}
+                    />
                 </View>
             </LinearGradient>
         );
@@ -104,62 +278,26 @@ export default function StorySharedPostViewer({
     }
 
     if (hasRealMedia && mediaUrl) {
+        const imageText = String(post.imageText || '').trim();
+        const isCarousel = (post.mediaItems?.length || 0) > 1;
         return (
             <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
-                {isVideo ? (
-                    <Video
-                        source={{ uri: mediaUrl }}
-                        style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                        resizeMode="cover"
-                        muted
-                        repeat
-                        paused
-                    />
-                ) : (
-                    <Image source={{ uri: mediaUrl }} style={[StyleSheet.absoluteFill, styles.backdropMedia]} />
-                )}
+                <SharedBackdrop isVideo={isVideo} mediaUrl={mediaUrl} posterSource={posterSource} />
                 <View style={styles.backdropDim} />
                 <View style={styles.cardColumn}>
-                    <TouchableOpacity style={styles.card} onPress={onOpenModal} activeOpacity={0.95}>
-                        {isVideo ? (
-                            <Video
-                                source={{ uri: mediaUrl }}
-                                style={styles.cardMedia}
-                                resizeMode="cover"
-                                repeat
-                                muted={isMuted}
-                                paused={paused}
-                            />
-                        ) : (
-                            <Image source={{ uri: mediaUrl }} style={styles.cardMedia} resizeMode="cover" />
-                        )}
-                        <View style={styles.cardChip}>
-                            <Avatar
-                                src={getAvatarForHandle(post.userHandle)}
-                                name={post.userHandle.split('@')[0]}
-                                size="sm"
-                            />
-                            <Text style={styles.cardChipText} numberOfLines={1}>
-                                {post.userHandle}
-                            </Text>
-                        </View>
-                        {!!caption && (
-                            <View style={styles.cardCaption}>
-                                <Text style={styles.cardCaptionText} numberOfLines={2}>
-                                    <Text style={styles.cardCaptionHandle}>{post.userHandle} </Text>
-                                    {caption}
-                                </Text>
-                            </View>
-                        )}
-                    </TouchableOpacity>
-                    {!!handle && (
-                        <TouchableOpacity
-                            style={styles.attribution}
-                            onPress={() => onOpenProfile(handle.replace(/^@/, ''))}
-                        >
-                            <Text style={styles.attributionText}>@{handle.replace(/^@/, '')}</Text>
-                        </TouchableOpacity>
-                    )}
+                    <SharedPostMediaCard
+                        handle={post.userHandle || handle}
+                        avatarHandle={post.userHandle}
+                        caption={caption}
+                        imageText={imageText}
+                        isCarousel={isCarousel}
+                        isVideo={isVideo}
+                        mediaUrl={mediaUrl}
+                        posterSource={posterSource}
+                        isMuted={isMuted}
+                        paused={paused}
+                        onPress={onOpenModal}
+                    />
                 </View>
             </LinearGradient>
         );
@@ -167,30 +305,93 @@ export default function StorySharedPostViewer({
 
     if (post.text) {
         const { gradientColors, color, fontSize } = getTextStoryStyle(story, post);
+        const cleanHandle = (handle || post.userHandle || '').replace(/^@/, '');
+        const bodySize = Math.max(fontSize, ox(18));
+        const backdropColors =
+            gradientColors.length >= 2
+                ? [gradientColors[0], '#060d16', gradientColors[gradientColors.length - 1]]
+                : TEXT_SHARE_FALLBACK_BACKDROP;
+
         return (
-            <View style={styles.textSharedRoot}>
-                <Text style={styles.sharedFromPill}>
-                    Shared from <Text style={styles.sharedFromBold}>@{handle.replace(/^@/, '')}</Text>
-                </Text>
-                <TouchableOpacity style={styles.textCard} onPress={onOpenModal} activeOpacity={0.95}>
-                    <View style={styles.textCardHeader}>
-                        <Avatar
-                            src={getAvatarForHandle(post.userHandle)}
-                            name={post.userHandle.split('@')[0]}
-                            size="sm"
-                        />
-                        <View style={styles.textCardMeta}>
-                            <Text style={styles.textCardHandle}>{post.userHandle}</Text>
-                            {post.createdAt ? (
-                                <Text style={styles.textCardTime}>{timeAgo(post.createdAt)}</Text>
-                            ) : null}
-                        </View>
+            <LinearGradient colors={backdropColors} style={styles.textSharedRoot}>
+                <View style={styles.textSharedVeil} pointerEvents="none" />
+                <View style={styles.textSharedColumn}>
+                    <View style={styles.sharedFromPill}>
+                        <Icon name="return-up-forward-outline" size={ox(12)} color="#9fd4cb" />
+                        <Text style={styles.sharedFromPillText}>
+                            Shared from{' '}
+                            <Text style={styles.sharedFromBold}>@{cleanHandle}</Text>
+                        </Text>
                     </View>
-                    <LinearGradient colors={gradientColors} style={styles.textCardBody}>
-                        <Text style={[styles.textCardBodyText, { color, fontSize }]}>{post.text}</Text>
-                    </LinearGradient>
-                </TouchableOpacity>
-            </View>
+
+                    <TouchableOpacity
+                        style={styles.textCard}
+                        onPress={onOpenModal}
+                        activeOpacity={0.94}
+                    >
+                        <View style={styles.textCardHeader}>
+                            <Avatar
+                                src={getAvatarForHandle(post.userHandle)}
+                                name={post.userHandle.split('@')[0]}
+                                size={ox(36)}
+                            />
+                            <View style={styles.textCardMeta}>
+                                <View style={styles.textCardHandleRow}>
+                                    <Text style={styles.textCardHandle} numberOfLines={1}>
+                                        {post.userHandle}
+                                    </Text>
+                                    <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
+                                </View>
+                                <View style={styles.textCardSubRow}>
+                                    {post.locationLabel ? (
+                                        <>
+                                            <Icon
+                                                name="location-outline"
+                                                size={ox(11)}
+                                                color="#6B7280"
+                                            />
+                                            <Text style={styles.textCardTime} numberOfLines={1}>
+                                                {post.locationLabel}
+                                            </Text>
+                                            {post.createdAt ? (
+                                                <Text style={styles.textCardDot}>·</Text>
+                                            ) : null}
+                                        </>
+                                    ) : null}
+                                    {post.createdAt ? (
+                                        <Text style={styles.textCardTime}>
+                                            {timeAgo(post.createdAt)}
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            </View>
+                        </View>
+
+                        <View style={styles.textCardBodyPad}>
+                            <LinearGradient
+                                colors={
+                                    gradientColors.length >= 2
+                                        ? gradientColors
+                                        : ['#0f2430', '#1a3f3c', '#12263a']
+                                }
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.textCardBody}
+                            >
+                                <View style={styles.textCardAccent} />
+                                <Text
+                                    style={[
+                                        styles.textCardBodyText,
+                                        { color, fontSize: bodySize, lineHeight: bodySize * 1.35 },
+                                    ]}
+                                >
+                                    {post.text}
+                                </Text>
+                            </LinearGradient>
+                        </View>
+                    </TouchableOpacity>
+                </View>
+            </LinearGradient>
         );
     }
 
@@ -217,97 +418,189 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+        paddingHorizontal: 28,
+        paddingVertical: 20,
     },
     card: {
         width: '100%',
-        maxWidth: 280,
-        borderRadius: 16,
+        maxWidth: 300,
+        borderRadius: 12,
         overflow: 'hidden',
-        backgroundColor: '#fff',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.55)',
+        backgroundColor: '#FFFFFF',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(0,0,0,0.08)',
+        shadowColor: '#000',
+        shadowOpacity: 0.35,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: Platform.OS === 'android' ? 10 : 0,
     },
-    cardMedia: {
-        width: '100%',
-        aspectRatio: 9 / 16,
-        maxHeight: 360,
-        backgroundColor: '#111',
-    },
-    cardChip: {
-        position: 'absolute',
-        top: 10,
-        left: 10,
+    cardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        backgroundColor: '#fff',
-        borderRadius: 20,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-    },
-    cardChipText: {
-        color: '#111827',
-        fontSize: 11,
-        fontWeight: '700',
-        maxWidth: 140,
-    },
-    cardCaption: {
-        backgroundColor: '#fff',
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#e5e7eb',
-    },
-    cardCaptionText: { color: '#111827', fontSize: 12, lineHeight: 16 },
-    cardCaptionHandle: { fontWeight: '700' },
-    attribution: {
-        marginTop: 12,
-        backgroundColor: 'rgba(0,0,0,0.6)',
         paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
+        paddingVertical: 8,
+        backgroundColor: '#FFFFFF',
+        gap: 8,
     },
-    attributionText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-    textSharedRoot: {
-        flex: 1,
-        backgroundColor: '#000',
+    cardHeaderHandle: {
+        flexShrink: 1,
+        color: '#111827',
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    cardMediaWrap: {
+        width: '100%',
+        aspectRatio: 4 / 5,
+        backgroundColor: '#111',
+        overflow: 'hidden',
+        position: 'relative',
+    },
+    cardMediaFill: {
+        width: '100%',
+        height: '100%',
+    },
+    carouselBadge: {
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    imageTextOverlay: {
+        position: 'absolute',
+        left: 14,
+        right: 14,
+        bottom: 16,
+        alignItems: 'center',
+    },
+    imageText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+        textAlign: 'center',
+        lineHeight: 19,
+        textShadowColor: 'rgba(0,0,0,0.85)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 5,
+    },
+    cardCaption: {
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 12,
+        paddingTop: 8,
+        paddingBottom: 10,
+    },
+    cardCaptionText: {
+        color: '#111827',
+        fontSize: 12,
+        lineHeight: 16,
+    },
+    cardCaptionHandle: { fontWeight: '700' },
+    textSharedRoot: {
+        flex: 1,
+        width: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    textSharedVeil: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(6, 13, 22, 0.45)',
+    },
+    textSharedColumn: {
+        width: '100%',
+        maxWidth: ox(340),
+        paddingHorizontal: ox(22),
+        alignItems: 'center',
     },
     sharedFromPill: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: 12,
-        marginBottom: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+        marginBottom: ox(14),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(7),
+        borderRadius: ox(999),
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderColor: 'rgba(159, 212, 203, 0.35)',
+        backgroundColor: 'rgba(6, 13, 22, 0.72)',
     },
-    sharedFromBold: { fontWeight: '700' },
+    sharedFromPillText: {
+        color: 'rgba(255,255,255,0.92)',
+        fontSize: ox(12),
+    },
+    sharedFromBold: { fontWeight: '700', color: '#9fd4cb' },
     textCard: {
         width: '100%',
-        maxWidth: 300,
-        borderRadius: 16,
+        borderRadius: ox(20),
         overflow: 'hidden',
-        backgroundColor: '#fff',
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.55)',
+        shadowColor: '#000',
+        shadowOpacity: 0.45,
+        shadowRadius: 24,
+        shadowOffset: { width: 0, height: 12 },
+        elevation: 12,
     },
     textCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-        padding: 12,
+        gap: ox(12),
+        paddingHorizontal: ox(16),
+        paddingTop: ox(16),
+        paddingBottom: ox(12),
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#e5e7eb',
+        borderBottomColor: '#E5E7EB',
+        backgroundColor: '#FFFFFF',
     },
-    textCardMeta: { flex: 1 },
-    textCardHandle: { fontSize: 13, fontWeight: '700', color: '#111827' },
-    textCardTime: { fontSize: 11, color: '#6b7280', marginTop: 2 },
-    textCardBody: { padding: 16, minHeight: 120, justifyContent: 'center' },
-    textCardBodyText: { fontWeight: '600', textAlign: 'left', lineHeight: 22 },
+    textCardMeta: { flex: 1, minWidth: 0 },
+    textCardHandleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+    },
+    textCardHandle: {
+        flexShrink: 1,
+        fontSize: ox(14),
+        fontWeight: '700',
+        color: '#111827',
+    },
+    textCardSubRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(4),
+        marginTop: ox(3),
+    },
+    textCardTime: { fontSize: ox(11), color: '#6B7280', flexShrink: 1 },
+    textCardDot: { fontSize: ox(11), color: '#9CA3AF' },
+    textCardBodyPad: {
+        padding: ox(14),
+        backgroundColor: '#FFFFFF',
+    },
+    textCardBody: {
+        paddingVertical: ox(22),
+        paddingHorizontal: ox(18),
+        minHeight: ox(148),
+        borderRadius: ox(14),
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    textCardAccent: {
+        position: 'absolute',
+        left: 0,
+        top: ox(14),
+        bottom: ox(14),
+        width: 3,
+        borderRadius: 2,
+        backgroundColor: 'rgba(159, 212, 203, 0.85)',
+    },
+    textCardBodyText: {
+        fontWeight: '600',
+        textAlign: 'left',
+        letterSpacing: -0.2,
+    },
 });

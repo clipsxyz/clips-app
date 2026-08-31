@@ -1,8 +1,6 @@
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
-
-function hasAuthToken(): boolean {
-    return typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
-}
+import { hasAuthTokenAsync } from '../utils/authTokenBridge';
+import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 
 export interface ChatMessage {
     id: string;
@@ -24,15 +22,47 @@ export interface ChatMessage {
 type ConversationId = string; // sorted `${a}|${b}`
 
 /** Map Laravel API message to frontend ChatMessage */
-function laravelMsgToChatMessage(m: { id: string; sender_handle: string; text?: string | null; image_url?: string | null; created_at?: string; is_system_message?: boolean }): ChatMessage {
-    return {
-        id: m.id,
-        senderHandle: m.sender_handle,
-        text: m.text ?? undefined,
-        imageUrl: m.image_url ?? undefined,
-        timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-        isSystemMessage: !!m.is_system_message,
-    };
+function mapLaravelReplyTo(raw: unknown): ChatMessage['replyTo'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const nested = (r.reply_to ?? r.replyTo ?? r) as Record<string, unknown> | null;
+  if (!nested || typeof nested !== 'object') return undefined;
+  const messageId = String(nested.message_id ?? nested.messageId ?? '').trim();
+  const text = String(nested.text ?? '');
+  const senderHandle = String(nested.sender_handle ?? nested.senderHandle ?? '').trim();
+  const imageUrlRaw = nested.image_url ?? nested.imageUrl;
+  const imageUrl = typeof imageUrlRaw === 'string' && imageUrlRaw.trim() ? imageUrlRaw : undefined;
+  const mediaTypeRaw = nested.media_type ?? nested.mediaType;
+  const mediaType = mediaTypeRaw === 'video' || mediaTypeRaw === 'image' ? mediaTypeRaw : undefined;
+  if (!messageId && !text.trim() && !senderHandle && !imageUrl) return undefined;
+  return {
+    messageId,
+    text,
+    senderHandle,
+    imageUrl,
+    mediaType,
+  };
+}
+
+function laravelMsgToChatMessage(m: {
+  id: string;
+  sender_handle: string;
+  text?: string | null;
+  image_url?: string | null;
+  created_at?: string;
+  is_system_message?: boolean;
+  reply_to?: unknown;
+  replyTo?: unknown;
+}): ChatMessage {
+  return {
+    id: m.id,
+    senderHandle: m.sender_handle,
+    text: m.text ?? undefined,
+    imageUrl: m.image_url ?? undefined,
+    timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+    isSystemMessage: !!m.is_system_message,
+    replyTo: mapLaravelReplyTo(m.reply_to ?? m.replyTo),
+  };
 }
 
 const conversations = new Map<ConversationId, ChatMessage[]>();
@@ -100,9 +130,25 @@ function persistBlockedMap(): void {
 })();
 
 /** In-memory chat groups when `VITE_USE_LARAVEL_API=false` (local / mock mode). */
-const mockChatGroups = new Map<string, { name: string; avatar_url?: string | null; creatorHandle: string; conversation_id: string }>();
+type MockChatGroupMeta = {
+    name: string;
+    avatar_url?: string | null;
+    creatorHandle: string;
+    conversation_id: string;
+    /** Handles that can see/open this group (includes creator). */
+    memberHandles: string[];
+};
+const mockChatGroups = new Map<string, MockChatGroupMeta>();
 const mockGroupMessageLists = new Map<string, ChatMessage[]>();
 const mockGroupLastReadByUser = new Map<string, number>();
+
+function sameHandle(a: string, b: string): boolean {
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function normalizeInviteHandle(raw: string): string {
+    return raw.trim().replace(/^@+/, '').split(/\s+/)[0] || '';
+}
 
 export function createMockChatGroup(
     name: string,
@@ -112,10 +158,70 @@ export function createMockChatGroup(
     const trimmed = name.trim();
     const id = `mock-cg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const conversation_id = `mock-conv-${id}`;
-    mockChatGroups.set(id, { name: trimmed, avatar_url: avatarUrl || null, creatorHandle, conversation_id });
+    const creator = creatorHandle.trim();
+    mockChatGroups.set(id, {
+        name: trimmed,
+        avatar_url: avatarUrl || null,
+        creatorHandle: creator,
+        conversation_id,
+        memberHandles: [creator],
+    });
     mockGroupMessageLists.set(id, []);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
     return { id, name: trimmed, avatar_url: avatarUrl || null, conversation_id };
+}
+
+/**
+ * Mock invite: add the handle as a group member immediately (no Laravel notifications).
+ * Resolves common short names to known mock users (e.g. sarah → Sarah@Artane).
+ */
+export function mockInviteToChatGroup(
+    groupId: string,
+    inviteeHandleRaw: string,
+    inviterHandle?: string | null,
+): { ok: true; inviteeHandle: string; groupName: string } {
+    const meta = mockChatGroups.get(groupId);
+    if (!meta) {
+        throw new Error('Group not found');
+    }
+    if (inviterHandle && !sameHandle(inviterHandle, meta.creatorHandle)) {
+        throw new Error('Only the group admin can invite people');
+    }
+    let invitee = normalizeInviteHandle(inviteeHandleRaw);
+    if (!invitee) {
+        throw new Error('Enter a username to invite');
+    }
+    // Prefer full mock handles when the user typed a short name.
+    const knownMocks = ['Sarah@Artane', 'Bob@Ireland', 'Alice@Finglas', 'Alice@Dublin'];
+    const resolved =
+        knownMocks.find((h) => sameHandle(h, invitee)) ||
+        knownMocks.find((h) => h.toLowerCase().startsWith(invitee.toLowerCase() + '@')) ||
+        knownMocks.find((h) => h.split('@')[0].toLowerCase() === invitee.toLowerCase());
+    if (resolved) invitee = resolved;
+
+    if (sameHandle(invitee, meta.creatorHandle)) {
+        throw new Error('That person is already in the group');
+    }
+    if (meta.memberHandles.some((h) => sameHandle(h, invitee))) {
+        throw new Error('That person is already in the group');
+    }
+    meta.memberHandles.push(invitee);
+    mockChatGroups.set(groupId, meta);
+
+    const list = mockGroupMessageLists.get(groupId) ?? [];
+    list.push({
+        id: `mock-gm-sys-${Date.now()}`,
+        senderHandle: 'system',
+        text: `${invitee} was added to the group`,
+        timestamp: Date.now(),
+        isSystemMessage: true,
+    });
+    mockGroupMessageLists.set(groupId, list);
+    dispatchBrowserEvent('conversationUpdated', {
+        chat_group_id: groupId,
+        chatGroupId: groupId,
+    });
+    return { ok: true, inviteeHandle: invitee, groupName: meta.name };
 }
 
 /** ChatGroupSummary-shaped rows for InviteToGroupModal / fetchMyChatGroups in mock mode. */
@@ -131,16 +237,16 @@ export function listMockChatGroupsAsSummaries(viewerHandle: string): Array<{
 }> {
     const h = viewerHandle.trim();
     return Array.from(mockChatGroups.entries())
-        .filter(([, meta]) => meta.creatorHandle === h)
+        .filter(([, meta]) => meta.memberHandles.some((m) => sameHandle(m, h)))
         .map(([id, meta]) => ({
             id,
             name: meta.name,
             avatar_url: meta.avatar_url || null,
             conversation_id: meta.conversation_id,
             creator_id: 'mock',
-            is_admin: true,
-            role: 'admin',
-            member_count: 1,
+            is_admin: sameHandle(meta.creatorHandle, h),
+            role: sameHandle(meta.creatorHandle, h) ? 'admin' : 'member',
+            member_count: meta.memberHandles.length,
         }));
 }
 
@@ -150,13 +256,13 @@ export function mockLeaveChatGroup(groupId: string): void {
     for (const key of Array.from(mockGroupLastReadByUser.keys())) {
         if (key.endsWith(`::${groupId}`)) mockGroupLastReadByUser.delete(key);
     }
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 function buildMockGroupConversationSummaries(forHandle: string): ConversationSummary[] {
     const out: ConversationSummary[] = [];
     mockChatGroups.forEach((meta, id) => {
-        if (meta.creatorHandle !== forHandle) return;
+        if (!meta.memberHandles.some((m) => sameHandle(m, forHandle))) return;
         const msgs = mockGroupMessageLists.get(id) ?? [];
         const sorted = msgs.slice().sort((m1, m2) => m2.timestamp - m1.timestamp);
         const last = sorted[0];
@@ -197,7 +303,7 @@ export async function fetchConversationMessagesPage(
     cursor: string | null = null,
     limit: number = 50,
 ): Promise<ConversationMessagesPage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const page = await apiClient.fetchConversationPage(b, cursor, limit);
@@ -224,7 +330,7 @@ export async function fetchConversationMessagesPage(
 }
 
 export async function fetchConversation(a: string, b: string): Promise<ChatMessage[]> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
@@ -260,7 +366,7 @@ export async function fetchConversation(a: string, b: string): Promise<ChatMessa
 }
 
 export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number; sourcePostId?: string }): Promise<ChatMessage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const raw = await apiClient.sendMessage(to, {
@@ -268,8 +374,21 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
                 source_post_id: message.sourcePostId ?? undefined,
+                reply_to: message.replyTo
+                    ? {
+                          message_id: message.replyTo.messageId,
+                          text: message.replyTo.text,
+                          sender_handle: message.replyTo.senderHandle,
+                          image_url: message.replyTo.imageUrl,
+                          media_type: message.replyTo.mediaType,
+                      }
+                    : undefined,
             });
-            return laravelMsgToChatMessage(raw);
+            const mapped = laravelMsgToChatMessage(raw);
+            return {
+                ...mapped,
+                replyTo: mapped.replyTo || message.replyTo,
+            };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             // Rethrow so caller (e.g. direct share) can show error and put link in input; don't fall through to mock
@@ -302,16 +421,23 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     unreadByHandle.set(to, await computeUnreadTotal(to));
 
     // Create notifications for incoming messages unless this thread is muted by receiver.
+    // Story context messages may be image-only — still notify (Instagram story reply/reaction).
     const receiverMutedThread = mutedConversations.get(to)?.has(from) ?? false;
-    if (!message.isSystemMessage && message.text && !receiverMutedThread) {
+    const shouldNotify =
+        !message.isSystemMessage &&
+        !receiverMutedThread &&
+        Boolean(message.text?.trim() || message.storyId || message.imageUrl);
+    if (shouldNotify) {
         // Dynamically import to avoid circular dependency
         const { createNotification, isStickerMessage, isReplyToPost } = await import('./notifications');
         
         // Determine notification type
         let notificationType: 'sticker' | 'reply' | 'dm';
-        if (isStickerMessage(message.text)) {
+        if (message.storyId) {
+            notificationType = 'reply';
+        } else if (message.text && isStickerMessage(message.text)) {
             notificationType = 'sticker';
-        } else if (isReplyToPost(message.text)) {
+        } else if (message.text && isReplyToPost(message.text)) {
             notificationType = 'reply';
         } else {
             notificationType = 'dm';
@@ -322,7 +448,9 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
             type: notificationType,
             fromHandle: from,
             toHandle: to,
-            message: message.text,
+            message:
+                message.text?.trim() ||
+                (message.storyId ? 'Replied to your story' : message.imageUrl ? 'Sent a photo' : ''),
             storyId: message.storyId,
             imageUrl: message.storyId ? message.imageUrl : undefined,
             storyContextText: message.storyContextText,
@@ -335,9 +463,9 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     emitMessage(from, to, msg);
     emitInboxUnreadChanged(to, unreadByHandle.get(to) || 0);
     
-    // Also dispatch Custom Events as fallback for compatibility
-    window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: msg } }));
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: to, unread: unreadByHandle.get(to) || 0 } }));
+    // Also dispatch Custom Events as fallback for web compatibility.
+    dispatchBrowserEvent('conversationUpdated', { participants: [from, to], message: msg });
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: to, unread: unreadByHandle.get(to) || 0 });
     return msg;
 }
 
@@ -371,13 +499,13 @@ export async function editMessage(messageId: string, newText: string, from: stri
     conversations.set(id, list);
     
     // Dispatch event for UI update
-    window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: updatedMessage } }));
+    dispatchBrowserEvent('conversationUpdated', { participants: [from, to], message: updatedMessage });
     
     return updatedMessage;
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
@@ -394,7 +522,7 @@ export async function getUnreadTotal(handle: string): Promise<number> {
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
     unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             await apiClient.markConversationRead(otherHandle);
@@ -409,7 +537,7 @@ export async function markConversationRead(selfHandle: string, otherHandle: stri
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
     const { emitInboxUnreadChanged } = await import('../services/socketio');
     emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
 }
 
 export async function markConversationUnread(selfHandle: string, otherHandle: string): Promise<void> {
@@ -427,8 +555,8 @@ export async function markConversationUnread(selfHandle: string, otherHandle: st
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
     const { emitInboxUnreadChanged } = await import('../services/socketio');
     emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
+    dispatchBrowserEvent('conversationUpdated');
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
 }
 
 export interface ConversationSummary {
@@ -460,7 +588,7 @@ export async function fetchGroupThreadMessagesPage(
     cursor: string | null = null,
     limit: number = 50,
 ): Promise<GroupThreadMessagesPage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const page = (await apiClient.fetchGroupConversationPage(groupId, cursor, limit)) as {
@@ -505,7 +633,7 @@ export async function fetchGroupChatMessages(_viewerHandle: string, groupId: str
 
 /** Group thread payload from GET /messages/group/:id (name + messages). */
 export async function fetchGroupThread(groupId: string): Promise<{ groupName: string; groupAvatarUrl?: string | null; messages: ChatMessage[] }> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
@@ -565,15 +693,28 @@ export async function appendGroupChatMessage(
     groupId: string,
     message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number },
 ): Promise<ChatMessage> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const raw = await apiClient.sendGroupMessage(groupId, {
                 text: message.text ?? undefined,
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
+                reply_to: message.replyTo
+                    ? {
+                          message_id: message.replyTo.messageId,
+                          text: message.replyTo.text,
+                          sender_handle: message.replyTo.senderHandle,
+                          image_url: message.replyTo.imageUrl,
+                          media_type: message.replyTo.mediaType,
+                      }
+                    : undefined,
             });
-            return laravelMsgToChatMessage(raw);
+            const mapped = laravelMsgToChatMessage(raw);
+            return {
+                ...mapped,
+                replyTo: mapped.replyTo || message.replyTo,
+            };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             throw e;
@@ -595,16 +736,16 @@ export async function appendGroupChatMessage(
     const list = mockGroupMessageLists.get(groupId) ?? [];
     list.push(msg);
     mockGroupMessageLists.set(groupId, list);
-    window.dispatchEvent(
-        new CustomEvent('conversationUpdated', {
-            detail: { chat_group_id: groupId, chatGroupId: groupId, message: msg },
-        }),
-    );
+    dispatchBrowserEvent('conversationUpdated', {
+        chat_group_id: groupId,
+        chatGroupId: groupId,
+        message: msg,
+    });
     return msg;
 }
 
 export async function markGroupConversationReadById(groupId: string, viewerHandle?: string): Promise<void> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             await apiClient.markGroupConversationRead(groupId);
@@ -618,11 +759,11 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
     const t = msgs.length ? Math.max(...msgs.map((m) => m.timestamp)) : Date.now();
     const v = viewerHandle?.trim();
     if (v) mockGroupLastReadByUser.set(`${v}::${groupId}`, t);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
-    if (isLaravelApiEnabled() && hasAuthToken()) {
+    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
@@ -691,7 +832,8 @@ export async function listConversations(forHandle: string): Promise<Conversation
         if (a !== forHandle && b !== forHandle) return;
         const other = a === forHandle ? b : a;
         const sorted = msgs.slice().sort((m1, m2) => m2.timestamp - m1.timestamp);
-        const last = sorted[0];
+        // Prefer last real message for inbox preview (skip system echoes).
+        const last = sorted.find((m) => !m.isSystemMessage) || sorted[0];
         const lastRead = lastReadByThread.get(`${forHandle}::${other}`) || 0;
         const unread = sorted.filter(m => m.senderHandle !== forHandle && m.timestamp > lastRead && !m.isSystemMessage).length;
         const existing = summaries.get(other) || { last: undefined, unread: 0 };
@@ -739,7 +881,7 @@ export async function pinConversation(userHandle: string, otherHandle: string): 
     pinnedConversations.set(userHandle, pinned);
     const { emitConversationUpdate } = await import('../services/socketio');
     emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'pin' });
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function unpinConversation(userHandle: string, otherHandle: string): Promise<void> {
@@ -749,7 +891,7 @@ export async function unpinConversation(userHandle: string, otherHandle: string)
         pinnedConversations.set(userHandle, pinned);
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unpin' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -758,7 +900,7 @@ export async function addMessageRequest(recipientHandle: string, senderHandle: s
     const requests = messageRequests.get(recipientHandle) || new Set<string>();
     requests.add(senderHandle);
     messageRequests.set(recipientHandle, requests);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 // Accept message request (when user accepts/follows)
@@ -769,7 +911,7 @@ export async function acceptMessageRequest(userHandle: string, otherHandle: stri
         messageRequests.set(userHandle, requests);
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'accept' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -779,7 +921,7 @@ export async function muteConversation(userHandle: string, otherHandle: string):
     muted.add(otherHandle);
     mutedConversations.set(userHandle, muted);
     persistMuteMap();
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function unmuteConversation(userHandle: string, otherHandle: string): Promise<void> {
@@ -790,7 +932,7 @@ export async function unmuteConversation(userHandle: string, otherHandle: string
         persistMuteMap();
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unmute' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -827,7 +969,7 @@ export async function blockUser(userHandle: string, blockedHandle: string): Prom
     // Recompute unread
     unreadByHandle.set(userHandle, await computeUnreadTotal(userHandle));
     
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    dispatchBrowserEvent('conversationUpdated');
 }
 
 export async function unblockUser(userHandle: string, blockedHandle: string): Promise<void> {
@@ -838,7 +980,7 @@ export async function unblockUser(userHandle: string, blockedHandle: string): Pr
         persistBlockedMap();
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, blockedHandle], updateType: 'unblock' });
-        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+        dispatchBrowserEvent('conversationUpdated');
     }
 }
 
@@ -874,8 +1016,8 @@ export async function deleteConversation(userHandle: string, otherHandle: string
     const { emitConversationUpdate, emitInboxUnreadChanged } = await import('../services/socketio');
     emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'delete' });
     emitInboxUnreadChanged(userHandle, unreadByHandle.get(userHandle) || 0);
-    window.dispatchEvent(new CustomEvent('conversationUpdated'));
-    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: userHandle, unread: unreadByHandle.get(userHandle) || 0 } }));
+    dispatchBrowserEvent('conversationUpdated');
+    dispatchBrowserEvent('inboxUnreadChanged', { handle: userHandle, unread: unreadByHandle.get(userHandle) || 0 });
 }
 
 async function computeUnreadTotal(handle: string): Promise<number> {

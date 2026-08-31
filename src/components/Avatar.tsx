@@ -1,6 +1,8 @@
 import React from 'react';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
+import { resolveAvatarImageUri } from '../api/users';
+import { PASSPORT_TRAVELING_BORDER_COLORS } from '../utils/discoverAmbientPalette';
 
 export default function Avatar({
     src,
@@ -9,10 +11,14 @@ export default function Avatar({
     className = '',
     hasStory = false,
     onClick,
+    handle,
 }: AvatarProps) {
     const initials = getAvatarInitials(name);
     const isNumericSize = typeof size === 'number';
     const { dim, fontSize } = isNumericSize ? resolveAvatarDimensions(size) : { dim: 0, fontSize: 14 };
+    const handleHint =
+        handle || (typeof name === 'string' && name.includes('@') ? name : undefined);
+    const imageSrc = resolveAvatarImageUri(src, handleHint);
 
     const sizeClasses = {
         sm: 'w-8 h-8 text-xs',
@@ -27,9 +33,9 @@ export default function Avatar({
 
     const avatarContent = (
         <>
-            {src ? (
+            {imageSrc ? (
                 <img
-                    src={src}
+                    src={imageSrc}
                     alt={`${name}'s profile picture`}
                     className="w-full h-full object-cover rounded-full"
                     onError={(e) => {
@@ -56,14 +62,14 @@ export default function Avatar({
         ? (e: React.MouseEvent<HTMLButtonElement>) => onClick(e)
         : undefined;
 
-    // Gold + silver metallic palette for "has story" ring.
     const storyRingStyle = {
-        background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)',
+        background: `conic-gradient(${PASSPORT_TRAVELING_BORDER_COLORS.join(', ')})`,
+        animation: 'gazetteer-story-ring-spin 9s linear infinite',
     };
 
     const inner = hasStory ? (
         <>
-            <div className="absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
+            <div className="gazetteer-story-ring absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
                 <div className="w-full h-full rounded-full bg-black" />
             </div>
             <div

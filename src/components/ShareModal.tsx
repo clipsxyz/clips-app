@@ -7,21 +7,23 @@ import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
-import { getFollowedUsers, regeneratePublicShareToken } from '../api/posts';
+import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
 import * as apiClient from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import { buildPublicPostUrl } from '../utils/publicShare';
 import Avatar from './Avatar';
 import type { Post } from '../types';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 
 interface ShareModalProps {
     isOpen: boolean;
     onClose: () => void;
     post: Post;
+    onShareSuccess?: (postId: string) => void;
 }
 
-const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
+const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
     const [copied, setCopied] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [followedHandles, setFollowedHandles] = useState<string[]>([]);
@@ -97,12 +99,24 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
 
     if (!isOpen) return null;
 
+    const recordShare = async () => {
+        if (!user?.id || !post.id) return;
+        try {
+            await incrementShares(String(user.id), String(post.id));
+            window.dispatchEvent(new CustomEvent(`shareAdded-${post.id}`));
+            onShareSuccess?.(String(post.id));
+        } catch (err) {
+            console.warn('incrementShares failed:', err);
+        }
+    };
+
     const handleCopyLink = async () => {
         try {
             await navigator.clipboard.writeText(postUrl);
             setCopied(true);
             showToast?.('Link copied!');
             setTimeout(() => setCopied(false), 2000);
+            await recordShare();
         } catch (err) {
             console.error('Failed to copy link:', err);
         }
@@ -225,6 +239,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             );
             overlay.success('Shared to Stories 24.');
             showToast?.('You shared this to Stories 24!');
+            await recordShare();
         } catch (e) {
             console.error('Failed to share to clips:', e);
             if (overlay) {
@@ -258,6 +273,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         case 'sms':
             shareUrl = `sms:?body=${encodedText}%20${encodedUrl}`;
             window.location.href = shareUrl;
+            // Do not recordShare — leaving to SMS does not confirm a send.
             return;
         case 'threads':
             shareUrl = `https://www.threads.net/intent/post?text=${encodedText}%20${encodedUrl}`;
@@ -265,6 +281,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         default:
             return;
     }
+    // Opening an intent/popup is not a completed share (blockers / cancel still fire).
     window.open(shareUrl, '_blank', 'width=600,height=400');
 };
 
@@ -274,6 +291,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             state: { sharePostUrl: postUrl, sharePostId: post.id }
         });
         showToast?.('Post link ready to send!');
+        // Count when the DM is actually sent (MessagesPage), not when the composer opens.
     };
 
     const q = searchQuery.trim().toLowerCase();
@@ -344,24 +362,26 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     return (
         <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-[280]" onClick={onClose}>
             <div
-                className="bg-gray-900 w-full max-w-md rounded-t-2xl shadow-2xl max-h-[85vh] flex flex-col"
+                className="relative w-full max-w-md overflow-hidden rounded-t-2xl border border-white/10 border-b-0 bg-[#060d16] shadow-2xl max-h-[85vh] flex flex-col"
                 onClick={e => e.stopPropagation()}
             >
+                <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                <div className="relative z-10 flex max-h-[85vh] flex-col">
                 {/* Drag handle */}
                 <div className="flex justify-center pt-3 pb-1">
-                    <div className="w-10 h-1 rounded-full bg-gray-600" />
+                    <div className="w-10 h-1 rounded-full bg-white/30" />
                 </div>
 
                 {/* Search bar */}
                 <div className="px-4 pb-3">
-                    <div className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2.5">
-                        <FiSearch className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div className="flex items-center gap-2 rounded-lg bg-[rgba(15,36,48,0.72)] border border-white/10 px-3 py-2.5">
+                        <FiSearch className="w-5 h-5 text-white/45 flex-shrink-0" />
                         <input
                             type="text"
                             placeholder="Search"
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
-                            className="flex-1 bg-transparent text-white placeholder-gray-500 text-sm outline-none min-w-0"
+                            className="flex-1 bg-transparent text-white placeholder-white/45 text-sm outline-none min-w-0"
                         />
                     </div>
                 </div>
@@ -398,14 +418,14 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                 </div>
 
                 {/* Share to – social logos row (always visible at bottom) */}
-                <div className="border-t border-gray-800 flex-shrink-0 bg-gray-900/95">
+                <div className="border-t border-white/10 flex-shrink-0 bg-[rgba(6,13,22,0.72)]">
                     <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-3">
-                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Share to</p>
+                        <p className="text-xs font-medium text-white/45 uppercase tracking-wide">Share to</p>
                         <button
                             type="button"
                             onClick={() => setShowResetConfirm(true)}
                             disabled={regeneratingToken}
-                            className="text-[11px] text-sky-400 hover:text-sky-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                            className="text-[11px] text-[#3d9b8f] hover:text-[#9fd4cb] disabled:opacity-60 disabled:cursor-not-allowed"
                         >
                             {regeneratingToken ? 'Resetting…' : 'Reset shared link'}
                         </button>
@@ -421,10 +441,10 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                                         if (id === 'copy') return;
                                         onClose();
                                     }}
-                                    className="flex flex-col items-center gap-2 flex-shrink-0 min-w-[56px] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg"
+                                    className="flex flex-col items-center gap-2 flex-shrink-0 min-w-[56px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3d9b8f] rounded-lg"
                                 >
                                     {icon}
-                                    <span className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">
+                                    <span className="text-[10px] sm:text-xs text-white/55 whitespace-nowrap">
                                         {id === 'copy' && copied ? 'Copied!' : label}
                                     </span>
                                 </button>
@@ -432,12 +452,15 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
             {showResetConfirm && (
                 <div className="absolute inset-0 bg-black/70 flex items-center justify-center px-4 z-[290]">
-                    <div className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl">
+                    <div className="relative w-full max-w-sm overflow-hidden rounded-xl border border-white/10 bg-[#060d16] p-4 shadow-2xl">
+                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                        <div className="relative z-10">
                         <h3 className="text-sm font-semibold text-white">Reset shared link?</h3>
-                        <p className="mt-2 text-xs text-gray-300">
+                        <p className="mt-2 text-xs text-white/65">
                             Existing shared URLs for this post will stop working. A new link will be created and copied.
                         </p>
                         <div className="mt-4 flex items-center justify-end gap-2">
@@ -445,7 +468,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                                 type="button"
                                 onClick={() => setShowResetConfirm(false)}
                                 disabled={regeneratingToken}
-                                className="px-3 py-1.5 text-xs rounded-md border border-gray-600 text-gray-200 hover:border-gray-500 disabled:opacity-60"
+                                className="px-3 py-1.5 text-xs rounded-md border border-white/15 text-white/80 hover:bg-white/10 disabled:opacity-60"
                             >
                                 Cancel
                             </button>
@@ -453,10 +476,11 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                                 type="button"
                                 onClick={handleRegenerateLink}
                                 disabled={regeneratingToken}
-                                className="px-3 py-1.5 text-xs rounded-md bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-60"
+                                className="px-3 py-1.5 text-xs rounded-md bg-[#3d9b8f] text-white hover:bg-[#348a7f] disabled:opacity-60"
                             >
                                 {regeneratingToken ? 'Resetting…' : 'Reset link'}
                             </button>
+                        </div>
                         </div>
                     </div>
                 </div>

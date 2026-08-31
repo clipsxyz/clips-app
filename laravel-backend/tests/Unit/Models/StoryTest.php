@@ -36,6 +36,24 @@ class StoryTest extends TestCase
         $this->assertCount(1, $results);
     }
 
+    public function test_active_scope_includes_stories_created_within_24_hours(): void
+    {
+        $user = User::factory()->create();
+        $recent = Story::factory()->forUser($user)->create([
+            'created_at' => now('UTC')->subHours(23),
+            'expires_at' => now('UTC')->subMinutes(5),
+        ]);
+        Story::factory()->forUser($user)->create([
+            'created_at' => now('UTC')->subHours(25),
+            'expires_at' => now('UTC')->addHour(),
+        ]);
+
+        $results = Story::active()->pluck('id')->all();
+
+        $this->assertContains($recent->id, $results);
+        $this->assertCount(1, $results);
+    }
+
     public function test_expired_scope_returns_only_expired_stories(): void
     {
         $user = User::factory()->create();

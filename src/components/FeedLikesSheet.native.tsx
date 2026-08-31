@@ -1,14 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-    Modal,
-    View,
-    Text,
-    TouchableOpacity,
-    FlatList,
-    Pressable,
-    StyleSheet,
-    ActivityIndicator,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {
     fetchPostLikers,
@@ -16,6 +8,20 @@ import {
     type PostLiker,
 } from '../api/postLikers';
 import Avatar from './Avatar';
+import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
+import GazetteerBottomSheetModal, {
+    GAZETTEER_SHEET_PASSPORT,
+} from './GazetteerBottomSheetModal.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+
+const P = {
+    text: '#e8eef2',
+    muted: 'rgba(232, 238, 242, 0.62)',
+    border: 'rgba(255,255,255,0.12)',
+    chipBg: 'rgba(15, 36, 48, 0.72)',
+    accent: PASSPORT_PALETTE.wavePrimary,
+};
 
 type Props = {
     visible: boolean;
@@ -28,6 +34,7 @@ type Props = {
     onVisitProfile?: (handle: string) => void;
 };
 
+/** Feed likes & plays sheet — View Profile passport canvas. */
 export default function FeedLikesSheet({
     visible,
     postId,
@@ -45,7 +52,7 @@ export default function FeedLikesSheet({
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        if (!visible || likeCount <= 0) {
+        if (!visible) {
             setLikers([]);
             setFollowing(new Set());
             setLoading(false);
@@ -93,7 +100,25 @@ export default function FeedLikesSheet({
                 return copy;
             });
             try {
-                await toggleFollowFromLikesSheet(userId, handle, next);
+                const result = await toggleFollowFromLikesSheet(
+                    userId,
+                    handle,
+                    next,
+                    viewerHandle || undefined,
+                );
+                if (result.requested || !result.following) {
+                    setFollowing((prev) => {
+                        const copy = new Set(prev);
+                        copy.delete(handle);
+                        return copy;
+                    });
+                } else if (result.following) {
+                    setFollowing((prev) => {
+                        const copy = new Set(prev);
+                        copy.add(handle);
+                        return copy;
+                    });
+                }
             } catch {
                 setFollowing((prev) => {
                     const copy = new Set(prev);
@@ -103,224 +128,252 @@ export default function FeedLikesSheet({
                 });
             }
         },
-        [following, userId],
+        [following, userId, viewerHandle],
+    );
+
+    const listHeader = useMemo(
+        () => (
+            <View style={styles.sheetChrome}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Likes and plays</Text>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        style={styles.closeBtn}
+                        hitSlop={8}
+                        accessibilityLabel="Close"
+                    >
+                        <Icon name="close" size={16} color={P.muted} />
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.statsRow}>
+                    <View style={styles.stat}>
+                        <FeedLikeThumbsIcon size={16} color="#F472B6" />
+                        <Text style={styles.statLabel}>Likes</Text>
+                        <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.stat}>
+                        <Icon name="eye-outline" size={16} color="#60A5FA" />
+                        <Text style={styles.statLabel}>Views</Text>
+                        <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
+                    </View>
+                </View>
+
+                <View style={styles.listDivider} />
+            </View>
+        ),
+        [onClose, sheetLikes, sheetViews],
+    );
+
+    const renderItem = useCallback(
+        ({ item }: { item: PostLiker }) => {
+            const isSelf =
+                !!viewerHandle && item.handle.toLowerCase() === viewerHandle.toLowerCase();
+            const isFollowing = following.has(item.handle);
+            return (
+                <View style={styles.row}>
+                    <TouchableOpacity
+                        style={styles.rowLeft}
+                        onPress={() => {
+                            onClose();
+                            onVisitProfile?.(item.handle);
+                        }}
+                        disabled={!onVisitProfile}
+                        activeOpacity={0.8}
+                    >
+                        <Avatar
+                            src={item.avatar_url}
+                            name={item.display_name || item.handle.split('@')[0]}
+                            size="sm"
+                        />
+                        <View style={styles.nameCol}>
+                            <Text style={styles.displayName} numberOfLines={1}>
+                                {item.display_name || item.handle}
+                            </Text>
+                            {item.display_name ? (
+                                <Text style={styles.subHandle} numberOfLines={1}>
+                                    {item.handle}
+                                </Text>
+                            ) : null}
+                        </View>
+                    </TouchableOpacity>
+                    {!isSelf ? (
+                        <TouchableOpacity
+                            style={[styles.followBtn, isFollowing && styles.followBtnActive]}
+                            onPress={() => void toggleFollow(item.handle)}
+                        >
+                            <Text
+                                style={[
+                                    styles.followBtnText,
+                                    isFollowing && styles.followBtnTextActive,
+                                ]}
+                            >
+                                {isFollowing ? 'Following' : 'Follow'}
+                            </Text>
+                        </TouchableOpacity>
+                    ) : null}
+                </View>
+            );
+        },
+        [following, onClose, onVisitProfile, toggleFollow, viewerHandle],
     );
 
     return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <Pressable style={styles.backdrop} onPress={onClose}>
-                <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-                    <View style={styles.handleBar} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Likes and views</Text>
-                        <TouchableOpacity onPress={onClose} hitSlop={8}>
-                            <Icon name="close" size={22} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.statsRow}>
-                        <View style={styles.stat}>
-                            <Icon name="heart" size={16} color="#EF4444" />
-                            <Text style={styles.statLabel}>Likes</Text>
-                            <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
-                        </View>
-                        <View style={styles.stat}>
-                            <Icon name="eye-outline" size={16} color="#9CA3AF" />
-                            <Text style={styles.statLabel}>Views</Text>
-                            <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
-                        </View>
-                    </View>
-
-                    {loading ? (
-                        <ActivityIndicator color="#7A8AF0" style={styles.loader} />
-                    ) : (
-                        <FlatList
-                            data={likers}
-                            keyExtractor={(item, index) => `${item.handle}-${index}`}
-                            contentContainerStyle={styles.list}
-                            ListEmptyComponent={
-                                <Text style={styles.empty}>No likes yet</Text>
-                            }
-                            renderItem={({ item }) => {
-                                const isSelf =
-                                    !!viewerHandle &&
-                                    item.handle.toLowerCase() === viewerHandle.toLowerCase();
-                                const isFollowing = following.has(item.handle);
-                                return (
-                                    <View style={styles.row}>
-                                        <TouchableOpacity
-                                            style={styles.rowLeft}
-                                            onPress={() => {
-                                                onClose();
-                                                onVisitProfile?.(item.handle);
-                                            }}
-                                            disabled={!onVisitProfile}
-                                        >
-                                            <Avatar
-                                                src={item.avatar_url}
-                                                name={
-                                                    item.display_name ||
-                                                    item.handle.split('@')[0]
-                                                }
-                                                size={36}
-                                            />
-                                            <View style={styles.nameCol}>
-                                                <Text style={styles.handle} numberOfLines={1}>
-                                                    {item.display_name || item.handle}
-                                                </Text>
-                                                {item.display_name ? (
-                                                    <Text style={styles.subHandle} numberOfLines={1}>
-                                                        {item.handle}
-                                                    </Text>
-                                                ) : null}
-                                            </View>
-                                        </TouchableOpacity>
-                                        {!isSelf ? (
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.followBtn,
-                                                    isFollowing && styles.followBtnActive,
-                                                ]}
-                                                onPress={() => void toggleFollow(item.handle)}
-                                            >
-                                                <Text
-                                                    style={[
-                                                        styles.followBtnText,
-                                                        isFollowing && styles.followBtnTextActive,
-                                                    ]}
-                                                >
-                                                    {isFollowing ? 'Following' : 'Follow'}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ) : null}
-                                    </View>
-                                );
-                            }}
-                        />
-                    )}
-                </Pressable>
-            </Pressable>
-        </Modal>
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            snapPoints={['70%']}
+            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
+        >
+            <PassportSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+                {/*
+                  Column layout (regular View, not BottomSheetView sibling) keeps chrome
+                  pinned while FlatList scrolls below — avoids FlatList painting over header.
+                */}
+                <View style={styles.body}>
+                    {listHeader}
+                    <BottomSheetFlatList
+                        style={styles.listFlex}
+                        data={loading ? [] : likers}
+                        keyExtractor={(item, index) => `${item.handle}-${index}`}
+                        renderItem={renderItem}
+                        contentContainerStyle={styles.list}
+                        showsVerticalScrollIndicator={false}
+                        ListEmptyComponent={
+                            <Text style={styles.empty}>
+                                {loading ? 'Loading…' : 'No likes yet.'}
+                            </Text>
+                        }
+                    />
+                </View>
+            </PassportSheetCanvas>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    backdrop: {
+    canvas: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.55)',
-        justifyContent: 'flex-end',
     },
-    sheet: {
-        maxHeight: '75%',
-        backgroundColor: '#0b1220',
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        paddingBottom: 24,
+    canvasContent: {
+        flex: 1,
     },
-    handleBar: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: '#4B5563',
-        marginTop: 10,
-        marginBottom: 6,
+    body: {
+        flex: 1,
+    },
+    sheetChrome: {
+        zIndex: 2,
+        paddingHorizontal: 16,
+        paddingTop: 4,
+        paddingBottom: 4,
+        // Slight wash so list items never read through the pinned chrome on overscroll.
+        backgroundColor: 'rgba(6, 13, 22, 0.94)',
+    },
+    listFlex: {
+        flex: 1,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingBottom: 8,
+        marginBottom: 12,
     },
     title: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '600',
+        color: P.muted,
+        textTransform: 'uppercase',
+        letterSpacing: 2,
+    },
+    closeBtn: {
+        padding: 6,
+        borderRadius: 999,
     },
     statsRow: {
         flexDirection: 'row',
-        gap: 20,
-        paddingHorizontal: 16,
-        paddingBottom: 12,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.1)',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 16,
     },
     stat: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 8,
     },
     statLabel: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: P.muted,
     },
     statValue: {
         fontSize: 14,
-        fontWeight: '700',
-        color: '#F3F4F6',
+        fontWeight: '600',
+        color: P.text,
     },
-    loader: {
-        paddingVertical: 32,
+    listDivider: {
+        marginHorizontal: -16,
+        marginBottom: 4,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: P.border,
     },
     list: {
         paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 16,
+        paddingBottom: 24,
+        paddingTop: 4,
     },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: 10,
-        gap: 8,
+        paddingVertical: 8,
+        gap: 12,
     },
     rowLeft: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 12,
         minWidth: 0,
     },
     nameCol: {
         flex: 1,
         minWidth: 0,
     },
-    handle: {
+    displayName: {
         fontSize: 14,
-        fontWeight: '600',
-        color: '#F3F4F6',
+        fontWeight: '500',
+        color: P.text,
     },
     subHandle: {
         fontSize: 12,
-        color: '#9CA3AF',
-        marginTop: 2,
+        color: P.muted,
     },
     followBtn: {
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 999,
-        backgroundColor: '#3B82F6',
+        backgroundColor: 'rgba(61,155,143,0.35)',
         borderWidth: 1,
-        borderColor: '#60A5FA',
+        borderColor: 'rgba(61,155,143,0.55)',
     },
     followBtnActive: {
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: P.chipBg,
+        borderColor: P.border,
     },
     followBtnText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '600',
+        color: P.text,
         textTransform: 'uppercase',
-        letterSpacing: 0.4,
+        letterSpacing: 0.8,
     },
     followBtnTextActive: {
-        color: '#D1D5DB',
+        color: P.muted,
     },
     empty: {
         textAlign: 'center',
-        color: '#6B7280',
-        paddingVertical: 24,
+        fontSize: 12,
+        color: P.muted,
+        paddingVertical: 32,
     },
 });

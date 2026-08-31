@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -34,7 +35,11 @@ class Post extends Model
         'text_content',
         'media_url',
         'media_type',
+        'thumbnail_url',
         'location_label',
+        'place_id',
+        'latitude',
+        'longitude',
         'venue',
         'landmark',
         'social_format',
@@ -44,6 +49,7 @@ class Post extends Model
         'comments_count',
         'shares_count',
         'reclips_count',
+        'saves_count',
         'is_reclipped',
         'original_post_id',
         'original_user_handle',
@@ -53,6 +59,7 @@ class Post extends Model
         'template_id',
         'media_items',
         'caption',
+        'link_preview',
         'image_text',
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'video_captions_enabled',
@@ -70,6 +77,7 @@ class Post extends Model
         'tags' => 'array',
         'stickers' => 'array',
         'media_items' => 'array',
+        'link_preview' => 'array',
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'edit_timeline' => 'array', // Edit timeline for hybrid editing pipeline
         'likes_count' => 'integer',
@@ -77,18 +85,103 @@ class Post extends Model
         'comments_count' => 'integer',
         'shares_count' => 'integer',
         'reclips_count' => 'integer',
+        'saves_count' => 'integer',
         'is_reclipped' => 'boolean',
         'video_captions_enabled' => 'boolean',
         'subtitles_enabled' => 'boolean',
+        'latitude' => 'float',
+        'longitude' => 'float',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
     ];
 
+    /**
+     * JPEG poster for video grid tiles: stored column, then media_items poster, then image URL.
+     */
+    public function resolvedThumbnailUrl(): ?string
+    {
+        if (is_string($this->thumbnail_url) && trim($this->thumbnail_url) !== '') {
+            return $this->thumbnail_url;
+        }
+
+        $items = is_array($this->media_items) ? $this->media_items : [];
+        $first = is_array($items[0] ?? null) ? $items[0] : null;
+        if (is_array($first)) {
+            foreach (['posterUrl', 'poster_url', 'thumbnail_url', 'thumbnailUrl'] as $key) {
+                if (!empty($first[$key]) && is_string($first[$key])) {
+                    return $first[$key];
+                }
+            }
+        }
+
+        if ($this->media_type === 'image' && is_string($this->media_url) && $this->media_url !== '') {
+            return $this->media_url;
+        }
+
+        return null;
+    }
+
+    /** Still preferred, else media URL — for collection list covers. */
+    public function collectionCoverUrl(): ?string
+    {
+        $still = $this->resolvedThumbnailUrl();
+        if (is_string($still) && trim($still) !== '') {
+            return $still;
+        }
+        if (is_string($this->media_url) && trim($this->media_url) !== '') {
+            return $this->media_url;
+        }
+
+        return null;
+    }
+
+    /** withCount aliases so they do not collide with posts.likes_count columns. */
+    public static function engagementWithCounts(): array
+    {
+        return [
+            'likes as likes_rel_count',
+            'comments as comments_rel_count',
+            'shares as shares_rel_count',
+            'views as views_rel_count',
+            'reclips as reclips_rel_count',
+            'bookmarks as saves_rel_count',
+        ];
+    }
+
+    /** Home tab refetches the feed; bump this so stale cached zeros are not served. */
+    public static function bumpFeedCache(): void
+    {
+        Cache::put('feed_version', (int) Cache::get('feed_version', 0) + 1);
+    }
+
+    /**
+     * Prefer the greater of the denormalized column and the relationship count.
+     *
+     * @param  array<string, mixed>  $postData
+     * @param  array<string, mixed>  $attrs
+     * @return array<string, mixed>
+     */
+    public static function applyEngagementCounts(array $postData, array $attrs): array
+    {
+        foreach (['likes', 'comments', 'shares', 'views', 'reclips', 'saves'] as $metric) {
+            $col = $metric . '_count';
+            $rel = $metric . '_rel_count';
+            $postData[$col] = max((int) ($attrs[$col] ?? $postData[$col] ?? 0), (int) ($attrs[$rel] ?? 0));
+        }
+        return $postData;
+    }
+
     // Relationships
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    /** Original author of a reclipped post (matched on handle). */
+    public function originalUser()
+    {
+        return $this->belongsTo(User::class, 'original_user_handle', 'handle');
     }
 
     public function comments()
@@ -192,41 +285,106 @@ class Post extends Model
         }
 
         if (str_starts_with(strtolower($raw), 'venue:')) {
-            $needle = trim(substr($raw, 6));
+            $needle = $this->primaryPlaceTag(trim(substr($raw, 6)));
             if ($needle === '') {
                 return $query;
             }
 
-            return $query->where('venue', 'LIKE', "%{$needle}%");
+            return $query->where(function ($q) use ($needle) {
+                $q->where('venue', 'LIKE', "%{$needle}%")
+                    ->orWhereRaw('LOWER(TRIM(venue)) = ?', [strtolower($needle)]);
+            });
         }
 
         if (str_starts_with(strtolower($raw), 'landmark:')) {
-            $needle = trim(substr($raw, 9));
+            $needle = $this->primaryPlaceTag(trim(substr($raw, 9)));
             if ($needle === '') {
                 return $query;
             }
 
-            return $query->where('landmark', 'LIKE', "%{$needle}%");
+            return $query->where(function ($q) use ($needle) {
+                $q->where('landmark', 'LIKE', "%{$needle}%")
+                    ->orWhereRaw('LOWER(TRIM(landmark)) = ?', [strtolower($needle)]);
+            });
         }
 
         $needle = $raw;
+        $needleLower = strtolower($needle);
+        $irelandPlaces = [
+            'dublin', 'cork', 'galway', 'limerick', 'waterford', 'kilkenny', 'belfast',
+            'finglas', 'artane', 'ballymun',
+        ];
+        $usaPlaces = [
+            'new york', 'new york state', 'ny', 'nyc',
+        ];
+        $usaNational = in_array($needleLower, ['usa', 'us', 'united states'], true);
 
-        return $query->where(function ($q) use ($needle) {
+        return $query->where(function ($q) use ($needle, $needleLower, $irelandPlaces, $usaPlaces, $usaNational) {
             $q->where('location_label', 'LIKE', "%{$needle}%")
                 ->orWhere('venue', 'LIKE', "%{$needle}%")
                 ->orWhere('landmark', 'LIKE', "%{$needle}%")
-                ->orWhereHas('user', function ($uq) use ($needle) {
+                ->orWhere('place_id', $needle)
+                ->orWhereHas('user', function ($uq) use ($needle, $needleLower, $irelandPlaces, $usaPlaces, $usaNational) {
                     $uq->where('location_local', 'LIKE', "%{$needle}%")
                         ->orWhere('location_regional', 'LIKE', "%{$needle}%")
-                        ->orWhere('location_national', 'LIKE', "%{$needle}%");
+                        ->orWhere('location_national', 'LIKE', "%{$needle}%")
+                        ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$needleLower])
+                        ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$needleLower])
+                        ->orWhereRaw('LOWER(TRIM(location_national)) = ?', [$needleLower]);
+
+                    // Ireland news is national: Cork/Galway authors belong even if
+                    // location_label is only "Cork" and national was left blank.
+                    if ($needleLower === 'ireland') {
+                        $uq->orWhere(function ($irelandQ) use ($irelandPlaces) {
+                            foreach ($irelandPlaces as $place) {
+                                $irelandQ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$place])
+                                    ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$place]);
+                            }
+                        });
+                    }
+
+                    // USA news: New York State authors belong even if national was left blank,
+                    // and "Usa" / "USA" must match regardless of column casing.
+                    if ($usaNational) {
+                        $uq->orWhereRaw("LOWER(TRIM(location_national)) IN ('usa', 'us', 'united states')");
+                        $uq->orWhere(function ($usaQ) use ($usaPlaces) {
+                            foreach ($usaPlaces as $place) {
+                                $usaQ->orWhereRaw('LOWER(TRIM(location_local)) = ?', [$place])
+                                    ->orWhereRaw('LOWER(TRIM(location_regional)) = ?', [$place]);
+                            }
+                        });
+                    }
                 });
         });
     }
 
+    /**
+     * Short place label for venue/landmark feed filters (drop ", City, Country" suffix).
+     */
+    private function primaryPlaceTag(string $raw): string
+    {
+        $primary = trim(explode(',', $raw)[0] ?? $raw);
+        $primary = preg_replace(
+            '/\s+(railway station|train station|bus station|metro station|airport|international airport|station)$/i',
+            '',
+            $primary
+        ) ?? $primary;
+
+        return trim($primary);
+    }
+
+    /**
+     * Posts authored (or reclipped) by accounts this viewer follows.
+     * Query user_follows directly — nested whereHas/wherePivot has silently
+     * returned an empty feed across SQLite and handle-mismatch bugs.
+     */
     public function scopeFollowing($query, $userId)
     {
-        return $query->whereHas('user.followers', function ($q) use ($userId) {
-            $q->where('follower_id', $userId);
+        return $query->whereIn('posts.user_id', function ($sub) use ($userId) {
+            $sub->select('following_id')
+                ->from('user_follows')
+                ->where('follower_id', $userId)
+                ->where('status', 'accepted');
         });
     }
 
@@ -238,7 +396,37 @@ class Post extends Model
 
     public function isBookmarkedBy(User $user)
     {
-        return $this->bookmarks()->where('user_id', $user->id)->exists();
+        return $this->bookmarks()->where('users.id', $user->id)->exists();
+    }
+
+    /** First save by this user (any collection) — unique user count. */
+    public function recordSaveForUser(User $user): bool
+    {
+        $sync = $this->bookmarks()->syncWithoutDetaching([$user->id]);
+        $wasNew = ! empty($sync['attached']);
+        if ($wasNew) {
+            $this->increment('saves_count');
+            $this->refresh();
+            self::bumpFeedCache();
+        }
+
+        return $wasNew;
+    }
+
+    /** Last unsave by this user (removed from every collection). */
+    public function clearSaveForUser(User $user): bool
+    {
+        if (! $this->isBookmarkedBy($user)) {
+            return false;
+        }
+        $this->bookmarks()->detach($user->id);
+        if ((int) $this->saves_count > 0) {
+            $this->decrement('saves_count');
+            $this->refresh();
+        }
+        self::bumpFeedCache();
+
+        return true;
     }
 
     public function isViewedBy(User $user)
@@ -248,7 +436,7 @@ class Post extends Model
 
     public function isReclippedBy(User $user)
     {
-        return $this->reclips()->where('user_id', $user->id)->exists();
+        return $this->reclips()->where('users.id', $user->id)->exists();
     }
 
     public function isFollowingAuthor(User $user)

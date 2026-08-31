@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Modal, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { hasFinitePoint, safeLayoutNumber, safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 
 type Props = {
     visible: boolean;
@@ -14,11 +15,14 @@ type Props = {
 export default function FeedHeartDrop({ visible, startX, startY, targetRef, onComplete }: Props) {
     const progress = useRef(new Animated.Value(0)).current;
     const [end, setEnd] = useState<{ x: number; y: number } | null>(null);
+    const safeStartX = safeLayoutNumber(startX);
+    const safeStartY = safeLayoutNumber(startY);
 
     useEffect(() => {
-        if (!visible) {
+        if (!visible || !hasFinitePoint(safeStartX, safeStartY)) {
             progress.setValue(0);
             setEnd(null);
+            if (visible) onComplete();
             return;
         }
 
@@ -29,7 +33,13 @@ export default function FeedHeartDrop({ visible, startX, startY, targetRef, onCo
                 return;
             }
             node.measureInWindow((x, y, width, height) => {
-                setEnd({ x: x + width / 2, y: y + height / 2 });
+                const endX = safeLayoutNumber(x) + safePositiveLayoutNumber(width, 1) / 2;
+                const endY = safeLayoutNumber(y) + safePositiveLayoutNumber(height, 1) / 2;
+                if (!hasFinitePoint(endX, endY)) {
+                    onComplete();
+                    return;
+                }
+                setEnd({ x: endX, y: endY });
                 progress.setValue(0);
                 Animated.timing(progress, {
                     toValue: 1,
@@ -43,17 +53,17 @@ export default function FeedHeartDrop({ visible, startX, startY, targetRef, onCo
 
         const t = setTimeout(measureTarget, 50);
         return () => clearTimeout(t);
-    }, [visible, startX, startY, targetRef, progress, onComplete]);
+    }, [visible, safeStartX, safeStartY, targetRef, progress, onComplete]);
 
-    if (!visible || !end) return null;
+    if (!visible || !end || !hasFinitePoint(safeStartX, safeStartY)) return null;
 
     const left = progress.interpolate({
         inputRange: [0, 1],
-        outputRange: [startX, end.x],
+        outputRange: [safeStartX, end.x],
     });
     const top = progress.interpolate({
         inputRange: [0, 1],
-        outputRange: [startY, end.y],
+        outputRange: [safeStartY, end.y],
     });
     const scale = progress.interpolate({
         inputRange: [0, 1],

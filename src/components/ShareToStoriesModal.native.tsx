@@ -13,23 +13,45 @@ import { createStory } from '../api/stories';
 import { incrementShares } from '../api/posts';
 import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
+import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import type { Post } from '../types';
 import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import ShareTextStoryCapture, {
     type ShareTextStoryCaptureHandle,
 } from './ShareTextStoryCapture.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 type Props = {
     visible: boolean;
     post: Post | null;
     onClose: () => void;
     onShareSuccess?: (postId: string) => void;
+    /** Pin feed scroll — mounting/unmounting this Modal jumps FlatList on Android. */
+    onShow?: () => void;
+    onDismiss?: () => void;
 };
 
-export default function ShareToStoriesModal({ visible, post, onClose, onShareSuccess }: Props) {
+export default function ShareToStoriesModal({
+    visible,
+    post,
+    onClose,
+    onShareSuccess,
+    onShow,
+    onDismiss,
+}: Props) {
     const { user } = useAuth();
     const [isSharing, setIsSharing] = useState(false);
     const textCaptureRef = useRef<ShareTextStoryCaptureHandle>(null);
+
+    const resolveOverlayThumbUri = (targetPost: Post, payloadMediaUrl?: string, payloadMediaType?: 'image' | 'video') => {
+        const firstImageItem = (targetPost.mediaItems || []).find((m) => m?.type === 'image' && m.url)?.url;
+        if (payloadMediaType === 'video') {
+            return targetPost.videoPosterUrl || firstImageItem;
+        }
+        if (payloadMediaUrl) return payloadMediaUrl;
+        return firstImageItem || targetPost.videoPosterUrl;
+    };
 
     const handleShare = async () => {
         if (!user?.id || !post) {
@@ -40,8 +62,25 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
         setIsSharing(true);
         onShareSuccess?.(post.id);
 
+        let overlay:
+            | ReturnType<typeof showUploadOverlayNative>
+            | null = null;
         try {
             let payload = buildSharePostToStoriesPayload(post);
+
+            // Resolve mock slot paths to the same HTTPS clip the newsfeed plays —
+            // never leave `/demo-videos/*` to be remapped to bundled BBB in Stories.
+            if (payload.mediaUrl && payload.mediaType === 'video') {
+                const { isMockDemoVideoPath, resolveMockFeedVideoUrl } = await import(
+                    '../constants/mockFeedVideos'
+                );
+                if (isMockDemoVideoPath(payload.mediaUrl)) {
+                    payload = {
+                        ...payload,
+                        mediaUrl: resolveMockFeedVideoUrl(payload.mediaUrl),
+                    };
+                }
+            }
 
             if (!payload.mediaUrl && !payload.isTextOnlyShare) {
                 const generated = await textCaptureRef.current?.capture(payload.shareText || '');
@@ -54,6 +93,15 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                 }
                 payload = { ...payload, mediaUrl: generated, mediaType: 'image' };
             }
+
+            overlay = showUploadOverlayNative({
+                thumbUri: resolveOverlayThumbUri(post, payload.mediaUrl, payload.mediaType),
+                thumbType: payload.mediaType === 'video' ? 'video' : 'image',
+                initialMessage: 'Sharing to Stories 24...',
+                uploadingTitle: 'Preparing story...',
+                successTitle: 'Story shared!',
+                errorTitle: 'Story share failed',
+            });
 
             onClose();
 
@@ -75,6 +123,7 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                 undefined,
                 undefined,
                 payload.venue,
+                payload.videoPosterUrl,
             );
 
             try {
@@ -84,23 +133,35 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
             }
 
             emitStoriesRefresh();
-            Alert.alert('Stories', 'Successfully shared to Stories 24!');
+            overlay.success('Shared to Stories 24.');
         } catch (e) {
             console.error('Failed to share to stories:', e);
-            Alert.alert('Stories', 'Failed to share to Stories 24. Please try again.');
+            if (overlay) {
+                overlay.error('Failed to share to Stories 24. Please try again.');
+            } else {
+                Alert.alert('Stories', 'Failed to share to Stories 24. Please try again.');
+            }
         } finally {
             setIsSharing(false);
         }
     };
 
-    if (!visible || !post) return null;
-
     return (
-        <>
+        <View pointerEvents="box-none">
             <ShareTextStoryCapture ref={textCaptureRef} />
-        <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+        <Modal
+            visible={Boolean(visible && post)}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+            hardwareAccelerated
+            onRequestClose={onClose}
+            onShow={onShow}
+            onDismiss={onDismiss}
+        >
             <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.card} onPress={() => {}}>
+                    <PassportSheetCanvas contentStyle={styles.cardInner}>
                     <View style={styles.iconWrap}>
                         <ShareToStoriesFeedIcon size={52} color="#FFFFFF" />
                     </View>
@@ -126,10 +187,11 @@ export default function ShareToStoriesModal({ visible, post, onClose, onShareSuc
                             )}
                         </TouchableOpacity>
                     </View>
+                    </PassportSheetCanvas>
                 </TouchableOpacity>
             </TouchableOpacity>
         </Modal>
-        </>
+        </View>
     );
 }
 
@@ -147,7 +209,10 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: '#000000',
+        backgroundColor: PASSPORT_ABYSS,
+        overflow: 'hidden',
+    },
+    cardInner: {
         padding: 24,
     },
     iconWrap: {
@@ -164,7 +229,7 @@ const styles = StyleSheet.create({
     },
     kicker: {
         textAlign: 'center',
-        color: '#D4AF37',
+        color: PASSPORT_PALETTE.wavePrimary,
         fontSize: 11,
         fontWeight: '700',
         letterSpacing: 1.2,

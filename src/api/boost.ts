@@ -61,6 +61,44 @@ let boostedPosts: BoostedPost[] = [];
 
 // (legacy) boost duration handled dynamically based on selected duration.
 
+function notifyBoostActivated(postId: string, feedType?: BoostFeedType): void {
+  try {
+    // Web-only: RN has no reliable CustomEvent / window.dispatchEvent.
+    if (
+      typeof window !== 'undefined' &&
+      typeof (window as any).CustomEvent === 'function' &&
+      typeof window.dispatchEvent === 'function'
+    ) {
+      window.dispatchEvent(
+        new CustomEvent('boostActivated', { detail: { postId, feedType } }),
+      );
+    }
+  } catch {
+    // Ignore
+  }
+  try {
+    // RN: notify feed to stamp Sponsored without waiting for a full reload.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DeviceEventEmitter } = require('react-native');
+    DeviceEventEmitter?.emit?.('boostActivated', { postId: String(postId), feedType });
+  } catch {
+    // Web / non-RN
+  }
+}
+
+async function markPostBoostedLocally(
+  postId: string,
+  feedType: BoostFeedType,
+): Promise<void> {
+  try {
+    // Lazy import avoids circular dependency (posts.ts imports boost.ts).
+    const postsMod = await import('./posts');
+    postsMod.markPostAsBoosted(postId, feedType);
+  } catch {
+    // Non-fatal: in-memory boost registry is enough for feed injection.
+  }
+}
+
 /**
  * Activate boost for a post.
  * - When paymentIntentId is provided (Stripe redirect flow): calls backend to verify and persist.
@@ -98,14 +136,13 @@ export async function activateBoost(
                 durationHours: meta?.durationHours,
                 centerLocal: meta?.centerLocal,
             });
-            if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('boostActivated', { detail: { postId } }));
-            }
+            notifyBoostActivated(postId, feedType);
             const now = Date.now();
             const expiresAt =
                 res?.boost?.expiresAt
                     ? new Date(res.boost.expiresAt).getTime()
                     : now + (meta?.durationHours ?? 6) * 60 * 60 * 1000;
+            await markPostBoostedLocally(postId, feedType);
             return {
                 postId,
                 userId,
@@ -125,7 +162,7 @@ export async function activateBoost(
     const now = Date.now();
     const durationHours = meta?.durationHours ?? 6;
     const expiresAt = now + durationHours * 60 * 60 * 1000;
-    const existingBoost = boostedPosts.find((bp) => bp.postId === postId && bp.isActive);
+    const existingBoost = boostedPosts.find((bp) => String(bp.postId) === String(postId) && bp.isActive);
 
     if (existingBoost) {
         existingBoost.feedType = feedType;
@@ -133,11 +170,13 @@ export async function activateBoost(
         existingBoost.activatedAt = now;
         existingBoost.expiresAt = expiresAt;
         existingBoost.isActive = true;
+        notifyBoostActivated(postId, feedType);
+        await markPostBoostedLocally(postId, feedType);
         return existingBoost;
     }
 
     const boostedPost: BoostedPost = {
-        postId,
+        postId: String(postId),
         userId,
         feedType,
         price,
@@ -147,10 +186,8 @@ export async function activateBoost(
         isActive: true,
     };
     boostedPosts.push(boostedPost);
-    // Notify UI to refresh boost status (e.g. BoostButton)
-    if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('boostActivated', { detail: { postId } }));
-    }
+    notifyBoostActivated(postId, feedType);
+    await markPostBoostedLocally(postId, feedType);
     return boostedPost;
 }
 
@@ -163,23 +200,28 @@ export async function activateBoost(
  */
 export async function getActiveBoost(postId: string): Promise<BoostedPost | null> {
     const now = Date.now();
+    const id = String(postId);
 
     // Check in-memory FIRST – mock boosts (e.g. Bob's posts) only exist here
     const localBoost = boostedPosts.find(
-        (bp) => bp.postId === postId && bp.isActive && bp.expiresAt > now
+        (bp) => String(bp.postId) === id && bp.isActive && bp.expiresAt > now
     );
     if (localBoost) return localBoost;
 
     // Mark expired in-memory boosts
-    const expired = boostedPosts.find((bp) => bp.postId === postId && bp.expiresAt <= now);
+    const expired = boostedPosts.find((bp) => String(bp.postId) === id && bp.expiresAt <= now);
     if (expired) expired.isActive = false;
+
+    // Skip backend when mock mode — otherwise every Boost tile waits on an 8s API timeout.
+    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
+    if (!useLaravel) return null;
 
     // Then try backend API (for real Stripe boosts)
     try {
         const status = await apiClient.getBoostStatusApi(postId);
         if (status.isActive) {
             return {
-                postId,
+                postId: id,
                 userId: '',
                 feedType: status.feedType as BoostFeedType,
                 price: 0,
@@ -205,7 +247,7 @@ export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<
     const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
     if (useLaravel) {
         try {
-            return await apiClient.getActiveBoostedPostIdsApi(feedType);
+            return (await apiClient.getActiveBoostedPostIdsApi(feedType)).map(String);
         } catch {
             // Backend down (e.g. ERR_CONNECTION_REFUSED) – use in-memory so feed still loads
         }
@@ -214,7 +256,37 @@ export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<
     const active = boostedPosts.filter(
         (bp) => bp.isActive && bp.expiresAt > now && bp.feedType === feedType
     );
-    return active.map((bp) => bp.postId);
+    return active.map((bp) => String(bp.postId));
+}
+
+/**
+ * All actively boosted posts → feedType map (for legal Sponsored labeling on any tab).
+ */
+export async function getAllActiveBoostLabels(): Promise<Map<string, BoostFeedType>> {
+    const map = new Map<string, BoostFeedType>();
+    const now = Date.now();
+    for (const bp of boostedPosts) {
+        if (bp.isActive && bp.expiresAt > now) {
+            map.set(String(bp.postId), bp.feedType);
+        }
+    }
+    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
+    if (useLaravel) {
+        const feedTypes = ['local', 'regional', 'national'] as BoostFeedType[];
+        const results = await Promise.all(
+            feedTypes.map(async (feedType) => {
+                try {
+                    return { feedType, ids: await apiClient.getActiveBoostedPostIdsApi(feedType) };
+                } catch {
+                    return { feedType, ids: [] as string[] };
+                }
+            }),
+        );
+        for (const { feedType, ids } of results) {
+            for (const id of ids) map.set(String(id), feedType);
+        }
+    }
+    return map;
 }
 
 /**

@@ -3,16 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\StoryResource;
 use App\Models\Story;
 use App\Models\StoryReaction;
 use App\Models\StoryReply;
 use App\Models\StoryView;
 use App\Models\User;
 use App\Models\Post;
+use App\Services\LinkPreviewService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -40,7 +43,7 @@ class StoryController extends Controller
         $hasViewer = !empty($userId);
 
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url', 'reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views']);
 
         if ($hasViewer) {
@@ -48,11 +51,7 @@ class StoryController extends Controller
                 'views as has_viewed' => function ($q) use ($userId) {
                     $q->where('user_id', $userId);
                 },
-            ])
-            ->with(['reactions' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-                $q->select('story_id', 'emoji');
-            }]);
+            ]);
         }
 
         if ($cursorState['created_at'] && $cursorState['id']) {
@@ -70,21 +69,8 @@ class StoryController extends Controller
             ->limit($limit)
             ->get();
 
-        $items = $stories->map(function ($story) use ($hasViewer) {
-            $storyData = $story->toArray();
-            if ($hasViewer) {
-                $attrs = $story->getAttributes();
-                $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                    ? (bool) $attrs['has_viewed']
-                    : false;
-                $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                    ? optional($story->reactions->first())->emoji
-                    : null;
-            } else {
-                $storyData['has_viewed'] = false;
-                $storyData['user_reaction'] = null;
-            }
-            return $storyData;
+        $items = $stories->map(function ($story) use ($hasViewer, $userId) {
+            return StoryResource::payload($story, $hasViewer, $hasViewer ? (string) $userId : null);
         })->values();
 
         $lastStory = $stories->last();
@@ -108,7 +94,7 @@ class StoryController extends Controller
         $userId = $request->get('userId');
         $hasViewer = !empty($userId);
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url', 'reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views']);
 
         if ($hasViewer) {
@@ -116,17 +102,13 @@ class StoryController extends Controller
                 'views as has_viewed' => function ($q) use ($userId) {
                     $q->where('user_id', $userId);
                 },
-            ])
-            ->with(['reactions' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-                $q->select('story_id', 'emoji');
-            }]);
+            ]);
         }
 
         $stories = $query->orderBy('created_at', 'desc')->get();
 
         // Group by user
-        $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer) {
+        $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer, $userId) {
             $user = $userStories->first()->user;
             // Newest first within each user (viewer opens on latest slide).
             $ordered = $userStories->sortByDesc('created_at')->values();
@@ -135,21 +117,8 @@ class StoryController extends Controller
                 'user_handle' => $user->handle,
                 'user_name' => $user->display_name,
                 'avatar_url' => $user->avatar_url,
-                'stories' => $ordered->map(function ($story) use ($hasViewer) {
-                    $storyData = $story->toArray();
-                    if ($hasViewer) {
-                        $attrs = $story->getAttributes();
-                        $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                            ? (bool) $attrs['has_viewed']
-                            : false;
-                        $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                            ? optional($story->reactions->first())->emoji
-                            : null;
-                    } else {
-                        $storyData['has_viewed'] = false;
-                        $storyData['user_reaction'] = null;
-                    }
-                    return $storyData;
+                'stories' => $ordered->map(function ($story) use ($hasViewer, $userId) {
+                    return StoryResource::payload($story, $hasViewer, $hasViewer ? (string) $userId : null);
                 }),
             ];
         })->values();
@@ -162,20 +131,21 @@ class StoryController extends Controller
      */
     public function getUserStories(Request $request, string $handle): JsonResponse
     {
-        $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
-        ]);
+        $decoded = trim(urldecode($handle));
+        $user = User::query()
+            ->whereRaw('LOWER(handle) = ?', [mb_strtolower($decoded)])
+            ->first();
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+        if (!$user) {
+            return response()->json(['errors' => ['handle' => ['User not found']]], 404);
         }
 
-        $user = User::where('handle', $handle)->firstOrFail();
-        $userId = $request->get('userId');
+        $userId = $request->get('userId') ?: Auth::id();
         $hasViewer = !empty($userId);
 
         $query = Story::where('user_id', $user->id)
             ->active()
+            ->with(['reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
 
@@ -184,30 +154,13 @@ class StoryController extends Controller
                 'views as has_viewed' => function ($q) use ($userId) {
                     $q->where('user_id', $userId);
                 },
-            ])
-            ->with(['reactions' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-                $q->select('story_id', 'emoji');
-            }]);
+            ]);
         }
 
         $stories = $query->get();
 
-        $transformedStories = $stories->map(function ($story) use ($hasViewer) {
-            $storyData = $story->toArray();
-            if ($hasViewer) {
-                $attrs = $story->getAttributes();
-                $storyData['has_viewed'] = array_key_exists('has_viewed', $attrs)
-                    ? (bool) $attrs['has_viewed']
-                    : false;
-                $storyData['user_reaction'] = $story->relationLoaded('reactions')
-                    ? optional($story->reactions->first())->emoji
-                    : null;
-            } else {
-                $storyData['has_viewed'] = false;
-                $storyData['user_reaction'] = null;
-            }
-            return $storyData;
+        $transformedStories = $stories->map(function ($story) use ($hasViewer, $userId) {
+            return StoryResource::payload($story, $hasViewer, $hasViewer ? (string) $userId : null);
         });
 
         return response()->json($transformedStories);
@@ -218,10 +171,48 @@ class StoryController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'media_url' => 'nullable|url|max:500', // Made nullable for text-only stories
-            'media_type' => 'nullable|in:image,video', // Made nullable for text-only stories
-            'text' => 'nullable|string|max:500',
+        $user = Auth::user();
+        if (!$user) {
+            \Log::warning('stories.store rejected: unauthenticated');
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $mediaUrl = $request->input('media_url', $request->input('mediaUrl'));
+        $mediaType = $request->input('media_type', $request->input('mediaType', $request->input('type')));
+        $text = $request->input('text');
+        $stickers = $request->input('stickers');
+        $poll = $request->input('poll');
+        $question = $request->input('question');
+        $textStyle = $request->input('textStyle', $request->input('text_style'));
+        $taggedUsers = $request->input('taggedUsers', $request->input('tagged_users'));
+
+        if (!is_string($text) || trim($text) === '') {
+            if (is_array($poll) && !empty($poll['question'])) {
+                $text = (string) $poll['question'];
+            } elseif (is_string($question) && trim($question) !== '') {
+                $text = $question;
+            }
+        }
+
+        $payload = [
+            'media_url' => is_string($mediaUrl) && $mediaUrl !== '' ? $mediaUrl : null,
+            'media_type' => is_string($mediaType) && $mediaType !== '' ? $mediaType : null,
+            'text' => is_string($text) && trim($text) !== '' ? $text : null,
+            'text_color' => $request->input('text_color', $request->input('textColor')),
+            'text_size' => $request->input('text_size', $request->input('textSize')),
+            'location' => $request->input('location'),
+            'venue' => $request->input('venue'),
+            'shared_from_post_id' => $request->input('shared_from_post_id', $request->input('sharedFromPostId')),
+            'shared_from_user_handle' => $request->input('shared_from_user_handle', $request->input('sharedFromUser')),
+            'textStyle' => is_array($textStyle) ? $textStyle : null,
+            'stickers' => is_array($stickers) ? $stickers : null,
+            'taggedUsers' => is_array($taggedUsers) ? array_values(array_filter($taggedUsers, 'is_string')) : null,
+        ];
+
+        $validator = Validator::make($payload, [
+            'media_url' => 'nullable|string|max:2048',
+            'media_type' => 'nullable|in:image,video',
+            'text' => 'nullable|string|max:2000',
             'text_color' => 'nullable|string|max:50',
             'text_size' => 'nullable|in:small,medium,large',
             'location' => 'nullable|string|max:200',
@@ -230,48 +221,75 @@ class StoryController extends Controller
             'textStyle' => 'nullable|array',
             'textStyle.color' => 'nullable|string|max:50',
             'textStyle.size' => 'nullable|in:small,medium,large',
-            'textStyle.background' => 'nullable|string|max:200',
+            'textStyle.background' => 'nullable|string|max:1000',
             'stickers' => 'nullable|array',
             'taggedUsers' => 'nullable|array',
-            'taggedUsers.*' => 'required|string|exists:users,handle',
+            'taggedUsers.*' => 'nullable|string|max:100',
         ]);
 
         if ($validator->fails()) {
+            \Log::warning('stories.store validation failed', [
+                'user_id' => $user->id,
+                'errors' => $validator->errors()->toArray(),
+            ]);
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        // Validate that either media or text/stickers are provided
-        if (!$request->media_url && !$request->text && (!$request->stickers || count($request->stickers) === 0)) {
+        $hasStickers = is_array($payload['stickers']) && count($payload['stickers']) > 0;
+        if (!$payload['media_url'] && !$payload['text'] && !$hasStickers) {
+            \Log::warning('stories.store rejected: empty story', ['user_id' => $user->id]);
             return response()->json(['error' => 'Story must have media, text, or stickers'], 400);
         }
 
-        $user = Auth::user();
+        \Log::info('stories.store', [
+            'user_id' => $user->id,
+            'handle' => $user->handle,
+            'has_media' => (bool) $payload['media_url'],
+            'media_type' => $payload['media_type'],
+            'has_text' => (bool) $payload['text'],
+            'has_stickers' => $hasStickers,
+        ]);
 
-        $story = DB::transaction(function () use ($request, $user) {
-            $story = Story::create([
+        $linkPreview = app(LinkPreviewService::class)->previewFromText($payload['text']);
+
+        $story = DB::transaction(function () use ($payload, $user, $linkPreview) {
+            $attrs = [
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
-                'media_url' => $request->media_url,
-                'media_type' => $request->media_type,
-                'text' => $request->text,
-                'text_color' => $request->text_color,
-                'text_size' => $request->text_size,
-                'location' => $request->location,
-                'venue' => $request->venue,
-                'shared_from_post_id' => $request->shared_from_post_id,
-                'shared_from_user_handle' => $request->shared_from_post_id 
-                    ? Post::find($request->shared_from_post_id)?->user_handle 
+                'media_url' => $payload['media_url'],
+                'media_type' => $payload['media_type'],
+                'text' => $payload['text'],
+                'text_color' => $payload['text_color'],
+                'text_size' => $payload['text_size'],
+                'location' => $payload['location'],
+                'venue' => $payload['venue'],
+                'shared_from_post_id' => $payload['shared_from_post_id'],
+                'shared_from_user_handle' => $payload['shared_from_post_id']
+                    ? (Post::find($payload['shared_from_post_id'])?->user_handle
+                        ?: $payload['shared_from_user_handle'])
                     : null,
-                'text_style' => $request->textStyle,
-                'stickers' => $request->stickers,
-                'tagged_users' => $request->taggedUsers,
-                'expires_at' => now()->addHours(24), // 24 hours from now
-            ]);
+                'text_style' => $payload['textStyle'],
+                'stickers' => $payload['stickers'],
+                'tagged_users' => $payload['taggedUsers'],
+                'expires_at' => now('UTC')->addHours(24),
+            ];
+            if (Schema::hasColumn('stories', 'link_preview')) {
+                $attrs['link_preview'] = $linkPreview;
+            }
+            $story = Story::create($attrs);
 
-            return $story;
+            return $story->fresh() ?? $story;
         });
 
-        return response()->json($story, 201);
+        \Log::info('stories.store created', [
+            'story_id' => $story->id,
+            'user_id' => $story->user_id,
+            'user_handle' => $story->user_handle,
+        ]);
+
+        $story->loadCount(['reactions', 'replies', 'views']);
+
+        return response()->json(StoryResource::payload($story, false), 201);
     }
 
     /**
@@ -288,6 +306,10 @@ class StoryController extends Controller
         }
 
         $user = Auth::user();
+        if (!$user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
         $story = Story::findOrFail($id);
 
         if ($story->isExpired()) {
@@ -295,16 +317,21 @@ class StoryController extends Controller
         }
 
         DB::transaction(function () use ($user, $story) {
-            // Create view if not exists (unique constraint prevents duplicates)
-            StoryView::firstOrCreate([
+            $view = StoryView::firstOrCreate([
                 'story_id' => $story->id,
                 'user_id' => $user->id,
             ]);
 
-            $story->increment('views_count');
+            if ($view->wasRecentlyCreated) {
+                $story->increment('views_count');
+            }
         });
+        $story->refresh();
 
-        return response()->json(['success' => true]);
+        return response()->json(array_merge(
+            ['success' => true],
+            $this->storyInteractionMetrics($story)
+        ));
     }
 
     /**
@@ -349,7 +376,7 @@ class StoryController extends Controller
             }
         });
 
-        return response()->json($reaction, 201);
+        return response()->json(array_merge($reaction->toArray(), $this->storyInteractionMetrics($story)), 201);
     }
 
     /**
@@ -382,7 +409,36 @@ class StoryController extends Controller
             ]);
         });
 
-        return response()->json($reply, 201);
+        return response()->json(array_merge($reply->toArray(), $this->storyInteractionMetrics($story)), 201);
+    }
+
+    /**
+     * @return array{views_count: int, reactions_count: int, replies_count: int, reactions: array<int, array<string, mixed>>, replies: array<int, array<string, mixed>>}
+     */
+    private function storyInteractionMetrics(Story $story): array
+    {
+        $story->load(['reactions', 'replies']);
+        $story->loadCount(['reactions', 'replies', 'views']);
+
+        return [
+            'views_count' => (int) ($story->views_count ?? 0),
+            'reactions_count' => (int) ($story->reactions_count ?? 0),
+            'replies_count' => (int) ($story->replies_count ?? 0),
+            'reactions' => $story->reactions->map(fn ($reaction) => [
+                'id' => $reaction->id,
+                'user_id' => $reaction->user_id,
+                'user_handle' => $reaction->user_handle,
+                'emoji' => $reaction->emoji,
+                'created_at' => $reaction->created_at,
+            ])->values()->all(),
+            'replies' => $story->replies->map(fn ($reply) => [
+                'id' => $reply->id,
+                'user_id' => $reply->user_id,
+                'user_handle' => $reply->user_handle,
+                'text' => $reply->text,
+                'created_at' => $reply->created_at,
+            ])->values()->all(),
+        ];
     }
 
     private function decodeStoryCursor(?string $cursor): array

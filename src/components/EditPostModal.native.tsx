@@ -1,16 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Modal,
-    ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
+import {
+    BottomSheetFooter,
+    BottomSheetScrollView,
+    BottomSheetTextInput,
+    BottomSheetView,
+    type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Post } from '../types';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_SLATE } from './GazetteerBottomSheetModal.native';
+
 const TEXT_MAX = 500;
 
 type Props = {
@@ -21,6 +28,7 @@ type Props = {
 };
 
 export default function EditPostModal({ post, visible, onClose, onSave }: Props) {
+    const insets = useSafeAreaInsets();
     const [text, setText] = useState('');
     const [location, setLocation] = useState('');
     const [venue, setVenue] = useState('');
@@ -52,133 +60,126 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
         }
     };
 
-    if (!visible) return null;
+    const renderFooter = useCallback(
+        (props: BottomSheetFooterProps) => (
+            <BottomSheetFooter {...props} bottomInset={Math.max(insets.bottom, 12)}>
+                <View style={styles.footer}>
+                    <TouchableOpacity
+                        style={styles.cancelBtn}
+                        onPress={onClose}
+                        disabled={isSaving}
+                    >
+                        <Text style={styles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]}
+                        onPress={() => void handleSave()}
+                        disabled={isSaving}
+                    >
+                        {isSaving ? (
+                            <ActivityIndicator color="#000000" />
+                        ) : (
+                            <Text style={styles.saveText}>Save</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            </BottomSheetFooter>
+        ),
+        [insets.bottom, isSaving, onClose, text, location, venue, landmark],
+    );
 
     return (
-        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <View style={styles.sheet}>
-                    <View style={styles.grabber} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Edit Post</Text>
-                        <TouchableOpacity onPress={onClose} disabled={isSaving} hitSlop={12}>
-                            <Icon name="close" size={24} color="#FFFFFF" />
-                        </TouchableOpacity>
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            snapPoints={['88%']}
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_SLATE.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_SLATE.handle}
+            backdropOpacity={0.6}
+            footerComponent={renderFooter}
+            keyboardBehavior="interactive"
+            keyboardBlurBehavior="restore"
+            android_keyboardInputMode="adjustResize"
+        >
+            <BottomSheetView style={styles.header}>
+                <Text style={styles.title}>Edit Post</Text>
+                <TouchableOpacity onPress={onClose} disabled={isSaving} hitSlop={12}>
+                    <Icon name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+            </BottomSheetView>
+
+            <BottomSheetScrollView
+                contentContainerStyle={styles.scroll}
+                keyboardShouldPersistTaps="handled"
+            >
+                {error ? (
+                    <View style={styles.errorBox}>
+                        <Text style={styles.errorText}>{error}</Text>
                     </View>
+                ) : null}
 
-                    <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-                        {error ? (
-                            <View style={styles.errorBox}>
-                                <Text style={styles.errorText}>{error}</Text>
-                            </View>
-                        ) : null}
+                <Text style={styles.label}>Text</Text>
+                <BottomSheetTextInput
+                    style={[styles.input, styles.textArea]}
+                    value={text}
+                    onChangeText={setText}
+                    multiline
+                    maxLength={TEXT_MAX}
+                    placeholderTextColor="#6B7280"
+                    editable={!isSaving}
+                />
+                <Text style={styles.counter}>
+                    {text.length}/{TEXT_MAX}
+                </Text>
 
-                        <Text style={styles.label}>Text</Text>
-                        <TextInput
-                            style={[styles.input, styles.textArea]}
-                            value={text}
-                            onChangeText={setText}
-                            multiline
-                            maxLength={TEXT_MAX}
-                            placeholderTextColor="#6B7280"
-                            editable={!isSaving}
-                        />
-                        <Text style={styles.counter}>
-                            {text.length}/{TEXT_MAX}
-                        </Text>
-
-                        <Text style={styles.label}>Location</Text>
-                        <View style={styles.inputIconWrap}>
-                            <Icon name="location-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
-                            <TextInput
-                                style={styles.input}
-                                value={location}
-                                onChangeText={setLocation}
-                                placeholder="Add location"
-                                placeholderTextColor="#6B7280"
-                                maxLength={200}
-                                editable={!isSaving}
-                            />
-                        </View>
-
-                        <Text style={styles.label}>Venue</Text>
-                        <View style={styles.inputIconWrap}>
-                            <Icon name="business-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
-                            <TextInput
-                                style={styles.input}
-                                value={venue}
-                                onChangeText={setVenue}
-                                placeholder="Add venue (e.g. café, stadium)"
-                                placeholderTextColor="#6B7280"
-                                maxLength={200}
-                                editable={!isSaving}
-                            />
-                        </View>
-
-                        <Text style={styles.label}>Landmark</Text>
-                        <View style={styles.inputIconWrap}>
-                            <Icon name="map-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
-                            <TextInput
-                                style={styles.input}
-                                value={landmark}
-                                onChangeText={setLandmark}
-                                placeholder="Add landmark"
-                                placeholderTextColor="#6B7280"
-                                maxLength={200}
-                                editable={!isSaving}
-                            />
-                        </View>
-                    </ScrollView>
-
-                    <View style={styles.footer}>
-                        <TouchableOpacity
-                            style={styles.cancelBtn}
-                            onPress={onClose}
-                            disabled={isSaving}
-                        >
-                            <Text style={styles.cancelText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]}
-                            onPress={() => void handleSave()}
-                            disabled={isSaving}
-                        >
-                            {isSaving ? (
-                                <ActivityIndicator color="#000000" />
-                            ) : (
-                                <Text style={styles.saveText}>Save</Text>
-                            )}
-                        </TouchableOpacity>
-                    </View>
+                <Text style={styles.label}>Location</Text>
+                <View style={styles.inputIconWrap}>
+                    <Icon name="location-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <BottomSheetTextInput
+                        style={[styles.input, styles.inputWithIcon]}
+                        value={location}
+                        onChangeText={setLocation}
+                        placeholder="Add location"
+                        placeholderTextColor="#6B7280"
+                        maxLength={200}
+                        editable={!isSaving}
+                    />
                 </View>
-            </View>
-        </Modal>
+
+                <Text style={styles.label}>Venue</Text>
+                <View style={styles.inputIconWrap}>
+                    <Icon name="business-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <BottomSheetTextInput
+                        style={[styles.input, styles.inputWithIcon]}
+                        value={venue}
+                        onChangeText={setVenue}
+                        placeholder="Add venue (e.g. café, stadium)"
+                        placeholderTextColor="#6B7280"
+                        maxLength={200}
+                        editable={!isSaving}
+                    />
+                </View>
+
+                <Text style={styles.label}>Landmark</Text>
+                <View style={styles.inputIconWrap}>
+                    <Icon name="map-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <BottomSheetTextInput
+                        style={[styles.input, styles.inputWithIcon]}
+                        value={landmark}
+                        onChangeText={setLandmark}
+                        placeholder="Add landmark"
+                        placeholderTextColor="#6B7280"
+                        maxLength={200}
+                        editable={!isSaving}
+                    />
+                </View>
+            </BottomSheetScrollView>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        backgroundColor: '#1a1a1a',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        maxHeight: '88%',
-        borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    grabber: {
-        alignSelf: 'center',
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.3)',
-        marginTop: 10,
-        marginBottom: 8,
-    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -193,7 +194,7 @@ const styles = StyleSheet.create({
     },
     scroll: {
         paddingHorizontal: 16,
-        maxHeight: 420,
+        paddingBottom: 16,
     },
     label: {
         color: 'rgba(255,255,255,0.8)',
@@ -224,10 +225,12 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         marginBottom: 4,
     },
+    inputWithIcon: {
+        paddingLeft: 36,
+    },
     textArea: {
         minHeight: 100,
         textAlignVertical: 'top',
-        paddingLeft: 12,
     },
     counter: {
         color: 'rgba(255,255,255,0.5)',
@@ -254,6 +257,7 @@ const styles = StyleSheet.create({
         padding: 16,
         borderTopWidth: 1,
         borderTopColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: '#1a1a1a',
     },
     cancelBtn: {
         paddingHorizontal: 16,

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import LocationPlaceSummaryBody from './LocationPlaceSummaryBody';
+import LocationPlaceSummaryBody from './LocationPlaceSummaryBody.native';
 import { usePlaceSummary } from '../hooks/usePlaceSummary';
 
 type Props = {

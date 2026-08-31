@@ -21,6 +21,7 @@ import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 export default function PublicPostScreen({ navigation, route }: any) {
     const token: string | undefined = route?.params?.token;
@@ -129,7 +130,7 @@ export default function PublicPostScreen({ navigation, route }: any) {
     if (error || !post) {
         return (
             <GazetteerScreenShell contentStyle={styles.centered}>
-                <Icon name="alert-circle-outline" size={40} color="#F87171" />
+                <Icon name="alert-circle-outline" size={ox(40)} color="#F87171" />
                 <Text style={styles.errorTitle}>Post not available</Text>
                 <Text style={styles.errorBody}>{error || 'This shared post could not be loaded.'}</Text>
                 <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.replace('Landing')}>
@@ -151,16 +152,16 @@ export default function PublicPostScreen({ navigation, route }: any) {
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                    <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Shared post</Text>
-                <View style={{ width: 24 }} />
+                <View style={{ width: ox(24) }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.card}>
                     <TouchableOpacity style={styles.authorRow} onPress={openAuthorProfile} activeOpacity={0.85}>
-                        <Avatar src={undefined} name={post.userHandle.split('@')[0] || 'User'} size={40} />
+                        <Avatar src={undefined} name={post.userHandle.split('@')[0] || 'User'} size={ox(40)} />
                         <View style={styles.authorMeta}>
                             <Text style={styles.authorHandle}>{post.userHandle}</Text>
                             {post.createdAt ? (
@@ -192,19 +193,19 @@ export default function PublicPostScreen({ navigation, route }: any) {
 
                     <View style={styles.statsRow}>
                         <View style={styles.statItem}>
-                            <Icon name="heart-outline" size={18} color="#9CA3AF" />
+                            <Icon name="heart-outline" size={ox(18)} color="#9CA3AF" />
                             <Text style={styles.statText}>{post.stats.likes}</Text>
                         </View>
                         <View style={styles.statItem}>
-                            <Icon name="chatbubble-outline" size={18} color="#9CA3AF" />
+                            <Icon name="chatbubble-outline" size={ox(18)} color="#9CA3AF" />
                             <Text style={styles.statText}>{post.stats.comments}</Text>
                         </View>
                         <View style={styles.statItem}>
-                            <Icon name="share-outline" size={18} color="#9CA3AF" />
+                            <Icon name="share-outline" size={ox(18)} color="#9CA3AF" />
                             <Text style={styles.statText}>{post.stats.shares}</Text>
                         </View>
                         <View style={styles.statItem}>
-                            <Icon name="eye-outline" size={18} color="#9CA3AF" />
+                            <Icon name="eye-outline" size={ox(18)} color="#9CA3AF" />
                             <Text style={styles.statText}>{post.stats.views}</Text>
                         </View>
                     </View>
@@ -250,60 +251,60 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
-        gap: 12,
+        padding: ox(24),
+        gap: ox(12),
     },
     loadingText: {
         color: '#9CA3AF',
-        fontSize: 14,
-        marginTop: 8,
+        fontSize: ox(14),
+        marginTop: ox(8),
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(14),
         ...gazetteerHeader,
     },
     headerTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
     },
     scrollContent: {
-        padding: 16,
-        paddingBottom: 28,
-        gap: 14,
+        padding: ox(16),
+        paddingBottom: ox(28),
+        gap: ox(14),
     },
     card: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'hidden',
         ...glassPanel,
     },
     authorRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 14,
-        gap: 12,
+        padding: ox(14),
+        gap: ox(12),
     },
     authorMeta: {
         flex: 1,
-        gap: 2,
+        gap: ox(2),
     },
     authorHandle: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '700',
     },
     authorTime: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     authorLocation: {
         color: '#D1D5DB',
-        fontSize: 12,
-        marginTop: 2,
+        fontSize: ox(12),
+        marginTop: ox(2),
     },
     mediaWrap: {
         width: '100%',
@@ -311,91 +312,91 @@ const styles = StyleSheet.create({
     },
     media: {
         width: '100%',
-        minHeight: 240,
+        minHeight: ox(240),
         maxHeight: 520,
         backgroundColor: '#000000',
     },
     caption: {
-        paddingHorizontal: 14,
-        paddingBottom: 12,
+        paddingHorizontal: ox(14),
+        paddingBottom: ox(12),
         color: '#F3F4F6',
-        fontSize: 15,
-        lineHeight: 22,
+        fontSize: ox(15),
+        lineHeight: ox(22),
     },
     statsRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-around',
-        paddingHorizontal: 12,
-        paddingVertical: 12,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
         borderTopWidth: 1,
         borderTopColor: 'rgba(255, 255, 255, 0.08)',
     },
     statItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: ox(4),
     },
     statText: {
         color: '#D1D5DB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '600',
     },
     ctaCard: {
-        borderRadius: 14,
-        padding: 16,
+        borderRadius: ox(14),
+        padding: ox(16),
         ...glassPanel,
     },
     ctaTitle: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '700',
     },
     ctaBody: {
-        marginTop: 6,
+        marginTop: ox(6),
         color: '#D1D5DB',
-        fontSize: 13,
-        lineHeight: 19,
+        fontSize: ox(13),
+        lineHeight: ox(19),
     },
     ctaActions: {
-        marginTop: 14,
+        marginTop: ox(14),
         flexDirection: 'row',
-        gap: 10,
+        gap: ox(10),
     },
     primaryBtn: {
         flex: 1,
         backgroundColor: '#d91b5c',
-        borderRadius: 10,
-        paddingVertical: 12,
+        borderRadius: ox(10),
+        paddingVertical: ox(12),
         alignItems: 'center',
     },
     primaryBtnText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     secondaryBtn: {
         flex: 1,
-        borderRadius: 10,
-        paddingVertical: 12,
+        borderRadius: ox(10),
+        paddingVertical: ox(12),
         alignItems: 'center',
         ...glassSurface,
     },
     secondaryBtnText: {
         color: '#E5E7EB',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
     },
     errorTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '700',
         textAlign: 'center',
     },
     errorBody: {
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
         textAlign: 'center',
-        lineHeight: 20,
+        lineHeight: ox(20),
     },
 });

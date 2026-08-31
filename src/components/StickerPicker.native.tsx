@@ -1,19 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    FlatList,
-    Modal,
     ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
+import {
+    BottomSheetFlatList,
+    BottomSheetTextInput,
+    BottomSheetView,
+} from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { getStickers, STICKER_CATEGORIES, searchStickers } from '../api/stickers';
 import type { Sticker } from '../types';
 import { chipActiveMagenta, chipActiveMagentaText, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_STICKER } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -58,118 +61,117 @@ export default function StickerPickerNative({ visible, onClose, onSelectSticker,
     }, [visible, selectedCategory, searchQuery]);
 
     return (
-        <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <View style={styles.sheet}>
-                    <View style={styles.handle} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Stickers</Text>
-                        <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                            <Icon name="close" size={24} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.searchRow}>
-                        <Icon name="search" size={18} color="#9CA3AF" />
-                        <TextInput
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                            placeholder="Search stickers..."
-                            placeholderTextColor="#6B7280"
-                            style={styles.searchInput}
-                        />
-                    </View>
-
-                    {!searchQuery.trim() && (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categories}>
-                            {STICKER_CATEGORIES.map((category) => {
-                                const active = selectedCategory === category;
-                                return (
-                                    <TouchableOpacity
-                                        key={category}
-                                        onPress={() => setSelectedCategory(category)}
-                                        style={[styles.categoryChip, active && styles.categoryChipActive]}
-                                    >
-                                        <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
-                                            {category}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </ScrollView>
-                    )}
-
-                    {onAddText ? (
-                        <TouchableOpacity style={styles.addTextBtn} onPress={onAddText}>
-                            <Icon name="text" size={18} color="#FFFFFF" />
-                            <Text style={styles.addTextBtnLabel}>Add Text</Text>
-                        </TouchableOpacity>
-                    ) : null}
-
-                    {isLoading ? (
-                        <ActivityIndicator color="#f472b6" style={styles.loader} />
-                    ) : (
-                        <FlatList
-                            data={stickers}
-                            keyExtractor={(item) => item.id}
-                            numColumns={6}
-                            contentContainerStyle={styles.grid}
-                            columnWrapperStyle={styles.gridRow}
-                            keyboardShouldPersistTaps="handled"
-                            ListEmptyComponent={<Text style={styles.empty}>No stickers found</Text>}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={styles.stickerCell}
-                                    onPress={() => {
-                                        onSelectSticker(item);
-                                        onClose();
-                                    }}
-                                >
-                                    {item.emoji ? (
-                                        <Text style={styles.emoji}>{item.emoji}</Text>
-                                    ) : (
-                                        <Text style={styles.emojiFallback} numberOfLines={1}>
-                                            {item.name}
-                                        </Text>
-                                    )}
-                                    {item.isTrending ? <View style={styles.trendDot} /> : null}
-                                </TouchableOpacity>
-                            )}
-                        />
-                    )}
+        <GazetteerBottomSheetModal
+            visible={visible}
+            onDismiss={onClose}
+            snapPoints={['82%']}
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_STICKER.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_STICKER.handle}
+            backdropOpacity={0.75}
+        >
+            <BottomSheetView style={styles.headerBlock}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Stickers</Text>
+                    <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Icon name="close" size={24} color="#9CA3AF" />
+                    </TouchableOpacity>
                 </View>
-            </View>
-        </Modal>
+
+                <View style={styles.searchRow}>
+                    <Icon name="search" size={18} color="#9CA3AF" />
+                    <BottomSheetTextInput
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholder="Search stickers..."
+                        placeholderTextColor="#6B7280"
+                        style={styles.searchInput}
+                    />
+                </View>
+
+                {!searchQuery.trim() && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.categories}
+                    >
+                        {STICKER_CATEGORIES.map((category) => {
+                            const active = selectedCategory === category;
+                            return (
+                                <TouchableOpacity
+                                    key={category}
+                                    onPress={() => setSelectedCategory(category)}
+                                    style={[styles.categoryChip, active && styles.categoryChipActive]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.categoryChipText,
+                                            active && styles.categoryChipTextActive,
+                                        ]}
+                                    >
+                                        {category}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                )}
+
+                {onAddText ? (
+                    <TouchableOpacity style={styles.addTextBtn} onPress={onAddText}>
+                        <Icon name="text" size={18} color="#FFFFFF" />
+                        <Text style={styles.addTextBtnLabel}>Add Text</Text>
+                    </TouchableOpacity>
+                ) : null}
+            </BottomSheetView>
+
+            {isLoading ? (
+                <BottomSheetView>
+                    <ActivityIndicator color="#f472b6" style={styles.loader} />
+                </BottomSheetView>
+            ) : (
+                <BottomSheetFlatList
+                    data={stickers}
+                    keyExtractor={(item) => item.id}
+                    numColumns={6}
+                    contentContainerStyle={styles.grid}
+                    columnWrapperStyle={styles.gridRow}
+                    keyboardShouldPersistTaps="handled"
+                    ListEmptyComponent={<Text style={styles.empty}>No stickers found</Text>}
+                    renderItem={({ item }) => (
+                        <TouchableOpacity
+                            style={styles.stickerCell}
+                            onPress={() => {
+                                onSelectSticker(item);
+                                onClose();
+                            }}
+                        >
+                            {item.emoji ? (
+                                <Text style={styles.emoji}>{item.emoji}</Text>
+                            ) : (
+                                <Text style={styles.emojiFallback} numberOfLines={1}>
+                                    {item.name}
+                                </Text>
+                            )}
+                            {item.isTrending ? <View style={styles.trendDot} /> : null}
+                        </TouchableOpacity>
+                    )}
+                />
+            )}
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.75)',
-        justifyContent: 'flex-end',
-    },
-    sheet: {
-        maxHeight: '82%',
-        backgroundColor: '#120a1c',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        paddingBottom: 20,
-    },
-    handle: {
-        width: 40,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: '#4B5563',
-        alignSelf: 'center',
-        marginTop: 10,
+    headerBlock: {
+        paddingBottom: 8,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 12,
+        paddingTop: 4,
         paddingBottom: 8,
     },
     title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },

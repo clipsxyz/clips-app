@@ -4,12 +4,15 @@ export function collectFeedImageUrls(post: Post): string[] {
     const urls: string[] = [];
     if (post.mediaItems?.length) {
         for (const item of post.mediaItems) {
-            if (item.type === 'video') continue;
-            if (item.url) urls.push(item.url);
+            if (item.type === 'video' || item.type === 'text') continue;
+            if (!item.url) continue;
+            // Text slides sometimes ship as data:text URLs — not still images.
+            if (/^data:text\//i.test(item.url)) continue;
+            urls.push(item.url);
         }
     }
     if (!urls.length && post.mediaUrl && (post.mediaType || 'image') !== 'video') {
-        urls.push(post.mediaUrl);
+        if (!/^data:text\//i.test(post.mediaUrl)) urls.push(post.mediaUrl);
     }
     return urls;
 }

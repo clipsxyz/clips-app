@@ -30,9 +30,16 @@ function getPrivacySettings(): PrivacySettings {
   }
 }
 
-// Save privacy settings to localStorage
+// Save privacy settings to localStorage (+ AsyncStorage on RN)
 function savePrivacySettings(settings: PrivacySettings): void {
-  localStorage.setItem(PRIVACY_STORAGE_KEY, JSON.stringify(settings));
+  try {
+    localStorage.setItem(PRIVACY_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // ignore
+  }
+  void import('./privacyStorage.native')
+    .then((m) => m.savePrivacySettingsNative(settings))
+    .catch(() => {});
 }
 
 // Get follow requests from localStorage
@@ -61,9 +68,44 @@ export function getFollowRequests(): FollowRequest[] {
   }
 }
 
-// Save follow requests to localStorage
+// Save follow requests to localStorage (+ AsyncStorage on RN)
 function saveFollowRequests(requests: FollowRequest[]): void {
-  localStorage.setItem(FOLLOW_REQUESTS_KEY, JSON.stringify(requests));
+  try {
+    localStorage.setItem(FOLLOW_REQUESTS_KEY, JSON.stringify(requests));
+  } catch {
+    // ignore
+  }
+  void import('./privacyStorage.native')
+    .then((m) => m.saveFollowRequestsNative(requests))
+    .catch(() => {});
+}
+
+/**
+ * RN: load privacy + follow requests from AsyncStorage into the in-memory localStorage shim
+ * before Auth reads them. No-op on web when the native module is absent.
+ */
+export async function hydratePrivacyStorage(): Promise<void> {
+  try {
+    const m = await import('./privacyStorage.native');
+    const settings = await m.getPrivacySettingsNative();
+    if (settings && Object.keys(settings).length > 0) {
+      try {
+        localStorage.setItem(PRIVACY_STORAGE_KEY, JSON.stringify(settings));
+      } catch {
+        // ignore
+      }
+    }
+    const requests = await m.getFollowRequestsNative();
+    if (Array.isArray(requests) && requests.length > 0) {
+      try {
+        localStorage.setItem(FOLLOW_REQUESTS_KEY, JSON.stringify(requests));
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // web / unavailable
+  }
 }
 
 // Initialize mock users with different privacy settings (for testing)
@@ -113,8 +155,11 @@ export function setProfilePrivacy(handle: string, isPrivate: boolean): void {
 
 // Check if user can view a profile
 export function canViewProfile(viewerHandle: string, profileHandle: string, viewerFollows: string[]): boolean {
+  const viewerKey = normalizeHandleForPrivacy(viewerHandle);
+  const profileKey = normalizeHandleForPrivacy(profileHandle);
+
   // Users can always view their own profile
-  if (viewerHandle === profileHandle) {
+  if (viewerKey && profileKey && viewerKey === profileKey) {
     return true;
   }
 
@@ -123,14 +168,17 @@ export function canViewProfile(viewerHandle: string, profileHandle: string, view
     return true;
   }
 
-  // If profile is private, only followers can view
-  return viewerFollows.includes(profileHandle);
+  // If profile is private, only followers can view (case-insensitive)
+  return viewerFollows.some((h) => normalizeHandleForPrivacy(h) === profileKey);
 }
 
 // Check if user can send message
 export function canSendMessage(senderHandle: string, recipientHandle: string, senderFollows: string[]): boolean {
+  const senderKey = normalizeHandleForPrivacy(senderHandle);
+  const recipientKey = normalizeHandleForPrivacy(recipientHandle);
+
   // Users can't message themselves
-  if (senderHandle === recipientHandle) {
+  if (senderKey && recipientKey && senderKey === recipientKey) {
     return false;
   }
 
@@ -139,8 +187,8 @@ export function canSendMessage(senderHandle: string, recipientHandle: string, se
     return true;
   }
 
-  // If profile is private, only followers can message
-  return senderFollows.includes(recipientHandle);
+  // If profile is private, only followers can message (case-insensitive)
+  return senderFollows.some((h) => normalizeHandleForPrivacy(h) === recipientKey);
 }
 
 // Check if there's a pending follow request
@@ -175,17 +223,7 @@ export function hasPendingFollowRequest(fromHandle: string, toHandle: string): b
     req.status === 'pending'
   );
   const hasPending = matchingRequests.length > 0;
-  
-  // Debug logging
-  console.log('hasPendingFollowRequest: Check result', {
-    fromHandle,
-    toHandle,
-    hasPending,
-    matchingRequests: matchingRequests.length,
-    totalValidRequests: validRequests.length,
-    allRequests: validRequests.map(r => ({ from: r.fromHandle, to: r.toHandle, status: r.status, age: r.timestamp ? Math.floor((now - r.timestamp) / (1000 * 60 * 60 * 24)) + ' days' : 'unknown' }))
-  });
-  
+
   return hasPending;
 }
 

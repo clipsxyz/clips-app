@@ -101,6 +101,7 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
                 handle,
                 undefined,
                 undefined,
+                undefined,
                 [handle],
             );
 
@@ -119,7 +120,7 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
         }
     };
 
-    async function generateProfileImage(profileName: string, profileHandle: string): Promise<string> {
+    async function generateProfileImage(profileName: string, _profileHandle: string): Promise<string> {
         const width = 1080;
         const height = 1920;
         const canvas = document.createElement('canvas');

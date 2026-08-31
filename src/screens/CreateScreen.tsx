@@ -22,7 +22,15 @@ import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
 import { publishMediaStory24 } from '../utils/publishStoryNative';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
-import { saveDraft } from '../api/drafts';
+import { saveDraft } from '../api/drafts.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
+import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
+import {
+    failedToSaveSheet,
+    nothingToSaveSheet,
+    savedToDraftsSheet,
+    type DraftSaveSheetState,
+} from '../utils/draftSaveSheetNative';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
@@ -30,6 +38,7 @@ import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
 import TextStickerModalNative from '../components/TextStickerModal.native';
 import type { Sticker, StickerOverlay } from '../types';
+import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
 import { clampStickerY } from '../utils/stickerLayoutNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import {
@@ -41,10 +50,17 @@ import {
     type InstantFilterName,
 } from '../utils/instantFiltersNative';
 import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNative';
+import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
+import { ox } from '../constants/nativeOpticalScale';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import type { LocationSuggestion } from '../api/locations';
+import { geoFieldsFromSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -86,15 +102,26 @@ export default function CreateScreen({ navigation, route }: any) {
         ? carouselItems[carouselActiveIndex]?.type ?? mediaType
         : mediaType;
     const activeCarouselSlide = isCarousel ? carouselItems[carouselActiveIndex] : undefined;
-    const [text, setText] = useState(route.params?.draftCaption || route.params?.draftTextBody || '');
+    const [text, setText] = useState<string>(
+        String(route.params?.draftCaption || route.params?.draftTextBody || ''),
+    );
     const [location, setLocation] = useState(route.params?.draftLocation || '');
     const [venue, setVenue] = useState(route.params?.draftVenue || '');
     const [landmark, setLandmark] = useState(route.params?.draftLandmark || '');
-    const [taggedUsersInput, setTaggedUsersInput] = useState(
-        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : ''
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
+    const [taggedUsersInput, setTaggedUsersInput] = useState<string>(
+        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : '',
     );
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
+    const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
+    const [mediaSourceMenu, setMediaSourceMenu] = useState<{
+        title: string;
+        subtitle?: string;
+        options: GazetteerMenuOption[];
+    } | null>(null);
     const [videoCoverTime, setVideoCoverTime] = useState<number>(Number(route.params?.videoCoverTime || 0));
     const [isVideoPaused, setIsVideoPaused] = useState(false);
     const [videoDurationSec, setVideoDurationSec] = useState<number>(Math.max(1, Number(route.params?.videoDuration || 0) || 15));
@@ -375,9 +402,25 @@ export default function CreateScreen({ navigation, route }: any) {
         videoRef.current?.seek(Math.max(0, previewCoverTime));
     }, [previewCoverTime, previewType, previewUri, carouselActiveIndex]);
 
-    const pickCarouselMedia = useCallback(() => {
+    const handleSelectMedia = useCallback(async () => {
+        const allowed = await ensureGalleryMediaPermission();
+        if (!allowed) {
+            Alert.alert(
+                'Gallery access needed',
+                'Allow photo and video access in Settings to upload from your gallery.',
+            );
+            return;
+        }
+
+        // Web-parity: open the system gallery directly (no Photo/Video/Carousel chooser).
         ImagePicker.launchImageLibrary(
-            { mediaType: 'mixed', selectionLimit: 10, quality: 0.9, videoQuality: 'high' },
+            {
+                mediaType: 'mixed',
+                selectionLimit: isStory24Flow ? 1 : 10,
+                quality: 0.9,
+                videoQuality: 'high',
+                includeExtra: true,
+            },
             (response) => {
                 if (response.didCancel) return;
                 if (response.errorCode) {
@@ -388,92 +431,26 @@ export default function CreateScreen({ navigation, route }: any) {
                     return;
                 }
                 const assets = response.assets || [];
-                if (assets.length < 2) {
-                    Alert.alert('Carousel', 'Select at least 2 photos or videos for a carousel post.');
+                if (assets.length === 0) {
+                    Alert.alert('Media error', 'No media was selected.');
                     return;
                 }
-                applyCarouselFromAssets(assets);
+                if (!isStory24Flow && assets.length >= 2) {
+                    applyCarouselFromAssets(assets);
+                    return;
+                }
+                const asset = assets[0];
+                if (!asset?.uri) {
+                    Alert.alert('Media error', 'No media was selected.');
+                    return;
+                }
+                applySingleMedia(
+                    normalizeMediaUri(asset.uri),
+                    assetIsVideo(asset) ? 'video' : 'image',
+                );
             },
         );
-    }, [applyCarouselFromAssets]);
-
-    const handleSelectMedia = () => {
-        const pickPhotoWithFallback = async () => {
-            try {
-                const image = await ImageCropPicker.openPicker({
-                    mediaType: 'photo',
-                    cropping: true,
-                    width: 1080,
-                    height: 1350,
-                    cropperToolbarTitle: 'Adjust photo',
-                    cropperChooseText: 'Use Photo',
-                    cropperCancelText: 'Cancel',
-                    compressImageQuality: 0.9,
-                });
-                applySingleMedia(normalizeMediaUri(image.path || null), 'image');
-            } catch (err: any) {
-                if (err?.code === 'E_PICKER_CANCELLED') return;
-                console.error('Photo picker error (cropper), falling back:', err);
-                ImagePicker.launchImageLibrary(
-                    { mediaType: 'photo', selectionLimit: 1, quality: 0.9 },
-                    (response) => {
-                        if (response.didCancel) return;
-                        if (response.errorCode) {
-                            Alert.alert('Photo error', response.errorMessage || 'Could not open your photo library.');
-                            return;
-                        }
-                        const asset = response.assets?.[0];
-                        if (!asset?.uri) {
-                            Alert.alert('Photo error', 'No photo was selected.');
-                            return;
-                        }
-                        applySingleMedia(normalizeMediaUri(asset.uri), 'image');
-                    },
-                );
-            }
-        };
-
-        const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
-            {
-                text: 'Photo',
-                onPress: () => {
-                    void pickPhotoWithFallback();
-                },
-            },
-            {
-                text: 'Video',
-                onPress: () => {
-                    ImagePicker.launchImageLibrary(
-                        {
-                            mediaType: 'video',
-                            quality: 0.8,
-                        },
-                        (response) => {
-                            if (response.didCancel) return;
-                            if (response.errorCode) {
-                                Alert.alert('Video error', response.errorMessage || 'Could not open your video library.');
-                                return;
-                            }
-                            const asset = response.assets?.[0];
-                            if (!asset?.uri) {
-                                Alert.alert('Video error', 'No video was selected.');
-                                return;
-                            }
-                            applySingleMedia(normalizeMediaUri(asset.uri), 'video');
-                        },
-                    );
-                },
-            },
-        ];
-        if (!isStory24Flow) {
-            buttons.splice(2, 0, {
-                text: 'Carousel (2–10 photos & videos)',
-                onPress: pickCarouselMedia,
-            });
-        }
-        buttons.push({ text: 'Cancel', style: 'cancel' });
-        Alert.alert('Choose media type', 'How would you like to add media?', buttons);
-    };
+    }, [applyCarouselFromAssets, applySingleMedia, isStory24Flow]);
 
     const handleTakePhoto = async () => {
         try {
@@ -527,6 +504,11 @@ export default function CreateScreen({ navigation, route }: any) {
                 videoCoverTime,
             });
         } catch (err) {
+            // Live mode: never fall back to a device file:// URI (Laravel can't serve it).
+            const { isMockMode } = await import('../api/apiMode');
+            if (!isMockMode()) {
+                throw err;
+            }
             console.warn('prepareComposerMedia failed, using local media', err);
             return {
                 mediaUrl: selectedMedia,
@@ -585,14 +567,23 @@ export default function CreateScreen({ navigation, route }: any) {
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 venue: venue.trim() || undefined,
                 landmark: landmark.trim() || undefined,
+                placeId,
+                latitude: placeLatitude,
+                longitude: placeLongitude,
             });
             showUploadOverlayNative({
                 jobId: tempId,
                 thumbUri: localThumbUri ?? undefined,
                 thumbType: mediaType === 'video' ? 'video' : 'image',
+                uploadingTitle:
+                    mediaType === 'video' ? 'Posting your clip…' : 'Preparing post…',
+                initialMessage:
+                    mediaType === 'video'
+                        ? 'This may take a moment.'
+                        : 'Posting to Gazetteer…',
             });
             hapticLight();
-            navigation.navigate('Home', { forceRefreshAt: Date.now() });
+            resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
             setIsUploading(false);
             startBackgroundFeedUpload(tempId);
             return;
@@ -654,7 +645,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
     const handleSaveDraft = async () => {
         if (!selectedMedia && !text.trim()) {
-            Alert.alert('Nothing to save', 'Add media or text before saving a draft.');
+            setDraftAlert(nothingToSaveSheet('Add media or text before saving a draft.'));
             return;
         }
         if (isSavingDraft) return;
@@ -697,19 +688,24 @@ export default function CreateScreen({ navigation, route }: any) {
                 stickers: stickers.length > 0 ? stickers : undefined,
             });
             hapticLight();
-            Alert.alert('Saved', 'Draft saved to your profile drafts.');
+            await new Promise<void>((resolve) => setTimeout(resolve, 50));
+            setDraftAlert(
+                savedToDraftsSheet(() =>
+                    resetToHomeFeed(navigation, { forceRefreshAt: Date.now() }),
+                ),
+            );
         } catch (err: any) {
-            Alert.alert('Draft failed', err?.message || 'Could not save draft.');
+            setDraftAlert(failedToSaveSheet(err?.message));
         } finally {
             setIsSavingDraft(false);
         }
     };
 
     return (
-        <GazetteerScreenShell edges={['top', 'bottom']}>
+        <GazetteerScreenShell edges={['top', 'bottom']} ambientVariant="passport">
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Icon name="close" size={24} color="#FFFFFF" />
+                    <Icon name="close" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{isStory24Flow ? 'Create Story 24' : 'Create Post'}</Text>
                 <View style={styles.headerActions}>
@@ -745,13 +741,13 @@ export default function CreateScreen({ navigation, route }: any) {
             >
                 {isAddYoursFlow && (
                     <View style={styles.addYoursBanner}>
-                        <Icon name="sparkles" size={16} color="#111827" />
+                        <Icon name="sparkles" size={ox(16)} color="#111827" />
                         <Text style={styles.addYoursBannerText}>Add Yours mode</Text>
                     </View>
                 )}
                 {isStory24Flow && (
                     <View style={styles.addYoursBanner}>
-                        <Icon name="location" size={16} color="#111827" />
+                        <Icon name="location" size={ox(16)} color="#111827" />
                         <Text style={styles.addYoursBannerText}>Stories 24 mode</Text>
                     </View>
                 )}
@@ -803,17 +799,68 @@ export default function CreateScreen({ navigation, route }: any) {
                 {!selectedMedia && (
                     <View style={styles.mediaSelection}>
                         <TouchableOpacity
-                            onPress={handleSelectMedia}
+                            onPress={() => {
+                                setMediaSourceMenu({
+                                    title: isStory24Flow ? 'Add to your story' : 'Add to your post',
+                                    subtitle: isStory24Flow ? 'Photo, video, or a link' : 'Photo or video',
+                                    options: [
+                                        {
+                                            label: 'Photo library',
+                                            icon: 'images-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'library',
+                                                        kind: isStory24Flow ? 'single' : 'carousel',
+                                                        mediaType: 'mixed',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        {
+                                            label: 'Camera',
+                                            icon: 'camera-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'photo',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        ...(isStory24Flow
+                                            ? [
+                                                  {
+                                                      label: 'Paste a link',
+                                                      icon: 'link-outline' as const,
+                                                      onPress: () => {
+                                                          navigation.replace('StoryLinkCreate');
+                                                      },
+                                                  },
+                                              ]
+                                            : []),
+                                    ],
+                                });
+                            }}
                             style={styles.mediaButton}
                         >
-                            <Icon name="images" size={32} color="#8B5CF6" />
+                            <Icon name="images" size={ox(32)} color="#8B5CF6" />
                             <Text style={styles.mediaButtonText}>Choose from Library</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            onPress={handleTakePhoto}
+                            onPress={() => {
+                                navigation.replace('GalleryPreview', {
+                                    autoStart: { source: 'camera', kind: 'single', mediaType: 'photo' },
+                                    story24: isStory24Flow || undefined,
+                                });
+                            }}
                             style={styles.mediaButton}
                         >
-                            <Icon name="camera" size={32} color="#8B5CF6" />
+                            <Icon name="camera" size={ox(32)} color="#8B5CF6" />
                             <Text style={styles.mediaButtonText}>Take Photo</Text>
                         </TouchableOpacity>
                     </View>
@@ -824,7 +871,7 @@ export default function CreateScreen({ navigation, route }: any) {
                     <View style={styles.mediaPreview}>
                         {isCarousel ? (
                             <View style={styles.carouselBadge}>
-                                <Icon name="images" size={12} color="#FBCFE8" />
+                                <Icon name="images" size={ox(12)} color="#FBCFE8" />
                                 <Text style={styles.carouselBadgeText}>
                                     {carouselItems.length} slides · swipe in feed
                                 </Text>
@@ -832,13 +879,13 @@ export default function CreateScreen({ navigation, route }: any) {
                         ) : null}
                         {hasAppliedFilter && !isCarousel ? (
                             <View style={styles.filterBadge}>
-                                <Icon name="color-filter" size={12} color="#FBCFE8" />
+                                <Icon name="color-filter" size={ox(12)} color="#FBCFE8" />
                                 <Text style={styles.filterBadgeText}>{activeFilterName}</Text>
                             </View>
                         ) : null}
                         {hasAppliedFilter && isCarousel ? (
                             <View style={styles.filterBadge}>
-                                <Icon name="color-filter" size={12} color="#FBCFE8" />
+                                <Icon name="color-filter" size={ox(12)} color="#FBCFE8" />
                                 <Text style={styles.filterBadgeText}>Filter on cover photo</Text>
                             </View>
                         ) : null}
@@ -863,7 +910,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                         >
                                             {item.type === 'video' ? (
                                                 <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={22} color="#E5E7EB" />
+                                                    <Icon name="videocam" size={ox(22)} color="#E5E7EB" />
                                                 </View>
                                             ) : (
                                                 <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
@@ -883,7 +930,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                                 onPress={() => removeCarouselItem(index)}
                                                 hitSlop={8}
                                             >
-                                                <Icon name="close" size={14} color="#FFFFFF" />
+                                                <Icon name="close" size={ox(14)} color="#FFFFFF" />
                                             </TouchableOpacity>
                                         </TouchableOpacity>
                                     );
@@ -942,7 +989,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                     style={styles.videoPauseBtn}
                                     onPress={() => setIsVideoPaused((v) => !v)}
                                 >
-                                    <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
+                                    <Icon name={isVideoPaused ? 'play' : 'pause'} size={ox(18)} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                         </View>
@@ -956,7 +1003,7 @@ export default function CreateScreen({ navigation, route }: any) {
                             }}
                             style={styles.removeMediaButton}
                         >
-                            <Icon name="close-circle" size={32} color="#EF4444" />
+                            <Icon name="close-circle" size={ox(32)} color="#EF4444" />
                         </TouchableOpacity>
                     </View>
                 )}
@@ -964,12 +1011,12 @@ export default function CreateScreen({ navigation, route }: any) {
                     <View style={styles.composerTools}>
                         {previewType === 'video' && !isCarousel ? (
                             <TouchableOpacity style={styles.composerToolBtn} onPress={openFilters}>
-                                <Icon name="color-filter" size={18} color="#FBCFE8" />
+                                <Icon name="color-filter" size={ox(18)} color="#FBCFE8" />
                                 <Text style={styles.composerToolText}>Filters</Text>
                             </TouchableOpacity>
                         ) : null}
                         <TouchableOpacity style={styles.composerToolBtn} onPress={openStickerPicker}>
-                            <Icon name="happy" size={18} color="#FBCFE8" />
+                            <Icon name="happy" size={ox(18)} color="#FBCFE8" />
                             <Text style={styles.composerToolText}>
                                 Stickers{stickers.length > 0 ? ` (${stickers.length})` : ''}
                             </Text>
@@ -979,7 +1026,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                 style={styles.composerToolBtn}
                                 onPress={() => setSelectedStickerOverlay(null)}
                             >
-                                <Icon name="checkmark-circle-outline" size={18} color="#FBCFE8" />
+                                <Icon name="checkmark-circle-outline" size={ox(18)} color="#FBCFE8" />
                                 <Text style={styles.composerToolText}>Done</Text>
                             </TouchableOpacity>
                         ) : null}
@@ -1038,6 +1085,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         numberOfLines={6}
                         maxLength={TEXT_POST_BODY_MAX_LENGTH}
                     />
+                    <ComposerLinkPreview text={text} />
                     <View style={styles.captionCounterRow}>
                         <Text
                             style={[
@@ -1055,45 +1103,70 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Location Input */}
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="location" size={20} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="location"
                             value={location}
-                            onChangeText={setLocation}
+                            onChange={setLocation}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                const geo = geoFieldsFromSuggestion(s);
+                                setPlaceId(geo.placeId);
+                                setPlaceLatitude(geo.latitude);
+                                setPlaceLongitude(geo.longitude);
+                            }}
                             placeholder="Add location"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="business" size={20} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="venue"
                             value={venue}
-                            onChangeText={setVenue}
+                            onChange={setVenue}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                if (!placeId) {
+                                    const geo = geoFieldsFromSuggestion(s);
+                                    setPlaceId(geo.placeId);
+                                    setPlaceLatitude(geo.latitude);
+                                    setPlaceLongitude(geo.longitude);
+                                }
+                            }}
                             placeholder="Add venue"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="pin" size={20} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="landmark"
                             value={landmark}
-                            onChangeText={setLandmark}
+                            onChange={setLandmark}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                if (!placeId) {
+                                    const geo = geoFieldsFromSuggestion(s);
+                                    setPlaceId(geo.placeId);
+                                    setPlaceLatitude(geo.latitude);
+                                    setPlaceLongitude(geo.longitude);
+                                }
+                            }}
                             placeholder="Add landmark"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="person-add" size={20} color="#8B5CF6" />
+                        <Icon name="person-add" size={ox(20)} color="#8B5CF6" />
                         <TextInput
                             value={taggedUsersInput}
                             onChangeText={setTaggedUsersInput}
@@ -1106,7 +1179,7 @@ export default function CreateScreen({ navigation, route }: any) {
                     </View>
                     {taggedUsers.length > 0 && (
                         <Text style={styles.taggedUsersPreview}>
-                            Tagged: {taggedUsers.map((u) => `@${u}`).join(', ')}
+                            Tagged: {taggedUsers.map((u: string) => `@${u}`).join(', ')}
                         </Text>
                     )}
                 </View>
@@ -1126,6 +1199,26 @@ export default function CreateScreen({ navigation, route }: any) {
                 onClose={() => setShowTextStickerModal(false)}
                 onConfirm={handleAddTextSticker}
             />
+            <GazetteerAlertSheet
+                visible={draftAlert != null}
+                title={draftAlert?.title ?? ''}
+                message={draftAlert?.message}
+                icon={draftAlert?.icon ?? 'alert'}
+                confirmButtonText={draftAlert?.confirmButtonText ?? 'OK'}
+                onConfirm={() => {
+                    const action = draftAlert?.onConfirm;
+                    setDraftAlert(null);
+                    action?.();
+                }}
+                onDismiss={() => setDraftAlert(null)}
+            />
+            <GazetteerMenuSheet
+                visible={mediaSourceMenu != null}
+                title={mediaSourceMenu?.title ?? ''}
+                subtitle={mediaSourceMenu?.subtitle}
+                options={mediaSourceMenu?.options ?? []}
+                onDismiss={() => setMediaSourceMenu(null)}
+            />
         </GazetteerScreenShell>
     );
 }
@@ -1135,38 +1228,38 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
+        padding: ox(16),
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
         backgroundColor: 'rgba(0, 0, 0, 0.35)',
         zIndex: 1,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     postButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(8),
     },
     headerActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: ox(10),
     },
     draftButton: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
     },
     draftButtonText: {
         color: '#9CA3AF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     postButtonText: {
         color: '#3B82F6',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     content: {
@@ -1174,66 +1267,66 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     contentContainer: {
-        paddingBottom: 32,
+        paddingBottom: ox(32),
     },
     addYoursBanner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: ox(6),
         alignSelf: 'flex-start',
-        borderRadius: 999,
+        borderRadius: ox(999),
         backgroundColor: '#FBBF24',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        margin: 16,
-        marginBottom: 8,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
+        margin: ox(16),
+        marginBottom: ox(8),
     },
     addYoursBannerText: {
         color: '#111827',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     mediaSelection: {
-        padding: 16,
-        gap: 16,
+        padding: ox(16),
+        gap: ox(16),
     },
     mediaButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        padding: 20,
-        borderRadius: 14,
+        gap: ox(12),
+        padding: ox(20),
+        borderRadius: ox(14),
         ...glassSurface,
     },
     mediaButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '500',
     },
     storyControlsCard: {
-        marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 4,
-        borderRadius: 14,
+        marginHorizontal: ox(16),
+        marginTop: ox(8),
+        marginBottom: ox(4),
+        borderRadius: ox(14),
         ...glassPanel,
-        padding: 12,
-        gap: 10,
+        padding: ox(12),
+        gap: ox(10),
     },
     storyControlsTitle: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     storyAudienceRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
+        gap: ox(8),
     },
     storyAudienceChip: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         ...glassSurface,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     storyAudienceChipActive: {
         borderColor: '#F8D26A',
@@ -1241,25 +1334,25 @@ const styles = StyleSheet.create({
     },
     storyAudienceChipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     storyAudienceChipTextActive: {
         color: '#F8D26A',
     },
     storyStyleChip: {
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#4B5563',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     storyStyleChipActive: {
         borderColor: '#F8D26A',
     },
     storyStyleChipText: {
         color: '#F9FAFB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     mediaPreview: {
@@ -1296,33 +1389,33 @@ const styles = StyleSheet.create({
     carouselBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: ox(6),
         alignSelf: 'flex-start',
-        marginBottom: 8,
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        marginBottom: ox(8),
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         backgroundColor: 'rgba(59, 130, 246, 0.25)',
         borderWidth: 1,
         borderColor: 'rgba(147, 197, 253, 0.45)',
     },
     carouselBadgeText: {
         color: '#BFDBFE',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     carouselRail: {
-        marginBottom: 10,
+        marginBottom: ox(10),
         maxHeight: 88,
     },
     carouselRailContent: {
-        gap: 8,
-        paddingRight: 8,
+        gap: ox(8),
+        paddingRight: ox(8),
     },
     carouselThumbWrap: {
-        width: 72,
-        height: 72,
-        borderRadius: 10,
+        width: ox(72),
+        height: ox(72),
+        borderRadius: ox(10),
         overflow: 'hidden',
         backgroundColor: '#111827',
         borderWidth: 2,
@@ -1336,19 +1429,19 @@ const styles = StyleSheet.create({
         right: 4,
         top: 4,
         backgroundColor: 'rgba(244,114,182,0.9)',
-        borderRadius: 4,
-        paddingHorizontal: 4,
+        borderRadius: ox(4),
+        paddingHorizontal: ox(4),
         paddingVertical: 1,
     },
     carouselCoverBadgeText: {
         color: '#FFFFFF',
-        fontSize: 8,
+        fontSize: ox(8),
         fontWeight: '700',
     },
     carouselCoverHint: {
         color: '#9CA3AF',
-        fontSize: 12,
-        marginBottom: 8,
+        fontSize: ox(12),
+        marginBottom: ox(8),
     },
     carouselThumb: {
         width: '100%',
@@ -1366,22 +1459,22 @@ const styles = StyleSheet.create({
         left: 4,
         bottom: 4,
         backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 4,
-        paddingHorizontal: 4,
+        borderRadius: ox(4),
+        paddingHorizontal: ox(4),
         paddingVertical: 1,
     },
     carouselVidBadgeText: {
         color: '#FFFFFF',
-        fontSize: 9,
+        fontSize: ox(9),
         fontWeight: '700',
     },
     carouselThumbRemove: {
         position: 'absolute',
         top: 4,
         right: 4,
-        width: 22,
-        height: 22,
-        borderRadius: 11,
+        width: ox(22),
+        height: ox(22),
+        borderRadius: ox(11),
         backgroundColor: 'rgba(0,0,0,0.65)',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1393,17 +1486,17 @@ const styles = StyleSheet.create({
         zIndex: 2,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        gap: ox(4),
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         backgroundColor: 'rgba(217, 27, 92, 0.35)',
         borderWidth: 1,
         borderColor: 'rgba(244, 114, 182, 0.45)',
     },
     filterBadgeText: {
         color: '#FBCFE8',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     videoPauseBtn: {
@@ -1411,9 +1504,9 @@ const styles = StyleSheet.create({
         right: 14,
         top: 14,
         zIndex: 25,
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(17),
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.45)',
@@ -1426,37 +1519,37 @@ const styles = StyleSheet.create({
     },
     composerTools: {
         flexDirection: 'row',
-        gap: 10,
-        paddingHorizontal: 16,
-        paddingTop: 10,
-        paddingBottom: 4,
+        gap: ox(10),
+        paddingHorizontal: ox(16),
+        paddingTop: ox(10),
+        paddingBottom: ox(4),
     },
     composerToolBtn: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        borderRadius: 12,
-        paddingVertical: 10,
+        gap: ox(8),
+        borderRadius: ox(12),
+        paddingVertical: ox(10),
         backgroundColor: 'rgba(244, 114, 182, 0.12)',
         borderWidth: 1,
         borderColor: 'rgba(244, 114, 182, 0.28)',
     },
     composerToolText: {
         color: '#FBCFE8',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
     },
     imageFilterRow: {
-        paddingHorizontal: 16,
-        paddingBottom: 10,
-        gap: 8,
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(10),
+        gap: ox(8),
     },
     imageFilterChip: {
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
         backgroundColor: 'rgba(255,255,255,0.06)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
@@ -1467,38 +1560,38 @@ const styles = StyleSheet.create({
     },
     imageFilterChipText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     imageFilterChipTextActive: {
         color: '#FBCFE8',
     },
     videoCoverWrap: {
-        marginHorizontal: 16,
-        marginTop: 10,
-        marginBottom: 4,
+        marginHorizontal: ox(16),
+        marginTop: ox(10),
+        marginBottom: ox(4),
     },
     inputContainer: {
-        padding: 16,
+        padding: ox(16),
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.06)',
     },
     textInput: {
         ...glassSurface,
-        borderRadius: 14,
-        padding: 16,
+        borderRadius: ox(14),
+        padding: ox(16),
         color: '#FFFFFF',
-        fontSize: 16,
-        minHeight: 120,
+        fontSize: ox(16),
+        minHeight: ox(120),
         textAlignVertical: 'top',
     },
     captionCounterRow: {
-        marginTop: 8,
+        marginTop: ox(8),
         alignItems: 'flex-end',
     },
     captionCounterText: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     captionCounterWarn: {
@@ -1510,20 +1603,20 @@ const styles = StyleSheet.create({
     locationInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: ox(12),
         ...glassSurface,
-        borderRadius: 14,
-        padding: 16,
+        borderRadius: ox(14),
+        padding: ox(16),
     },
     locationInput: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
     },
     taggedUsersPreview: {
-        marginTop: 8,
+        marginTop: ox(8),
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
 });

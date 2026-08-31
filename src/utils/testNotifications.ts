@@ -202,14 +202,40 @@ export async function testFirebasePushConnection(): Promise<{
 
 /** Add sample rows to Inbox → Notifications (and optional desktop popups). */
 export async function seedInboxTestNotifications(): Promise<number> {
-  const userStr = localStorage.getItem('user');
-  if (!userStr) {
+  let toHandle = '';
+  try {
+    const userStr =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      toHandle = String(user?.handle || '');
+    }
+  } catch {
+    // fall through
+  }
+  if (!toHandle) {
+    try {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const userStr = await AsyncStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        toHandle = String(user?.handle || '');
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (!toHandle) {
     throw new Error('Sign in first.');
   }
-  const user = JSON.parse(userStr);
-  const toHandle = user?.handle;
-  if (!toHandle) {
-    throw new Error('No user handle found.');
+
+  // Master toggle must be on or createNotification marks items read / filters them out.
+  const { saveNotificationPreferences, getNotificationPreferences } = await import(
+    '../services/notifications'
+  );
+  const prefs = getNotificationPreferences();
+  if (!prefs.enabled) {
+    saveNotificationPreferences({ ...prefs, enabled: true });
   }
 
   const { createNotification } = await import('../api/notifications');
@@ -237,11 +263,15 @@ export async function seedInboxTestNotifications(): Promise<number> {
     created += 1;
   }
 
-  if (Notification.permission === 'granted') {
-    new Notification('Inbox test ready', {
-      body: `${created} notifications added. Open Inbox → Notifications.`,
-      icon: '/icon-192x192.png',
-    });
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('Inbox test ready', {
+        body: `${created} notifications added. Open Inbox → Notifications.`,
+        icon: '/icon-192x192.png',
+      });
+    }
+  } catch {
+    // RN / unsupported
   }
 
   return created;

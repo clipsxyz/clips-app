@@ -6,12 +6,15 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post, User } from '../types';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedPostMedia from './FeedPostMedia.native';
 import FeedTextOnlyFeedLayout from './FeedTextOnlyFeedLayout.native';
 import FeedCaptionText from './FeedCaptionText.native';
+import FeedTaggedMediaBadge from './FeedTaggedMediaBadge.native';
+import PostLinkPreviewCard from './PostLinkPreviewCard.native';
 import FeedEngagementRow from './FeedEngagementRow';
 import FeedEngagementRightActions from './FeedEngagementRightActions.native';
 import FeedHeartDrop from './FeedHeartDrop.native';
@@ -24,7 +27,12 @@ import ShareToStoriesModal from './ShareToStoriesModal.native';
 import TaggedUsersBottomSheet from './TaggedUsersBottomSheet.native';
 import BoostMetricsPanel from './BoostMetricsPanel.native';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
+import { getPostCaptionWithoutLink } from '../utils/linkPreview';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
+import {
+    FEED_CARD_BODY,
+    FEED_CARD_HEADER_WRAP,
+} from './FeedPageLayout.native';
 
 type Props = {
     post: Post;
@@ -47,6 +55,7 @@ export default function MyFeedPostCard({
     onReclipPress,
     onShareToStoriesSuccess,
 }: Props) {
+    const navigation = useNavigation<any>();
     const screenWidth = Dimensions.get('window').width;
     const cardWidth = screenWidth - 24;
     const cardMediaWidth = cardWidth - 24;
@@ -63,7 +72,14 @@ export default function MyFeedPostCard({
     const hasFeedMedia = Boolean(
         post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0),
     );
+    const hasTaggedUsers = Boolean(post.taggedUsers && post.taggedUsers.length > 0);
     const displayCaption = useMemo(() => getPostDisplayCaption(post), [post]);
+    const captionWithoutLink = useMemo(
+        () => getPostCaptionWithoutLink(post, displayCaption),
+        [post, displayCaption],
+    );
+    const showCaptionRow =
+        !textOnlyPost && hasFeedMedia && (captionWithoutLink.length > 0 || hasTaggedUsers);
     const carouselThumbItems = useMemo(
         () =>
             (post.mediaItems || []).filter(
@@ -101,7 +117,14 @@ export default function MyFeedPostCard({
                     onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (
-                <>
+                <View style={FEED_CARD_BODY}>
+                    <View style={FEED_CARD_HEADER_WRAP}>
+                        <FeedPostHeader
+                            post={post}
+                            viewerHandle={user?.handle}
+                            isCurrentUser={isCurrentUser}
+                        />
+                    </View>
                     {hasFeedMedia ? (
                         <View style={styles.mediaWrap}>
                             <FeedPostMedia
@@ -113,20 +136,8 @@ export default function MyFeedPostCard({
                                 height={mediaHeight}
                                 mode="feed"
                             />
-                            <FeedPostHeader
-                                post={post}
-                                viewerHandle={user?.handle}
-                                isCurrentUser={isCurrentUser}
-                                isOverlaid
-                            />
                         </View>
-                    ) : (
-                        <FeedPostHeader
-                            post={post}
-                            viewerHandle={user?.handle}
-                            isCurrentUser={isCurrentUser}
-                        />
-                    )}
+                    ) : null}
                     {carouselThumbItems.length > 1 ? (
                         <FeedMediaCarouselThumbs
                             items={carouselThumbItems}
@@ -134,12 +145,31 @@ export default function MyFeedPostCard({
                             onSelect={setCarouselIndex}
                         />
                     ) : null}
-                </>
+                </View>
             )}
 
-            {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
+            {showCaptionRow ? (
                 <View style={styles.captionWrap}>
-                    <FeedCaptionText caption={displayCaption} />
+                    <View style={styles.captionRow}>
+                        {captionWithoutLink.length > 0 ? (
+                            <View style={styles.captionTextSlot}>
+                                <FeedCaptionText caption={captionWithoutLink} />
+                            </View>
+                        ) : (
+                            <View style={styles.captionTextSlot} />
+                        )}
+                        {hasTaggedUsers ? (
+                            <FeedTaggedMediaBadge
+                                count={post.taggedUsers!.length}
+                                onPress={() => setTaggedSheetVisible(true)}
+                            />
+                        ) : null}
+                    </View>
+                </View>
+            ) : null}
+            {!textOnlyPost && post.linkPreview ? (
+                <View style={{ width: '100%', alignSelf: 'stretch' }}>
+                    <PostLinkPreviewCard preview={post.linkPreview} />
                 </View>
             ) : null}
 
@@ -152,30 +182,36 @@ export default function MyFeedPostCard({
             />
 
             <View style={styles.engagementBar}>
-                <FeedEngagementRow
-                    likeButtonRef={likeButtonRef}
-                    likes={post.stats?.likes ?? 0}
-                    comments={post.stats?.comments ?? 0}
-                    shares={post.stats?.shares ?? 0}
-                    reclips={post.stats?.reclips ?? 0}
-                    userLiked={post.userLiked}
-                    userReclipped={post.userReclipped}
-                    isSaved={post.isBookmarked}
-                    onLike={onLikePress}
-                    onLikesPress={() => {
-                        if ((post.stats?.likes ?? 0) > 0) setLikesSheetVisible(true);
-                    }}
-                    onComment={onCommentPress}
-                    onShareToStories={() => setShareToStoriesVisible(true)}
-                    onReclip={onReclipPress}
-                    onSave={onBookmarkPress}
-                    showReclip={Boolean(onReclipPress)}
-                    tone="feed"
-                />
+                <View style={styles.engagementLeft}>
+                    <FeedEngagementRow
+                        likeButtonRef={likeButtonRef}
+                        likes={post.stats?.likes ?? 0}
+                        comments={post.stats?.comments ?? 0}
+                        shares={post.stats?.shares ?? 0}
+                        reclips={post.stats?.reclips ?? 0}
+                        saves={post.stats?.saves ?? 0}
+                        userLiked={post.userLiked}
+                        userReclipped={post.userReclipped}
+                        isSaved={post.isBookmarked}
+                        onLike={onLikePress}
+                        onLikesPress={() => {
+                            setLikesSheetVisible(true);
+                        }}
+                        onComment={onCommentPress}
+                        onShareToStories={() => setShareToStoriesVisible(true)}
+                        onReclip={onReclipPress}
+                        onSave={onBookmarkPress}
+                        showReclip={Boolean(onReclipPress)}
+                        showSaveLabel={!post.isBoosted}
+                        compact={Boolean(post.isBoosted)}
+                        tone="feed"
+                    />
+                </View>
                 <FeedEngagementRightActions
                     showMetrics={Boolean(post.isBoosted)}
                     metricsOpen={boostMetricsOpen}
                     onToggleMetrics={() => setBoostMetricsOpen((v) => !v)}
+                    shares={post.stats?.shares ?? 0}
                     onShare={() => setShareModalOpen(true)}
                 />
             </View>
@@ -201,6 +237,9 @@ export default function MyFeedPostCard({
                     visible={taggedSheetVisible}
                     taggedUserHandles={post.taggedUsers}
                     onClose={() => setTaggedSheetVisible(false)}
+                    onVisitProfile={(handle) =>
+                        navigation.navigate('ViewProfile', { handle })
+                    }
                 />
             ) : null}
 
@@ -215,6 +254,7 @@ export default function MyFeedPostCard({
                 post={post}
                 isOpen={shareModalOpen}
                 onClose={() => setShareModalOpen(false)}
+                onShareSuccess={onShareToStoriesSuccess}
             />
         </TouchableOpacity>
     );
@@ -228,6 +268,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.06)',
+        flexDirection: 'column',
     },
     sponsoredBadge: {
         paddingHorizontal: 12,
@@ -241,10 +282,20 @@ const styles = StyleSheet.create({
     },
     mediaWrap: {
         position: 'relative',
+        overflow: 'hidden',
+        width: '100%',
     },
     captionWrap: {
         paddingHorizontal: 12,
         paddingVertical: 10,
+    },
+    captionRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    captionTextSlot: {
+        flex: 1,
+        minWidth: 0,
     },
     engagementBar: {
         flexDirection: 'row',
@@ -254,6 +305,13 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
         borderTopWidth: 1,
         borderTopColor: 'rgba(255,255,255,0.06)',
+        minWidth: 0,
+    },
+    engagementLeft: {
+        flex: 1,
+        minWidth: 0,
+        flexShrink: 1,
+        marginRight: 8,
     },
     rightActions: {
         flexDirection: 'row',

@@ -448,6 +448,8 @@ class MessageController extends Controller
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
             'source_post_id' => 'nullable|uuid|exists:posts,id',
+            'reply_to' => 'nullable|array',
+            'replyTo' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
@@ -485,6 +487,7 @@ class MessageController extends Controller
                 'text' => $request->text,
                 'image_url' => $request->image_url,
                 'is_system_message' => $request->boolean('is_system_message', false),
+                'reply_to' => $this->normalizedReplyTo($request),
             ]);
 
             // TODO: Create notification if needed (sticker, reply detection)
@@ -510,6 +513,8 @@ class MessageController extends Controller
             'text' => 'nullable|string|max:1000',
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
+            'reply_to' => 'nullable|array',
+            'replyTo' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
@@ -539,6 +544,7 @@ class MessageController extends Controller
             'text' => $request->text,
             'image_url' => $request->image_url,
             'is_system_message' => $request->boolean('is_system_message', false),
+            'reply_to' => $this->normalizedReplyTo($request),
         ]);
 
         return response()->json($message, 201);
@@ -566,6 +572,37 @@ class MessageController extends Controller
             ->update(['read_at' => now()]);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Snapshot of the message being replied to (camelCase or snake_case from clients).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function normalizedReplyTo(Request $request): ?array
+    {
+        $raw = $request->input('reply_to') ?? $request->input('replyTo');
+        if (! is_array($raw)) {
+            return null;
+        }
+
+        $messageId = trim((string) ($raw['message_id'] ?? $raw['messageId'] ?? ''));
+        $text = (string) ($raw['text'] ?? '');
+        $sender = trim((string) ($raw['sender_handle'] ?? $raw['senderHandle'] ?? ''));
+        $imageUrl = $raw['image_url'] ?? $raw['imageUrl'] ?? null;
+        $mediaType = $raw['media_type'] ?? $raw['mediaType'] ?? null;
+
+        if ($messageId === '' && trim($text) === '' && $sender === '' && empty($imageUrl)) {
+            return null;
+        }
+
+        return [
+            'message_id' => $messageId !== '' ? $messageId : null,
+            'text' => $text,
+            'sender_handle' => $sender !== '' ? $sender : null,
+            'image_url' => is_string($imageUrl) && $imageUrl !== '' ? $imageUrl : null,
+            'media_type' => in_array($mediaType, ['image', 'video'], true) ? $mediaType : null,
+        ];
     }
 }
 

@@ -10,15 +10,21 @@ import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import { FEED_UI } from '../constants/feedUiTokens';
+import {
+  isFeedScenesFullscreen,
+  subscribeFeedScenesFullscreen,
+} from '../utils/feedScenesFullscreenNative';
 
 type Props = BottomTabBarProps & {
   inboxBadgeCount: number;
+  onCreatePress?: () => void;
 };
 
 function TabSquareIcon({ name, focused }: { name: string; focused: boolean }) {
   return (
     <View style={[styles.iconSquare, focused ? styles.iconSquareActive : styles.iconSquareInactive]}>
-      <Icon name={name} size={16} color={focused ? '#111827' : '#FFFFFF'} />
+      <Icon name={name} size={FEED_UI.icon.tab} color={focused ? '#111827' : '#FFFFFF'} />
     </View>
   );
 }
@@ -28,10 +34,16 @@ export default function MainTabBar({
   descriptors,
   navigation,
   inboxBadgeCount,
+  onCreatePress,
 }: Props) {
   const insets = useSafeAreaInsets();
   const activeRouteName = state.routes[state.index]?.name;
   const [showContributeCue, setShowContributeCue] = React.useState(false);
+  const [scenesFullscreen, setScenesFullscreen] = React.useState(() =>
+    isFeedScenesFullscreen(),
+  );
+
+  React.useEffect(() => subscribeFeedScenesFullscreen(setScenesFullscreen), []);
 
   React.useEffect(() => {
     if (activeRouteName !== 'Home') {
@@ -48,6 +60,10 @@ export default function MainTabBar({
   }, [activeRouteName]);
 
   const showAddYours = showContributeCue && activeRouteName === 'Home';
+
+  if (scenesFullscreen) {
+    return null;
+  }
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 18 : 8) }]}>
@@ -67,12 +83,40 @@ export default function MainTabBar({
         else if (route.name === 'Inbox') iconName = focused ? 'chatbox-ellipses' : 'chatbox-ellipses-outline';
 
         const onPress = () => {
+          if (route.name === 'Create') {
+            navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+            onCreatePress?.();
+            return;
+          }
           const event = navigation.emit({
             type: 'tabPress',
             target: route.key,
             canPreventDefault: true,
           });
-          if (!focused && !event.defaultPrevented) {
+          if (event.defaultPrevented) return;
+
+          // Home footer always returns to the user's national feed (web `goHomeFeed` /
+          // `resetFeed`) — not the last Discover/Search location.
+          if (route.name === 'Home') {
+            navigation.navigate('Home', {
+              screen: 'Feed',
+              params: {
+                resetHomeFeedAt: Date.now(),
+                location: null,
+                locationLabel: null,
+                locationScope: null,
+                filterType: null,
+                placeId: null,
+              },
+            });
+            return;
+          }
+
+          if (!focused) {
             navigation.navigate(route.name);
           }
         };
@@ -106,7 +150,7 @@ export default function MainTabBar({
                     end={{ x: 1, y: 0 }}
                     style={styles.addYoursGradient}
                   >
-                    <Icon name="location" size={12} color="#111827" />
+                    <Icon name="location" size={10} color="#111827" />
                     <Text style={styles.addYoursText}>Add Yours</Text>
                   </LinearGradient>
                   <View style={styles.addYoursTail} />
@@ -134,24 +178,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingHorizontal: 8,
     paddingTop: 6,
-    backgroundColor: 'rgba(11, 7, 17, 0.94)',
-    borderTopWidth: 1,
+    backgroundColor: '#030712',
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'visible',
+    zIndex: 20,
+    elevation: 20,
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 6,
+    overflow: 'visible',
   },
   iconStack: {
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 28,
+    minHeight: FEED_UI.icon.tabSquare,
+    paddingTop: 4,
+    paddingRight: 8,
+    overflow: 'visible',
   },
   iconSquare: {
-    width: 28,
-    height: 28,
+    width: FEED_UI.icon.tabSquare,
+    height: FEED_UI.icon.tabSquare,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -167,7 +219,7 @@ const styles = StyleSheet.create({
   label: {
     marginTop: 4,
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   labelActive: {
     color: '#FFFFFF',
@@ -177,8 +229,8 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -10,
+    top: 0,
+    right: 0,
     minWidth: 16,
     height: 16,
     borderRadius: 8,
@@ -186,6 +238,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#030712',
+    zIndex: 5,
   },
   badgeText: {
     color: '#FFFFFF',
@@ -194,31 +249,31 @@ const styles = StyleSheet.create({
   },
   addYoursBubble: {
     position: 'absolute',
-    bottom: 36,
+    bottom: 34,
     alignItems: 'center',
     zIndex: 20,
   },
   addYoursGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    borderRadius: 16,
+    gap: 3,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   addYoursText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: '#111827',
   },
   addYoursTail: {
-    width: 8,
-    height: 8,
+    width: 6,
+    height: 6,
     backgroundColor: '#d8dde3',
     transform: [{ rotate: '45deg' }],
-    marginTop: -4,
-    borderRadius: 2,
+    marginTop: -3,
+    borderRadius: 1,
   },
 });

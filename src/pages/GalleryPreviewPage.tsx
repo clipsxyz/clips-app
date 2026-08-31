@@ -8,6 +8,7 @@ import { useAuth } from '../context/Auth';
 import { FiFilter, FiSmile, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { MdOutlineShareLocation } from 'react-icons/md';
 import { createPost } from '../api/posts';
+import { createStory } from '../api/stories';
 import { saveDraft } from '../api/drafts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -21,6 +22,9 @@ import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galle
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import { prepareMediaForPost, prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import { geoFieldsFromSuggestion, type LocationSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
+import { isMockMode } from '../api/apiMode';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -92,9 +96,13 @@ export default function GalleryPreviewPage() {
         draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
         /** Set when uploading from Create → Shorts / TikTok / Reels picker */
         socialUploadTarget?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
+        story24?: boolean;
+        storyAudience?: 'public' | 'close_friends' | 'only_me';
     } | null) || {};
 
     const socialUploadTarget = state.socialUploadTarget;
+    const story24 = !!state.story24;
+    const storyAudience = state.storyAudience || 'public';
 
     const isFromDraft = !!(state.fromDraft && state.draftMediaUrl);
     const moduleSeed = useMemo(() => readModuleCacheSeed(), []);
@@ -184,6 +192,9 @@ export default function GalleryPreviewPage() {
     const [storyLocation, setStoryLocation] = useState(isFromDraft ? (state.draftLocation ?? '') : '');
     const [venue, setVenue] = useState(isFromDraft ? (state.draftVenue ?? '') : '');
     const [landmark, setLandmark] = useState(isFromDraft ? (state.draftLandmark ?? '') : '');
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showTagUserModal, setShowTagUserModal] = useState(false);
     const [selectedFilter, setSelectedFilter] = useState('None');
@@ -601,8 +612,8 @@ export default function GalleryPreviewPage() {
             showToast('Please log in to post.');
             return;
         }
-        const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
-        if (mediaType === 'video' && !useBackend) {
+        const liveUpload = !isMockMode();
+        if (mediaType === 'video' && !liveUpload) {
             await Swal.fire(bottomSheet({
                 title: 'Cannot post video in mock mode',
                 message: 'To post videos from your gallery, the Gazetteer backend needs to be running. In mock mode you can post photos and text, but videos will not upload.',
@@ -615,13 +626,15 @@ export default function GalleryPreviewPage() {
             ? (mediaUrl || (carouselItems[0]?.url ?? ''))
             : (videoFrameDataUrl || mediaUrl || (carouselItems[0]?.url ?? ''));
         const overlay = thumbForOverlay
-            ? showUploadOverlay({ thumbUrl: thumbForOverlay, initialMessage: 'Posting to Gazetteer…' })
+            ? showUploadOverlay({
+                thumbUrl: thumbForOverlay,
+                initialMessage: story24 ? 'Posting to your story…' : 'Posting to Gazetteer…',
+            })
             : null;
         setIsUploading(true);
         try {
             let persistentMediaUrl = mediaUrl;
             let videoPosterUrl: string | undefined;
-            const isVideo = mediaType === 'video';
             let mediaItemsForPost: Array<{ url: string; type: 'image' | 'video'; duration?: number }> | undefined;
 
             // Preserve all carousel items when posting to newsfeed.
@@ -643,18 +656,53 @@ export default function GalleryPreviewPage() {
                 }
             }
 
-            if (mediaUrl.startsWith('blob:')) {
-                const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
+            const needsUpload = /^blob:|^data:|^file:/i.test(mediaUrl) || (!/^https?:\/\//i.test(mediaUrl) && liveUpload);
+            if (needsUpload) {
                 const prepared = await prepareMediaForPost({
                     mediaUrl,
                     mediaType,
-                    useBackendUpload: isVideo ? useBackend : false,
+                    useBackendUpload: liveUpload,
                     appOrigin: window.location.origin,
                 });
                 persistentMediaUrl = prepared.mediaUrl;
-                videoPosterUrl = prepared.videoPosterUrl;
+                if (prepared.videoPosterUrl) {
+                    videoPosterUrl = prepared.videoPosterUrl;
+                }
             }
             const typedCaption = caption.trim();
+            if (story24) {
+                await createStory(
+                    user.id,
+                    user.handle,
+                    persistentMediaUrl,
+                    mediaType,
+                    typedCaption || undefined,
+                    storyLocation.trim() || undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    stickers.length > 0 ? stickers : undefined,
+                    taggedUsers.length > 0 ? taggedUsers : undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    venue.trim() || undefined,
+                    videoPosterUrl,
+                    storyAudience,
+                );
+                clearGalleryPreviewMedia();
+                window.dispatchEvent(new CustomEvent('storyCreated', {
+                    detail: { userHandle: user.handle },
+                }));
+                showToast('Story created successfully!');
+                navigate('/stories');
+                if (overlay) {
+                    overlay.success('Your story is live for 24 hours.');
+                }
+                return;
+            }
             const createdPost = await createPost(
                 user.id,
                 user.handle,
@@ -683,7 +731,10 @@ export default function GalleryPreviewPage() {
                 landmark.trim() || undefined,
                 socialUploadTarget,
                 undefined, // videoFrameMode
-                videoPosterUrl
+                videoPosterUrl,
+                placeId,
+                placeLatitude,
+                placeLongitude,
             );
             const newPost = {
                 ...createdPost,
@@ -692,13 +743,14 @@ export default function GalleryPreviewPage() {
             };
             clearGalleryPreviewMedia();
             showToast('Post created successfully!');
-            window.dispatchEvent(new CustomEvent('postCreated'));
             window.dispatchEvent(new CustomEvent('localPostCreated', {
                 detail: { post: newPost }
             }));
+            window.dispatchEvent(new CustomEvent('postCreated'));
+            // Id-only state: full image data URLs can exceed History state limits and drop the inject.
             navigate('/feed', {
                 state: {
-                    createdPost: newPost,
+                    createdPostId: newPost.id,
                     forceRefreshAt: Date.now(),
                 },
             });
@@ -714,7 +766,7 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget]);
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget, story24, storyAudience, placeId, placeLatitude, placeLongitude]);
 
     const content = (
         <div
@@ -799,8 +851,8 @@ export default function GalleryPreviewPage() {
                             onClick={handlePost}
                             disabled={isUploading}
                             className="p-2.5 rounded-full bg-black text-white disabled:opacity-50 transition-colors shadow-lg flex-shrink-0 hover:bg-black"
-                            title="Post to newsfeed"
-                            aria-label="Post to newsfeed"
+                            title={story24 ? 'Share to your story' : 'Post to newsfeed'}
+                            aria-label={story24 ? 'Share to your story' : 'Post to newsfeed'}
                         >
                             <FiSend className="w-6 h-6" />
                         </button>
@@ -1161,7 +1213,21 @@ export default function GalleryPreviewPage() {
                                         <PlaceAutocompleteField
                                             mode="location"
                                             value={storyLocation}
-                                            onChange={setStoryLocation}
+                                            onChange={(value) => {
+                                                setStoryLocation(value);
+                                                if (!value.trim()) {
+                                                    setPlaceId(undefined);
+                                                    setPlaceLatitude(undefined);
+                                                    setPlaceLongitude(undefined);
+                                                }
+                                            }}
+                                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                                warmPlaceGeocode(s);
+                                                const geo = geoFieldsFromSuggestion(s);
+                                                setPlaceId(geo.placeId);
+                                                setPlaceLatitude(geo.latitude);
+                                                setPlaceLongitude(geo.longitude);
+                                            }}
                                             placeholder="Add story location"
                                             inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                         />
@@ -1181,6 +1247,15 @@ export default function GalleryPreviewPage() {
                                             mode="venue"
                                             value={venue}
                                             onChange={setVenue}
+                                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                                warmPlaceGeocode(s);
+                                                if (!placeId) {
+                                                    const geo = geoFieldsFromSuggestion(s);
+                                                    setPlaceId(geo.placeId);
+                                                    setPlaceLatitude(geo.latitude);
+                                                    setPlaceLongitude(geo.longitude);
+                                                }
+                                            }}
                                             placeholder="Add venue"
                                             inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                         />
@@ -1200,6 +1275,15 @@ export default function GalleryPreviewPage() {
                                             mode="landmark"
                                             value={landmark}
                                             onChange={setLandmark}
+                                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                                warmPlaceGeocode(s);
+                                                if (!placeId) {
+                                                    const geo = geoFieldsFromSuggestion(s);
+                                                    setPlaceId(geo.placeId);
+                                                    setPlaceLatitude(geo.latitude);
+                                                    setPlaceLongitude(geo.longitude);
+                                                }
+                                            }}
                                             placeholder="Add landmark (optional)"
                                             inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                         />

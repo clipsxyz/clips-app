@@ -1,31 +1,26 @@
 /**
- * Client-side delivery targets modeled on Instagram's upload pipeline:
- * - On device: transcode to H.264/AAC MP4 before upload (aggressive, mobile-oriented).
- * - Server/CDN may re-encode again; we match what the Instagram *app* sends upstream.
+ * On-device H.264/AAC MP4 before upload. Tuned for encode speed on phones
+ * (ultrafast + 720p + capped bitrate) so posts stay small with no server transcode.
  *
- * References (public specs / creator docs, 2024–2026):
- * - H.264 + AAC in MP4, progressive download (`faststart`)
- * - Long edge capped at 1080px, aspect ratio preserved
- * - ~30 fps cap, ~3.5 Mbps video / 128 kbps AAC audio for HD-class output
- * - Portrait 9:16 (1080×1920), square 1:1, and 4:5 are display crops — we do not
- *   force a single aspect; we only bound resolution and bitrate like Instagram's scaler.
+ * - Long edge capped at 720px, aspect ratio preserved
+ * - 30 fps cap, ~1.8 Mbps video / 96 kbps AAC
  */
 
 export const INSTAGRAM_UPLOAD_DELIVERY = {
     container: 'mp4',
-    maxLongEdgePx: 1080,
+    maxLongEdgePx: 720,
     maxFrameRate: 30,
     videoCodec: 'libx264',
-    videoProfile: 'high',
-    videoLevel: '4.0',
+    videoProfile: 'main',
+    videoLevel: '3.1',
     pixelFormat: 'yuv420p',
-    x264Preset: 'veryfast',
-    /** Instagram HD feed/reels class target (~3.5–5 Mbps). */
-    videoBitrate: '3500k',
-    videoMaxrate: '3500k',
-    videoBufsize: '7000k',
+    x264Preset: 'ultrafast',
+    /** 720p social target — small files, fast x264. */
+    videoBitrate: '1800k',
+    videoMaxrate: '1800k',
+    videoBufsize: '3600k',
     audioCodec: 'aac',
-    audioBitrate: '128k',
+    audioBitrate: '96k',
     audioSampleRate: 44100,
     audioChannels: 2,
 } as const;
@@ -37,7 +32,7 @@ export function buildInstagramDeliveryVideoFilterChain(colorFilter?: string | nu
     const max = INSTAGRAM_UPLOAD_DELIVERY.maxLongEdgePx;
     const fps = INSTAGRAM_UPLOAD_DELIVERY.maxFrameRate;
     const parts = [
-        `scale=w='min(${max},iw)':h='min(${max},ih)':force_original_aspect_ratio=decrease`,
+        `scale=w='min(${max},iw)':h='min(${max},ih)':force_original_aspect_ratio=decrease:flags=fast_bilinear`,
         'scale=trunc(iw/2)*2:trunc(ih/2)*2',
         `fps=${fps}`,
     ];
@@ -58,6 +53,7 @@ export function buildInstagramDeliveryEncodeArgs(): string[] {
         `-maxrate ${d.videoMaxrate}`,
         `-bufsize ${d.videoBufsize}`,
         `-pix_fmt ${d.pixelFormat}`,
+        '-threads 0',
         '-map 0:v:0',
         '-map 0:a:0?',
         `-c:a ${d.audioCodec}`,

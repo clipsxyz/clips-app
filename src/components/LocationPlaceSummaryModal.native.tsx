@@ -7,7 +7,7 @@ import {
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import LocationPlaceSummaryBody from './LocationPlaceSummaryBody';
+import LocationPlaceSummaryBody from './LocationPlaceSummaryBody.native';
 import { usePlaceSummary } from '../hooks/usePlaceSummary';
 
 type Props = {

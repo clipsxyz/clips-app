@@ -7,12 +7,23 @@ import { firebaseSwPlugin } from './vite-plugin-firebase-sw'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), noCache(), firebaseSwPlugin()],
+  // Node packages that read process.env must not crash in the browser.
+  define: {
+    'process.env': {},
+  },
+  // Expose both Vite and Expo-style public env keys to the client bundle.
+  envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
   resolve: {
+    // Prefer *.web.* so shared imports do not pull Metro-only files.
+    extensions: ['.web.tsx', '.web.ts', '.web.jsx', '.web.js', '.mjs', '.tsx', '.ts', '.jsx', '.js', '.json'],
     alias: {
       '@': resolve(__dirname, './src'),
       // Prevent Vite from processing React Native entry point
       './App': resolve(__dirname, './src/App.tsx'),
       '../App': resolve(__dirname, './src/App.tsx'),
+      // Shared modules (Auth, stories rail, etc.) import `react-native`; serve the web build
+      // or the browser hits Flow `import typeof` and renders a blank page.
+      'react-native': 'react-native-web',
     },
   },
   // Explicitly exclude React Native files from being processed
@@ -20,11 +31,14 @@ export default defineConfig({
   root: '.',
   optimizeDeps: {
     force: true, // Force re-optimization
-    include: ['firebase/app', 'firebase/messaging'],
-    // Exclude React Native dependencies from optimization (not needed for web)
-    exclude: [
-      'react-native',
+    include: [
+      'firebase/app',
+      'firebase/messaging',
       'react-native-web',
+      '@react-native-async-storage/async-storage',
+    ],
+    // Exclude native-only packages (not aliased to web)
+    exclude: [
       'react-native-vector-icons',
       'react-native-webrtc',
       'react-native-safe-area-context',
@@ -40,8 +54,6 @@ export default defineConfig({
   build: {
     commonjsOptions: {
       ignore: [
-        'react-native',
-        'react-native-web',
         'react-native-vector-icons',
         'react-native-webrtc',
       ],
@@ -51,6 +63,7 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '0.0.0.0', // Allow external connections (accessible from other devices on network)
+    allowedHosts: true,
     strictPort: false,
     fs: {
       allow: ['.', './src', './public'],
@@ -62,9 +75,11 @@ export default defineConfig({
       'Last-Modified': new Date().toUTCString(),
       'ETag': '', // Disable ETag caching
     },
+    // Don't force HMR to localhost — that blanks/breaks phone tabs on the LAN IP.
+    // Vite will use the page hostname (e.g. 192.168.1.12) when opened from Oppo.
     hmr: {
       protocol: 'ws',
-      host: 'localhost', // For laptop dev; when on phone via IP, HMR may fail but app still loads
+      clientPort: 5173,
     },
     proxy: {
       '/api': {

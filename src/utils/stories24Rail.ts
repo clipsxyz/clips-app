@@ -1,7 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
-import { getFollowedUsers } from '../api/posts';
+import { getFollowedUsers, posts as localPosts } from '../api/posts';
+import { getAvatarForHandle } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
+import {
+    resolveStoryMediaUrl,
+    resolveStoryVideoPlaybackUrl,
+} from './storyMediaNative';
 
 export type Stories24RailItem = {
     handle: string;
@@ -14,10 +19,10 @@ export type Stories24RailItem = {
 /** RN AsyncStorage key — keep in sync with web `clips:stories24OpenedFromRailHandle` semantics. */
 export const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:rn:stories24OpenedFromRailHandle';
 export const STORIES24_LOADING_HOLD_MS = 2600;
-/** Card → fullscreen expand before navigating to Stories (match web App.tsx). */
-export const STORIES24_EXPAND_MS = 560;
-/** Fullscreen → card shrink when returning to feed (match web App.tsx). */
-export const STORIES24_COLLAPSE_MS = 720;
+/** Card → fullscreen expand before navigating to Stories (Threads-style spring morph). */
+export const STORIES24_EXPAND_MS = 420;
+/** Fullscreen → card shrink (Apple TV decelerate into tile). */
+export const STORIES24_COLLAPSE_MS = 560;
 export const STORIES24_ADD_YOURS_HANDLE = '__add_yours__';
 
 /** RN AsyncStorage — keep in sync with web `clips:stories24RailReturn`. */
@@ -32,6 +37,19 @@ export type Stories24RailReturnPayload = {
     previewThumb?: string;
     previewVideoUrl?: string;
 };
+
+/** Sync handoff so feed can start shrink before AsyncStorage round-trip. */
+let stories24RailReturnSync: Stories24RailReturnPayload | null = null;
+
+export function setStories24RailReturnSync(payload: Stories24RailReturnPayload): void {
+    stories24RailReturnSync = payload;
+}
+
+export function takeStories24RailReturnSync(): Stories24RailReturnPayload | null {
+    const next = stories24RailReturnSync;
+    stories24RailReturnSync = null;
+    return next;
+}
 
 export function normalizeStories24Handle(handle: string): string {
     return (handle || '').trim().toLowerCase().replace(/^@/, '');
@@ -100,7 +118,20 @@ export async function buildStories24RailItems(
     userHandle?: string | null,
 ): Promise<Stories24RailItem[]> {
     const followedUserHandles = await getFollowedUsers(userId);
-    const groups = await fetchFollowedUsersStoryGroups(userId, followedUserHandles || []);
+    const followedSet = new Set(
+        (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase().replace(/^@/, '')).filter(Boolean),
+    );
+    const selfHandle = (userHandle || '').trim().toLowerCase().replace(/^@/, '');
+    const groups = (await fetchFollowedUsersStoryGroups(userId, followedUserHandles || [])).filter(
+        (group) => {
+            const handle = (group.userHandle || '').trim().toLowerCase().replace(/^@/, '');
+            if (selfHandle && handle === selfHandle) return true;
+            if (String(group.userId) === String(userId) && (!handle || handle === selfHandle)) {
+                return true;
+            }
+            return followedSet.has(handle);
+        },
+    );
 
     const nextItems: Stories24RailItem[] = [];
     for (const group of groups) {
@@ -110,15 +141,48 @@ export async function buildStories24RailItems(
         const latest = sortedStories[0];
         if (!latest) continue;
 
-        const latestMediaUrl = latest.mediaUrl;
+        const latestMediaUrl = resolveStoryMediaUrl(latest.mediaUrl);
         const latestMediaType = latest.mediaType;
-        const firstImage = sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl;
-        let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined);
+        const firstImage = resolveStoryMediaUrl(
+            sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
+        );
+        const sharedPost = latest.sharedFromPost
+            ? localPosts.find((p) => String(p.id) === String(latest.sharedFromPost))
+            : undefined;
+        const sharedPoster =
+            resolveStoryMediaUrl(latest.videoPosterUrl) ||
+            resolveStoryMediaUrl(sharedPost?.videoPosterUrl) ||
+            resolveStoryMediaUrl(
+                sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
+            ) ||
+            resolveStoryMediaUrl(
+                sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url,
+            );
+        const previewVideoUrl =
+            latestMediaType === 'video'
+                ? resolveStoryVideoPlaybackUrl(latest.mediaUrl)
+                : sharedPost?.mediaType === 'video'
+                  ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
+                  : undefined;
+        const avatarUrl =
+            resolveStoryMediaUrl(group.avatarUrl) || getAvatarForHandle(group.userHandle);
+        // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
+        // the rail pauses previews and would flash the avatar instead of the shared clip.
+        let thumb =
+            firstImage ||
+            sharedPoster ||
+            (latestMediaType !== 'video' && !previewVideoUrl ? latestMediaUrl : undefined);
+        if (thumb && avatarUrl && thumb === avatarUrl) {
+            thumb = undefined;
+        }
+        if (!thumb && !previewVideoUrl) {
+            thumb = avatarUrl;
+        }
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.poll?.question || '').trim() ||
             (latest.sharedFromPost ? 'Shared a post' : 'New story');
-        const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
+        const title = text.length > 90 ? `${text.slice(0, 90)}...` : text;
         const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
         nextItems.push({
@@ -126,7 +190,7 @@ export async function buildStories24RailItems(
             title,
             subtitle,
             thumb,
-            previewVideoUrl: latestMediaType === 'video' ? latestMediaUrl : undefined,
+            previewVideoUrl,
         });
         if (nextItems.length >= 12) break;
     }
@@ -181,15 +245,14 @@ export async function clearStories24RailOpenHandle(): Promise<void> {
 export async function persistStories24RailReturn(payload: Stories24RailReturnPayload): Promise<void> {
     const handle = (payload.handle || '').trim();
     if (!handle) return;
+    const next = {
+        handle,
+        previewThumb: payload.previewThumb,
+        previewVideoUrl: payload.previewVideoUrl,
+    };
+    setStories24RailReturnSync(next);
     try {
-        await AsyncStorage.setItem(
-            STORIES24_RAIL_RETURN_KEY,
-            JSON.stringify({
-                handle,
-                previewThumb: payload.previewThumb,
-                previewVideoUrl: payload.previewVideoUrl,
-            }),
-        );
+        await AsyncStorage.setItem(STORIES24_RAIL_RETURN_KEY, JSON.stringify(next));
     } catch {
         /* ignore */
     }
@@ -229,6 +292,15 @@ export async function consumeStories24FeedScrollRestore(): Promise<number | null
 }
 
 export async function consumeStories24RailReturn(): Promise<Stories24RailReturnPayload | null> {
+    const sync = takeStories24RailReturnSync();
+    if (sync) {
+        try {
+            await AsyncStorage.removeItem(STORIES24_RAIL_RETURN_KEY);
+        } catch {
+            /* ignore */
+        }
+        return sync;
+    }
     try {
         const raw = await AsyncStorage.getItem(STORIES24_RAIL_RETURN_KEY);
         if (!raw) return null;

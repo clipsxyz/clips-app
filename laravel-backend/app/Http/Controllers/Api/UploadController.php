@@ -11,9 +11,12 @@ use Illuminate\Support\Facades\Validator;
 
 class UploadController extends Controller
 {
+    /** App-level cap in bytes (must stay at or below PHP upload/post limits). */
+    private const MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
+
     /**
      * Upload single file
-     * Note: PHP upload_max_filesize and post_max_size must be large enough (e.g., 100M+)
+     * Note: PHP upload_max_filesize and post_max_size must be large enough (e.g., 256M+)
      */
     public function single(Request $request): JsonResponse
     {
@@ -23,38 +26,29 @@ class UploadController extends Controller
         // Check current PHP limits (guard against empty ini values)
         $uploadMax = $this->parseSize(ini_get('upload_max_filesize') ?: '8M');
         $postMax = $this->parseSize(ini_get('post_max_size') ?: '8M');
-        $maxAllowed = min($uploadMax, $postMax);
+        $maxAllowed = min($uploadMax, $postMax, self::MAX_UPLOAD_BYTES);
+        $maxLabel = $this->formatBytes($maxAllowed);
         
         // Check if request is too large (before validation)
         $contentLength = $request->header('Content-Length') ? (int)$request->header('Content-Length') : 0;
         if ($contentLength > 0 && $contentLength > $maxAllowed) {
             return response()->json([
                 'error' => 'File too large',
-                'message' => "File size ({$this->formatBytes($contentLength)}) exceeds PHP limit ({$this->formatBytes($maxAllowed)}). Please increase upload_max_filesize and post_max_size in php.ini to at least 100M.",
-                'maxSize' => $this->formatBytes($maxAllowed),
+                'message' => "This clip is too large to upload. Try a shorter video (max {$maxLabel}).",
+                'maxSize' => $maxLabel,
                 'fileSize' => $this->formatBytes($contentLength),
                 'phpUploadMax' => ini_get('upload_max_filesize'),
                 'phpPostMax' => ini_get('post_max_size'),
-                'instructions' => 'Edit php.ini and set: upload_max_filesize = 100M and post_max_size = 100M, then restart PHP server.'
-            ], 413);
-        }
-        
-        if ($contentLength > 100 * 1024 * 1024) {
-            return response()->json([
-                'error' => 'File too large',
-                'message' => 'Maximum file size is 100MB. Please reduce video quality or duration.',
-                'maxSize' => '100MB',
-                'fileSize' => $this->formatBytes($contentLength)
             ], 413);
         }
 
         // Validate file - use extensions instead of MIME types if fileinfo is not working
         $validator = Validator::make($request->all(), [
-            'file' => 'required|file|max:102400'
+            'file' => 'required|file|max:262144'
         ]);
 
         // Additional validation for file extensions (fallback if MIME validation fails)
-        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'webm', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
+        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'mov', 'm4v', 'webm', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
         $file = $request->file('file');
         if ($file) {
             $extension = strtolower($file->getClientOriginalExtension());
@@ -76,8 +70,8 @@ class UploadController extends Controller
                     if (str_contains($error, 'max')) {
                         return response()->json([
                             'error' => 'File too large',
-                            'message' => 'Maximum file size is 100MB. Please reduce video quality or duration.',
-                            'maxSize' => '100MB',
+                            'message' => "This clip is too large to upload. Try a shorter video (max {$maxLabel}).",
+                            'maxSize' => $maxLabel,
                             'errors' => $errors
                         ], 413);
                     }
@@ -87,15 +81,9 @@ class UploadController extends Controller
         }
 
         $file = $request->file('file');
-        $user = null;
-        try {
-            $user = Auth::user();
-        } catch (\Throwable $e) {
-            // Auth may throw if guard not configured; continue as guest
-        }
+        $userId = $this->uploadOwnerId($request);
 
         $ext = $file->getClientOriginalExtension() ?: 'jpg';
-        $userId = $user ? $user->id : 'guest';
         $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $ext;
 
         $disk = config('filesystems.default');
@@ -156,11 +144,11 @@ class UploadController extends Controller
     public function multiple(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'files.*' => 'required|file|max:102400'
+            'files.*' => 'required|file|max:262144'
         ]);
 
         // Additional validation for file extensions (fallback if MIME validation fails)
-        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'webm', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
+        $allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'mov', 'm4v', 'webm', 'mp3', 'wav', 'm4a', 'aac', 'ogg'];
         $files = $request->file('files');
         if ($files) {
             foreach ($files as $file) {
@@ -180,7 +168,7 @@ class UploadController extends Controller
         }
 
         $files = $request->file('files');
-        $user = Auth::user();
+        $userId = $this->uploadOwnerId($request);
         $uploadedFiles = [];
 
         // Use a web-accessible filesystem disk (prefer 'public' for local dev so files are served via /storage)
@@ -193,7 +181,6 @@ class UploadController extends Controller
             $disk = config('filesystems.default', 'public');
         }
 
-        $userId = $user ? $user->id : 'guest';
         foreach ($files as $file) {
             // Generate unique filename with user ID for organization (or 'guest' if not authenticated)
             $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $file->getClientOriginalExtension();
@@ -234,8 +221,8 @@ class UploadController extends Controller
     private function increaseUploadLimits(): void
     {
         // Try to increase limits if possible (won't work if ini_set is disabled)
-        @ini_set('upload_max_filesize', '100M');
-        @ini_set('post_max_size', '100M');
+        @ini_set('upload_max_filesize', '256M');
+        @ini_set('post_max_size', '280M');
         @ini_set('max_execution_time', '300'); // 5 minutes for large uploads
         @ini_set('max_input_time', '300');
     }
@@ -264,6 +251,23 @@ class UploadController extends Controller
         return $value;
     }
     
+    /**
+     * Public upload routes still receive a Bearer token — resolve Sanctum without requiring the auth middleware.
+     */
+    private function uploadOwnerId(Request $request): string
+    {
+        try {
+            $user = $request->user('sanctum') ?: Auth::guard('sanctum')->user();
+            if ($user && $user->id) {
+                return (string) $user->id;
+            }
+        } catch (\Throwable $e) {
+            // continue as guest
+        }
+
+        return 'guest';
+    }
+
     /**
      * Format bytes to human-readable string
      */

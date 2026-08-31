@@ -20,6 +20,7 @@ import { glassPanel } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { publishPollStory24 } from '../utils/publishStoryNative';
 import { hapticSuccess } from '../utils/hapticsNative';
+import { ox } from '../constants/nativeOpticalScale';
 
 const OPTION_MAX = 26;
 
@@ -36,7 +37,7 @@ export default function ClipPollScreen({ navigation }: any) {
 
     const pickBackground = () => {
         ImagePicker.launchImageLibrary(
-            { mediaType: 'photo', quality: 0.85 },
+            { mediaType: 'photo', quality: 0.8 },
             (response) => {
                 if (response.didCancel) return;
                 const uri = response.assets?.[0]?.uri;
@@ -100,11 +101,11 @@ export default function ClipPollScreen({ navigation }: any) {
             >
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-                        <Icon name="close" size={26} color="#FFFFFF" />
+                        <Icon name="close" size={ox(26)} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Create Poll</Text>
                     <TouchableOpacity onPress={pickBackground} style={styles.headerBtn}>
-                        <Icon name="image-outline" size={24} color="#FFFFFF" />
+                        <Icon name="image-outline" size={ox(24)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
 
@@ -213,7 +214,7 @@ function PollCard({
                     <PollOptionInput value={option3 || ''} onChangeText={onOption3Change} />
                 ) : (
                     <TouchableOpacity style={styles.addOptionBtn} onPress={onAddOption3}>
-                        <Icon name="add" size={18} color="#374151" />
+                        <Icon name="add" size={ox(18)} color="#374151" />
                         <Text style={styles.addOptionText}>Add option</Text>
                     </TouchableOpacity>
                 )}
@@ -245,71 +246,71 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
     },
-    headerBtn: { padding: 8 },
-    headerTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-    previewWrap: { flex: 1, marginHorizontal: 12, borderRadius: 16, overflow: 'hidden' },
+    headerBtn: { padding: ox(8) },
+    headerTitle: { color: '#FFFFFF', fontSize: ox(17), fontWeight: '700' },
+    previewWrap: { flex: 1, marginHorizontal: ox(12), borderRadius: ox(16), overflow: 'hidden' },
     previewBg: { flex: 1, justifyContent: 'center' },
-    cardScroll: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+    cardScroll: { flexGrow: 1, justifyContent: 'center', padding: ox(20) },
     pollCard: {
         ...glassPanel,
         backgroundColor: 'rgba(255,255,255,0.95)',
-        borderRadius: 20,
-        padding: 20,
+        borderRadius: ox(20),
+        padding: ox(20),
     },
     questionInput: {
-        fontSize: 17,
+        fontSize: ox(17),
         fontWeight: '600',
         color: '#111827',
         borderWidth: 2,
         borderColor: '#E5E7EB',
-        borderRadius: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        marginBottom: 16,
+        borderRadius: ox(12),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
+        marginBottom: ox(16),
     },
-    optionWrap: { marginBottom: 12 },
+    optionWrap: { marginBottom: ox(12) },
     optionInput: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#111827',
         textAlign: 'center',
         borderWidth: 2,
         borderColor: '#E5E7EB',
-        borderRadius: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 14,
+        borderRadius: ox(12),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(14),
     },
-    optionCount: { textAlign: 'center', color: '#6B7280', fontSize: 11, marginTop: 4 },
+    optionCount: { textAlign: 'center', color: '#6B7280', fontSize: ox(11), marginTop: ox(4) },
     addOptionBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
+        gap: ox(6),
         borderWidth: 2,
         borderStyle: 'dashed',
         borderColor: '#D1D5DB',
-        borderRadius: 12,
-        paddingVertical: 12,
+        borderRadius: ox(12),
+        paddingVertical: ox(12),
     },
     addOptionText: { color: '#374151', fontWeight: '600' },
-    footer: { padding: 16, gap: 10 },
+    footer: { padding: ox(16), gap: ox(10) },
     locationInput: {
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 10,
+        borderRadius: ox(12),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(10),
         color: '#FFFFFF',
     },
     postBtn: {
         backgroundColor: '#FFFFFF',
-        borderRadius: 999,
-        paddingVertical: 14,
+        borderRadius: ox(999),
+        paddingVertical: ox(14),
         alignItems: 'center',
     },
     postBtnDisabled: { opacity: 0.7 },
-    postBtnText: { color: '#111827', fontWeight: '700', fontSize: 16 },
+    postBtnText: { color: '#111827', fontWeight: '700', fontSize: ox(16) },
 });

@@ -8,3 +8,14 @@ export function navigateMainTab(
 ) {
     navigation.navigate('MainTabs', { screen, params });
 }
+
+/** Open own Passport with bottom tab bar visible (web /profile parity). */
+export function navigatePassport(
+    navigation: { navigate: (name: string, params?: object) => void },
+    fromTab: MainTabName = 'Home',
+) {
+    navigation.navigate('MainTabs', {
+        screen: fromTab,
+        params: { screen: 'Profile' },
+    });
+}

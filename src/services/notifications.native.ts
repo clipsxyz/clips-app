@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
-import { apiRequest } from '../api/client';
+import messaging from '@react-native-firebase/messaging';
+import { apiRequest, fetchNotificationPreferences, saveNotificationPreferencesToServer } from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
 
@@ -61,31 +63,25 @@ let unsubscribeOpened: (() => void) | null = null;
 let unsubscribeTokenRefresh: (() => void) | null = null;
 let currentFcmToken: string | null = null;
 
-function getDynamicRequire(): ((name: string) => any) | null {
+function getMessagingInstance(): any | null {
   try {
-    // Avoid static bundler resolution when package is not installed.
-    const req = Function('return typeof require !== "undefined" ? require : null')();
-    return typeof req === 'function' ? req : null;
-  } catch {
-    return null;
-  }
-}
-
-async function getMessagingInstance(): Promise<any | null> {
-  const req = getDynamicRequire();
-  if (!req) return null;
-  try {
-    const messagingModule = req('@react-native-firebase/messaging');
-    const factory = messagingModule?.default ?? messagingModule;
-    return typeof factory === 'function' ? factory() : null;
-  } catch {
+    return typeof messaging === 'function' ? messaging() : messaging;
+  } catch (error) {
+    console.warn('[FCM] messaging() unavailable:', error);
     return null;
   }
 }
 
 async function getCurrentUserIdentity(): Promise<{ id?: string; handle?: string } | null> {
   try {
-    const userStr = await AsyncStorage.getItem('user');
+    let userStr = await AsyncStorage.getItem('user');
+    if (!userStr) {
+      try {
+        userStr = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
+      } catch {
+        userStr = null;
+      }
+    }
     if (!userStr) return null;
     const userData = JSON.parse(userStr);
     return {
@@ -100,16 +96,38 @@ async function getCurrentUserIdentity(): Promise<{ id?: string; handle?: string 
 async function saveTokenToBackend(token: string): Promise<void> {
   try {
     const user = await getCurrentUserIdentity();
+    if (!user?.id || user.id === 'unknown') {
+      console.log('[FCM] skip token save until user is signed in');
+      return;
+    }
     await apiRequest('/notifications/fcm-token', {
       method: 'POST',
       body: JSON.stringify({
         token,
-        userId: user?.id || user?.handle || 'unknown',
-        userHandle: user?.handle || '',
+        userId: user.id,
+        userHandle: user.handle || '',
       }),
     });
+    console.log('[FCM] token registered for', user.handle || user.id);
   } catch (error) {
     console.warn('Failed to save FCM token to backend:', error);
+  }
+}
+
+/** Call after login / hydrate so the device token is tied to the Sanctum user. */
+export async function registerFcmTokenForCurrentUser(): Promise<string | null> {
+  await hydratePreferencesOnce();
+  const messaging = getMessagingInstance();
+  if (!messaging) return null;
+  try {
+    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
+      await messaging.requestPermission();
+    }
+    await requestNotificationPermission();
+    return await getFCMToken();
+  } catch (error) {
+    console.warn('[FCM] register after auth failed:', error);
+    return null;
   }
 }
 
@@ -125,6 +143,7 @@ async function removeTokenFromBackend(token: string): Promise<void> {
         remove: true,
       }),
     });
+    console.log('[FCM] token removed for', user?.handle || user?.id || 'user');
   } catch (error) {
     console.warn('Failed to remove FCM token from backend:', error);
   }
@@ -145,6 +164,23 @@ async function hydratePreferencesOnce(): Promise<void> {
 }
 
 void hydratePreferencesOnce();
+
+/** Await AsyncStorage hydrate and Laravel prefs so Settings matches the account. */
+export async function loadNotificationPreferences(): Promise<NotificationPreferences> {
+  await hydratePreferencesOnce();
+  if (isLaravelApiEnabled()) {
+    try {
+      const remote = await fetchNotificationPreferences();
+      if (remote) {
+        inMemoryNotificationPrefs = { ...defaultPreferences, ...remote };
+        await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+      }
+    } catch (error) {
+      console.warn('Failed to load notification preferences from backend:', error);
+    }
+  }
+  return getNotificationPreferences();
+}
 
 export function getNotificationPreferences(): NotificationPreferences {
   return { ...defaultPreferences, ...inMemoryNotificationPrefs };
@@ -184,11 +220,49 @@ export function isNotificationTypeEnabled(
   }
 }
 
+/** In-app inbox is not gated on the push master switch. */
+export function isInAppNotificationChannelEnabled(
+  prefs: NotificationPreferences,
+  channel: NotificationPreferenceChannel
+): boolean {
+  return isNotificationTypeEnabled({ ...prefs, enabled: true }, channel);
+}
+
 export function saveNotificationPreferences(prefs: NotificationPreferences): void {
   inMemoryNotificationPrefs = { ...defaultPreferences, ...prefs };
   void AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs)).catch((error) => {
     console.error('Error saving notification preferences:', error);
   });
+  if (isLaravelApiEnabled()) {
+    void saveNotificationPreferencesToServer(inMemoryNotificationPrefs).catch((error) => {
+      console.warn('Failed to sync notification preferences to backend:', error);
+    });
+  }
+}
+
+/** Awaitable save for Settings UI (disk + Laravel). */
+export async function saveNotificationPreferencesAsync(
+  prefs: NotificationPreferences,
+  options?: { syncRemote?: boolean },
+): Promise<NotificationPreferences> {
+  inMemoryNotificationPrefs = { ...defaultPreferences, ...prefs };
+  try {
+    await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+  } catch (error) {
+    console.error('Error saving notification preferences:', error);
+  }
+  if (options?.syncRemote !== false && isLaravelApiEnabled()) {
+    try {
+      const saved = await saveNotificationPreferencesToServer(inMemoryNotificationPrefs);
+      if (saved) {
+        inMemoryNotificationPrefs = { ...defaultPreferences, ...saved };
+        await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+      }
+    } catch (error) {
+      console.warn('Failed to sync notification preferences to backend:', error);
+    }
+  }
+  return getNotificationPreferences();
 }
 
 export function resetNotificationPreferences(): NotificationPreferences {
@@ -217,12 +291,19 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 
 export async function getFCMToken(): Promise<string | null> {
   const messaging = await getMessagingInstance();
-  if (!messaging) return null;
+  if (!messaging) {
+    console.warn('[FCM] messaging module unavailable');
+    return null;
+  }
   try {
     const token = await messaging.getToken();
     if (token) {
+      // Explicit log so `adb logcat` / `npx react-native log-android` can copy the device token.
+      console.log('[FCM] device token:', token);
       await saveTokenToBackend(token);
       currentFcmToken = token;
+    } else {
+      console.warn('[FCM] getToken returned empty');
     }
     return token || null;
   } catch (error) {
@@ -255,13 +336,6 @@ export function showBrowserNotification(title: string, options?: any): void {
 export async function initializeNotifications(options?: NotificationInitOptions): Promise<void> {
   await hydratePreferencesOnce();
   const prefs = getNotificationPreferences();
-  if (!prefs.enabled) {
-    return;
-  }
-  const permission = await requestNotificationPermission();
-  if (permission !== 'granted') {
-    return;
-  }
 
   const messaging = await getMessagingInstance();
   if (!messaging) {
@@ -269,15 +343,16 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     return;
   }
 
+  // Always attempt token fetch so Firebase console / log-android can capture the device token.
   try {
     if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
       await messaging.requestPermission();
     }
+    await requestNotificationPermission();
+    await getFCMToken();
   } catch (error) {
-    console.warn('Native notification permission request failed:', error);
+    console.warn('Native FCM token fetch failed:', error);
   }
-
-  await getFCMToken();
 
   if (unsubscribeForeground) {
     unsubscribeForeground();
@@ -292,10 +367,8 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     unsubscribeTokenRefresh = null;
   }
 
-  unsubscribeForeground = await onForegroundMessage(() => {
-    // Keep listener active for future in-app badges/refresh hooks.
-  });
-
+  // Deep-link listeners always register in mock/dev — tapping a push must navigate even if
+  // the master Settings toggle is off (toggle gates delivery, not open handling).
   if (typeof messaging.onNotificationOpenedApp === 'function' && options?.onNotificationPress) {
     unsubscribeOpened = messaging.onNotificationOpenedApp((remoteMessage: NotificationPayload) => {
       options.onNotificationPress?.(remoteMessage?.data || {});
@@ -313,8 +386,30 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     }
   }
 
+  if (!prefs.enabled) {
+    return;
+  }
+
+  const permission = await requestNotificationPermission();
+  if (permission !== 'granted') {
+    return;
+  }
+
+  try {
+    if (Platform.OS === 'ios' && typeof messaging.requestPermission === 'function') {
+      await messaging.requestPermission();
+    }
+  } catch (error) {
+    console.warn('Native notification permission request failed:', error);
+  }
+
+  unsubscribeForeground = await onForegroundMessage(() => {
+    // Keep listener active for future in-app badges/refresh hooks.
+  });
+
   if (typeof messaging.onTokenRefresh === 'function') {
     unsubscribeTokenRefresh = messaging.onTokenRefresh((token: string) => {
+      console.log('[FCM] device token (refresh):', token);
       currentFcmToken = token;
       void saveTokenToBackend(token);
     });
@@ -357,11 +452,19 @@ export async function registerBackgroundMessageHandler(
 }
 
 export async function clearNotificationSession(): Promise<void> {
-  const messaging = await getMessagingInstance();
-  if (currentFcmToken) {
-    await removeTokenFromBackend(currentFcmToken);
-    currentFcmToken = null;
+  const messaging = getMessagingInstance();
+  const tokens = new Set<string>();
+  if (currentFcmToken) tokens.add(currentFcmToken);
+  try {
+    const live = await messaging?.getToken?.();
+    if (typeof live === 'string' && live.trim()) tokens.add(live.trim());
+  } catch (error) {
+    console.warn('[FCM] getToken during logout failed:', error);
   }
+  for (const token of tokens) {
+    await removeTokenFromBackend(token);
+  }
+  currentFcmToken = null;
   if (messaging && typeof messaging.deleteToken === 'function') {
     try {
       await messaging.deleteToken();

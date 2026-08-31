@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { userHasStoriesByHandle } from '../api/stories';
-import { getAvatarForHandle } from '../api/users';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
+import { resolveAvatarImageUri } from '../api/users';
 import { useAuth } from '../context/Auth';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { getReclipDisplay } from '../utils/feedPostMeta';
+import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import Avatar from './Avatar';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
-import TaggedAvatars from './TaggedAvatars.native';
-
-const AVATAR_COLUMN_WIDTH = 36;
+import PostLinkPreviewCard from './PostLinkPreviewCard.native';
+import FeedTaggedMediaBadge from './FeedTaggedMediaBadge.native';
+import { FEED_UI } from '../constants/feedUiTokens';
+import { getPostCaptionWithoutLink } from '../utils/linkPreview';
+const AVATAR_COLUMN_WIDTH = FEED_UI.icon.avatar + 8;
 const BUBBLE_MAX_WIDTH = 480;
 
 type Props = {
@@ -27,6 +31,9 @@ type Props = {
     onDoubleLike: () => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onShowTaggedUsers?: () => void;
+    menuAnchorRef?: React.Ref<View>;
+    /** News feed hides OG share cards (they live in Stories 24). */
+    showLinkPreview?: boolean;
 };
 
 export default function FeedTextOnlyFeedLayout({
@@ -41,6 +48,8 @@ export default function FeedTextOnlyFeedLayout({
     onDoubleLike,
     onRegisterDmAnchor,
     onShowTaggedUsers,
+    menuAnchorRef,
+    showLinkPreview = true,
 }: Props) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
@@ -50,10 +59,23 @@ export default function FeedTextOnlyFeedLayout({
         post.userHandle.replace(/^@+/, '').toLowerCase() === viewerHandle.replace(/^@+/, '').toLowerCase();
 
     const { profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
-    const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(profileHandle);
+    const avatarSrc = resolveAvatarImageUri(
+        (isCurrentUser ? user?.avatarUrl : undefined) || post.userAvatarUrl,
+        profileHandle,
+    );
     const isFollowing = post.isFollowing === true;
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
+    const viewer = viewerHandle ?? user?.handle;
+    const hasPendingRequest = Boolean(
+        !isCurrentUser &&
+            !isFollowing &&
+            viewer &&
+            isProfilePrivate(profileHandle) &&
+            hasPendingFollowRequest(viewer, profileHandle),
+    );
     const bubbleMaxWidth = Math.min(Math.max(120, cardWidth - AVATAR_COLUMN_WIDTH - 8), BUBBLE_MAX_WIDTH);
+    const leftover = getPostCaptionWithoutLink(post, post.text || '');
+    const showBubble = leftover.length > 0 || !post.linkPreview || !showLinkPreview;
 
     const registerAnchor = useCallback(
         (ref: View | null) => {
@@ -65,13 +87,18 @@ export default function FeedTextOnlyFeedLayout({
 
     useEffect(() => {
         let cancelled = false;
-        userHasStoriesByHandle(profileHandle)
-            .then((v) => {
-                if (!cancelled) setHasStory(v);
-            })
-            .catch(() => {});
+        const check = () => {
+            userHasStoriesByHandle(profileHandle)
+                .then((v) => {
+                    if (!cancelled) setHasStory(v);
+                })
+                .catch(() => {});
+        };
+        check();
+        const unsub = subscribeStoriesRefresh(check);
         return () => {
             cancelled = true;
+            unsub();
         };
     }, [profileHandle]);
 
@@ -88,17 +115,22 @@ export default function FeedTextOnlyFeedLayout({
                 onProfileMenuPress={onProfileMenuPress}
                 onOverflowPress={onOverflowPress}
                 onRegisterDmAnchor={onRegisterDmAnchor}
+                menuAnchorRef={menuAnchorRef}
             />
+
+            {showLinkPreview && post.linkPreview ? <PostLinkPreviewCard preview={post.linkPreview} /> : null}
 
             {/* Web PostHeader textOnlyFeed: bubble then avatar, row aligned end. */}
             <View style={styles.bubbleRow}>
                 <View style={[styles.bubbleSlot, { maxWidth: bubbleMaxWidth }]}>
-                    <FeedTextOnlyCard
-                        post={post}
-                        isFromViewer={isFromViewer}
-                        onDoubleLike={onDoubleLike}
-                        maxWidth={bubbleMaxWidth}
-                    />
+                    {showBubble ? (
+                        <FeedTextOnlyCard
+                            post={leftover ? { ...post, text: leftover } : post}
+                            isFromViewer={isFromViewer}
+                            onDoubleLike={onDoubleLike}
+                            maxWidth={bubbleMaxWidth}
+                        />
+                    ) : null}
                 </View>
                 <View style={styles.avatarColumn}>
                     <View ref={(r) => registerAnchor(r)} collapsable={false} style={styles.avatarWrap}>
@@ -106,14 +138,20 @@ export default function FeedTextOnlyFeedLayout({
                             <Avatar
                                 src={avatarSrc}
                                 name={(profileHandle || post.userHandle || 'User').split('@')[0]}
-                                size={28}
+                                handle={profileHandle || post.userHandle}
+                                size={FEED_UI.icon.avatar}
                                 hasStory={hasStory}
                             />
                         </TouchableOpacity>
-                        {!isCurrentUser && onFollow && !isFollowing ? (
+                        {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                             <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
                                 <Icon name="add" size={12} color="#FFFFFF" />
                             </TouchableOpacity>
+                        ) : null}
+                        {!isCurrentUser && hasPendingRequest ? (
+                            <View style={styles.requestedPill} pointerEvents="none">
+                                <Text style={styles.requestedPillText}>Req</Text>
+                            </View>
                         ) : null}
                         {!isCurrentUser && isMutualFollow && onOpenDM ? (
                             <TouchableOpacity
@@ -134,9 +172,9 @@ export default function FeedTextOnlyFeedLayout({
 
             {post.taggedUsers && post.taggedUsers.length > 0 ? (
                 <View style={styles.taggedFooter}>
-                    <TaggedAvatars
-                        taggedUserHandles={post.taggedUsers}
-                        onShowTaggedUsers={onShowTaggedUsers ?? (() => {})}
+                    <FeedTaggedMediaBadge
+                        count={post.taggedUsers.length}
+                        onPress={onShowTaggedUsers ?? (() => {})}
                     />
                 </View>
             ) : null}
@@ -185,6 +223,26 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 1.5,
         borderColor: '#030712',
+    },
+    requestedPill: {
+        position: 'absolute',
+        right: -10,
+        bottom: -2,
+        minWidth: 28,
+        height: 18,
+        paddingHorizontal: 4,
+        borderRadius: 9,
+        backgroundColor: 'rgba(61, 155, 143, 0.95)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#030712',
+    },
+    requestedPillText: {
+        color: '#FFFFFF',
+        fontSize: 8,
+        fontWeight: '700',
+        letterSpacing: 0.2,
     },
     dmButton: {
         position: 'absolute',

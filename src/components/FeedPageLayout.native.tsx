@@ -22,6 +22,7 @@ import {
     type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ox } from '../constants/nativeOpticalScale';
 
 /** Web `main` / feed shell background (App.tsx style={{ backgroundColor: '#030712' }}). */
 export const FEED_PAGE_BG = '#030712';
@@ -29,13 +30,335 @@ export const FEED_PAGE_BG = '#030712';
 /** Web post card / article background (FeedCard style). */
 export const FEED_CARD_BG = '#030712';
 
+/** Media column + loading frame (black letterbox). */
+export const FEED_CARD_MEDIA_BG = '#000000';
+
+/** Web post card bottom divider (dark:border-gray-700). */
+export const FEED_CARD_BORDER_COLOR = 'rgba(55, 65, 81, 0.9)';
+
+/** Web FeedCard article chrome (non-tile mode). */
+export const FEED_POST_CARD_STYLE = {
+    backgroundColor: FEED_CARD_BG,
+    borderBottomWidth: 1,
+    borderBottomColor: FEED_CARD_BORDER_COLOR,
+    position: 'relative' as const,
+    overflow: 'hidden' as const,
+    flexDirection: 'column' as const,
+    width: '100%' as const,
+    alignSelf: 'stretch' as const,
+};
+
+/** Header → media → footer. Clip media so TextureView cannot bleed. */
+export const FEED_CARD_BODY = {
+    position: 'relative' as const,
+    width: '100%' as const,
+    alignSelf: 'stretch' as const,
+    overflow: 'hidden' as const,
+    flexDirection: 'column' as const,
+};
+
+/** Reserved chrome above media so the player cannot collapse into the next card. */
+export const FEED_CARD_HEADER_WRAP = {
+    position: 'relative' as const,
+    width: '100%' as const,
+    minHeight: 56,
+    zIndex: 2,
+    backgroundColor: FEED_CARD_BG,
+} as const;
+
+/** Default media frame while sizing / for letterboxing. */
+export const FEED_CARD_MEDIA_FRAME = {
+    backgroundColor: FEED_CARD_MEDIA_BG,
+};
+
+/** Web FeedCard sponsored row: `px-4 pt-2 pb-1.5`. */
+export const FEED_CARD_SPONSORED_PADDING = {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+} as const;
+
+/** Web caption block under media: `px-3 py-2.5`. */
+export const FEED_CARD_CAPTION_PADDING = {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+} as const;
+
+export const FEED_CARD_CAPTION_ROW = {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+};
+
+export const FEED_CARD_CAPTION_TEXT_SLOT = {
+    flex: 1,
+    minWidth: 0,
+} as const;
+
+/** Web EngagementBar shell: `px-3 pt-2 pb-2.5 border-t` with borderColor #030712. */
+export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: FEED_PAGE_BG,
+} as const;
+
+/** Full-bleed media column below the stacked post header. */
+export const FEED_CARD_MEDIA_WRAP = {
+    width: '100%' as const,
+    alignSelf: 'stretch' as const,
+    backgroundColor: FEED_CARD_MEDIA_BG,
+    position: 'relative' as const,
+    overflow: 'hidden' as const,
+    marginRight: 0,
+    paddingHorizontal: 0,
+};
+
+/** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
+export const FEED_CARD_MEDIA_FX_LAYER = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 45,
+} as const;
+
+/** Transparent tap layer above media (header is stacked above this frame). */
+export const FEED_CARD_MEDIA_TAP_LAYER = {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 15,
+} as const;
+
+/** Client upload / failure overlay on media. */
+export const FEED_CARD_UPLOAD_OVERLAY = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 20,
+    gap: 6,
+};
+
+export const FEED_CARD_UPLOAD_TITLE = {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700' as const,
+    marginTop: 4,
+};
+
+export const FEED_CARD_UPLOAD_SUBTITLE = {
+    color: '#D1D5DB',
+    fontSize: 12,
+    textAlign: 'center' as const,
+};
+
+/** Web sponsored row container: flex + px-4 pt-2 pb-1.5. */
+export const FEED_CARD_SPONSORED_ROW = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    ...FEED_CARD_SPONSORED_PADDING,
+};
+
+/** Web `inline-flex … px-2.5 py-0.5 rounded-full text-xs … bg-amber-500/20`. */
+export const FEED_CARD_SPONSORED_PILL = {
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+};
+
+export const FEED_CARD_SPONSORED_TEXT = {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: '#FBBF24',
+};
+
+export const FEED_CARD_SPONSORED_FEED_TYPE = {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textTransform: 'capitalize' as const,
+};
+
+/** Web EngagementBar flex row + border-t padding. */
+export const FEED_CARD_ENGAGEMENT_BAR = {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    minWidth: 0,
+    ...FEED_CARD_ENGAGEMENT_BAR_PADDING,
+};
+
+export const FEED_CARD_ENGAGEMENT_BAR_DIMMED = {
+    opacity: 0.45,
+};
+
+/** Left cluster in engagement row (web: flex items-center min-w-0 flex-shrink). */
+export const FEED_CARD_ENGAGEMENT_LEFT = {
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
+    marginRight: 8,
+};
+
+/** Web carousel thumb rail: px-3 py-2 bg-black/95 border-t border-white/10. */
+export const FEED_CARD_CAROUSEL_WRAP = {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+};
+
+export const FEED_CARD_CAROUSEL_HEADER = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginBottom: 8,
+};
+
+export const FEED_CARD_CAROUSEL_TITLE = {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase' as const,
+    color: 'rgba(255,255,255,0.85)',
+};
+
+export const FEED_CARD_CAROUSEL_COUNT = {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: 'rgba(255,255,255,0.8)',
+};
+
+export const FEED_CARD_CAROUSEL_RAIL = {
+    flexDirection: 'row' as const,
+    gap: 8,
+    paddingBottom: 4,
+};
+
+export const FEED_CARD_CAROUSEL_THUMB = {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    overflow: 'hidden' as const,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+};
+
+export const FEED_CARD_CAROUSEL_THUMB_ACTIVE = {
+    borderColor: '#FFFFFF',
+    borderWidth: 2,
+};
+
+/** Web banner ticker under engagement (news-ticker-container). */
+export const FEED_CARD_TICKER_WRAP = {
+    height: 28,
+    overflow: 'hidden' as const,
+    backgroundColor: FEED_CARD_MEDIA_BG,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: FEED_CARD_BORDER_COLOR,
+    justifyContent: 'center' as const,
+};
+
+export const FEED_CARD_TICKER_TEXT = {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600' as const,
+    paddingHorizontal: 12,
+};
+
+/** Web empty-feed card: rounded-2xl border-gray-800 gradient shell. */
+export const FEED_EMPTY_CARD = {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(31, 41, 55, 0.95)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    alignItems: 'center' as const,
+    alignSelf: 'stretch' as const,
+    maxWidth: 448,
+    width: '100%' as const,
+};
+
+export const FEED_EMPTY_BADGE = {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase' as const,
+    color: '#9CA3AF',
+    marginBottom: 12,
+    textAlign: 'center' as const,
+};
+
+export const FEED_EMPTY_TITLE = {
+    fontSize: 20,
+    fontWeight: '600' as const,
+    color: '#FFFFFF',
+    textAlign: 'center' as const,
+    marginBottom: 8,
+};
+
+export const FEED_EMPTY_SUBTITLE = {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#9CA3AF',
+    textAlign: 'center' as const,
+    marginBottom: 16,
+};
+
+export const FEED_EMPTY_FOLLOWING_TITLE = {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#FFFFFF',
+    textAlign: 'center' as const,
+    marginBottom: 4,
+};
+
+export const FEED_EMPTY_FOLLOWING_SUBTITLE = {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#9CA3AF',
+    textAlign: 'center' as const,
+};
+
+export const FEED_EMPTY_GRADIENT_BTN = {
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    minWidth: 200,
+};
+
+export const FEED_EMPTY_GRADIENT_BTN_TEXT = {
+    color: '#000000',
+    fontSize: 14,
+    fontWeight: '600' as const,
+};
+
+export const FEED_EMPTY_NOTIFY_GRADIENT = ['#0EA5E9', '#6366F1', '#A855F7'] as const;
+export const FEED_EMPTY_CREATE_GRADIENT = ['#EF4444', '#FACC15', '#EF4444'] as const;
+
 /** Web PillTabs container: `bg-black py-1`. */
 export const FEED_PILL_TABS_BG = '#000000';
 
 /** Web location pill: `bg-[#36454F]`. */
 export const FEED_LOCATION_PILL_BG = '#36454F';
 
-/** Web header title typography (PillTabs location label). */
+/** Web header title typography (PillTabs location label — 18px / 700). */
 export const FEED_HEADER_TITLE = {
     fontSize: 18,
     fontWeight: '700' as const,
@@ -43,13 +366,187 @@ export const FEED_HEADER_TITLE = {
     color: '#E5E7EB',
 };
 
-/** Web FeedCard article chrome (non-tile mode). */
-export const FEED_POST_CARD_STYLE = {
-    backgroundColor: FEED_CARD_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(55, 65, 81, 0.9)', // gray-700
-    marginBottom: 8, // mb-2
-    overflow: 'visible' as const,
+/** Web PillTabs grid row: grid-cols-[auto_1fr_auto] gap-2 px-3. */
+export const FEED_HEADER_PICKER_ROW = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    gap: 8,
+    zIndex: 30,
+};
+
+export const FEED_HEADER_SIDE_ACTION = {
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingVertical: 2,
+};
+
+export const FEED_HEADER_SIDE_LABEL = {
+    marginTop: 2,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '500' as const,
+    color: '#FFFFFF',
+};
+
+export const FEED_HEADER_CENTER = {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center' as const,
+    position: 'relative' as const,
+};
+
+/** Web location pill: rounded-lg bg-[#36454F] px-3 py-1.5 gap-2. */
+export const FEED_HEADER_LOCATION_PILL = {
+    position: 'relative' as const,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+    maxWidth: '100%' as const,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: FEED_LOCATION_PILL_BG,
+    overflow: 'hidden' as const,
+};
+
+export const FEED_HEADER_ACTIVE_DOT = {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+};
+
+export const FEED_HEADER_LOCATION_TITLE = {
+    flexShrink: 1,
+    maxWidth: 160,
+    ...FEED_HEADER_TITLE,
+};
+
+/** Web dropdown: rounded-[22px] border-white/10 bg-[#272b35]/92. */
+export const FEED_HEADER_DROPDOWN_MENU = {
+    position: 'absolute' as const,
+    top: 48,
+    marginTop: 6,
+    alignSelf: 'center' as const,
+    width: 220,
+    backgroundColor: 'rgba(39, 43, 53, 0.92)',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingVertical: 6,
+    zIndex: 60,
+    shadowColor: '#000000',
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 36,
+};
+
+export const FEED_HEADER_DROPDOWN_SEARCH_WRAP = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    backgroundColor: 'transparent',
+};
+
+export const FEED_HEADER_DROPDOWN_SEARCH_INPUT = {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    marginLeft: 8,
+    paddingVertical: 0,
+    borderWidth: 0,
+};
+
+export const FEED_HEADER_DROPDOWN_SEARCH_HINT = {
+    marginTop: 4,
+    marginBottom: 4,
+    marginHorizontal: 14,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
+};
+
+export const FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP = {
+    marginHorizontal: 12,
+    marginBottom: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    overflow: 'hidden' as const,
+};
+
+export const FEED_HEADER_DROPDOWN_SUGGESTION_ITEM = {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+};
+
+export const FEED_HEADER_DROPDOWN_SUGGESTION_TEXT = {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 15,
+};
+
+export const FEED_HEADER_DROPDOWN_META = {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+};
+
+export const FEED_HEADER_DROPDOWN_MENU_ITEM = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+};
+
+export const FEED_HEADER_DROPDOWN_MENU_TEXT = {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.95)',
+    fontWeight: '600' as const,
+};
+
+export const FEED_HEADER_PASSPORT_AVATAR = {
+    width: ox(36),
+    height: ox(36),
+    borderRadius: 10,
+    overflow: 'hidden' as const,
+    backgroundColor: '#374151',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+};
+
+export const FEED_HEADER_PASSPORT_INITIALS = {
+    fontSize: ox(12),
+    fontWeight: '700' as const,
+    color: '#FFFFFF',
+};
+
+export const FEED_HEADER_ICON_BUTTON = {
+    width: 44,
+    height: 44,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+};
+
+export const FEED_HEADER_RIGHT_ACTIONS = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'flex-end' as const,
+    gap: 2,
 };
 
 export type FeedPageLayoutProps = {
@@ -61,6 +558,8 @@ export type FeedPageLayoutProps = {
     error?: string | null;
     onRetry?: () => void;
     style?: StyleProp<ViewStyle>;
+    /** Let an in-cell video scale past the postcard (Scenes overlay). */
+    allowOverflow?: boolean;
 };
 
 export default function FeedPageLayout({
@@ -70,13 +569,21 @@ export default function FeedPageLayout({
     error = null,
     onRetry,
     style,
+    allowOverflow = false,
 }: FeedPageLayoutProps) {
     const insets = useSafeAreaInsets();
 
     return (
-        <View style={[styles.root, style]}>
+        <View style={[styles.root, allowOverflow ? styles.rootOverflow : null, style]}>
+            <View style={styles.opaqueBackdrop} pointerEvents="none" />
             {/* Pinned chrome — web: shrink-0 pt-[safe-area] (FeedPageWrapper) */}
-            <View style={[styles.pinnedChrome, { paddingTop: insets.top }]}>
+            <View
+                style={[
+                    styles.pinnedChrome,
+                    { paddingTop: insets.top },
+                    allowOverflow ? styles.pinnedChromeUnderlay : null,
+                ]}
+            >
                 <View style={styles.spacer16} />
 
                 {!online ? (
@@ -112,7 +619,7 @@ export default function FeedPageLayout({
             </View>
 
             {/* Inner scroll host — web: flex-1 min-h-0 overflow-y-auto pb-2 */}
-            <View style={styles.scrollHost}>{children}</View>
+            <View style={[styles.scrollHost, allowOverflow ? styles.scrollHostOverlay : null]}>{children}</View>
         </View>
     );
 }
@@ -123,6 +630,14 @@ const styles = StyleSheet.create({
         backgroundColor: FEED_PAGE_BG,
         overflow: 'hidden',
     },
+    rootOverflow: {
+        overflow: 'visible',
+    },
+    opaqueBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: FEED_PAGE_BG,
+        zIndex: 0,
+    },
     pinnedChrome: {
         flexShrink: 0,
         zIndex: 140,
@@ -132,41 +647,51 @@ const styles = StyleSheet.create({
             ios: {},
         }),
     },
+    pinnedChromeUnderlay: {
+        zIndex: 0,
+    },
     spacer16: {
         height: 16, // web h-4
     },
     pillTabsHost: {
         backgroundColor: FEED_PILL_TABS_BG,
         paddingVertical: 4, // web py-1
+        position: 'relative',
+        zIndex: 140,
     },
     scrollHost: {
         flex: 1,
         minHeight: 0,
         paddingBottom: 8, // web pb-2
         backgroundColor: FEED_PAGE_BG,
+        zIndex: 1,
+    },
+    scrollHostOverlay: {
+        zIndex: 20,
+        overflow: 'visible',
     },
     offlineBanner: {
         marginHorizontal: 12, // mx-3
         marginTop: 8, // mt-2
-        borderRadius: 6, // rounded-md
+        borderRadius: 6,
         borderWidth: 1,
-        borderColor: '#FDE68A', // amber-200 dark: amber-800 approx
-        backgroundColor: '#FFFBEB', // amber-50 — readable on dark via text color
+        borderColor: '#92400E', // amber-800
+        backgroundColor: '#451A03', // amber-950
         paddingHorizontal: 12,
         paddingVertical: 8,
     },
     offlineBannerText: {
-        fontSize: 12, // text-xs
-        color: '#78350F', // amber-900
+        fontSize: 12,
+        color: '#FDE68A', // amber-200
     },
     errorBanner: {
-        marginHorizontal: 16, // mx-4
-        marginVertical: 12, // my-3
-        padding: 12, // p-3
+        marginHorizontal: 16,
+        marginVertical: 12,
+        padding: 12,
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: '#FCA5A5', // red-300
-        backgroundColor: '#FEF2F2', // red-50
+        borderColor: '#991B1B', // red-800
+        backgroundColor: '#450A0A', // red-950
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -174,8 +699,8 @@ const styles = StyleSheet.create({
     },
     errorText: {
         flex: 1,
-        fontSize: 14, // text-sm
-        color: '#991B1B', // red-800
+        fontSize: 14,
+        color: '#FECACA', // red-200
     },
     errorRetryBtn: {
         paddingHorizontal: 12,

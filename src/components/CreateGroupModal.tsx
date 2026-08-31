@@ -1,10 +1,12 @@
 import React from 'react';
 import { FiX, FiUsers } from 'react-icons/fi';
 import { createChatGroup } from '../api/chatGroups';
+import { uploadFile } from '../api/client';
 import { showToast } from '../utils/toast';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { useAuth } from '../context/Auth';
 import Avatar from './Avatar';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import { getAvatarForHandle } from '../api/users';
 
 export default function CreateGroupModal({
@@ -18,14 +20,16 @@ export default function CreateGroupModal({
 }) {
   const { user } = useAuth();
   const [name, setName] = React.useState('');
-  const [avatarDataUrl, setAvatarDataUrl] = React.useState<string | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = React.useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = React.useState<File | null>(null);
   const [busy, setBusy] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     if (isOpen) {
       setName('');
-      setAvatarDataUrl(null);
+      setAvatarPreviewUrl(null);
+      setAvatarFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [isOpen]);
@@ -45,7 +49,19 @@ export default function CreateGroupModal({
     }
     setBusy(true);
     try {
-      const g = await createChatGroup(trimmed, creatorHandle ?? null, avatarDataUrl);
+      let avatarUrl: string | null = null;
+      if (avatarFile) {
+        if (isLaravelApiEnabled()) {
+          const upload = await uploadFile(avatarFile);
+          avatarUrl = upload?.fileUrl || upload?.url || null;
+          if (!avatarUrl) {
+            throw new Error('Could not upload group photo');
+          }
+        } else if (avatarPreviewUrl) {
+          avatarUrl = avatarPreviewUrl;
+        }
+      }
+      const g = await createChatGroup(trimmed, creatorHandle ?? null, avatarUrl);
       if (g) {
         onCreated?.(g);
         onClose();
@@ -67,8 +83,9 @@ export default function CreateGroupModal({
   return (
     <div className="fixed inset-0 z-[295] flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px]" onClick={() => !busy && onClose()} />
-      <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/15 bg-black shadow-2xl overflow-hidden mb-safe">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3">
+      <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#060d16] shadow-2xl overflow-hidden mb-safe">
+        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+        <div className="relative z-[2] flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <Avatar
               src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
@@ -85,7 +102,7 @@ export default function CreateGroupModal({
             <FiX className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-4 space-y-3 bg-black">
+        <div className="relative z-[2] p-4 space-y-3">
           <p className="text-xs text-white/50 leading-relaxed">
             Next you&apos;ll open the group chat. Invite people with the <strong className="text-white/70">+</strong> button there, or
             open someone&apos;s profile → <strong className="text-white/70">Invite to group</strong>.
@@ -111,14 +128,15 @@ export default function CreateGroupModal({
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
               >
-                {avatarDataUrl ? 'Change photo' : 'Choose photo'}
+                {avatarPreviewUrl ? 'Change photo' : 'Choose photo'}
               </button>
-              {avatarDataUrl ? (
+              {avatarPreviewUrl ? (
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => {
-                    setAvatarDataUrl(null);
+                    setAvatarPreviewUrl(null);
+                    setAvatarFile(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
                   className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50"
@@ -142,15 +160,16 @@ export default function CreateGroupModal({
                     showToast('Could not read image file');
                     return;
                   }
-                  setAvatarDataUrl(result);
+                  setAvatarFile(file);
+                  setAvatarPreviewUrl(result);
                 };
                 reader.onerror = () => showToast('Could not read image file');
                 reader.readAsDataURL(file);
               }}
             />
-            {avatarDataUrl ? (
+            {avatarPreviewUrl ? (
               <div className="w-16 h-16 rounded-full overflow-hidden border border-white/20">
-                <img src={avatarDataUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
+                <img src={avatarPreviewUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
               </div>
             ) : null}
           </div>

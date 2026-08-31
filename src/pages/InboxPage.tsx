@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiUsers, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -19,8 +19,9 @@ import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/cli
 import { fetchUserProfile } from '../api/client';
 import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
+import { acceptChatGroupInvite, declineChatGroupInvite } from '../api/chatGroups';
 import { markGroupConversationReadById } from '../api/messages';
-import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import { getNotificationPreferences, isInAppNotificationChannelEnabled } from '../services/notifications';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -652,7 +653,7 @@ export default function InboxPage() {
                     // 3. Doesn't already have a notification for this handle
                     if (conv.kind === 'group') {
                         // Group conversation activity can surface in Notifs when Group Chat notifications are enabled.
-                        if (!isNotificationTypeEnabled(prefs, 'group_chat')) return false;
+                        if (!isInAppNotificationChannelEnabled(prefs, 'group_chat')) return false;
                         if (!conv.chatGroupId || !conv.lastMessage) return false;
                         if (conv.lastMessage.senderHandle === user.handle) return false;
                         if (conv.unread === 0) return false;
@@ -661,7 +662,7 @@ export default function InboxPage() {
                     if (!conv.lastMessage) return false;
                     if (conv.lastMessage.senderHandle === user.handle) return false; // User sent it, don't create notification
                     if (existingNotifHandles.has(conv.otherHandle)) return false; // Already has notification
-                    if (!isNotificationTypeEnabled(prefs, 'dm')) return false;
+                    if (!isInAppNotificationChannelEnabled(prefs, 'dm')) return false;
                     return true;
                 })
                 .map(conv => {
@@ -1055,6 +1056,17 @@ export default function InboxPage() {
             navigate(`/user/${encodeURIComponent(notif.fromHandle)}`, {
                 state: notif.postId ? { sourcePostId: notif.postId } : undefined,
             });
+        } else if (
+            (notif.type === 'comment' || notif.type === 'reply') &&
+            notif.postId &&
+            !notif.storyId
+        ) {
+            // Instagram-style Activity: open the post comments thread.
+            navigate(`/post/${encodeURIComponent(notif.postId)}`, {
+                state: { openComments: true, focusCommentId: notif.commentId },
+            });
+        } else if (notif.type === 'group_invite') {
+            return;
         } else if (notif.type === 'sticker' || notif.type === 'reply') {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'dm') {
@@ -1078,15 +1090,27 @@ export default function InboxPage() {
                 ? `Replied to your 24hr story${ownerSuffix}: ${replyPreview}${contextSuffix}`
                 : `Replied to your 24hr story${ownerSuffix}${contextSuffix}`;
         }
+        if (notif.type === 'comment' && notif.postId) {
+            const preview = (notif.message || '').trim();
+            return preview ? `Commented: ${preview}` : 'Commented on your post';
+        }
+        if (notif.type === 'reply' && notif.postId) {
+            const preview = (notif.message || '').trim();
+            return preview ? `Replied to your comment: ${preview}` : 'Replied to your comment';
+        }
         switch (notif.type) {
             case 'sticker':
                 return `Sent you a sticker: ${notif.message || ''}`;
             case 'reply':
                 return notif.message || 'Replied to your post';
+            case 'comment':
+                return notif.message || 'Commented on your post';
             case 'dm':
                 return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
+            case 'group_invite':
+                return notif.message || `invited you to join ${notif.groupName || 'a community'}`;
             case 'new_post':
                 return notif.message || 'posted a new clip';
             default:
@@ -1105,6 +1129,8 @@ export default function InboxPage() {
                 return <FiMessageCircle className={cls} />;
             case 'follow_request':
                 return <FiUserPlus className={cls} />;
+            case 'group_invite':
+                return <FiUsers className={cls} />;
             case 'new_post':
                 return <FiBell className={cls} />;
             default:
@@ -1210,6 +1236,39 @@ export default function InboxPage() {
         }
     };
 
+    const handleAcceptGroupInvite = async (notif: Notification, e: React.MouseEvent) => {
+        e.stopPropagation();
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId || !user?.handle) return;
+        try {
+            await acceptChatGroupInvite(inviteId);
+            await deleteNotification(notif.id, user.handle);
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+            if (notif.chatGroupId) {
+                navigate(`/messages/group/${encodeURIComponent(notif.chatGroupId)}`);
+            } else {
+                await loadData();
+            }
+        } catch (error) {
+            console.error('Error accepting community invite:', error);
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Could not join this community right now', icon: 'alert' }));
+        }
+    };
+
+    const handleDeclineGroupInvite = async (notif: Notification, e: React.MouseEvent) => {
+        e.stopPropagation();
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId || !user?.handle) return;
+        try {
+            await declineChatGroupInvite(inviteId);
+            await deleteNotification(notif.id, user.handle);
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+        } catch (error) {
+            console.error('Error declining community invite:', error);
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Could not decline this invite right now', icon: 'alert' }));
+        }
+    };
+
     return (
         <div className={compactPhone ? 'p-3' : 'p-4'}>
             <div className="flex items-center gap-2 mb-4">
@@ -1266,7 +1325,29 @@ export default function InboxPage() {
                                 key={group.userId || group.userHandle}
                                 type="button"
                                 onClick={() => {
-                                    navigate('/stories', { state: { openUserHandle: group.userHandle } });
+                                    const railHandles = storyGroups
+                                        .map((g) => g.userHandle)
+                                        .filter(Boolean);
+                                    const latest = [...(group.stories || [])].sort(
+                                        (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+                                    )[0];
+                                    const mediaUrl = latest?.mediaUrl;
+                                    const isVideo =
+                                        latest?.mediaType === 'video' ||
+                                        (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+                                    navigate('/stories', {
+                                        state: {
+                                            openUserHandle: group.userHandle,
+                                            fromStories24Rail: true,
+                                            skipStories24RailReturn: true,
+                                            railHandles,
+                                            previewThumb:
+                                                (!isVideo && mediaUrl) ||
+                                                group.avatarUrl ||
+                                                undefined,
+                                            previewVideoUrl: isVideo && mediaUrl ? mediaUrl : undefined,
+                                        },
+                                    });
                                 }}
                                 className="flex flex-col items-center gap-1 flex-shrink-0"
                             >
@@ -1359,7 +1440,30 @@ export default function InboxPage() {
                 </button>
             </div>
             {loading ? (
-                <div className="text-gray-500">Loading…</div>
+                <div className="w-full" role="status" aria-label="Loading messages">
+                    <div className="pt-1">
+                        {Array.from({ length: 7 }, (_, i) => (
+                            <div
+                                key={i}
+                                className="mx-2 flex items-center gap-2.5 px-1.5 py-3 animate-pulse"
+                                style={{ animationDelay: `${i * 70}ms` }}
+                            >
+                                <div className="h-11 w-11 shrink-0 rounded-full bg-white/10" />
+                                <div className="min-w-0 flex-1 space-y-2">
+                                    <div
+                                        className="h-2.5 rounded bg-white/15"
+                                        style={{ width: `${36 + ((i * 11) % 28)}%` }}
+                                    />
+                                    <div
+                                        className="h-2 rounded bg-white/10"
+                                        style={{ width: `${48 + ((i * 9) % 26)}%` }}
+                                    />
+                                </div>
+                                <div className="mt-0.5 h-2 w-7 shrink-0 rounded bg-white/10 self-start" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
             ) : activeTab === 'messages' ? (
                 queriedItems.length === 0 ? (
                     <div className="text-gray-500 text-center py-8">
@@ -1783,6 +1887,22 @@ export default function InboxPage() {
                                             className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
                                         >
                                             Deny
+                                        </button>
+                                    </div>
+                                )}
+                                {notif.type === 'group_invite' && (
+                                    <div className="flex gap-2 flex-shrink-0">
+                                        <button
+                                            onClick={(e) => handleAcceptGroupInvite(notif, e)}
+                                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                        >
+                                            Join
+                                        </button>
+                                        <button
+                                            onClick={(e) => handleDeclineGroupInvite(notif, e)}
+                                            className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                        >
+                                            Decline
                                         </button>
                                     </div>
                                 )}

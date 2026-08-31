@@ -35,8 +35,9 @@ if (-not $devices) {
     Write-Warning "No Android device detected. Plug in your phone, enable USB debugging, tap Allow, then run again."
 }
 
-Write-Host "Forwarding Metro (8081) to device..."
+Write-Host "Forwarding Metro (8081) and Laravel API (8000) to device..."
 & $adb reverse tcp:8081 tcp:8081 2>$null
+& $adb reverse tcp:8000 tcp:8000 2>$null
 
 Set-Location (Split-Path $PSScriptRoot -Parent)
 npm run dev:android

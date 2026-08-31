@@ -3,44 +3,78 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
+    Pressable,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import Video from 'react-native-video';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Collection, Post } from '../types';
 import {
     addPostToCollection,
     createCollection,
     getCollectionsForPost,
-    getCollectionThumbnailUrl,
+    getCollectionThumbSource,
     getUserCollections,
     removePostFromCollection,
+    resolvePostThumbnail,
     savePostToDefaultCollection,
 } from '../api/collections';
+import { mockFeedVideoSource } from '../constants/mockFeedVideos';
+import {
+    getPostBodyText,
+    getTextOnlyBackgroundColor,
+    getTextOnlyTextColor,
+    isTextOnlyPost,
+    isVideoPost,
+} from '../utils/effectiveTextPostStyleNative';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
+import CollectionCoverThumb from './CollectionCoverThumb.native';
+import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 const DEFAULT_COLLECTION_NAME = 'All Posts';
+/** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
+const PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
+/** View Profile night-atlas chrome (light type on passport canvas). */
+const P = {
+    text: '#e8eef2',
+    muted: 'rgba(232, 238, 242, 0.62)',
+    border: 'rgba(255,255,255,0.12)',
+    accent: PASSPORT_PALETTE.wavePrimary,
+    chipBg: 'rgba(15, 36, 48, 0.72)',
+    plusBg: 'rgba(15, 36, 48, 0.88)',
+    handle: 'rgba(255,255,255,0.28)',
+};
 
 type Props = {
     post: Post;
     userId: string;
     visible: boolean;
     onClose: () => void;
-    onSaved?: () => void;
+    onSaved?: (detail?: { savesCount?: number }) => void;
 };
 
 export default function SavePostModal({ post, userId, visible, onClose, onSaved }: Props) {
+    const insets = useSafeAreaInsets();
     const [collections, setCollections] = useState<Collection[]>([]);
     const [postCollectionIds, setPostCollectionIds] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [savingId, setSavingId] = useState<string | null>(null);
-    const [creating, setCreating] = useState(false);
+    const [mode, setMode] = useState<'picker' | 'create'>('picker');
     const [newName, setNewName] = useState('');
+    const [creating, setCreating] = useState(false);
+    /** Ignore backdrop presses until the open animation finishes. */
+    const [backdropArmed, setBackdropArmed] = useState(false);
     const autoSavedRef = useRef(false);
+    const nameInputRef = useRef<TextInput>(null);
 
     const load = async () => {
         setLoading(true);
@@ -57,9 +91,19 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
     };
 
     useEffect(() => {
-        if (!visible || !userId) return;
+        if (!visible || !userId) {
+            setBackdropArmed(false);
+            setMode('picker');
+            setNewName('');
+            return;
+        }
         autoSavedRef.current = false;
+        setBackdropArmed(false);
+        setMode('picker');
+        setNewName('');
+        const t = setTimeout(() => setBackdropArmed(true), 420);
         void load();
+        return () => clearTimeout(t);
     }, [visible, userId, post.id]);
 
     useEffect(() => {
@@ -69,244 +113,655 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         autoSavedRef.current = true;
         void (async () => {
             try {
-                await savePostToDefaultCollection(userId, post.id, post);
+                const saved = await savePostToDefaultCollection(userId, post.id, post);
                 await load();
-                onSaved?.();
+                onSaved?.({ savesCount: saved.savesCount });
             } catch (e) {
                 console.error('Auto-save failed:', e);
             }
         })();
     }, [visible, loading, collections, postCollectionIds, userId, post.id]);
 
+    useEffect(() => {
+        if (mode !== 'create' || !visible) return;
+        const t = setTimeout(() => nameInputRef.current?.focus(), 280);
+        return () => clearTimeout(t);
+    }, [mode, visible]);
+
+    const defaultCollection = collections.find((c) => c.name === DEFAULT_COLLECTION_NAME);
+    const customCollections = collections.filter((c) => c.name !== DEFAULT_COLLECTION_NAME);
+    const savedToAll = !!(defaultCollection && postCollectionIds.includes(defaultCollection.id));
+    const previewUrl = resolvePostThumbnail(post);
+    const videoPreviewUrl =
+        isVideoPost(post) && !previewUrl
+            ? post.mediaItems?.find((item) => item?.type === 'video' && item.url)?.url || post.mediaUrl
+            : undefined;
+    const textPreviewBody = isTextOnlyPost(post) ? getPostBodyText(post) : '';
+
+    const postPreviewThumb =
+        previewUrl ? (
+            <Image source={{ uri: previewUrl }} style={styles.cardThumbImg} />
+        ) : videoPreviewUrl ? (
+            <Video
+                source={mockFeedVideoSource(videoPreviewUrl)}
+                style={styles.cardThumbImg}
+                resizeMode="cover"
+                paused
+                muted
+                repeat={false}
+                controls={false}
+                playInBackground={false}
+                playWhenInactive={false}
+                ignoreSilentSwitch="obey"
+                disableFocus
+                pointerEvents="none"
+            />
+        ) : textPreviewBody ? (
+            <View
+                style={[
+                    styles.cardThumbImg,
+                    styles.textThumbPreview,
+                    { backgroundColor: getTextOnlyBackgroundColor(post) },
+                ]}
+            >
+                <Text
+                    style={[styles.textThumbPreviewBody, { color: getTextOnlyTextColor(post) }]}
+                    numberOfLines={4}
+                >
+                    {textPreviewBody}
+                </Text>
+            </View>
+        ) : (
+            <Icon name="bookmark" size={28} color={P.muted} />
+        );
+
     const toggle = async (collectionId: string) => {
         setSavingId(collectionId);
         try {
             if (postCollectionIds.includes(collectionId)) {
-                await removePostFromCollection(collectionId, post.id);
+                const removed = await removePostFromCollection(collectionId, post.id);
+                await load();
+                onSaved?.({ savesCount: removed.savesCount });
             } else {
-                await addPostToCollection(collectionId, post.id, post);
+                const added = await addPostToCollection(collectionId, post.id, post);
+                await load();
+                onSaved?.({ savesCount: added.savesCount });
             }
-            await load();
-            onSaved?.();
-        } catch (e) {
+        } catch {
             Alert.alert('Save', 'Could not update collection.');
         } finally {
             setSavingId(null);
         }
     };
 
+    const openCreate = () => {
+        setNewName('');
+        setMode('create');
+    };
+
+    const cancelCreate = () => {
+        setNewName('');
+        setMode('picker');
+    };
+
     const createNew = async () => {
         const name = newName.trim();
-        if (!name) return;
-        setLoading(true);
+        if (!name || creating) return;
+        setCreating(true);
         try {
-            await createCollection(userId, name, true, post.id, post);
+            const created = await createCollection(userId, name, true, post.id, post);
             setNewName('');
-            setCreating(false);
+            setMode('picker');
             await load();
-            onSaved?.();
-        } catch (e) {
+            onSaved?.({ savesCount: created.savesCount });
+        } catch {
             Alert.alert('Collections', 'Could not create collection.');
         } finally {
-            setLoading(false);
+            setCreating(false);
         }
     };
 
     if (!visible) return null;
 
-    const defaultCollection = collections.find((c) => c.name === DEFAULT_COLLECTION_NAME);
-    const customCollections = collections.filter((c) => c.name !== DEFAULT_COLLECTION_NAME);
-    const previewUrl =
-        post.videoPosterUrl ||
-        post.mediaUrl ||
-        post.mediaItems?.find((m) => m?.url)?.url;
+    const sheetBody = (
+        <>
+            <View style={styles.handleWrap}>
+                <View style={styles.handle} />
+            </View>
 
-    return (
-        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <View style={styles.sheet}>
-                    <View style={styles.grabber} />
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Save Post</Text>
-                        <View style={styles.headerActions}>
-                            <TouchableOpacity onPress={() => setCreating(true)} hitSlop={8}>
-                                <Icon name="add" size={24} color="#E5E7EB" />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={onClose} hitSlop={8}>
-                                <Icon name="close" size={24} color="#E5E7EB" />
-                            </TouchableOpacity>
+            {mode === 'create' ? (
+                <>
+                    <View style={styles.createHeader}>
+                        <Pressable onPress={cancelCreate} hitSlop={10} style={styles.headerSide}>
+                            <Text style={styles.headerAction}>Cancel</Text>
+                        </Pressable>
+                        <Text style={styles.createTitle}>New collection</Text>
+                        <Pressable
+                            onPress={() => void createNew()}
+                            hitSlop={10}
+                            style={styles.headerSideRight}
+                            disabled={!newName.trim() || creating}
+                        >
+                            {creating ? (
+                                <ActivityIndicator size="small" color={P.accent} />
+                            ) : (
+                                <Text
+                                    style={[
+                                        styles.headerActionDone,
+                                        !newName.trim() && styles.headerActionDisabled,
+                                    ]}
+                                >
+                                    Done
+                                </Text>
+                            )}
+                        </Pressable>
+                    </View>
+                    <View style={styles.createBody}>
+                        <View style={styles.createPreview}>
+                            {previewUrl ? (
+                                <Image source={{ uri: previewUrl }} style={styles.createPreviewImg} />
+                            ) : videoPreviewUrl ? (
+                                <Video
+                                    source={mockFeedVideoSource(videoPreviewUrl)}
+                                    style={styles.createPreviewImg}
+                                    resizeMode="cover"
+                                    paused
+                                    muted
+                                    repeat={false}
+                                    controls={false}
+                                    playInBackground={false}
+                                    playWhenInactive={false}
+                                    ignoreSilentSwitch="obey"
+                                    disableFocus
+                                    pointerEvents="none"
+                                />
+                            ) : textPreviewBody ? (
+                                <View
+                                    style={[
+                                        styles.createPreviewImg,
+                                        styles.textThumbPreview,
+                                        { backgroundColor: getTextOnlyBackgroundColor(post) },
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.textThumbPreviewBody,
+                                            { color: getTextOnlyTextColor(post) },
+                                        ]}
+                                        numberOfLines={5}
+                                    >
+                                        {textPreviewBody}
+                                    </Text>
+                                </View>
+                            ) : (
+                                <Icon name="bookmark-outline" size={32} color={P.muted} />
+                            )}
                         </View>
+                        <TextInput
+                            ref={nameInputRef}
+                            style={styles.nameInput}
+                            value={newName}
+                            onChangeText={setNewName}
+                            placeholder="Collection name"
+                            placeholderTextColor={P.muted}
+                            returnKeyType="done"
+                            onSubmitEditing={() => void createNew()}
+                            maxLength={60}
+                        />
+                        <Text style={styles.createHint}>
+                            Collections are private. Only you can see them.
+                        </Text>
+                    </View>
+                </>
+            ) : (
+                <>
+                    <View style={styles.pickerHeader}>
+                        <Text style={styles.pickerTitle}>Save</Text>
+                        <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+                            <Icon name="close" size={22} color={P.text} />
+                        </Pressable>
                     </View>
 
-                    <ScrollView style={styles.scroll}>
-                        {defaultCollection ? (
-                            <TouchableOpacity
-                                style={styles.row}
-                                onPress={() => void toggle(defaultCollection.id)}
-                                disabled={savingId === defaultCollection.id}
-                            >
-                                <View style={styles.thumb}>
-                                    {previewUrl ? (
-                                        <Image source={{ uri: previewUrl }} style={styles.thumbImg} />
-                                    ) : (
-                                        <Icon name="bookmark" size={28} color="#9CA3AF" />
-                                    )}
-                                </View>
-                                <View style={styles.rowText}>
-                                    <Text style={styles.rowTitle}>All Posts</Text>
-                                    <Text style={styles.rowSub}>Private — every saved post</Text>
-                                </View>
-                                {postCollectionIds.includes(defaultCollection.id) ? (
-                                    <Icon name="bookmark" size={22} color="#7A8AF0" />
-                                ) : null}
-                            </TouchableOpacity>
-                        ) : null}
+                    {savedToAll ? (
+                        <View style={styles.savedBanner}>
+                            <Icon name="checkmark-circle" size={18} color={P.accent} />
+                            <Text style={styles.savedBannerText}>Saved</Text>
+                            <Text style={styles.savedBannerSub}>to All Posts</Text>
+                        </View>
+                    ) : loading ? (
+                        <View style={styles.savedBanner}>
+                            <ActivityIndicator size="small" color={P.accent} />
+                            <Text style={styles.savedBannerSub}>Saving…</Text>
+                        </View>
+                    ) : null}
 
-                        <Text style={styles.sectionTitle}>Collections</Text>
+                    <Text style={styles.sectionLabel}>Collections</Text>
+                    <Text style={styles.sectionHint}>
+                        Tap a collection to add this post, or create a new one.
+                    </Text>
 
-                        {creating ? (
-                            <View style={styles.createBox}>
-                                <TextInput
-                                    style={styles.input}
-                                    value={newName}
-                                    onChangeText={setNewName}
-                                    placeholder="Collection name"
-                                    placeholderTextColor="#6B7280"
-                                    autoFocus
-                                />
-                                <View style={styles.createActions}>
-                                    <TouchableOpacity style={styles.createBtn} onPress={() => void createNew()}>
-                                        <Text style={styles.createBtnText}>Create</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            setCreating(false);
-                                            setNewName('');
-                                        }}
-                                    >
-                                        <Text style={styles.cancelText}>Cancel</Text>
-                                    </TouchableOpacity>
+                    {loading && collections.length === 0 ? (
+                        <ActivityIndicator color={P.accent} style={{ marginVertical: 28 }} />
+                    ) : (
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.rail}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            <Pressable style={styles.card} onPress={openCreate}>
+                                <View style={[styles.cardThumb, styles.newThumb]}>
+                                    <View style={styles.plusCircle}>
+                                        <Icon name="add" size={28} color={P.text} />
+                                    </View>
                                 </View>
-                            </View>
-                        ) : null}
+                                <Text style={styles.cardLabel} numberOfLines={2}>
+                                    New collection
+                                </Text>
+                            </Pressable>
 
-                        {loading && collections.length === 0 ? (
-                            <ActivityIndicator color="#8B5CF6" style={{ marginVertical: 24 }} />
-                        ) : customCollections.length === 0 ? (
-                            <Text style={styles.empty}>No collections yet. Create one to get started.</Text>
-                        ) : (
-                            customCollections.map((c) => {
-                                const thumb = getCollectionThumbnailUrl(c);
+                            {defaultCollection ? (
+                                <Pressable
+                                    style={styles.card}
+                                    onPress={() => void toggle(defaultCollection.id)}
+                                    disabled={savingId === defaultCollection.id}
+                                >
+                                    <View style={styles.cardThumb}>
+                                        {postPreviewThumb}
+                                        {postCollectionIds.includes(defaultCollection.id) ? (
+                                            <View style={styles.selectedBadge}>
+                                                <Icon name="checkmark" size={16} color="#FFF" />
+                                            </View>
+                                        ) : null}
+                                        {savingId === defaultCollection.id ? (
+                                            <View style={styles.savingOverlay}>
+                                                <ActivityIndicator color="#FFF" />
+                                            </View>
+                                        ) : null}
+                                    </View>
+                                    <Text style={styles.cardLabel} numberOfLines={2}>
+                                        All Posts
+                                    </Text>
+                                </Pressable>
+                            ) : null}
+
+                            {customCollections.map((c) => {
+                                const thumb = getCollectionThumbSource(c);
                                 const inCol = postCollectionIds.includes(c.id);
                                 return (
-                                    <TouchableOpacity
+                                    <Pressable
                                         key={c.id}
-                                        style={styles.row}
+                                        style={styles.card}
                                         onPress={() => void toggle(c.id)}
                                         disabled={savingId === c.id}
                                     >
-                                        <View style={styles.thumb}>
+                                        <View style={styles.cardThumb}>
                                             {thumb ? (
-                                                <Image source={{ uri: thumb }} style={styles.thumbImg} />
+                                                <CollectionCoverThumb
+                                                    uri={thumb.uri}
+                                                    isVideo={thumb.isVideo}
+                                                    style={styles.cardThumbImg}
+                                                />
                                             ) : (
-                                                <Icon name="folder-outline" size={26} color="#9CA3AF" />
+                                                <Icon
+                                                    name="folder-outline"
+                                                    size={28}
+                                                    color={P.muted}
+                                                />
                                             )}
+                                            {inCol ? (
+                                                <View style={styles.selectedBadge}>
+                                                    <Icon name="checkmark" size={16} color="#FFF" />
+                                                </View>
+                                            ) : null}
+                                            {savingId === c.id ? (
+                                                <View style={styles.savingOverlay}>
+                                                    <ActivityIndicator color="#FFF" />
+                                                </View>
+                                            ) : null}
                                         </View>
-                                        <View style={styles.rowText}>
-                                            <Text style={styles.rowTitle}>{c.name}</Text>
-                                            <Text style={styles.rowSub}>
-                                                {c.postIds?.length ?? 0} posts
-                                            </Text>
-                                        </View>
-                                        {inCol ? <Icon name="checkmark-circle" size={22} color="#7A8AF0" /> : null}
-                                    </TouchableOpacity>
+                                        <Text style={styles.cardLabel} numberOfLines={2}>
+                                            {c.name}
+                                        </Text>
+                                    </Pressable>
                                 );
-                            })
-                        )}
-                    </ScrollView>
+                            })}
+                        </ScrollView>
+                    )}
+
+                    <Pressable style={styles.newCollectionRow} onPress={openCreate}>
+                        <View style={styles.newCollectionIcon}>
+                            <Icon name="add" size={20} color={P.text} />
+                        </View>
+                        <Text style={styles.newCollectionText}>New collection</Text>
+                        <Icon name="chevron-forward" size={18} color={P.muted} />
+                    </Pressable>
+                </>
+            )}
+        </>
+    );
+
+    const sheetInner =
+        Platform.OS === 'ios' ? (
+            <View style={styles.sheetCanvas} collapsable={false}>
+                <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
+                    <DiscoverAmbientCanvas variant="passport" fillParent />
                 </View>
+                <View style={styles.sheetContent} collapsable={false}>
+                    {sheetBody}
+                </View>
+            </View>
+        ) : (
+            <LinearGradient
+                colors={[...PASSPORT_WASH]}
+                locations={[0, 0.28, 0.55, 0.78, 1]}
+                start={{ x: 0.1, y: 1 }}
+                end={{ x: 0.9, y: 0 }}
+                style={styles.sheetCanvas}
+            >
+                <View style={styles.sheetContent} collapsable={false}>
+                    {sheetBody}
+                </View>
+            </LinearGradient>
+        );
+
+    return (
+        <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+            <View style={styles.overlay}>
+                <Pressable
+                    style={styles.backdrop}
+                    disabled={!backdropArmed}
+                    onPress={() => {
+                        if (backdropArmed) onClose();
+                    }}
+                />
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 20) }]}
+                >
+                    {sheetInner}
+                </KeyboardAvoidingView>
             </View>
         </Modal>
     );
 }
 
+const CARD = 96;
+
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-    sheet: {
-        backgroundColor: '#1f2937',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        maxHeight: '85%',
+    overlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
     },
-    grabber: {
-        alignSelf: 'center',
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+    },
+    sheet: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        maxHeight: '78%',
+        zIndex: 2,
+        elevation: 12,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: PASSPORT_ABYSS,
+    },
+    sheetCanvas: {
+        backgroundColor: PASSPORT_ABYSS,
+        overflow: 'hidden',
+    },
+    ambientBack: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+    },
+    sheetContent: {
+        position: 'relative',
+        zIndex: 1,
+        backgroundColor: 'transparent',
+        paddingBottom: 8,
+    },
+    handleWrap: {
+        alignItems: 'center',
+        paddingTop: 10,
+        paddingBottom: 6,
+    },
+    handle: {
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: '#4B5563',
-        marginTop: 10,
-        marginBottom: 8,
+        backgroundColor: P.handle,
     },
-    header: {
-        flexDirection: 'row',
+    pickerHeader: {
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         paddingHorizontal: 16,
-        paddingBottom: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.08)',
+        paddingBottom: 8,
+        minHeight: 44,
     },
-    headerActions: { flexDirection: 'row', gap: 12 },
-    title: { color: '#FFF', fontSize: 18, fontWeight: '700' },
-    scroll: { paddingHorizontal: 16, paddingVertical: 12 },
-    sectionTitle: {
-        color: '#FFF',
+    pickerTitle: {
+        color: P.text,
         fontSize: 16,
         fontWeight: '700',
-        marginTop: 16,
-        marginBottom: 8,
     },
-    row: {
+    closeBtn: {
+        position: 'absolute',
+        right: 14,
+        top: 0,
+        width: 36,
+        height: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    savedBanner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingVertical: 12,
-        borderRadius: 12,
-    },
-    thumb: {
-        width: 56,
-        height: 56,
+        gap: 6,
+        marginHorizontal: 16,
+        marginBottom: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
         borderRadius: 10,
-        backgroundColor: '#374151',
+        backgroundColor: P.chipBg,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: P.border,
+    },
+    savedBannerText: {
+        color: P.text,
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    savedBannerSub: {
+        color: P.muted,
+        fontSize: 14,
+        fontWeight: '500',
+    },
+    sectionLabel: {
+        color: P.text,
+        fontSize: 15,
+        fontWeight: '700',
+        paddingHorizontal: 16,
+        marginBottom: 4,
+    },
+    sectionHint: {
+        color: P.muted,
+        fontSize: 13,
+        paddingHorizontal: 16,
+        marginBottom: 14,
+        lineHeight: 18,
+    },
+    rail: {
+        paddingHorizontal: 16,
+        gap: 14,
+        paddingBottom: 8,
+    },
+    card: {
+        width: CARD,
+        alignItems: 'center',
+    },
+    cardThumb: {
+        width: CARD,
+        height: CARD,
+        borderRadius: 12,
+        backgroundColor: P.plusBg,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
+        marginBottom: 8,
     },
-    thumbImg: { width: '100%', height: '100%' },
-    rowText: { flex: 1 },
-    rowTitle: { color: '#FFF', fontWeight: '600', fontSize: 15 },
-    rowSub: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-    createBox: {
-        backgroundColor: 'rgba(255,255,255,0.06)',
+    newThumb: {
+        borderWidth: 1,
+        borderColor: P.border,
+        borderStyle: 'dashed',
+        backgroundColor: P.chipBg,
+    },
+    plusCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'rgba(6, 13, 22, 0.72)',
+        borderWidth: 1,
+        borderColor: P.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cardThumbImg: {
+        width: '100%',
+        height: '100%',
+    },
+    textThumbPreview: {
+        justifyContent: 'center',
+        padding: 6,
+    },
+    textThumbPreviewBody: {
+        fontSize: 11,
+        fontWeight: '600',
+        lineHeight: 14,
+    },
+    cardLabel: {
+        color: P.text,
+        fontSize: 12,
+        fontWeight: '600',
+        textAlign: 'center',
+        lineHeight: 15,
+    },
+    selectedBadge: {
+        position: 'absolute',
+        right: 8,
+        bottom: 8,
+        width: 24,
+        height: 24,
         borderRadius: 12,
-        padding: 12,
-        marginBottom: 12,
+        backgroundColor: P.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: '#FFF',
     },
-    input: {
-        backgroundColor: '#111827',
-        borderRadius: 10,
-        padding: 12,
-        color: '#FFF',
-        marginBottom: 10,
+    savingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    createActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-    createBtn: {
-        backgroundColor: '#3B82F6',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 8,
+    newCollectionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 16,
+        marginHorizontal: 16,
+        paddingVertical: 14,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: P.border,
+        gap: 12,
     },
-    createBtnText: { color: '#FFF', fontWeight: '700' },
-    cancelText: { color: '#9CA3AF', fontWeight: '600' },
-    empty: { color: '#9CA3AF', textAlign: 'center', paddingVertical: 24 },
+    newCollectionIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: P.plusBg,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    newCollectionText: {
+        flex: 1,
+        color: P.text,
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    createHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingBottom: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: P.border,
+        minHeight: 48,
+    },
+    headerSide: {
+        width: 72,
+        alignItems: 'flex-start',
+    },
+    headerSideRight: {
+        width: 72,
+        alignItems: 'flex-end',
+    },
+    createTitle: {
+        flex: 1,
+        textAlign: 'center',
+        color: P.text,
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    headerAction: {
+        color: P.text,
+        fontSize: 15,
+        fontWeight: '500',
+    },
+    headerActionDone: {
+        color: P.accent,
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    headerActionDisabled: {
+        opacity: 0.35,
+    },
+    createBody: {
+        paddingHorizontal: 20,
+        paddingTop: 24,
+        paddingBottom: 12,
+        alignItems: 'center',
+    },
+    createPreview: {
+        width: 72,
+        height: 72,
+        borderRadius: 12,
+        backgroundColor: P.plusBg,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 20,
+    },
+    createPreviewImg: {
+        width: '100%',
+        height: '100%',
+    },
+    nameInput: {
+        width: '100%',
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: P.border,
+        paddingVertical: 12,
+        fontSize: 16,
+        color: P.text,
+        textAlign: 'center',
+        fontWeight: '500',
+    },
+    createHint: {
+        marginTop: 14,
+        color: P.muted,
+        fontSize: 13,
+        textAlign: 'center',
+        lineHeight: 18,
+    },
 });

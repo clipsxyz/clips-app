@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, StyleSheet, Easing } from 'react-native';
+import { View, Text, Animated, Easing } from 'react-native';
+import { FEED_CARD_TICKER_TEXT, FEED_CARD_TICKER_WRAP } from './FeedPageLayout.native';
 
 type Props = {
     text: string;
@@ -28,30 +29,10 @@ export default function FeedNewsTicker({ text }: Props) {
     });
 
     return (
-        <View style={styles.wrap}>
-            <Animated.View style={[styles.track, { transform: [{ translateX }] }]}>
-                <Text style={styles.text}>{label}</Text>
+        <View style={FEED_CARD_TICKER_WRAP}>
+            <Animated.View style={{ flexDirection: 'row', transform: [{ translateX }] }}>
+                <Text style={FEED_CARD_TICKER_TEXT}>{label}</Text>
             </Animated.View>
         </View>
     );
 }
-
-const styles = StyleSheet.create({
-    wrap: {
-        height: 28,
-        overflow: 'hidden',
-        backgroundColor: '#000000',
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#374151',
-        justifyContent: 'center',
-    },
-    track: {
-        flexDirection: 'row',
-    },
-    text: {
-        color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '600',
-        paddingHorizontal: 12,
-    },
-});

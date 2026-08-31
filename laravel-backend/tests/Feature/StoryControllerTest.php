@@ -36,6 +36,85 @@ class StoryControllerTest extends TestCase
         ]);
     }
 
+    public function test_can_create_story_with_unknown_tagged_handle(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'text' => 'Tagged someone new',
+                'taggedUsers' => ['Nobody@Nowhere'],
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('text', 'Tagged someone new')
+            ->assertJsonPath('user_id', $user->id);
+
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'text' => 'Tagged someone new',
+        ]);
+    }
+
+    public function test_shared_feed_post_story_keeps_original_post_id(): void
+    {
+        $author = User::factory()->create(['handle' => 'Sarah@Artane']);
+        $sharer = User::factory()->create(['handle' => 'Gazetteer@Dublin']);
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'text_content' => 'Newsfeed clip',
+        ]);
+
+        $response = $this->actingAs($sharer, 'sanctum')
+            ->postJson('/api/stories', [
+                'text' => 'Newsfeed clip',
+                'shared_from_post_id' => $post->id,
+                'shared_from_user_handle' => $author->handle,
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('shared_from_post_id', $post->id)
+            ->assertJsonPath('shared_from_user_handle', $author->handle);
+
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $sharer->id,
+            'shared_from_post_id' => $post->id,
+            'shared_from_user_handle' => $author->handle,
+        ]);
+
+        $list = $this->actingAs($sharer, 'sanctum')
+            ->getJson('/api/stories?userId='.$sharer->id);
+
+        $list->assertStatus(200)
+            ->assertJsonFragment([
+                'shared_from_post_id' => $post->id,
+            ]);
+    }
+
+    public function test_can_create_poll_story_without_media(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'poll' => [
+                    'question' => 'Coffee or tea?',
+                    'option1' => 'Coffee',
+                    'option2' => 'Tea',
+                ],
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('text', 'Coffee or tea?')
+            ->assertJsonPath('user_id', $user->id);
+
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'text' => 'Coffee or tea?',
+        ]);
+    }
+
     public function test_cannot_create_empty_story(): void
     {
         $user = User::factory()->create();
@@ -62,12 +141,28 @@ class StoryControllerTest extends TestCase
             ->postJson("/api/stories/{$story->id}/view");
 
         $response->assertStatus(200)
-            ->assertJson(['success' => true]);
+            ->assertJson([
+                'success' => true,
+                'views_count' => 1,
+                'reactions_count' => 0,
+                'replies_count' => 0,
+            ]);
 
         $this->assertDatabaseHas('story_views', [
             'story_id' => $story->id,
             'user_id' => $viewer->id,
         ]);
+        $this->assertSame(1, $story->fresh()->views_count);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/view")
+            ->assertStatus(200)
+            ->assertJsonPath('views_count', 1);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/stories/{$story->id}/view")
+            ->assertStatus(200)
+            ->assertJsonPath('views_count', 2);
     }
 
     public function test_cannot_view_expired_story(): void
@@ -104,7 +199,18 @@ class StoryControllerTest extends TestCase
             ->assertJsonFragment([
                 'story_id' => $story->id,
                 'user_id' => $viewer->id,
-            ]);
+            ])
+            ->assertJsonPath('reactions_count', 1)
+            ->assertJsonPath('replies_count', 0);
+
+        $list = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stories?userId='.$user->id);
+
+        $list->assertStatus(200);
+        $row = collect($list->json())->flatMap(fn ($group) => collect($group['stories']))->firstWhere('id', $story->id);
+        $this->assertNotNull($row);
+        $this->assertSame(1, $row['reactions_count']);
+        $this->assertCount(1, $row['reactions']);
     }
 
     public function test_can_add_reply_to_story(): void
@@ -125,7 +231,77 @@ class StoryControllerTest extends TestCase
             ->assertJsonFragment([
                 'story_id' => $story->id,
                 'user_id' => $viewer->id,
-            ]);
+            ])
+            ->assertJsonPath('replies_count', 1)
+            ->assertJsonPath('reactions_count', 0);
+
+        $list = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stories?userId='.$user->id);
+
+        $list->assertStatus(200);
+        $row = collect($list->json())->flatMap(fn ($group) => collect($group['stories']))->firstWhere('id', $story->id);
+        $this->assertNotNull($row);
+        $this->assertSame(1, $row['replies_count']);
+        $this->assertCount(1, $row['replies']);
+    }
+
+    public function test_can_list_own_active_stories_by_handle(): void
+    {
+        $user = User::factory()->create(['handle' => 'Gazetteer@Dublin']);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'text' => 'On my 24',
+            ])
+            ->assertStatus(201);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stories/user/'.rawurlencode('Gazetteer@Dublin'));
+
+        $response->assertStatus(200)
+            ->assertJsonFragment(['text' => 'On my 24']);
+        $this->assertNotEmpty($response->json());
+    }
+
+    public function test_index_returns_persisted_active_stories_within_24_hours(): void
+    {
+        $user = User::factory()->create(['handle' => 'Gazetteer@Dublin']);
+        $viewer = User::factory()->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'text' => 'Stay on the rail',
+            ])
+            ->assertStatus(201)
+            ->assertJsonPath('text', 'Stay on the rail')
+            ->assertJsonPath('user_id', $user->id);
+
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'text' => 'Stay on the rail',
+        ]);
+
+        Story::factory()->forUser($user)->expired()->create([
+            'text' => 'Too old',
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/stories?userId='.$viewer->id);
+
+        $response->assertStatus(200)
+            ->assertJsonFragment(['text' => 'Stay on the rail']);
+
+        $payload = $response->json();
+        $this->assertIsArray($payload);
+        $allTexts = collect($payload)->flatMap(fn ($group) => collect($group['stories'])->pluck('text'))->all();
+        $this->assertContains('Stay on the rail', $allTexts);
+        $this->assertNotContains('Too old', $allTexts);
+
+        $firstStory = $payload[0]['stories'][0] ?? null;
+        $this->assertIsArray($firstStory);
+        $this->assertArrayHasKey('views_count', $firstStory);
+        $this->assertArrayHasKey('reactions_count', $firstStory);
+        $this->assertArrayHasKey('replies_count', $firstStory);
     }
 }
 

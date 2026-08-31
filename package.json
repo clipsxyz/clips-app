@@ -11,6 +11,7 @@
     "dev:web": "vite",
     "dev:ios": "react-native run-ios",
     "dev:android": "react-native run-android",
+    "android:adb-reverse": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8000 tcp:8000",
     "dev:clean": "npm run clean:cache && vite",
     "build": "vite build",
     "build:web": "vite build",
@@ -22,7 +23,8 @@
     "setup:ffmpeg-native": "node scripts/setup-ffmpeg-native.mjs",
     "sync:env": "node scripts/sync-firebase-env.mjs",
     "check:secrets": "node scripts/check-no-secrets-staged.mjs",
-    "prepare": "node scripts/install-git-hooks.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs && node scripts/patch-react-native-fragment-props.mjs",
+    "patch:rn-fragment": "node scripts/patch-react-native-fragment-props.mjs",
     "clean:cache": "node -e \"const fs = require('fs'); const path = require('path'); const rimraf = (dir) => { try { fs.rmSync(dir, { recursive: true, force: true }); console.log('Cleared:', dir); } catch(e) {} }; rimraf(path.join(process.cwd(), 'node_modules/.vite')); rimraf(path.join(process.cwd(), 'dist')); console.log('Cache cleared!');\""
   },
   "dependencies": {
@@ -32,6 +34,7 @@
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@gorhom/bottom-sheet": "^5.2.14",
     "@mediapipe/camera_utils": "^0.3.1675466862",
     "@mediapipe/drawing_utils": "^0.3.1675466124",
     "@mediapipe/face_mesh": "^0.4.1633559619",
@@ -49,6 +52,7 @@
     "@stripe/react-stripe-js": "^5.6.0",
     "@stripe/stripe-js": "^8.7.0",
     "@types/qrcode": "^1.5.6",
+    "expo": "^57.0.14",
     "ffmpeg-kit-react-native-alt": "^6.0.6",
     "firebase": "^10.7.1",
     "framer-motion": "^12.23.24",
@@ -87,7 +91,9 @@
   "devDependencies": {
     "@react-native-community/cli": "^20.0.0",
     "@react-native-community/cli-platform-android": "^20.0.0",
+    "@react-native/babel-preset": "^0.85.3",
     "@react-native/jest-preset": "^0.85.3",
+    "@react-native/metro-config": "^0.85.3",
     "@size-limit/preset-app": "^12.0.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^5.16.5",

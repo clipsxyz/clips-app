@@ -13,7 +13,8 @@ export async function getGlobalVideoMutedNative(): Promise<boolean> {
     } catch {
         /* ignore */
     }
-    return true;
+    // Default unmuted so mock/demo clips with audio are audible; tap mute to silence.
+    return false;
 }
 
 export async function setGlobalVideoMutedNative(muted: boolean): Promise<void> {

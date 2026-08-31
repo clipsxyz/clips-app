@@ -3,7 +3,6 @@ import {
     View,
     Text,
     StyleSheet,
-    Modal,
     FlatList,
     TouchableOpacity,
     Image,
@@ -12,15 +11,25 @@ import {
     Alert,
     Dimensions,
     KeyboardAvoidingView,
+    Keyboard,
     Platform,
-    Pressable,
     type ListRenderItem,
     type NativeSyntheticEvent,
     type NativeScrollEvent,
 } from 'react-native';
+import {
+    BottomSheetFlatList,
+    BottomSheetFooter,
+    BottomSheetTextInput,
+    type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
+import GazetteerBottomSheetModal, {
+    GAZETTEER_SHEET_PASSPORT,
+} from './GazetteerBottomSheetModal.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import Video from 'react-native-video';
 import Avatar from './Avatar';
 import FeedChevronIcon from './FeedChevronIcon.native';
 import FeedCloseIcon from './FeedCloseIcon.native';
@@ -30,6 +39,7 @@ import FeedSendIcon from './FeedSendIcon.native';
 import FeedSmileIcon from './FeedSmileIcon.native';
 import { resolveAvatarDimensions } from './avatarProps';
 import { getAvatarForHandle } from '../api/users';
+import { isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import {
     addComment,
     addReply,
@@ -52,9 +62,18 @@ const COMMENT_EMOJIS = [
 ];
 const HANDLE_REGEX = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.58, 520);
-const BRAND_600 = '#155bd6';
-const COMMENT_LIKE_BLUE = '#3B82F6';
-const MENTION_COLOR = '#7A8AF0';
+const BRAND_600 = PASSPORT_PALETTE.wavePrimary;
+const COMMENT_LIKE_ACTIVE = '#FFFFFF';
+const MENTION_COLOR = '#9fd4cb';
+/** View Profile night-atlas chrome. */
+const P = {
+    text: '#e8eef2',
+    muted: 'rgba(232, 238, 242, 0.62)',
+    border: 'rgba(255,255,255,0.12)',
+    chipBg: 'rgba(15, 36, 48, 0.72)',
+    inputBg: 'rgba(6, 13, 22, 0.72)',
+    handle: 'rgba(255,255,255,0.28)',
+};
 
 type Props = {
     postId: string;
@@ -64,6 +83,10 @@ type Props = {
     commentAuthorHandle: string;
     currentUserHandle?: string;
     onAfterClose?: () => void;
+    /** Called whenever the visible comment count changes so feed/profile cards stay in sync. */
+    onCommentCountChange?: (comments: number) => void;
+    /** `scenesEmbed` — no Modal; parent positions sheet (Scenes viewer). */
+    variant?: 'modal' | 'scenesEmbed';
 };
 
 function formatTime(timestamp: number): string {
@@ -127,19 +150,23 @@ function renderTextWithMentions(
 function CommentAvatarRing({
     size,
     children,
+    gap = 12,
 }: {
     size: number | 'sm' | 'md' | 'lg' | 'xl';
     children: React.ReactNode;
+    gap?: number;
 }) {
     const { dim } = resolveAvatarDimensions(size);
     return (
         <View
             style={[
                 styles.avatarRing,
+                styles.avatarCol,
                 {
                     width: dim + 2,
                     height: dim + 2,
                     borderRadius: (dim + 2) / 2,
+                    marginRight: gap,
                 },
             ]}
         >
@@ -154,27 +181,26 @@ function CommentItem({
     isPostOwner,
     onLikeComment,
     onLikeReply,
-    onReply,
+    onStartReply,
     onModerateComment,
     onMentionPress,
+    isReplyingTo,
 }: {
     comment: Comment;
     viewerHandle: string;
     isPostOwner: boolean;
     onLikeComment: (commentId: string) => Promise<void>;
     onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
-    onReply: (parentId: string, text: string) => Promise<void>;
+    onStartReply: (commentId: string, handle: string) => void;
     onModerateComment: (commentId: string, action: 'hide' | 'unhide' | 'delete') => Promise<void>;
     onMentionPress: (handle: string) => void;
+    isReplyingTo?: boolean;
 }) {
     const { user } = useAuth();
     const [liked, setLiked] = useState(comment.userLiked);
     const [likes, setLikes] = useState(comment.likes ?? 0);
     const [busy, setBusy] = useState(false);
     const [showReplies, setShowReplies] = useState(false);
-    const [showReplyInput, setShowReplyInput] = useState(false);
-    const [replyText, setReplyText] = useState('');
-    const [submittingReply, setSubmittingReply] = useState(false);
 
     useEffect(() => {
         setLiked(comment.userLiked);
@@ -191,20 +217,6 @@ function CommentItem({
         if (reply.moderationState !== 'hidden_by_filter') return true;
         return String(reply.userHandle || '').trim().toLowerCase() === normalizedViewer;
     });
-
-    const handleReply = async () => {
-        if (!replyText.trim() || submittingReply) return;
-        setSubmittingReply(true);
-        try {
-            await onReply(comment.id, replyText.trim());
-            setReplyText('');
-            setShowReplyInput(false);
-        } catch {
-            Alert.alert('Error', 'Failed to add reply');
-        } finally {
-            setSubmittingReply(false);
-        }
-    };
 
     const avatarSrc =
         comment.userHandle === user?.handle
@@ -248,16 +260,25 @@ function CommentItem({
                             </Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => onModerateComment(comment.id, 'delete')}>
-                            <Text style={styles.moderationDeleteText}>Delete</Text>
+                            <Text style={[styles.moderationDeleteText, styles.moderationDeleteSpacing]}>
+                                Delete
+                            </Text>
                         </TouchableOpacity>
                     </View>
                 ) : null}
                 <View style={styles.commentActionsRow}>
                     <TouchableOpacity
                         disabled={isHiddenForViewer}
-                        onPress={() => setShowReplyInput((v) => !v)}
+                        onPress={() => onStartReply(comment.id, comment.userHandle || '')}
                     >
-                        <Text style={styles.commentReplyText}>Reply</Text>
+                        <Text
+                            style={[
+                                styles.commentReplyText,
+                                isReplyingTo && styles.commentReplyTextActive,
+                            ]}
+                        >
+                            {isReplyingTo ? 'Replying…' : 'Reply'}
+                        </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         disabled={busy || isHiddenForViewer}
@@ -280,32 +301,12 @@ function CommentItem({
                     >
                         <FeedLikeThumbsIcon
                             size={16}
-                            filled={false}
-                            color={liked ? COMMENT_LIKE_BLUE : '#6B7280'}
+                            filled={liked}
+                            color={liked ? COMMENT_LIKE_ACTIVE : P.muted}
                         />
                         <Text style={styles.commentLikeCount}>{likes}</Text>
                     </TouchableOpacity>
                 </View>
-
-                {showReplyInput ? (
-                    <View style={styles.inlineReplyContainer}>
-                        <TextInput
-                            style={styles.inlineReplyInput}
-                            placeholder="Write a reply..."
-                            placeholderTextColor="#6B7280"
-                            value={replyText}
-                            onChangeText={setReplyText}
-                            editable={!submittingReply}
-                        />
-                        <TouchableOpacity
-                            disabled={!replyText.trim() || submittingReply}
-                            style={styles.inlineReplySendButton}
-                            onPress={handleReply}
-                        >
-                            <FeedSendIcon size={16} color="#111827" />
-                        </TouchableOpacity>
-                    </View>
-                ) : null}
 
                 {hasReplies ? (
                     <View style={styles.repliesToggleWrap}>
@@ -329,7 +330,7 @@ function CommentItem({
                                             : getAvatarForHandle(reply.userHandle);
                                     return (
                                         <View key={reply.id} style={styles.replyItem}>
-                                            <CommentAvatarRing size={24}>
+                                            <CommentAvatarRing size={24} gap={8}>
                                                 <Avatar
                                                     src={replyAvatarSrc}
                                                     name={reply.userHandle?.split('@')[0] || 'User'}
@@ -354,8 +355,8 @@ function CommentItem({
                                                 >
                                                     <FeedLikeThumbsIcon
                                                         size={14}
-                                                        filled={false}
-                                                        color={reply.userLiked ? COMMENT_LIKE_BLUE : '#6B7280'}
+                                                        filled={Boolean(reply.userLiked)}
+                                                        color={reply.userLiked ? COMMENT_LIKE_ACTIVE : P.muted}
                                                     />
                                                     <Text style={styles.replyLikeCount}>{reply.likes ?? 0}</Text>
                                                 </TouchableOpacity>
@@ -376,14 +377,36 @@ function CommentInput({
     placeholder,
     onSubmit,
     isLoading,
+    replyingToHandle,
+    onCancelReply,
+    useSheetTextInput = false,
+    autoFocus = false,
 }: {
     placeholder: string;
     onSubmit: (text: string) => void;
     isLoading: boolean;
+    replyingToHandle?: string | null;
+    onCancelReply?: () => void;
+    useSheetTextInput?: boolean;
+    autoFocus?: boolean;
 }) {
     const { user } = useAuth();
     const [text, setText] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const inputRef = useRef<TextInput>(null);
+
+    useEffect(() => {
+        if (!replyingToHandle) return;
+        setText('');
+        const t = setTimeout(() => inputRef.current?.focus(), 80);
+        return () => clearTimeout(t);
+    }, [replyingToHandle]);
+
+    useEffect(() => {
+        if (!autoFocus) return;
+        const t = setTimeout(() => inputRef.current?.focus(), 80);
+        return () => clearTimeout(t);
+    }, [autoFocus]);
 
     const handleSubmit = () => {
         if (!text.trim() || isLoading) return;
@@ -391,8 +414,20 @@ function CommentInput({
         setText('');
     };
 
+    const InputComponent = useSheetTextInput ? BottomSheetTextInput : TextInput;
+
     return (
         <View style={styles.commentInputShell}>
+            {replyingToHandle ? (
+                <View style={styles.replyingBanner}>
+                    <Text style={styles.replyingBannerText} numberOfLines={1}>
+                        Replying to {replyingToHandle}
+                    </Text>
+                    <TouchableOpacity onPress={onCancelReply} hitSlop={8} accessibilityLabel="Cancel reply">
+                        <FeedCloseIcon size={16} color={P.muted} />
+                    </TouchableOpacity>
+                </View>
+            ) : null}
             {showEmojiPicker ? (
                 <View style={styles.emojiPickerWrap}>
                     <View style={styles.emojiPickerGrid}>
@@ -409,7 +444,7 @@ function CommentInput({
                 </View>
             ) : null}
             <View style={styles.commentInputRow}>
-                <CommentAvatarRing size="sm">
+                <CommentAvatarRing size="sm" gap={8}>
                     <Avatar src={user?.avatarUrl} name={user?.name || 'User'} size="sm" />
                 </CommentAvatarRing>
                 <TouchableOpacity
@@ -418,14 +453,15 @@ function CommentInput({
                 >
                     <FeedSmileIcon
                         size={20}
-                        color={showEmojiPicker ? '#1F2937' : '#6B7280'}
+                        color={showEmojiPicker ? P.text : P.muted}
                     />
                 </TouchableOpacity>
                 <View style={styles.commentInputGradientWrap}>
-                    <TextInput
+                    <InputComponent
+                        ref={inputRef as any}
                         style={styles.commentInput}
                         placeholder={placeholder}
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={P.muted}
                         value={text}
                         onChangeText={setText}
                         editable={!isLoading}
@@ -453,11 +489,16 @@ export default function PostCommentsSheet({
     commentAuthorHandle,
     currentUserHandle,
     onAfterClose,
+    onCommentCountChange,
+    variant = 'modal',
 }: Props) {
+    const isScenesEmbed = variant === 'scenesEmbed';
     const { user } = useAuth();
     const navigation = useNavigation<any>();
     const insets = useSafeAreaInsets();
-    const listRef = useRef<FlatList<Comment>>(null);
+    const insetsBottomRef = useRef(insets.bottom);
+    insetsBottomRef.current = insets.bottom;
+    const listRef = useRef<FlatList<Comment> | null>(null);
 
     const [post, setPost] = useState<Post | null>(postProp ?? null);
     const [comments, setComments] = useState<Comment[]>([]);
@@ -468,11 +509,31 @@ export default function PostCommentsSheet({
     const [submitting, setSubmitting] = useState(false);
     const [followBusy, setFollowBusy] = useState(false);
     const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
+    const [replyingTo, setReplyingTo] = useState<{ id: string; handle: string } | null>(null);
+    const [submittingReply, setSubmittingReply] = useState(false);
 
     const viewerHandle = String(currentUserHandle || user?.handle || commentAuthorHandle || '').trim();
     const normalizedViewerHandle = viewerHandle.toLowerCase();
     const postIdStr = String(postId || '');
-    const canLoadComments = isFrontendOnlyPostId(postIdStr) || Boolean(user?.id);
+    // Mock / collection snapshot ids can load without a Laravel user id.
+    // Real backend post ids require an authenticated user before fetching comments.
+    const canLoadComments =
+        Boolean(postIdStr) && (isFrontendOnlyPostId(postIdStr) || Boolean(user?.id));
+    const postPropRef = useRef(postProp);
+    postPropRef.current = postProp;
+    const loadGenRef = useRef(0);
+    const onCommentCountChangeRef = useRef(onCommentCountChange);
+    onCommentCountChangeRef.current = onCommentCountChange;
+
+    const emitCommentCount = useCallback((next: number, mode: 'max' | 'set' = 'max') => {
+        const n = Math.max(0, Math.floor(Number(next) || 0));
+        setPost((prev) => {
+            if (!prev) return prev;
+            const comments = mode === 'set' ? n : Math.max(prev.stats.comments || 0, n);
+            return { ...prev, stats: { ...prev.stats, comments } };
+        });
+        onCommentCountChangeRef.current?.(n);
+    }, []);
 
     const onMentionPress = useCallback(
         (handle: string) => {
@@ -486,13 +547,20 @@ export default function PostCommentsSheet({
             setSortMode('top');
             return;
         }
-        if (!postId || !canLoadComments) return;
+        if (!postId || !canLoadComments) {
+            // Still show the snapshot header when auth isn't ready / signed out.
+            setPost(postPropRef.current ?? null);
+            setComments([]);
+            setLoading(false);
+            return;
+        }
 
         let cancelled = false;
+        const req = ++loadGenRef.current;
+        setComments([]);
         (async () => {
             setLoading(true);
-            setPost(postProp ?? null);
-            setComments([]);
+            setPost(postPropRef.current ?? null);
             setCommentsCursor(null);
             setCommentsHasMore(false);
             setCommentsLoadingMore(false);
@@ -501,26 +569,38 @@ export default function PostCommentsSheet({
                     getPostById(postId, user?.id),
                     fetchCommentsPage(postId, null, 30, 5, user?.id),
                 ]);
-                if (cancelled) return;
-                setPost(fetchedPost ?? postProp ?? null);
-                setComments(fetchedPage.items);
+                if (cancelled || req !== loadGenRef.current) return;
+                setPost(fetchedPost ?? postPropRef.current ?? null);
+                setComments((prev) => {
+                    const temps = prev.filter((c) => String(c.id).startsWith('temp-'));
+                    const seen = new Set(fetchedPage.items.map((c) => String(c.id)));
+                    const merged = [...fetchedPage.items];
+                    for (const t of temps) {
+                        if (!seen.has(String(t.id))) merged.push(t);
+                    }
+                    return merged;
+                });
                 setCommentsCursor(fetchedPage.nextCursor);
                 setCommentsHasMore(fetchedPage.hasMore);
+                const apiCount = Number(fetchedPost?.stats?.comments);
+                const listCount = fetchedPage.items.length;
+                emitCommentCount(
+                    Number.isFinite(apiCount) ? Math.max(apiCount, listCount) : listCount,
+                );
             } catch (err) {
                 console.error('Failed to load comments sheet:', err);
-                if (!cancelled) {
-                    setPost(postProp ?? null);
-                    setComments([]);
+                if (!cancelled && req === loadGenRef.current) {
+                    setPost(postPropRef.current ?? null);
                 }
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!cancelled && req === loadGenRef.current) setLoading(false);
             }
         })();
 
         return () => {
             cancelled = true;
         };
-    }, [isOpen, postId, canLoadComments, user?.id, postProp]);
+    }, [isOpen, postId, canLoadComments, user?.id, emitCommentCount]);
 
     const sortedComments = useMemo(() => {
         const next = [...comments];
@@ -597,7 +677,7 @@ export default function PostCommentsSheet({
         });
 
     const handleAddComment = async (text: string) => {
-        const handle = String(commentAuthorHandle || user?.handle || '').trim();
+        const handle = String(commentAuthorHandle || user?.handle || currentUserHandle || viewerHandle || '').trim();
         if (!handle) {
             Alert.alert('Sign in required', 'You need a profile handle to comment.');
             return;
@@ -620,12 +700,17 @@ export default function PostCommentsSheet({
             moderationReason: moderation.matched[0],
         };
         setComments((prev) => [...prev, optimisticComment]);
+        const prevCount = post?.stats.comments ?? 0;
+        emitCommentCount(prevCount + 1, 'set');
         setSubmitting(true);
         try {
             const newComment = await addComment(postId, handle, text);
             setComments((prev) => prev.map((c) => (c.id === optimisticComment.id ? newComment : c)));
+            emitCommentCount(prevCount + 1, 'max');
         } catch (err) {
             console.error('Failed to add comment:', err);
+            setComments((prev) => prev.filter((c) => c.id !== optimisticComment.id));
+            emitCommentCount(prevCount, 'set');
             Alert.alert('Error', 'Failed to add comment');
         } finally {
             setSubmitting(false);
@@ -661,16 +746,16 @@ export default function PostCommentsSheet({
         }
     };
 
-    const handleReplyToComment = async (parentId: string, text: string) => {
+    const handleReplyToComment = async (parentId: string, text: string): Promise<boolean> => {
         const handle = String(commentAuthorHandle || user?.handle || '').trim();
         if (!handle) {
             Alert.alert('Sign in required', 'You need a profile handle to reply.');
-            return;
+            return false;
         }
         const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
         if (moderation.level !== 'none') {
             const ok = await confirmModerationPost(moderation.level);
-            if (!ok) return;
+            if (!ok) return false;
         }
 
         const optimisticReply: Comment = {
@@ -709,6 +794,8 @@ export default function PostCommentsSheet({
                     };
                 }),
             );
+            emitCommentCount((post?.stats.comments ?? 0) + 1, 'max');
+            return true;
         } catch (err) {
             console.error('Failed to add reply:', err);
             throw err;
@@ -733,7 +820,10 @@ export default function PostCommentsSheet({
         }
         const nextState = action === 'hide' ? 'hidden_by_filter' : 'visible';
         const ok = await setCommentModerationState(commentId, nextState, 'creator_moderation');
-        if (!ok) return;
+        if (!ok) {
+            Alert.alert('Could not update comment', 'The server did not save that change. Try again.');
+            return;
+        }
         setComments((prev) =>
             prev.map((comment) => {
                 if (comment.id === commentId) {
@@ -764,7 +854,7 @@ export default function PostCommentsSheet({
         if (!user?.id || !post || user.handle === post.userHandle) return;
         setFollowBusy(true);
         try {
-            const updated = await toggleFollowForPost(user.id, postId, post.userHandle);
+            const updated = await toggleFollowForPost(user.id, postId, post.userHandle, user.handle, post.isFollowing === true);
             setPost((prev) => (prev ? { ...prev, isFollowing: updated.isFollowing } : null));
         } catch (err) {
             console.error('Follow toggle failed:', err);
@@ -774,9 +864,63 @@ export default function PostCommentsSheet({
     };
 
     const handleClose = () => {
+        setReplyingTo(null);
         onAfterClose?.();
         onClose();
     };
+
+    useEffect(() => {
+        if (!isOpen) setReplyingTo(null);
+    }, [isOpen]);
+
+    const scrollReplyIntoView = useCallback(
+        (commentId: string) => {
+            const index = sortedComments.findIndex((c) => String(c.id) === String(commentId));
+            if (index < 0) return;
+            try {
+                listRef.current?.scrollToIndex({
+                    index,
+                    animated: true,
+                    viewPosition: 0.2,
+                    viewOffset: 24,
+                });
+            } catch {
+                /* layout may not be ready yet */
+            }
+        },
+        [sortedComments],
+    );
+
+    const startReply = useCallback(
+        (commentId: string, handle: string) => {
+            setReplyingTo({ id: commentId, handle });
+            scrollReplyIntoView(commentId);
+        },
+        [scrollReplyIntoView],
+    );
+
+    const cancelReply = useCallback(() => {
+        setReplyingTo(null);
+    }, []);
+
+    const handleComposerSubmit = useCallback(
+        async (text: string) => {
+            if (replyingTo) {
+                setSubmittingReply(true);
+                try {
+                    const ok = await handleReplyToComment(replyingTo.id, text);
+                    if (ok) setReplyingTo(null);
+                } catch {
+                    Alert.alert('Error', 'Failed to add reply');
+                } finally {
+                    setSubmittingReply(false);
+                }
+                return;
+            }
+            await handleAddComment(text);
+        },
+        [replyingTo, handleReplyToComment, handleAddComment],
+    );
 
     const renderComment: ListRenderItem<Comment> = ({ item }) => (
         <CommentItem
@@ -785,9 +929,10 @@ export default function PostCommentsSheet({
             isPostOwner={isPostOwner}
             onLikeComment={handleLikeComment}
             onLikeReply={handleLikeReply}
-            onReply={handleReplyToComment}
+            onStartReply={startReply}
             onModerateComment={handleModerateComment}
             onMentionPress={onMentionPress}
+            isReplyingTo={replyingTo?.id === item.id}
         />
     );
 
@@ -832,141 +977,312 @@ export default function PostCommentsSheet({
         </>
     );
 
-    if (!isOpen) return null;
-
-    return (
-        <Modal visible={isOpen} animationType="slide" transparent onRequestClose={handleClose}>
-            <KeyboardAvoidingView
-                style={styles.modalOverlay}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-                <Pressable style={styles.backdrop} onPress={handleClose} />
-                <View style={[styles.sheet, { height: SHEET_HEIGHT, paddingBottom: insets.bottom }]}>
-                    {post?.mediaUrl ? (
-                        <View style={styles.mediaPreviewRow}>
-                            <View style={styles.mediaPreviewThumb}>
-                                {post.mediaType === 'video' ? (
-                                    <Video
-                                        source={{ uri: post.mediaUrl }}
-                                        style={styles.mediaPreviewMedia}
-                                        resizeMode="cover"
-                                        muted
-                                        repeat
-                                        paused={false}
-                                    />
-                                ) : (
-                                    <Image
-                                        source={{ uri: post.mediaUrl }}
-                                        style={styles.mediaPreviewMedia}
-                                        resizeMode="cover"
-                                    />
-                                )}
-                            </View>
-                            {authorHandle ? (
-                                <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
-                                    {authorHandle}
-                                </Text>
-                            ) : null}
-                        </View>
-                    ) : null}
-
-                    <View style={styles.dragHandleRow}>
-                        <View style={styles.dragHandle} />
-                    </View>
-
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>
-                            {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+    const sheetTitleBar = (
+        <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+                {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+            </Text>
+            <View style={styles.modalHeaderRight}>
+                <View style={styles.commentSortToggle}>
+                    <TouchableOpacity
+                        onPress={() => setSortMode('top')}
+                        style={[styles.commentSortButton, sortMode === 'top' && styles.commentSortButtonActive]}
+                    >
+                        <Text
+                            style={[
+                                styles.commentSortButtonText,
+                                sortMode === 'top' && styles.commentSortButtonTextActive,
+                            ]}
+                        >
+                            Top
                         </Text>
-                        <View style={styles.modalHeaderRight}>
-                            <View style={styles.commentSortToggle}>
-                                <TouchableOpacity
-                                    onPress={() => setSortMode('top')}
-                                    style={[styles.commentSortButton, sortMode === 'top' && styles.commentSortButtonActive]}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.commentSortButtonText,
-                                            sortMode === 'top' && styles.commentSortButtonTextActive,
-                                        ]}
-                                    >
-                                        Top
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={() => setSortMode('newest')}
-                                    style={[
-                                        styles.commentSortButton,
-                                        sortMode === 'newest' && styles.commentSortButtonActive,
-                                    ]}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.commentSortButtonText,
-                                            sortMode === 'newest' && styles.commentSortButtonTextActive,
-                                        ]}
-                                    >
-                                        Newest
-                                    </Text>
-                                </TouchableOpacity>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setSortMode('newest')}
+                        style={[
+                            styles.commentSortButton,
+                            sortMode === 'newest' && styles.commentSortButtonActive,
+                        ]}
+                    >
+                        <Text
+                            style={[
+                                styles.commentSortButtonText,
+                                sortMode === 'newest' && styles.commentSortButtonTextActive,
+                            ]}
+                        >
+                            Newest
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                    <FeedCloseIcon size={20} color={P.muted} />
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+
+    const sheetMediaPreview =
+        post && (post.mediaUrl || isVideoPost(post) || authorHandle) ? (
+            <View style={styles.mediaPreviewRow}>
+                <View style={styles.mediaPreviewThumb}>
+                    {(() => {
+                        const postAny = post as {
+                            posterUrl?: string;
+                            thumbnailUrl?: string;
+                            avatarUrl?: string;
+                            author?: { avatarUrl?: string };
+                        };
+                        const mediaPosters = (post.mediaItems || []).flatMap((item) => {
+                            const slide = item as {
+                                posterUrl?: string;
+                                thumbnailUrl?: string;
+                                url?: string;
+                                type?: string;
+                            };
+                            return [
+                                slide.posterUrl,
+                                slide.thumbnailUrl,
+                                slide.type === 'image' ? slide.url : undefined,
+                            ];
+                        });
+                        const previewUri = [
+                            postAny.posterUrl,
+                            post.videoPosterUrl,
+                            postAny.thumbnailUrl,
+                            ...mediaPosters,
+                            !isVideoPost(post) ? post.mediaUrl : undefined,
+                            postAny.author?.avatarUrl,
+                            postAny.avatarUrl,
+                            authorHandle ? getAvatarForHandle(authorHandle) : undefined,
+                        ].find(
+                            (u): u is string => typeof u === 'string' && u.trim().length > 0,
+                        );
+
+                        if (previewUri) {
+                            return (
+                                <Image
+                                    source={{ uri: previewUri }}
+                                    style={styles.mediaPreviewMedia}
+                                    resizeMode="cover"
+                                />
+                            );
+                        }
+
+                        return (
+                            <View style={styles.mediaPreviewAvatarFallback}>
+                                <Avatar
+                                    src={undefined}
+                                    name={authorHandle.split('@')[0] || 'User'}
+                                    size="md"
+                                />
                             </View>
-                            <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                                <FeedCloseIcon size={20} color="#4B5563" />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
+                        );
+                    })()}
+                </View>
+                {authorHandle ? (
+                    <Text style={styles.mediaPreviewHandle} numberOfLines={1}>
+                        {authorHandle}
+                    </Text>
+                ) : null}
+            </View>
+        ) : null;
 
-                    {loading ? (
-                        <View style={styles.loadingWrap}>
-                            <ActivityIndicator size="large" color={BRAND_600} />
-                        </View>
-                    ) : (
-                        <FlatList
-                            ref={listRef}
-                            style={styles.commentsList}
-                            data={sortedComments}
-                            keyExtractor={(item) => item.id}
-                            renderItem={renderComment}
-                            ListHeaderComponent={listHeader}
-                            ListEmptyComponent={
-                                <View style={styles.emptyState}>
-                                    <FeedMessageSquareIcon size={48} color="#6B7280" opacity={0.5} />
-                                    <Text style={styles.emptyTitle}>No comments yet</Text>
-                                    <Text style={styles.emptySubtitle}>Be the first to comment!</Text>
-                                </View>
-                            }
-                            ListFooterComponent={
-                                commentsHasMore ? (
-                                    <TouchableOpacity
-                                        style={styles.loadMoreButton}
-                                        disabled={commentsLoadingMore}
-                                        onPress={handleLoadMoreComments}
-                                    >
-                                        <Text style={styles.loadMoreText}>
-                                            {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ) : null
-                            }
-                            contentContainerStyle={styles.commentsListContent}
-                            onScroll={handleScroll}
-                            scrollEventThrottle={16}
-                            keyboardShouldPersistTaps="handled"
-                        />
-                    )}
+    const sheetChromeHeader = (
+        <>
+            {sheetMediaPreview}
+            {sheetTitleBar}
+            {listHeader}
+        </>
+    );
 
+    const renderCommentsFooter = useCallback(
+        (props: BottomSheetFooterProps) => (
+            <BottomSheetFooter {...props} bottomInset={insetsBottomRef.current}>
+                {/* Solid footer — animated Passport canvas remounts on keyboard resize and steals focus. */}
+                <View style={styles.footerSolid}>
                     <CommentInput
-                        placeholder="Join the conversation..."
-                        onSubmit={handleAddComment}
-                        isLoading={submitting}
+                        placeholder={
+                            replyingTo ? 'Write a reply...' : 'Join the conversation...'
+                        }
+                        onSubmit={(text) => {
+                            void handleComposerSubmit(text);
+                        }}
+                        isLoading={submitting || submittingReply}
+                        replyingToHandle={replyingTo?.handle}
+                        onCancelReply={cancelReply}
+                        useSheetTextInput
+                        autoFocus={Boolean(replyingTo)}
                     />
                 </View>
+            </BottomSheetFooter>
+        ),
+        [cancelReply, handleComposerSubmit, replyingTo, submitting, submittingReply],
+    );
+
+    const commentsListProps = {
+        ref: listRef,
+        style: styles.commentsList,
+        data: sortedComments,
+        keyExtractor: (item: Comment) => item.id,
+        renderItem: renderComment,
+        ListHeaderComponent: sheetChromeHeader,
+        ListEmptyComponent: (
+            <View style={styles.emptyState}>
+                <FeedMessageSquareIcon size={48} color={P.muted} opacity={0.5} />
+                <Text style={styles.emptyTitle}>No comments yet</Text>
+                <Text style={styles.emptySubtitle}>Be the first to comment!</Text>
+            </View>
+        ),
+        ListFooterComponent: commentsHasMore ? (
+            <TouchableOpacity
+                style={styles.loadMoreButton}
+                disabled={commentsLoadingMore}
+                onPress={handleLoadMoreComments}
+            >
+                <Text style={styles.loadMoreText}>
+                    {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
+                </Text>
+            </TouchableOpacity>
+        ) : null,
+        contentContainerStyle: styles.commentsListContent,
+        onScroll: handleScroll,
+        scrollEventThrottle: 16 as const,
+        keyboardShouldPersistTaps: 'handled' as const,
+        keyboardDismissMode: 'on-drag' as const,
+        automaticallyAdjustKeyboardInsets: false,
+        onScrollToIndexFailed: (info: { index: number }) => {
+            setTimeout(() => {
+                listRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: true,
+                    viewPosition: 0.15,
+                    viewOffset: 24,
+                });
+            }, 160);
+        },
+    };
+
+    const sheetBody = (
+        <PassportSheetCanvas style={[styles.sheetCanvas, styles.sheetBodyFill]} contentStyle={styles.sheetBodyFill}>
+            <View style={[styles.sheet, styles.sheetBodyFill]}>
+                {/* Pin chrome outside FlatList so Android Modal height quirks can't blank the sheet. */}
+                {sheetMediaPreview}
+                {sheetTitleBar}
+                {loading ? (
+                    <View style={styles.loadingWrap}>
+                        <ActivityIndicator size="large" color={BRAND_600} />
+                    </View>
+                ) : (
+                    <FlatList {...commentsListProps} ListHeaderComponent={listHeader} />
+                )}
+                <View style={styles.footerSolid}>
+                    <CommentInput
+                        placeholder={replyingTo ? 'Write a reply...' : 'Join the conversation...'}
+                        onSubmit={(text) => {
+                            void handleComposerSubmit(text);
+                        }}
+                        isLoading={submitting || submittingReply}
+                        replyingToHandle={replyingTo?.handle}
+                        onCancelReply={cancelReply}
+                        autoFocus={Boolean(replyingTo)}
+                    />
+                </View>
+            </View>
+        </PassportSheetCanvas>
+    );
+
+    if (isScenesEmbed) {
+        if (!isOpen) return null;
+        // Android: rely on adjustResize / Modal resize only. KAV `height` was
+        // fighting the soft keyboard and collapsing the list (blank sheet) or
+        // bouncing focus (keyboard pop then drop).
+        if (Platform.OS === 'android') {
+            return <View style={styles.scenesEmbedRoot}>{sheetBody}</View>;
+        }
+        return (
+            <KeyboardAvoidingView
+                style={styles.scenesEmbedRoot}
+                behavior="padding"
+                keyboardVerticalOffset={12}
+            >
+                {sheetBody}
             </KeyboardAvoidingView>
-        </Modal>
+        );
+    }
+
+    return (
+        <GazetteerBottomSheetModal
+            visible={isOpen}
+            onDismiss={handleClose}
+            snapPoints={['75%']}
+            horizontalInset={0}
+            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
+            footerComponent={renderCommentsFooter}
+            keyboardBehavior="interactive"
+            keyboardBlurBehavior="restore"
+            android_keyboardInputMode="adjustResize"
+        >
+            <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
+                <BottomSheetFlatList
+                    {...((loading
+                        ? {
+                              data: [] as Comment[],
+                              renderItem: () => null,
+                              ListHeaderComponent: (
+                                  <>
+                                      {sheetChromeHeader}
+                                      <View style={styles.loadingWrap}>
+                                          <ActivityIndicator size="large" color={BRAND_600} />
+                                      </View>
+                                  </>
+                              ),
+                          }
+                        : {
+                              data: commentsListProps.data,
+                              keyExtractor: commentsListProps.keyExtractor,
+                              renderItem: commentsListProps.renderItem,
+                              ListHeaderComponent: commentsListProps.ListHeaderComponent,
+                              ListEmptyComponent: commentsListProps.ListEmptyComponent,
+                              ListFooterComponent: commentsListProps.ListFooterComponent,
+                              contentContainerStyle: commentsListProps.contentContainerStyle,
+                              onScroll: commentsListProps.onScroll,
+                              scrollEventThrottle: commentsListProps.scrollEventThrottle,
+                              keyboardShouldPersistTaps: commentsListProps.keyboardShouldPersistTaps,
+                              keyboardDismissMode: commentsListProps.keyboardDismissMode,
+                              automaticallyAdjustKeyboardInsets: true,
+                          }) as any)}
+                    style={[styles.commentsList, styles.sheet]}
+                />
+            </PassportSheetCanvas>
+        </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
+    scenesEmbedRoot: {
+        flex: 1,
+    },
+    sheetCanvas: {
+        flex: 1,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+    },
+    sheetCanvasContent: {
+        flex: 1,
+    },
+    embedSolidBg: {
+        backgroundColor: '#060d16',
+    },
+    footerCanvasContent: {
+        backgroundColor: 'transparent',
+    },
+    footerSolid: {
+        // Keep composer on a stable strip so keyboard resize doesn't remount the ambient canvas.
+        backgroundColor: 'rgba(6, 13, 22, 0.92)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: P.border,
+    },
     modalOverlay: {
         flex: 1,
         justifyContent: 'flex-end',
@@ -976,37 +1292,53 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
     },
     sheet: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'transparent',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         overflow: 'hidden',
     },
+    sheetBodyFill: {
+        flex: 1,
+        minHeight: 240,
+    },
     mediaPreviewRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 12,
         paddingHorizontal: 16,
         paddingTop: 12,
         paddingBottom: 8,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
     },
     mediaPreviewThumb: {
         width: 56,
         height: 56,
         borderRadius: 8,
         overflow: 'hidden',
-        backgroundColor: '#111827',
+        backgroundColor: P.chipBg,
+        marginRight: 12,
     },
     mediaPreviewMedia: {
         width: '100%',
         height: '100%',
     },
+    mediaPreviewPlaceholder: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#121212',
+    },
+    mediaPreviewAvatarFallback: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#121212',
+    },
     mediaPreviewHandle: {
         flex: 1,
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
     },
     dragHandleRow: {
         alignItems: 'center',
@@ -1017,7 +1349,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 999,
-        backgroundColor: '#D1D5DB',
+        backgroundColor: P.handle,
     },
     modalHeader: {
         flexDirection: 'row',
@@ -1026,23 +1358,22 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#E5E7EB',
+        borderBottomColor: P.border,
     },
     modalHeaderRight: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
     },
     modalTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
     },
     commentSortToggle: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: P.border,
         borderRadius: 8,
         padding: 2,
     },
@@ -1052,18 +1383,19 @@ const styles = StyleSheet.create({
         borderRadius: 6,
     },
     commentSortButtonActive: {
-        backgroundColor: '#111827',
+        backgroundColor: P.chipBg,
     },
     commentSortButtonText: {
         fontSize: 12,
-        color: '#4B5563',
+        color: P.muted,
         fontWeight: '600',
     },
     commentSortButtonTextActive: {
-        color: '#FFFFFF',
+        color: P.text,
     },
     closeButton: {
         padding: 4,
+        marginLeft: 8,
     },
     loadingWrap: {
         flex: 1,
@@ -1079,56 +1411,60 @@ const styles = StyleSheet.create({
     },
     avatarRing: {
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: P.border,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    avatarCol: {
+        flexShrink: 0,
     },
     authorRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 12,
         paddingBottom: 12,
         marginBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
     },
     authorHandle: {
         flex: 1,
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
     },
     followButton: {
         paddingHorizontal: 16,
         paddingVertical: 6,
         borderRadius: 8,
-        backgroundColor: '#111827',
+        backgroundColor: P.chipBg,
     },
     followButtonFollowing: {
-        backgroundColor: '#E5E7EB',
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: P.border,
     },
     followButtonText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: P.text,
     },
     followButtonTextFollowing: {
-        color: '#1F2937',
+        color: P.text,
     },
     captionBlock: {
         paddingBottom: 12,
         marginBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
     },
     captionText: {
         fontSize: 14,
-        color: '#111827',
+        color: P.text,
         lineHeight: 20,
     },
     captionTime: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
         marginTop: 8,
     },
     mentionText: {
@@ -1137,35 +1473,35 @@ const styles = StyleSheet.create({
     emptyState: {
         alignItems: 'center',
         paddingVertical: 32,
-        rowGap: 8,
     },
     emptyTitle: {
         fontSize: 15,
-        color: '#6B7280',
+        color: P.muted,
         marginTop: 16,
     },
     emptySubtitle: {
         fontSize: 14,
-        color: '#6B7280',
+        color: P.muted,
+        marginTop: 8,
     },
     loadMoreButton: {
         minHeight: 40,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#F9FAFB',
+        borderColor: P.border,
+        backgroundColor: P.chipBg,
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 4,
     },
     loadMoreText: {
         fontSize: 14,
-        color: '#374151',
+        color: P.muted,
     },
     commentItem: {
         flexDirection: 'row',
+        alignItems: 'flex-start',
         marginBottom: 16,
-        columnGap: 12,
     },
     commentContent: {
         flex: 1,
@@ -1174,21 +1510,21 @@ const styles = StyleSheet.create({
     commentHeaderRow: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        columnGap: 8,
         marginBottom: 2,
     },
     commentUser: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
+        marginRight: 8,
     },
     commentTime: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
     },
     commentText: {
         fontSize: 14,
-        color: '#111827',
+        color: P.text,
         marginBottom: 8,
     },
     hiddenFromOthersNote: {
@@ -1199,18 +1535,20 @@ const styles = StyleSheet.create({
     moderationActionsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 12,
         marginBottom: 8,
     },
     moderationActionText: {
         fontSize: 11,
-        color: '#4B5563',
+        color: P.muted,
         fontWeight: '500',
     },
     moderationDeleteText: {
         fontSize: 11,
         color: '#DC2626',
         fontWeight: '500',
+    },
+    moderationDeleteSpacing: {
+        marginLeft: 12,
     },
     commentActionsRow: {
         flexDirection: 'row',
@@ -1219,35 +1557,54 @@ const styles = StyleSheet.create({
     },
     commentReplyText: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
+        fontWeight: '500',
+    },
+    commentReplyTextActive: {
+        color: BRAND_600,
+        fontWeight: '600',
+    },
+    replyingBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 2,
+        gap: 8,
+    },
+    replyingBannerText: {
+        flex: 1,
+        fontSize: 12,
+        color: P.muted,
         fontWeight: '500',
     },
     commentLikeRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
     },
     commentLikeCount: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
+        marginLeft: 4,
     },
     inlineReplyContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
         marginTop: 8,
     },
     inlineReplyInput: {
         flex: 1,
-        backgroundColor: '#F3F4F6',
+        backgroundColor: P.inputBg,
         borderRadius: 999,
         paddingHorizontal: 12,
         paddingVertical: 8,
-        color: '#111827',
+        color: P.text,
         fontSize: 14,
     },
     inlineReplySendButton: {
         padding: 6,
+        marginLeft: 8,
     },
     repliesToggleWrap: {
         marginTop: 8,
@@ -1256,26 +1613,26 @@ const styles = StyleSheet.create({
     repliesToggleButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
     },
     repliesToggleText: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
+        marginLeft: 4,
     },
     replyList: {
         marginTop: 8,
         paddingLeft: 16,
         borderLeftWidth: 2,
-        borderLeftColor: '#E5E7EB',
-        backgroundColor: 'rgba(249, 250, 251, 0.8)',
+        borderLeftColor: P.border,
+        backgroundColor: 'rgba(15, 36, 48, 0.45)',
         borderTopRightRadius: 6,
         borderBottomRightRadius: 6,
         paddingVertical: 8,
-        rowGap: 12,
     },
     replyItem: {
         flexDirection: 'row',
-        columnGap: 8,
+        alignItems: 'flex-start',
+        marginBottom: 12,
     },
     replyContent: {
         flex: 1,
@@ -1284,41 +1641,41 @@ const styles = StyleSheet.create({
     replyHeaderRow: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        columnGap: 6,
         marginBottom: 2,
     },
     replyUser: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#111827',
+        color: P.text,
+        marginRight: 6,
     },
     replyTime: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: P.muted,
     },
     replyText: {
         fontSize: 12,
-        color: '#111827',
+        color: P.text,
         marginBottom: 4,
     },
     replyLikeRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
     },
     replyLikeCount: {
         fontSize: 12,
-        color: '#6B7280',
+        color: P.muted,
+        marginLeft: 4,
     },
     commentInputShell: {
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#E5E7EB',
-        backgroundColor: '#FFFFFF',
+        borderTopColor: P.border,
+        backgroundColor: 'rgba(6, 13, 22, 0.55)',
     },
     emojiPickerWrap: {
         maxHeight: 96,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: P.border,
         paddingHorizontal: 8,
         paddingVertical: 8,
     },
@@ -1342,26 +1699,27 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 12,
         paddingVertical: 12,
-        columnGap: 8,
     },
     emojiToggle: {
         padding: 8,
         borderRadius: 8,
+        marginRight: 8,
     },
     emojiToggleActive: {
-        backgroundColor: '#E5E7EB',
+        backgroundColor: 'rgba(255,255,255,0.12)',
     },
     commentInputGradientWrap: {
         flex: 1,
         borderRadius: 8,
-        borderWidth: 2,
-        borderColor: '#D1D5DB',
-        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: P.border,
+        backgroundColor: P.inputBg,
+        marginRight: 8,
     },
     commentInput: {
         paddingHorizontal: 12,
         paddingVertical: 8,
-        color: '#111827',
+        color: P.text,
         fontSize: 14,
     },
     sendButton: {

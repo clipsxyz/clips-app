@@ -1,10 +1,12 @@
 // Notification service with Firebase Cloud Messaging support
 // Firebase imports are loaded dynamically to avoid errors if package not installed
 
-import { getReactNativeDefaultApiBaseUrl, getRuntimeEnv } from '../config/runtimeEnv';
+import { fetchNotificationPreferences, saveNotificationPreferencesToServer } from '../api/client';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 function notificationApiBase(): string {
-  return getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+  return getApiBaseUrl();
 }
 
 // Notification preferences storage key
@@ -110,60 +112,75 @@ export function isNotificationTypeEnabled(
   }
 }
 
-// Save notification preferences to localStorage
+/** In-app inbox is not gated on the push master switch. */
+export function isInAppNotificationChannelEnabled(
+  prefs: NotificationPreferences,
+  channel: NotificationPreferenceChannel
+): boolean {
+  return isNotificationTypeEnabled({ ...prefs, enabled: true }, channel);
+}
+
+// Save notification preferences to localStorage and Laravel
 export function saveNotificationPreferences(prefs: NotificationPreferences): void {
   inMemoryNotificationPrefs = { ...prefs };
   try {
     if (canUseLocalStorage()) {
       localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs));
     }
-    // Also sync to backend if user is logged in
-    if (canUseLocalStorage()) {
-      syncPreferencesToBackend(prefs);
+    if (isLaravelApiEnabled()) {
+      void saveNotificationPreferencesToServer(prefs).catch((error) => {
+        console.warn('Failed to sync notification preferences to backend:', error);
+      });
     }
   } catch (error) {
     console.error('Error saving notification preferences:', error);
   }
 }
 
+export async function loadNotificationPreferences(): Promise<NotificationPreferences> {
+  if (isLaravelApiEnabled()) {
+    try {
+      const remote = await fetchNotificationPreferences();
+      if (remote) {
+        inMemoryNotificationPrefs = { ...defaultPreferences, ...remote };
+        if (canUseLocalStorage()) {
+          localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load notification preferences from backend:', error);
+    }
+  }
+  return getNotificationPreferences();
+}
+
+export async function saveNotificationPreferencesAsync(
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  inMemoryNotificationPrefs = { ...prefs };
+  try {
+    if (canUseLocalStorage()) {
+      localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs));
+    }
+    if (isLaravelApiEnabled()) {
+      const saved = await saveNotificationPreferencesToServer(prefs);
+      if (saved) {
+        inMemoryNotificationPrefs = { ...defaultPreferences, ...saved };
+        if (canUseLocalStorage()) {
+          localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error saving notification preferences:', error);
+  }
+  return getNotificationPreferences();
+}
+
 export function resetNotificationPreferences(): NotificationPreferences {
   const next = { ...defaultPreferences };
   saveNotificationPreferences(next);
   return next;
-}
-
-// Sync preferences to backend
-async function syncPreferencesToBackend(prefs: NotificationPreferences): Promise<void> {
-  try {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) {
-      return;
-    }
-
-    const userData = JSON.parse(userStr);
-    const userId = userData.id || userData.handle;
-
-    // Call API to save preferences
-    const response = await fetch(`${notificationApiBase()}/notifications/preferences`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        userId,
-        userHandle: userData.handle,
-        preferences: prefs,
-      }),
-    });
-
-    if (response.ok) {
-      console.log('Notification preferences synced to backend');
-    } else {
-      console.warn('Failed to sync preferences to backend:', response.statusText);
-    }
-  } catch (error) {
-    console.error('Error syncing preferences to backend:', error);
-  }
 }
 
 // Request notification permission
@@ -219,6 +236,11 @@ export async function getFCMToken(): Promise<string | null> {
     console.error('Error getting FCM token:', error);
     return null;
   }
+}
+
+/** Web/native parity: (re)register FCM token after login. */
+export async function registerFcmTokenForCurrentUser(): Promise<string | null> {
+  return getFCMToken();
 }
 
 // Save FCM token to backend

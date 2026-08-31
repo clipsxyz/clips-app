@@ -1,4 +1,4 @@
-export type DiscoverAmbientVariant = 'discover' | 'goldChrome';
+export type DiscoverAmbientVariant = 'discover' | 'goldChrome' | 'passport';
 
 export type AmbientPalette = {
     wavePrimary: string;
@@ -28,8 +28,57 @@ export const GOLD_CHROME_PALETTE: AmbientPalette = {
     wave2End: 'rgba(11, 7, 17, 0)',
 };
 
+/**
+ * View Profile — night atlas / passport ink.
+ * Sea-glass + brass on deep navy (not Instagram purple/magenta).
+ */
+export const PASSPORT_PALETTE: AmbientPalette = {
+    wavePrimary: '#3d9b8f',
+    waveMid: '#12263a',
+    waveDeep: '#060d16',
+    wave2Primary: 'rgba(196, 165, 116, 0.4)',
+    wave2Mid: 'rgba(61, 155, 143, 0.22)',
+    wave2End: 'rgba(6, 13, 22, 0)',
+};
+
+export const PASSPORT_ABYSS = '#060d16';
+
+/** Brass wash used with sea-glass on passport chrome (borders, accents). */
+export const PASSPORT_BRASS = '#c4a574';
+export const PASSPORT_BRASS_LIGHT = '#e8d5a3';
+
+/**
+ * Android View Profile canvas (GazetteerScreenShell wash).
+ * Deep navy + muted teal — not Instagram purple, not brass/gold.
+ */
+export const PASSPORT_CANVAS_WASH = ['#060d16', '#0f2430', '#1a3f3c', '#12263a', '#060d16'] as const;
+
+/** Accent red for the feed-switcher traveling ring. */
+export const PASSPORT_INK_RED = '#d91b5c';
+
+/**
+ * Traveling ring on the feed-switcher pill — View Profile navy/teal plus a red beat.
+ */
+export const PASSPORT_TRAVELING_BORDER_COLORS = [
+    PASSPORT_PALETTE.wavePrimary,
+    PASSPORT_INK_RED,
+    PASSPORT_CANVAS_WASH[2],
+    PASSPORT_PALETTE.wavePrimary,
+    PASSPORT_CANVAS_WASH[1],
+    PASSPORT_INK_RED,
+    PASSPORT_CANVAS_WASH[3],
+    PASSPORT_PALETTE.wavePrimary,
+] as const;
+
+/** Stories 24 link-share canvas — same colors as the header Stories icon ring. */
+export const STORY_LINK_SHARE_CANVAS_COLORS = PASSPORT_TRAVELING_BORDER_COLORS;
+
+export const STORY_LINK_SHARE_CANVAS_CSS = `linear-gradient(135deg, ${PASSPORT_TRAVELING_BORDER_COLORS.join(', ')})`;
+
 export function getAmbientPalette(variant: DiscoverAmbientVariant): AmbientPalette {
-    return variant === 'goldChrome' ? GOLD_CHROME_PALETTE : DISCOVER_PALETTE;
+    if (variant === 'goldChrome') return GOLD_CHROME_PALETTE;
+    if (variant === 'passport') return PASSPORT_PALETTE;
+    return DISCOVER_PALETTE;
 }
 
 export type AmbientWaveGeometry = {

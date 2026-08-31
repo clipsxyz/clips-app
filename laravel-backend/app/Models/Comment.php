@@ -30,11 +30,16 @@ class Comment extends Model
         'parent_id',
         'likes_count',
         'replies_count',
+        'moderation_status',
+        'is_hidden',
+        'flagged_keywords',
     ];
 
     protected $casts = [
         'likes_count' => 'integer',
         'replies_count' => 'integer',
+        'is_hidden' => 'boolean',
+        'flagged_keywords' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -75,6 +80,32 @@ class Comment extends Model
     public function scopeReplies($query)
     {
         return $query->whereNotNull('parent_id');
+    }
+
+    /**
+     * Public listing: hide pending/hidden rows unless the viewer owns the post.
+     */
+    public function scopeVisibleTo($query, ?User $viewer, ?string $postOwnerId)
+    {
+        if ($viewer && $postOwnerId && (string) $viewer->id === (string) $postOwnerId) {
+            return $query;
+        }
+
+        return $query->where('is_hidden', false)
+            ->where(function ($inner) {
+                $inner->whereNull('moderation_status')
+                    ->orWhere('moderation_status', 'approved');
+            });
+    }
+
+    public function isHiddenFromPublic(): bool
+    {
+        if ($this->is_hidden) {
+            return true;
+        }
+        $status = (string) ($this->moderation_status ?: 'approved');
+
+        return in_array($status, ['hidden', 'pending_review'], true);
     }
 
     // Helper methods

@@ -1,9 +1,30 @@
-import type { Story, StoryGroup, StickerOverlay } from '../types';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import type { Story, StoryGroup, StoryReaction, StoryReply, StickerOverlay } from '../types';
+import { isMockMode } from '../config/runtimeEnv';
+import { getAvatarForHandle, resolveAvatarImageUri, setAvatarForHandle } from './users';
+import { resolveStoryMediaUrl } from '../utils/storyMediaNative';
+import { mapApiLinkPreview } from '../utils/linkPreview';
 
 let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
 export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
     return lastStoriesLoadSource;
+}
+
+const storyGroupCache = new Map<string, { at: number; group: StoryGroup | null }>();
+const STORY_GROUP_CACHE_MS = 20_000;
+
+function storyGroupCacheKey(handle: string, viewerUserId?: string): string {
+    return `${handle.trim().toLowerCase()}|${viewerUserId || ''}`;
+}
+
+export function invalidateStoryPresenceCache(userHandle?: string): void {
+    if (!userHandle) {
+        storyGroupCache.clear();
+        return;
+    }
+    const needle = userHandle.trim().toLowerCase();
+    for (const key of [...storyGroupCache.keys()]) {
+        if (key.startsWith(`${needle}|`)) storyGroupCache.delete(key);
+    }
 }
 
 // Mock stories data – tuned to showcase the new Instagram-style story types
@@ -578,7 +599,104 @@ let stories: Story[] = [
                 fontSize: 'small'
             }
         ]
-    }
+    },
+    // Ava@galway — demo Clips 24 stories for inbox reply/reaction testing
+    {
+        id: 'story-ava-1',
+        userId: 'ava-galway-1',
+        userHandle: 'Ava@galway',
+        text: 'Galway evenings hit different 🌅 Who’s around?',
+        textStyle: {
+            color: '#ffffff',
+            size: 'large',
+            background: 'linear-gradient(160deg, #0ea5e9 0%, #0369a1 45%, #0f172a 100%)',
+        },
+        createdAt: Date.now() - 120000,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000 - 120000,
+        location: 'Galway',
+        views: 12,
+        viewerHandles: ['Bob@Ireland', 'Sarah@Artane'],
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined,
+    },
+    {
+        id: 'story-ava-2',
+        userId: 'ava-galway-1',
+        userHandle: 'Ava@galway',
+        mediaUrl: 'https://images.unsplash.com/photo-1500375592092-40eb2168fd21?w=800',
+        mediaType: 'image',
+        text: 'Salt air + coffee run',
+        createdAt: Date.now() - 90000,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000 - 90000,
+        location: 'Salthill',
+        views: 8,
+        viewerHandles: ['Bob@Ireland'],
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'location-sticker-ava-2',
+                stickerId: 'location-sticker-ava-2',
+                sticker: {
+                    id: 'location-sticker-ava-2',
+                    name: 'Salthill, Galway',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false,
+                },
+                x: 50,
+                y: 88,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Salthill, Galway',
+                textColor: '#FFFFFF',
+                fontSize: 'small',
+            },
+        ],
+    },
+    {
+        id: 'story-ava-3',
+        userId: 'ava-galway-1',
+        userHandle: 'Ava@galway',
+        mediaUrl: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800',
+        mediaType: 'image',
+        createdAt: Date.now() - 45000,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000 - 45000,
+        location: 'Galway',
+        views: 5,
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-ava-3',
+                stickerId: 'text-sticker-ava-3',
+                sticker: {
+                    id: 'text-sticker-ava-3',
+                    name: 'Reply if you’re free later ✨',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false,
+                },
+                x: 50,
+                y: 78,
+                scale: 1,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Reply if you’re free later ✨',
+                textColor: '#FFFFFF',
+                fontSize: 'medium',
+            },
+        ],
+    },
 ];
 
 function delay(ms = 300): Promise<void> {
@@ -607,18 +725,103 @@ export function sortStoriesNewestFirst(stories: Story[]): Story[] {
     return [...stories].sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Rewrite denormalized handles after a passport name/handle change (mock store). */
+export function renameStoryHandlesEverywhere(oldHandle: string, newHandle: string): void {
+    const oldNorm = String(oldHandle || '')
+        .replace(/^@/, '')
+        .trim()
+        .toLowerCase();
+    const nextHandle = String(newHandle || '').replace(/^@/, '').trim();
+    if (!oldNorm || !nextHandle || oldNorm === nextHandle.toLowerCase()) return;
+
+    const rewrite = (h?: string | null) => {
+        if (!h) return h;
+        const n = String(h).replace(/^@/, '').trim().toLowerCase();
+        return n === oldNorm ? nextHandle : h;
+    };
+
+    stories = stories.map((s) => ({
+        ...s,
+        userHandle: rewrite(s.userHandle) || s.userHandle,
+        sharedFromUserHandle: (s as any).sharedFromUserHandle
+            ? rewrite((s as any).sharedFromUserHandle)
+            : (s as any).sharedFromUserHandle,
+        taggedUsers: Array.isArray(s.taggedUsers)
+            ? s.taggedUsers.map((t) => rewrite(t) || t)
+            : s.taggedUsers,
+        reactions: Array.isArray(s.reactions)
+            ? s.reactions.map((r) => ({
+                  ...r,
+                  userHandle: rewrite(r.userHandle) || r.userHandle,
+              }))
+            : s.reactions,
+        replies: Array.isArray(s.replies)
+            ? s.replies.map((r) => ({
+                  ...r,
+                  userHandle: rewrite(r.userHandle) || r.userHandle,
+              }))
+            : s.replies,
+    }));
+}
+
 export type StoriesPage = {
     items: Story[];
     nextCursor: string | null;
     hasMore: boolean;
 };
 
+function mapLaravelReaction(raw: any): StoryReaction | null {
+    if (!raw?.emoji) return null;
+    return {
+        id: String(raw.id || `reaction-${raw.user_id || raw.userId || ''}`),
+        userId: raw.user_id || raw.userId || '',
+        userHandle: raw.user_handle || raw.userHandle || '',
+        emoji: raw.emoji,
+        createdAt: raw.created_at ? new Date(raw.created_at).getTime() : Date.now(),
+    };
+}
+
+function mapLaravelReply(raw: any): StoryReply | null {
+    const text = typeof raw?.text === 'string' ? raw.text : '';
+    if (!text) return null;
+    return {
+        id: String(raw.id || `reply-${raw.user_id || raw.userId || ''}`),
+        userId: raw.user_id || raw.userId || '',
+        userHandle: raw.user_handle || raw.userHandle || '',
+        text,
+        createdAt: raw.created_at ? new Date(raw.created_at).getTime() : Date.now(),
+    };
+}
+
+function mapLaravelReactions(raw: any): StoryReaction[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(mapLaravelReaction).filter((row): row is StoryReaction => !!row);
+}
+
+function mapLaravelReplies(raw: any): StoryReply[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(mapLaravelReply).filter((row): row is StoryReply => !!row);
+}
+
+function storyCountsFromApi(story: any): Pick<Story, 'views' | 'views_count' | 'reactions_count' | 'replies_count'> {
+    const reactions = mapLaravelReactions(story?.reactions);
+    const replies = mapLaravelReplies(story?.replies);
+    const views = Number(story?.views_count ?? story?.views ?? 0) || 0;
+    return {
+        views,
+        views_count: views,
+        reactions_count: Number(story?.reactions_count ?? reactions.length ?? 0) || 0,
+        replies_count: Number(story?.replies_count ?? replies.length ?? 0) || 0,
+    };
+}
+
 function mapLaravelStoryToStory(story: any): Story {
+    const handle = story.user_handle || story.user?.handle || '';
     return {
         id: story.id,
-        userId: story.user_id,
-        userHandle: story.user_handle,
-        mediaUrl: story.media_url || undefined,
+        userId: story.user_id || story.user?.id,
+        userHandle: handle,
+        mediaUrl: resolveStoryMediaUrl(story.media_url) || undefined,
         mediaType: story.media_type || undefined,
         text: story.text || undefined,
         textColor: story.text_color || undefined,
@@ -626,16 +829,51 @@ function mapLaravelStoryToStory(story: any): Story {
         location: story.location || undefined,
         venue: story.venue || undefined,
         createdAt: story.created_at ? new Date(story.created_at).getTime() : Date.now(),
-        expiresAt: story.expires_at ? new Date(story.expires_at).getTime() : Date.now(),
-        views: story.views_count || 0,
+        expiresAt: story.expires_at
+            ? new Date(story.expires_at).getTime()
+            : (story.created_at
+                ? new Date(story.created_at).getTime() + 24 * 60 * 60 * 1000
+                : Date.now() + 24 * 60 * 60 * 1000),
+        ...storyCountsFromApi(story),
         hasViewed: !!story.has_viewed,
-        reactions: [],
-        replies: [],
+        reactions: mapLaravelReactions(story.reactions),
+        replies: mapLaravelReplies(story.replies),
         userReaction: story.user_reaction || undefined,
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
         taggedUsers: story.tagged_users || undefined,
+        sharedFromPost: story.shared_from_post_id || story.sharedFromPost || undefined,
+        sharedFromUser: story.shared_from_user_handle || story.sharedFromUser || undefined,
+        videoPosterUrl: resolveStoryMediaUrl(story.video_poster_url) || undefined,
+        linkPreview: mapApiLinkPreview(story.link_preview ?? story.linkPreview),
     };
+}
+
+function mapLaravelStoryGroups(raw: any[]): StoryGroup[] {
+    return raw.map((group) => {
+        const handle = group.user_handle || group.userHandle || '';
+        const storiesRaw = Array.isArray(group.stories) ? group.stories : [];
+        const mappedStories = sortStoriesNewestFirst(storiesRaw.map((s: any) => mapLaravelStoryToStory({
+            ...s,
+            user_handle: s.user_handle || handle,
+            user_id: s.user_id || group.user_id,
+        })));
+            const groupHandle = handle || mappedStories[0]?.userHandle || '';
+            const resolvedAvatar = resolveAvatarImageUri(
+                group.avatar_url || group.avatarUrl,
+                groupHandle,
+            );
+            if (resolvedAvatar && groupHandle) {
+                setAvatarForHandle(groupHandle, resolvedAvatar);
+            }
+            return {
+                userId: group.user_id || mappedStories[0]?.userId,
+                userHandle: groupHandle,
+                name: group.user_name || (groupHandle || '').split('@')[0],
+                avatarUrl: resolvedAvatar || getAvatarForHandle(groupHandle),
+                stories: mappedStories,
+            };
+    }).filter((g) => g.userId && g.stories.length > 0);
 }
 
 function sortGroupStoriesNewestFirst(groups: StoryGroup[]): StoryGroup[] {
@@ -644,6 +882,21 @@ function sortGroupStoriesNewestFirst(groups: StoryGroup[]): StoryGroup[] {
 
 // Get all story groups (grouped by user)
 export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
+    if (!isMockMode()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const params = new URLSearchParams();
+            if (userId) params.append('userId', userId);
+            const response = await apiRequest(`/stories?${params.toString()}`);
+            const raw = Array.isArray(response) ? response : [];
+            lastStoriesLoadSource = 'api-paged';
+            return sortGroupStoriesNewestFirst(mapLaravelStoryGroups(raw));
+        } catch (error) {
+            console.warn('Failed to fetch story groups from API, falling back to mock:', error);
+        }
+    }
+
+    lastStoriesLoadSource = 'mock';
     await delay();
 
     // Filter out expired stories
@@ -666,7 +919,7 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
                 userId: story.userId,
                 userHandle: story.userHandle,
                 name: story.userHandle.split('@')[0],
-                avatarUrl: story.userId === userId ? undefined : undefined, // Will be set from user context
+                avatarUrl: getAvatarForHandle(story.userHandle),
                 stories: [story]
             });
         }
@@ -696,7 +949,7 @@ export async function fetchStoriesPage(cursor: string | null, limit = 20, userId
 
 // Get stories for a specific user
 export async function fetchUserStories(viewerUserId: string, targetUserId: string, followedUserHandles: string[] = []): Promise<Story[]> {
-    if (isLaravelApiEnabled()) {
+    if (!isMockMode()) {
         try {
             const allGroups = await fetchFollowedUsersStoryGroups(viewerUserId, followedUserHandles);
             const targetGroup = allGroups.find((group) => group.userId === targetUserId);
@@ -725,23 +978,38 @@ export async function fetchUserStories(viewerUserId: string, targetUserId: strin
 }
 
 // Get story group for a specific user by handle
-export async function fetchStoryGroupByHandle(userHandle: string): Promise<StoryGroup | null> {
-    if (isLaravelApiEnabled()) {
+export async function fetchStoryGroupByHandle(userHandle: string, viewerUserId?: string): Promise<StoryGroup | null> {
+    const cacheKey = storyGroupCacheKey(userHandle, viewerUserId);
+    const cached = storyGroupCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < STORY_GROUP_CACHE_MS) {
+        return cached.group;
+    }
+
+    if (!isMockMode()) {
         try {
             const { apiRequest } = await import('./client');
             const encoded = encodeURIComponent(userHandle);
-            const response = await apiRequest(`/stories/user/${encoded}`);
+            const params = new URLSearchParams();
+            if (viewerUserId) params.append('userId', viewerUserId);
+            const qs = params.toString();
+            const response = await apiRequest(`/stories/user/${encoded}${qs ? `?${qs}` : ''}`);
             const rawStories = Array.isArray(response) ? response : [];
-            if (rawStories.length === 0) return null;
-            const stories = rawStories.map((story: any) => mapLaravelStoryToStory(story));
+            if (rawStories.length === 0) {
+                lastStoriesLoadSource = 'api-user';
+                storyGroupCache.set(cacheKey, { at: Date.now(), group: null });
+                return null;
+            }
+            const mapped = rawStories.map((story: any) => mapLaravelStoryToStory(story));
             lastStoriesLoadSource = 'api-user';
-            return {
-                userId: stories[0].userId,
-                userHandle: stories[0].userHandle,
-                name: stories[0].userHandle.split('@')[0],
-                avatarUrl: undefined,
-                stories: sortStoriesNewestFirst(stories),
+            const group = {
+                userId: mapped[0].userId,
+                userHandle: mapped[0].userHandle || userHandle,
+                name: (mapped[0].userHandle || userHandle).split('@')[0],
+                avatarUrl: getAvatarForHandle(mapped[0].userHandle || userHandle),
+                stories: sortStoriesNewestFirst(mapped),
             };
+            storyGroupCache.set(cacheKey, { at: Date.now(), group });
+            return group;
         } catch (error) {
             console.warn('Failed to fetch story group by handle from API, falling back to mock:', error);
         }
@@ -760,7 +1028,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
         userId: activeStories[0].userId,
         userHandle: activeStories[0].userHandle,
         name: activeStories[0].userHandle.split('@')[0],
-        avatarUrl: undefined,
+        avatarUrl: getAvatarForHandle(activeStories[0].userHandle),
         stories: activeStories.sort((a, b) => b.createdAt - a.createdAt),
     };
 }
@@ -784,33 +1052,103 @@ export async function createStory(
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
     question?: string, // Question prompt (e.g., "Ask me anything")
     venue?: string, // Venue / place name (for metadata when story is shown on feed)
+    videoPosterUrl?: string, // Still for Stories 24 rail thumbs
     audience: 'public' | 'close_friends' | 'only_me' = 'public'
 ): Promise<Story> {
-    // Use real Laravel API
-    const { apiRequest } = await import('./client');
-    
+    const buildMockStory = async (): Promise<Story> => {
+        await delay();
+
+        const now = Date.now();
+        const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
+
+        const newStory: Story = {
+            id: `story-${Date.now()}`,
+            userId,
+            userHandle,
+            mediaUrl: (() => {
+                const raw = (mediaUrl || '').trim();
+                // Keep demo slot paths relative; RN maps each slot to its HTTPS sample
+                // (never bundled BBB). Absolute URLs pass through resolveStoryMediaUrl.
+                if (raw.startsWith('/demo-videos/') || /\/demo-videos\//i.test(raw)) {
+                    const match = raw.match(/\/demo-videos\/[^/?#]+/i);
+                    return match ? match[0] : raw;
+                }
+                return resolveStoryMediaUrl(mediaUrl) || undefined;
+            })(),
+            mediaType: mediaType || undefined,
+            text,
+            textColor,
+            textSize,
+            textStyle: textStyle || undefined,
+            stickers: stickers || undefined,
+            taggedUsers: taggedUsers || undefined,
+            createdAt: now,
+            expiresAt,
+            location,
+            venue: venue || undefined,
+            videoPosterUrl: videoPosterUrl || undefined,
+            audience: audience || 'public',
+            views: 0,
+            viewerHandles: [],
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+            userReaction: undefined,
+            sharedFromPost,
+            sharedFromUser,
+            poll: poll ? {
+                question: poll.question,
+                option1: poll.option1,
+                option2: poll.option2,
+                option3: poll.option3,
+                votes1: 0,
+                votes2: 0,
+                votes3: poll.option3 ? 0 : undefined,
+                userVote: undefined
+            } : undefined,
+            question: question ? {
+                prompt: question,
+                responses: []
+            } : undefined
+        };
+
+        stories.push(newStory);
+        invalidateStoryPresenceCache(userHandle);
+        return newStory;
+    };
+
+    // Same gate as posts: live mode is EXPO_PUBLIC_USE_MOCK=false.
+    if (isMockMode()) {
+        return buildMockStory();
+    }
+
+    // Use real Laravel API — dedicated helper, same as createPost (bypasses apiRequest allowlist).
+    const { createStory: createStoryApi } = await import('./client');
+
     try {
-        const response = await apiRequest('/stories', {
-            method: 'POST',
-            body: JSON.stringify({
-                media_url: mediaUrl || undefined,
-                media_type: mediaType || undefined,
-                text: text || undefined,
-                location: location || undefined,
-                text_color: textColor || undefined,
-                text_size: textSize || undefined,
-                shared_from_post_id: sharedFromPost || undefined,
-                shared_from_user_handle: sharedFromUser || undefined,
-                textStyle: textStyle || undefined, // Only color, size, background - no taggedUsersPositions
-                stickers: stickers || undefined,
-                taggedUsers: taggedUsers || undefined, // Send tagged users to backend
-                taggedUsersPositions: taggedUsersPositions || undefined, // Send tagged users with positions
-                poll: poll || undefined,
-                question: question || undefined, // Question prompt
-                venue: venue || undefined,
-                audience: audience || 'public',
-            }),
+        const response = await createStoryApi({
+            media_url: mediaUrl || undefined,
+            media_type: mediaType || undefined,
+            text: text || undefined,
+            location: location || undefined,
+            text_color: textColor || undefined,
+            text_size: textSize || undefined,
+            shared_from_post_id: sharedFromPost || undefined,
+            shared_from_user_handle: sharedFromUser || undefined,
+            textStyle: textStyle || undefined,
+            stickers: stickers || undefined,
+            taggedUsers: taggedUsers || undefined,
+            taggedUsersPositions: taggedUsersPositions || undefined,
+            poll: poll || undefined,
+            question: question || undefined,
+            venue: venue || undefined,
+            video_poster_url: videoPosterUrl || undefined,
+            audience: audience || 'public',
         });
+
+        if (!response?.id) {
+            throw new Error('Story was not saved (missing id in API response)');
+        }
 
         // Transform Laravel response to frontend Story format
         const now = Date.now();
@@ -818,7 +1156,7 @@ export async function createStory(
             id: response.id,
             userId: response.user_id || userId,
             userHandle: response.user_handle || userHandle,
-            mediaUrl: response.media_url || mediaUrl || undefined,
+            mediaUrl: resolveStoryMediaUrl(response.media_url || mediaUrl) || undefined,
             mediaType: response.media_type || mediaType || undefined,
             // Keep local text data if backend response omits it (prevents blank text-only stories).
             text: response.text || text || undefined,
@@ -832,8 +1170,11 @@ export async function createStory(
             expiresAt: new Date(response.expires_at).getTime() || (now + 24 * 60 * 60 * 1000),
             location: response.location || location || undefined,
             venue: response.venue || venue || undefined,
+            videoPosterUrl:
+                resolveStoryMediaUrl(response.video_poster_url || videoPosterUrl) || undefined,
+            linkPreview: mapApiLinkPreview(response.link_preview ?? response.linkPreview),
             audience: response.audience || audience || 'public',
-            views: response.views_count || 0,
+            ...storyCountsFromApi(response),
             viewerHandles: Array.isArray((response as any).viewer_handles)
                 ? (response as any).viewer_handles
                 : [],
@@ -861,12 +1202,17 @@ export async function createStory(
 
         // Also add to local stories array for immediate UI update
         stories.push(newStory);
+        invalidateStoryPresenceCache(userHandle);
 
         return newStory;
-    } catch (error) {
-        console.error('Error creating story via API, falling back to mock:', error);
-        // Fallback to mock implementation if API fails
-        await delay();
+    } catch (error: any) {
+        const isConnectionFallback =
+            error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+        if (!isConnectionFallback) {
+            console.warn('createStory API failed:', error);
+            throw error;
+        }
+        console.warn('createStory API unreachable, using local story until Laravel is back:', error);
 
         const now = Date.now();
         const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
@@ -887,6 +1233,7 @@ export async function createStory(
             expiresAt,
             location,
             venue: venue || undefined,
+            videoPosterUrl: videoPosterUrl || undefined,
             audience: audience || 'public',
             views: 0,
             viewerHandles: [],
@@ -913,75 +1260,186 @@ export async function createStory(
         };
 
         stories.push(newStory);
+        invalidateStoryPresenceCache(userHandle);
 
         return newStory;
     }
 }
 
-// Mark story as viewed
-export async function markStoryViewed(storyId: string, _userId: string, viewerHandle?: string): Promise<void> {
-    await delay();
+export type StoryViewMetrics = {
+    views_count: number;
+    reactions_count: number;
+    replies_count: number;
+    reactions?: StoryReaction[];
+    replies?: StoryReply[];
+};
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        const normalizedHandle = (viewerHandle || '').trim();
-        if (!Array.isArray(story.viewerHandles)) story.viewerHandles = [];
-        const alreadyCounted = normalizedHandle
-            ? story.viewerHandles.some((h) => (h || '').trim().toLowerCase() === normalizedHandle.toLowerCase())
-            : story.hasViewed;
-        if (!alreadyCounted) {
-            if (normalizedHandle) story.viewerHandles.push(normalizedHandle);
-            story.views += 1;
+function parseStoryViewMetrics(response: any): StoryViewMetrics {
+    const reactions = mapLaravelReactions(response?.reactions);
+    const replies = mapLaravelReplies(response?.replies);
+    return {
+        views_count: Number(response?.views_count ?? 0) || 0,
+        reactions_count: Number(response?.reactions_count ?? reactions.length ?? 0) || 0,
+        replies_count: Number(response?.replies_count ?? replies.length ?? 0) || 0,
+        reactions,
+        replies,
+    };
+}
+
+// Mark story as viewed
+export async function markStoryViewed(
+    storyId: string,
+    _userId: string,
+    viewerHandle?: string,
+): Promise<StoryViewMetrics | void> {
+    const applyMock = (): StoryViewMetrics | void => {
+        const story = stories.find((s) => s.id === storyId);
+        if (story) {
+            const normalizedHandle = (viewerHandle || '').trim();
+            if (!Array.isArray(story.viewerHandles)) story.viewerHandles = [];
+            const alreadyCounted = normalizedHandle
+                ? story.viewerHandles.some((h) => (h || '').trim().toLowerCase() === normalizedHandle.toLowerCase())
+                : story.hasViewed;
+            if (!alreadyCounted) {
+                if (normalizedHandle) story.viewerHandles.push(normalizedHandle);
+                story.views += 1;
+                story.views_count = story.views;
+            }
+            story.hasViewed = true;
+            return {
+                views_count: Number(story.views_count ?? story.views ?? 0) || 0,
+                reactions_count: Number(story.reactions_count ?? story.reactions?.length ?? 0) || 0,
+                replies_count: Number(story.replies_count ?? story.replies?.length ?? 0) || 0,
+                reactions: story.reactions || [],
+                replies: story.replies || [],
+            };
         }
-        story.hasViewed = true;
+        return undefined;
+    };
+
+    if (!isMockMode()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const response = await apiRequest(`/stories/${storyId}/view`, { method: 'POST' });
+            return parseStoryViewMetrics(response);
+        } catch (error: any) {
+            const isConnectionFallback =
+                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+            if (!isConnectionFallback) throw error;
+        }
     }
+
+    await delay();
+    return applyMock();
 }
 
 // Increment story view count
-export async function incrementStoryViews(storyId: string): Promise<void> {
-    await delay();
-
-    // Kept for backward compatibility; view counts are now deduped in markStoryViewed.
-    const _story = stories.find(s => s.id === storyId);
-    void _story;
+export async function incrementStoryViews(_storyId: string): Promise<void> {
+    // View counts are recorded in markStoryViewed via POST /stories/{id}/view.
 }
 
 // Add reaction to story
-export async function addStoryReaction(storyId: string, userId: string, userHandle: string, emoji: string): Promise<void> {
-    await delay();
+export async function addStoryReaction(
+    storyId: string,
+    userId: string,
+    userHandle: string,
+    emoji: string,
+): Promise<StoryViewMetrics | void> {
+    const pushMockReaction = (): StoryViewMetrics | void => {
+        const story = stories.find(s => s.id === storyId);
+        if (story) {
+            const hadReaction = (story.reactions || []).some((r) => r.userId === userId);
+            story.reactions = story.reactions.filter(r => r.userId !== userId);
+            story.reactions.push({
+                id: `reaction-${Date.now()}`,
+                userId,
+                userHandle,
+                emoji,
+                createdAt: Date.now()
+            });
+            story.userReaction = emoji;
+            story.reactions_count = hadReaction
+                ? Math.max(Number(story.reactions_count ?? 0) || 0, story.reactions.length)
+                : (Number(story.reactions_count ?? 0) || 0) + 1;
+            return {
+                views_count: Number(story.views_count ?? story.views ?? 0) || 0,
+                reactions_count: Number(story.reactions_count ?? story.reactions.length) || 0,
+                replies_count: Number(story.replies_count ?? story.replies?.length ?? 0) || 0,
+                reactions: story.reactions,
+                replies: story.replies || [],
+            };
+        }
+        return undefined;
+    };
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        // Remove existing reaction from this user
-        story.reactions = story.reactions.filter(r => r.userId !== userId);
-
-        // Add new reaction
-        story.reactions.push({
-            id: `reaction-${Date.now()}`,
-            userId,
-            userHandle,
-            emoji,
-            createdAt: Date.now()
-        });
-
-        story.userReaction = emoji;
+    if (!isMockMode()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const response = await apiRequest(`/stories/${storyId}/reaction`, {
+                method: 'POST',
+                body: JSON.stringify({ emoji }),
+            });
+            pushMockReaction();
+            return parseStoryViewMetrics(response);
+        } catch (error: any) {
+            const isConnectionFallback =
+                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+            if (!isConnectionFallback) throw error;
+        }
     }
+
+    await delay();
+    return pushMockReaction();
 }
 
 // Add reply to story
-export async function addStoryReply(storyId: string, userId: string, userHandle: string, text: string): Promise<void> {
-    await delay();
+export async function addStoryReply(
+    storyId: string,
+    userId: string,
+    userHandle: string,
+    text: string,
+): Promise<StoryViewMetrics | void> {
+    const pushMockReply = (): StoryViewMetrics | void => {
+        const story = stories.find((s) => s.id === storyId);
+        if (story) {
+            if (!Array.isArray(story.replies)) story.replies = [];
+            story.replies.push({
+                id: `reply-${Date.now()}`,
+                userId,
+                userHandle,
+                text,
+                createdAt: Date.now(),
+            });
+            story.replies_count = (Number(story.replies_count ?? 0) || 0) + 1;
+            return {
+                views_count: Number(story.views_count ?? story.views ?? 0) || 0,
+                reactions_count: Number(story.reactions_count ?? story.reactions?.length ?? 0) || 0,
+                replies_count: Number(story.replies_count ?? story.replies.length) || 0,
+                reactions: story.reactions || [],
+                replies: story.replies,
+            };
+        }
+        return undefined;
+    };
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        story.replies.push({
-            id: `reply-${Date.now()}`,
-            userId,
-            userHandle,
-            text,
-            createdAt: Date.now()
-        });
+    if (!isMockMode()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const response = await apiRequest(`/stories/${storyId}/reply`, {
+                method: 'POST',
+                body: JSON.stringify({ text }),
+            });
+            pushMockReply();
+            return parseStoryViewMetrics(response);
+        } catch (error: any) {
+            const isConnectionFallback =
+                error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
+            if (!isConnectionFallback) throw error;
+        }
     }
+
+    await delay();
+    return pushMockReply();
 }
 
 // Add answer to question in story - stores question in questions API (not messages)
@@ -1056,6 +1514,9 @@ export interface StoryInsight {
     viewers: string[];
     likes: number;
     likers: string[]; // user handles who reacted (heart/thumbs-up)
+    /** All emoji reactions (Instagram-style attribution). */
+    reactions: Array<{ userHandle: string; emoji: string; createdAt: number }>;
+    replies: Array<{ userHandle: string; text: string; createdAt: number }>;
     question?: {
         prompt: string;
         responseCount: number;
@@ -1077,17 +1538,26 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
     const ownStories = stories.filter((s) => {
         if ((s.userHandle || '').trim().toLowerCase() !== normalizedHandle) return false;
         if (s.expiresAt <= now) return false;
-        // Re-shared stories should not create owner insight alerts.
-        if (s.sharedFromPost) return false;
-        if (s.sharedFromUser && (s.sharedFromUser || '').trim().toLowerCase() !== normalizedHandle) return false;
         return true;
     });
 
     return ownStories
         .map<StoryInsight>(story => {
-            // Count common positive reactions as likes in insights (heart + thumbs-up).
-            const likeReactions = (story.reactions || []).filter(r => r.emoji === '❤️' || r.emoji === '👍');
-            const likers = Array.from(new Set(likeReactions.map(r => r.userHandle)));
+            const ownerNorm = normalizedHandle;
+            // All reactions except the owner's own (IG: your self-taps aren't activity).
+            const reactionRows = (story.reactions || [])
+                .filter((r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm)
+                .map((r) => ({
+                    userHandle: r.userHandle,
+                    emoji: r.emoji,
+                    createdAt: r.createdAt || story.createdAt,
+                }))
+                .sort((a, b) => b.createdAt - a.createdAt);
+
+            const likeReactions = reactionRows.filter(
+                (r) => r.emoji === '❤️' || r.emoji === '♥️' || r.emoji === '❤' || r.emoji === '👍',
+            );
+            const likers = Array.from(new Set(likeReactions.map((r) => r.userHandle)));
             const viewers = Array.from(
                 new Set(
                     (story.viewerHandles || [])
@@ -1096,6 +1566,13 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 )
             );
             const views = Math.max(Number(story.views || 0), viewers.length);
+            const replyRows = (story.replies || [])
+                .filter((r) => (r.userHandle || '').trim().toLowerCase() !== ownerNorm)
+                .map((r) => ({
+                    userHandle: r.userHandle,
+                    text: r.text,
+                    createdAt: r.createdAt,
+                }));
             const questionResponseCount = story.question?.responses?.length || 0;
             return {
                 storyId: story.id,
@@ -1107,6 +1584,8 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 viewers,
                 likes: likers.length,
                 likers,
+                reactions: reactionRows,
+                replies: replyRows,
                 question: story.question ? {
                     prompt: story.question.prompt,
                     responseCount: questionResponseCount,
@@ -1114,8 +1593,15 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 } : undefined
             };
         })
-        // Only surface actionable insights (likes or question responses).
-        .filter((item) => item.views > 0 || item.likes > 0 || (item.question?.responseCount || 0) > 0)
+        // Surface stories with real other-person activity (or views).
+        .filter(
+            (item) =>
+                item.views > 0 ||
+                item.likes > 0 ||
+                item.reactions.length > 0 ||
+                item.replies.length > 0 ||
+                (item.question?.responseCount || 0) > 0,
+        )
         // Newest stories first
         .sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -1131,22 +1617,47 @@ export async function userHasStories(userId: string): Promise<boolean> {
 
 // Check if a user has stories by userHandle
 export async function userHasStoriesByHandle(userHandle: string): Promise<boolean> {
+    const target = (userHandle || '').trim();
+    if (!target) return false;
+
+    if (!isMockMode()) {
+        try {
+            const group = await fetchStoryGroupByHandle(target);
+            if (group && group.stories.length > 0) return true;
+        } catch (error) {
+            console.warn('userHasStoriesByHandle API failed, falling back to mock:', error);
+        }
+    }
+
     await delay();
 
     const now = Date.now();
-    const target = (userHandle || '').trim().toLowerCase();
-    const activeStories = stories.filter(s => (s.userHandle || '').trim().toLowerCase() === target && s.expiresAt > now);
+    const needle = target.toLowerCase();
+    const activeStories = stories.filter(s => (s.userHandle || '').trim().toLowerCase() === needle && s.expiresAt > now);
     return activeStories.length > 0;
 }
 
 // Check if a user has unviewed stories by userHandle
-export async function userHasUnviewedStoriesByHandle(userHandle: string): Promise<boolean> {
+export async function userHasUnviewedStoriesByHandle(userHandle: string, viewerUserId?: string): Promise<boolean> {
+    const target = (userHandle || '').trim();
+    if (!target) return false;
+
+    if (!isMockMode()) {
+        try {
+            const group = await fetchStoryGroupByHandle(target, viewerUserId);
+            if (!group) return false;
+            return group.stories.some((s) => !s.hasViewed);
+        } catch (error) {
+            console.warn('userHasUnviewedStoriesByHandle API failed, falling back to mock:', error);
+        }
+    }
+
     await delay();
 
     const now = Date.now();
-    const target = (userHandle || '').trim().toLowerCase();
+    const needle = target.toLowerCase();
     const unviewedStories = stories.filter(s =>
-        (s.userHandle || '').trim().toLowerCase() === target &&
+        (s.userHandle || '').trim().toLowerCase() === needle &&
         s.expiresAt > now &&
         !s.hasViewed
     );
@@ -1155,37 +1666,53 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string): Promis
 
 // Get stories for followed users only
 export async function fetchFollowedUsersStoryGroups(userId: string, followedUserHandles: string[]): Promise<StoryGroup[]> {
-    if (isLaravelApiEnabled()) {
+    const followedSet = new Set(
+        (followedUserHandles || [])
+            .map((h) => (h || '').trim().toLowerCase().replace(/^@/, ''))
+            .filter(Boolean),
+    );
+
+    if (!isMockMode()) {
         try {
-            const collected: Story[] = [];
-            let cursor: string | null = null;
-            let pages = 0;
-            const maxPages = 5;
+            const groups = await fetchStoryGroups(userId);
+            const viewerId = String(userId || '');
+            const filtered = groups.filter((group) => {
+                const handle = (group.userHandle || '').trim().toLowerCase().replace(/^@/, '');
+                return String(group.userId) === viewerId || followedSet.has(handle);
+            });
 
-            do {
-                const page = await fetchStoriesPage(cursor, 50, userId);
-                collected.push(...page.items);
-                cursor = page.nextCursor;
-                pages += 1;
-                if (!page.hasMore) break;
-            } while (cursor && pages < maxPages);
-
-            const filtered = collected.filter((story) =>
-                story.userId === userId || followedUserHandles.includes(story.userHandle),
-            );
-
+            // Merge in local stories so a just-created row still shows if the GET races the POST.
+            const now = Date.now();
+            const localActive = stories.filter((s) => {
+                if (s.expiresAt <= now) return false;
+                const audience = s.audience || 'public';
+                if (String(s.userId) === viewerId) return true;
+                if (!followedSet.has((s.userHandle || '').trim().toLowerCase())) return false;
+                if (audience === 'only_me') return false;
+                return true;
+            });
             const byUser = new Map<string, StoryGroup>();
-            for (const story of filtered) {
-                const existing = byUser.get(story.userId);
+            for (const group of filtered) {
+                byUser.set(String(group.userId), {
+                    ...group,
+                    stories: [...group.stories],
+                });
+            }
+            const seenIds = new Set(filtered.flatMap((g) => g.stories.map((s) => String(s.id))));
+            for (const local of localActive) {
+                const key = String(local.id);
+                if (seenIds.has(key)) continue;
+                seenIds.add(key);
+                const existing = byUser.get(String(local.userId));
                 if (existing) {
-                    existing.stories.push(story);
+                    existing.stories.push(local);
                 } else {
-                    byUser.set(story.userId, {
-                        userId: story.userId,
-                        userHandle: story.userHandle,
-                        name: story.userHandle.split('@')[0],
-                        avatarUrl: undefined,
-                        stories: [story],
+                    byUser.set(String(local.userId), {
+                        userId: local.userId,
+                        userHandle: local.userHandle,
+                        name: local.userHandle.split('@')[0],
+                        avatarUrl: getAvatarForHandle(local.userHandle),
+                        stories: [local],
                     });
                 }
             }
@@ -1206,28 +1733,25 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
         if (s.expiresAt <= now) return false;
         const audience = s.audience || 'public';
         if (s.userId === userId) return true;
-        if (!followedUserHandles.includes(s.userHandle)) return false;
+        if (!followedSet.has((s.userHandle || '').trim().toLowerCase())) return false;
         if (audience === 'only_me') return false;
         return true; // public + close_friends for followed users
     });
 
-    // Group stories by user and filter by followed users
+    // Group stories by user (already filtered to self + followed)
     const groups = activeStories.reduce((acc, story) => {
-        // Only include stories from followed users or current user
-        if (story.userId === userId || followedUserHandles.includes(story.userHandle)) {
-            const existingGroup = acc.find(g => g.userId === story.userId);
+        const existingGroup = acc.find(g => g.userId === story.userId);
 
-            if (existingGroup) {
-                existingGroup.stories.push(story);
-            } else {
-                acc.push({
-                    userId: story.userId,
-                    userHandle: story.userHandle,
-                    name: story.userHandle.split('@')[0],
-                    avatarUrl: undefined,
-                    stories: [story]
-                });
-            }
+        if (existingGroup) {
+            existingGroup.stories.push(story);
+        } else {
+            acc.push({
+                userId: story.userId,
+                userHandle: story.userHandle,
+                name: story.userHandle.split('@')[0],
+                avatarUrl: getAvatarForHandle(story.userHandle),
+                stories: [story]
+            });
         }
 
         return acc;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
     View,
     Text,
@@ -9,7 +9,6 @@ import {
     ActivityIndicator,
     Modal,
     ScrollView,
-    Alert,
     TextInput,
     Share,
     Linking,
@@ -17,11 +16,17 @@ import {
     Easing,
     Platform,
     DeviceEventEmitter,
+    useWindowDimensions,
+    StatusBar,
+    PermissionsAndroid,
+    type ViewToken,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import { navigateMainTab } from '../navigation/mainTabs';
+import { resetRootToScreen } from '../navigation/rootNavigationRef';
 import {
     chipActiveMagenta,
     chipActiveMagentaText,
@@ -30,15 +35,18 @@ import {
     glassSearch,
     glassSurface,
     gazetteerHeader,
+    profilePassportDivider,
+    profilePassportChipBorder,
+    profilePassportScrollInset,
 } from '../theme/gazetteerAmbientNative';
-import Clipboard from '@react-native-clipboard/clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, type HiddenCommentReviewItem } from '../api/posts';
+import { fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply } from '../api/posts';
 import {
-    getCollectionThumbnailUrl,
+    getCollectionThumbSource,
     getUserCollections,
     savePostToDefaultCollection,
     unsavePost,
@@ -46,8 +54,10 @@ import {
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { buildFilterInfo, type InstantFilterName } from '../utils/instantFiltersNative';
 import { getUnreadTotal } from '../api/messages';
+import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, removeVerifiedPhone, changePassword, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones, getCurrentUser, mapLaravelUserToAppFields, fetchFollowers, fetchFollowing, connectionListTotal, isAbortError } from '../api/client';
+import { isMockMode } from '../api/apiMode';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
@@ -57,14 +67,15 @@ import SavePostModal from '../components/SavePostModal.native';
 import EditPostModal from '../components/EditPostModal.native';
 import QRCodeModal from '../components/QRCodeModal.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import FeedShareModal from '../components/FeedShareModal';
+import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import {
     incrementViews,
     deletePost,
     reclipPost,
-    incrementShares,
 } from '../api/posts';
-import { getCollectionsForPost } from '../api/collections';
+import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
 import { updatePost as apiUpdatePost } from '../api/client';
 import {
     markFeedPostArchivedMobile,
@@ -73,26 +84,52 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import CollectionCoverThumb from '../components/CollectionCoverThumb.native';
+import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
+import ProfilePictureModal from '../components/ProfilePictureModal.native';
+import CommentSafetyModal from '../components/CommentSafetyModal.native';
 import {
     getNotificationPreferences,
-    saveNotificationPreferences,
+    loadNotificationPreferences,
+    saveNotificationPreferencesAsync,
     resetNotificationPreferences,
     type NotificationPreferences,
 } from '../services/notifications';
-import {
-    getCommentModerationPreferences,
-    setCommentModerationPreferences,
-    type CommentModerationPreferences,
-} from '../utils/commentModeration';
-import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtimeEnv';
+import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
+import { ensureContactsPermission } from '../utils/contactsPermissionNative';
+import { buildInviteShareUrl } from '../utils/profileShareUrl';
+import { maskPhoneNumber, toE164Phone } from '../utils/maskPhoneNumber';
+import ProfileQRCodeModal from '../components/ProfileQRCodeModal.native';
 import { timeAgo } from '../utils/timeAgo';
+import { ox } from '../constants/nativeOpticalScale';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import {
+    setGlobalVideoMutedNative,
+    subscribeGlobalVideoMuted,
+} from '../utils/globalVideoMuteNative';
+import { userHasStoriesByHandle } from '../api/stories';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
+
+type ProfileAlertConfig = {
+    title: string;
+    message?: string;
+    icon?: 'success' | 'alert' | 'info';
+    confirmButtonText?: string;
+    cancelButtonText?: string;
+    showCancelButton?: boolean;
+    onConfirm?: () => void | Promise<void>;
+    onDismiss?: () => void;
+};
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
+    const { height: windowHeight } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const { user, logout, login } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [postsLoading, setPostsLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'posts' | 'collections'>('posts');
     const [collectionsOpen, setCollectionsOpen] = useState(false);
     const [brokenCollectionThumbs, setBrokenCollectionThumbs] = useState<Record<string, true>>({});
@@ -100,6 +137,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
     const [myFeedOpen, setMyFeedOpen] = useState(false);
+    const [myFeedActiveVideoPostId, setMyFeedActiveVideoPostId] = useState<string | null>(null);
+    const [myFeedVideoMuted, setMyFeedVideoMuted] = useState(false);
     const [myFeedOverflowPost, setMyFeedOverflowPost] = useState<Post | null>(null);
     const [myFeedOverflowVisible, setMyFeedOverflowVisible] = useState(false);
     const [myFeedOverflowSaved, setMyFeedOverflowSaved] = useState(false);
@@ -108,6 +147,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [myFeedEditPost, setMyFeedEditPost] = useState<Post | null>(null);
     const [myFeedQrPost, setMyFeedQrPost] = useState<Post | null>(null);
     const [myFeedSharePost, setMyFeedSharePost] = useState<Post | null>(null);
+    const [myFeedShareToStoriesPost, setMyFeedShareToStoriesPost] = useState<Post | null>(null);
     const [myFeedCreateGroupOpen, setMyFeedCreateGroupOpen] = useState(false);
     const [myFeedCommentsOpen, setMyFeedCommentsOpen] = useState(false);
     const [myFeedCommentsPost, setMyFeedCommentsPost] = useState<Post | null>(null);
@@ -117,31 +157,53 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [myFeedReplyingTo, setMyFeedReplyingTo] = useState<string | null>(null);
     const [myFeedReplyDraft, setMyFeedReplyDraft] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [showProfilePictureModal, setShowProfilePictureModal] = useState(false);
+    const [openPassportCardRequest, setOpenPassportCardRequest] = useState<ProfileCardId | null>(null);
+    const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [isTogglingPrivacy, setIsTogglingPrivacy] = useState(false);
+    const [profileAlert, setProfileAlert] = useState<ProfileAlertConfig | null>(null);
+    const [hasStory, setHasStory] = useState(false);
+
+    const showProfileAlert = React.useCallback((config: ProfileAlertConfig) => {
+        setProfileAlert(config);
+    }, []);
+
+    const dismissProfileAlert = React.useCallback(() => {
+        setProfileAlert((current) => {
+            current?.onDismiss?.();
+            return null;
+        });
+    }, []);
     const [unreadCount, setUnreadCount] = useState(0);
-    const [commentModerationPrefs, setCommentModerationPrefs] = useState<CommentModerationPreferences>(getCommentModerationPreferences());
-    const [commentWordDraft, setCommentWordDraft] = useState('');
-    const [hiddenCommentQueue, setHiddenCommentQueue] = useState<HiddenCommentReviewItem[]>([]);
-    const [loadingHiddenCommentQueue, setLoadingHiddenCommentQueue] = useState(false);
-    const [hiddenQueueFilter, setHiddenQueueFilter] = useState<'all' | 'comments' | 'replies'>('all');
     const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(getNotificationPreferences());
+    const [emailDigestEnabled, setEmailDigestEnabled] = useState(user?.emailDigestEnabled !== false);
+    const [emailDigestSaving, setEmailDigestSaving] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
     const [isPrivate, setIsPrivate] = useState(() =>
         getEffectiveProfilePrivate(user?.handle, user?.is_private)
     );
-    const [editProfileOpen, setEditProfileOpen] = useState(false);
-    const [profileNameDraft, setProfileNameDraft] = useState(user?.name || '');
-    const [profileBioDraft, setProfileBioDraft] = useState(user?.bio || '');
-    const [profileWebsiteDraft, setProfileWebsiteDraft] = useState((user as any)?.socialLinks?.website || (user as any)?.website || '');
-    const [profilePodcastDraft, setProfilePodcastDraft] = useState((user as any)?.socialLinks?.podcast || '');
+    const [audienceCounts, setAudienceCounts] = useState({
+        followers: user?.followers_count ?? 0,
+        following: user?.following_count ?? 0,
+    });
     const [securityModalOpen, setSecurityModalOpen] = useState(false);
-    const [securityStep, setSecurityStep] = useState<'phone' | 'code'>('phone');
+    const [securityStep, setSecurityStep] = useState<'hub' | 'code'>('hub');
     const [securityBusy, setSecurityBusy] = useState(false);
     const [phoneCountryCode, setPhoneCountryCode] = useState('+353');
     const [phoneInput, setPhoneInput] = useState('');
     const [otpInput, setOtpInput] = useState('');
     const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
+    const [changingPhone, setChangingPhone] = useState(false);
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
     const [inviteSyncing, setInviteSyncing] = useState(false);
     const [inviteMatchedFriends, setInviteMatchedFriends] = useState<FacebookMatchedFriend[]>([]);
     const [contactsSyncing, setContactsSyncing] = useState(false);
+    const contactsSyncingRef = useRef(false);
+    const [showInviteQR, setShowInviteQR] = useState(false);
     const [showTabsHint, setShowTabsHint] = useState(true);
     const tabsHintAnim = React.useRef(new Animated.Value(0)).current;
     const tabsScrollRef = React.useRef<ScrollView | null>(null);
@@ -155,35 +217,132 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             Math.round(tabsStripContentW) > Math.round(tabsStripLayoutW) + 2,
         [tabsStripLayoutW, tabsStripContentW]
     );
+    const settingsModalScrollMaxHeight = useMemo(
+        () => Math.max(240, Math.round(windowHeight * 0.8 - 64)),
+        [windowHeight]
+    );
+
+    const userRef = useRef(user);
+    userRef.current = user;
+    const loginRef = useRef(login);
+    loginRef.current = login;
+    const postsLoadedRef = useRef(false);
+    const loadLockRef = useRef<Promise<void> | null>(null);
+    const loadGenRef = useRef(0);
+    const unmountAbortRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
-        loadData();
-    }, [user?.handle]);
+        const controller = new AbortController();
+        unmountAbortRef.current = controller;
+        return () => controller.abort();
+    }, []);
+
+    const myFeedActiveVideoPostIdRef = useRef<string | null>(null);
+    myFeedActiveVideoPostIdRef.current = myFeedActiveVideoPostId;
+
+    const activateMyFeedVideo = useCallback((postId: string | null) => {
+        const next = postId ? String(postId) : null;
+        myFeedActiveVideoPostIdRef.current = next;
+        setMyFeedActiveVideoPostId(next);
+        setActiveFeedVideoPostId(next);
+    }, []);
+
+    useEffect(() => {
+        if (!myFeedOpen) {
+            activateMyFeedVideo(null);
+            return;
+        }
+        if (myFeedActiveVideoPostIdRef.current) return;
+        const firstVideo = posts.find((p) => postHasVideoMedia(p));
+        activateMyFeedVideo(firstVideo ? String(firstVideo.id) : null);
+    }, [activateMyFeedVideo, myFeedOpen, posts]);
+
+    useEffect(() => {
+        if (!myFeedOpen) return;
+        let cancelled = false;
+        void (async () => {
+            await setGlobalVideoMutedNative(false);
+            if (!cancelled) setMyFeedVideoMuted(false);
+        })();
+        const unsub = subscribeGlobalVideoMuted(setMyFeedVideoMuted);
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [myFeedOpen]);
+
+    const myFeedViewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 60,
+        minimumViewTime: 80,
+    }).current;
+
+    const onMyFeedViewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+            const visibleVideos = viewableItems
+                .filter((token) => token.isViewable && token.item && postHasVideoMedia(token.item as Post))
+                .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+            const next = visibleVideos[0]?.item as Post | undefined;
+            if (next) activateMyFeedVideo(String(next.id));
+        },
+    ).current;
+
+    // Hydrate Push Notification toggles from AsyncStorage (survive restarts in mock mode).
+    useEffect(() => {
+        let cancelled = false;
+        void loadNotificationPreferences().then((prefs) => {
+            if (!cancelled) setNotificationPrefs(prefs);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Repair sessions created before Auth.login persisted accountType.
+    useEffect(() => {
+        if (!user?.email || user.accountType === 'business' || user.accountType === 'personal') return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                const raw = await AsyncStorage.getItem('gazetteer_local_registrations_rn');
+                if (!raw || cancelled) return;
+                const reg = JSON.parse(raw) as Record<string, { userData?: { accountType?: string } }>;
+                const rec = reg[String(user.email).trim().toLowerCase()];
+                const t = rec?.userData?.accountType;
+                if (t !== 'business' && t !== 'personal') return;
+                if (cancelled) return;
+                login({ ...user, accountType: t });
+            } catch {
+                // ignore repair failures
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [user?.email, user?.accountType, login, user]);
 
     useEffect(() => {
         setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
     }, [user?.handle, user?.is_private]);
 
     useEffect(() => {
-        setProfileNameDraft(user?.name || '');
-        setProfileBioDraft(user?.bio || '');
-        setProfileWebsiteDraft((user as any)?.socialLinks?.website || (user as any)?.website || '');
-        setProfilePodcastDraft((user as any)?.socialLinks?.podcast || '');
-    }, [user?.name, user?.bio, (user as any)?.website, (user as any)?.socialLinks?.website, (user as any)?.socialLinks?.podcast]);
+        setEmailDigestEnabled(user?.emailDigestEnabled !== false);
+    }, [user?.emailDigestEnabled]);
 
-    useFocusEffect(
-        React.useCallback(() => {
-            void loadData();
-            // Do not auto-open security phone prompt when entering Passport.
-            setSecurityModalOpen(false);
-            setSecurityStep('phone');
-            setSecurityBusy(false);
-            setPhoneCountryCode('+353');
-            setPhoneInput('');
-            setOtpInput('');
-            setPendingPhoneNumber('');
-        }, [])
-    );
+    useEffect(() => {
+        if (!settingsOpen) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                const prefs = await loadNotificationPreferences();
+                if (!cancelled) setNotificationPrefs(prefs);
+            } catch {
+                if (!cancelled) setNotificationPrefs(getNotificationPreferences());
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [settingsOpen]);
 
     useEffect(() => {
         const loop = Animated.loop(
@@ -228,24 +387,144 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         return () => clearTimeout(t);
     }, [showTabsHint, tabsStripOverflow, tabsStripLayoutW, tabsStripContentW]);
 
-    const loadData = async () => {
-        if (!user?.handle) return;
-        setLoading(true);
+    const closeSecurityModal = React.useCallback(() => {
+        setSecurityModalOpen(false);
+        setSecurityStep('hub');
+        setSecurityBusy(false);
+        setChangingPhone(false);
+        setPhoneCountryCode('+353');
+        setPhoneInput('');
+        setOtpInput('');
+        setPendingPhoneNumber('');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+    }, []);
+
+    const loadData = useCallback(async () => {
+        const u = userRef.current;
+        if (!u?.handle && !u?.id) return;
+        if (loadLockRef.current) return loadLockRef.current;
+
+        const run = (async () => {
+            const gen = ++loadGenRef.current;
+            let identifier = String(u.handle || u.id);
+            let viewerId = u.id;
+            let liveFollowers = Number(u.followers_count ?? 0) || 0;
+            let liveFollowing = Number(u.following_count ?? 0) || 0;
+            if (!isMockMode()) {
+                try {
+                    const me = await getCurrentUser();
+                    if (gen !== loadGenRef.current) return;
+                    if (!userRef.current) return;
+                    const liveHandle = String(me?.handle || '').trim();
+                    const liveId = me?.id != null ? String(me.id) : '';
+                    if (liveHandle || liveId) {
+                        identifier = liveHandle || liveId;
+                        if (liveId) viewerId = liveId;
+                    }
+                    const mapped = mapLaravelUserToAppFields(me as Record<string, unknown>);
+                    liveFollowers = Number(me?.followers_count ?? mapped.followers_count ?? 0) || 0;
+                    liveFollowing = Number(me?.following_count ?? mapped.following_count ?? 0) || 0;
+                    const liveHandleForLists = String(me?.handle || identifier || '').trim();
+                    if (liveHandleForLists) {
+                        const listSignal = unmountAbortRef.current?.signal;
+                        try {
+                            liveFollowers = Math.max(
+                                liveFollowers,
+                                connectionListTotal(await fetchFollowers(liveHandleForLists, 0, 1, listSignal)),
+                            );
+                        } catch (error) {
+                            if (isAbortError(error)) return;
+                            /* keep /auth/me count */
+                        }
+                        try {
+                            liveFollowing = Math.max(
+                                liveFollowing,
+                                connectionListTotal(await fetchFollowing(liveHandleForLists, 0, 1, listSignal)),
+                            );
+                        } catch (error) {
+                            if (isAbortError(error)) return;
+                            /* keep /auth/me count */
+                        }
+                    }
+                    loginRef.current({
+                        ...userRef.current,
+                        ...mapped,
+                        followers_count: liveFollowers,
+                        following_count: liveFollowing,
+                    });
+                } catch {
+                    // Fall back to the cached profile handle.
+                }
+            }
+            setAudienceCounts({
+                followers: liveFollowers,
+                following: liveFollowing,
+            });
+            if (!postsLoadedRef.current) setPostsLoading(true);
+
+            const postsTask = fetchPostsByUser(identifier, 50, viewerId, 'all')
+                .then((userPosts) => {
+                    if (gen !== loadGenRef.current) return;
+                    setPosts(userPosts);
+                    postsLoadedRef.current = true;
+                })
+                .catch((error) => {
+                    console.error('Error loading profile posts:', error);
+                })
+                .finally(() => {
+                    if (gen === loadGenRef.current) setPostsLoading(false);
+                });
+
+            const extrasTask = Promise.all([
+                getUserCollections(String(viewerId || userRef.current?.id || 'me')).catch((err) => {
+                    console.error('Error loading collections:', err);
+                    return [] as Collection[];
+                }),
+                getDrafts().catch((err) => {
+                    console.error('Error loading drafts:', err);
+                    return [];
+                }),
+            ]).then(([userCollections, userDrafts]) => {
+                if (gen !== loadGenRef.current) return;
+                setCollections(userCollections);
+                setDrafts(userDrafts);
+            }).catch((error) => {
+                console.error('Error loading profile extras:', error);
+            });
+
+            await Promise.all([postsTask, extrasTask]);
+        })();
+
+        loadLockRef.current = run;
         try {
-            const [userPosts, userCollections, userDrafts] = await Promise.all([
-                fetchPostsByUser(user.handle, 50),
-                getUserCollections(user.id || 'me'),
-                getDrafts().catch(() => []),
-            ]);
-            setPosts(userPosts);
-            setCollections(userCollections);
-            setDrafts(userDrafts);
-        } catch (error) {
-            console.error('Error loading profile:', error);
+            await run;
         } finally {
-            setLoading(false);
+            if (loadLockRef.current === run) loadLockRef.current = null;
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        void loadData();
+    }, [loadData, user?.handle]);
+
+    useFocusEffect(
+        React.useCallback(() => {
+            void loadData();
+            setSecurityModalOpen(false);
+            setSecurityStep('hub');
+            setSecurityBusy(false);
+            setChangingPhone(false);
+            setPhoneCountryCode('+353');
+            setPhoneInput('');
+            setOtpInput('');
+            setPendingPhoneNumber('');
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+        }, [loadData])
+    );
 
     const openMyFeedComments = React.useCallback(async (post: Post) => {
         setMyFeedCommentsPost(post);
@@ -285,7 +564,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             );
         } catch (error) {
             console.error('Error adding My feed comment:', error);
-            Alert.alert('Could not add comment', 'Please try again.');
+            showProfileAlert({ title: 'Could not add comment', message: 'Please try again.', icon: 'alert' });
         }
     }, [myFeedCommentDraft, myFeedCommentsPost?.id, user?.handle]);
 
@@ -319,7 +598,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             setMyFeedReplyingTo(null);
         } catch (error) {
             console.error('Error adding reply in My feed:', error);
-            Alert.alert('Could not add reply', 'Please try again.');
+            showProfileAlert({ title: 'Could not add reply', message: 'Please try again.', icon: 'alert' });
         }
     }, [myFeedCommentsPost?.id, myFeedReplyingTo, myFeedReplyDraft, user?.handle]);
 
@@ -332,11 +611,18 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     }, []);
 
-    const filteredHiddenQueue = React.useMemo(() => {
-        if (hiddenQueueFilter === 'comments') return hiddenCommentQueue.filter((item) => !item.isReply);
-        if (hiddenQueueFilter === 'replies') return hiddenCommentQueue.filter((item) => !!item.isReply);
-        return hiddenCommentQueue;
-    }, [hiddenCommentQueue, hiddenQueueFilter]);
+    const handleOpenPostFromCommentSafety = React.useCallback(
+        (postId: string) => {
+            const post = posts.find((p) => String(p.id) === String(postId));
+            if (!post) {
+                showProfileAlert({ title: 'Post not found in your feed', icon: 'alert' });
+                return;
+            }
+            setCommentSafetyOpen(false);
+            navigation.navigate('PostDetail', { postId: post.id });
+        },
+        [navigation, posts, showProfileAlert]
+    );
 
     useEffect(() => {
         if (user?.handle) {
@@ -349,30 +635,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 }
             };
             updateUnreadCount();
-            const interval = setInterval(updateUnreadCount, 10000);
+            const interval = setInterval(updateUnreadCount, getInboxUnreadPollMs());
             return () => clearInterval(interval);
         }
     }, [user?.handle]);
-
-    useEffect(() => {
-        if (!commentSafetyOpen || !user?.handle) return;
-        let cancelled = false;
-        (async () => {
-            setLoadingHiddenCommentQueue(true);
-            try {
-                const items = await fetchHiddenCommentsForOwner(user.handle);
-                if (!cancelled) setHiddenCommentQueue(items);
-            } catch (error) {
-                console.error('Error loading hidden comments queue:', error);
-                if (!cancelled) setHiddenCommentQueue([]);
-            } finally {
-                if (!cancelled) setLoadingHiddenCommentQueue(false);
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, [commentSafetyOpen, user?.handle]);
 
     const loadCollections = async () => {
         if (!user?.id) return;
@@ -387,6 +653,29 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         if (collectionsOpen) setBrokenCollectionThumbs({});
     }, [collectionsOpen]);
+
+    useEffect(() => {
+        if (!user?.handle) {
+            setHasStory(false);
+            return undefined;
+        }
+        let cancelled = false;
+        const check = () => {
+            void userHasStoriesByHandle(user.handle)
+                .then((has) => {
+                    if (!cancelled) setHasStory(has);
+                })
+                .catch(() => {
+                    if (!cancelled) setHasStory(false);
+                });
+        };
+        check();
+        const unsub = subscribeStoriesRefresh(check);
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [user?.handle]);
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -414,82 +703,124 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             await loadData();
         } catch (error) {
             console.error('Error deleting draft:', error);
-            Alert.alert('Error', 'Failed to delete draft');
+            showProfileAlert({ title: 'Error', message: 'Failed to delete draft', icon: 'alert' });
         }
     };
 
     const handleLogout = () => {
-        Alert.alert(
-            'Logout',
-            'Are you sure you want to logout?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Logout',
-                    style: 'destructive',
-                    onPress: () => {
-                        logout();
-                        navigation.replace('Login');
-                    },
-                },
-            ]
-        );
+        if (loggingOut) return;
+        showProfileAlert({
+            title: 'Logout',
+            message: 'Are you sure you want to logout?',
+            icon: 'alert',
+            showCancelButton: true,
+            confirmButtonText: 'Logout',
+            cancelButtonText: 'Cancel',
+            onConfirm: async () => {
+                setProfileAlert(null);
+                setLoggingOut(true);
+                try {
+                    await logout();
+                    resetRootToScreen('Login', { mode: 'login' });
+                } finally {
+                    setLoggingOut(false);
+                }
+            },
+        });
     };
 
-    const handleTogglePrivate = async () => {
-        if (!user?.handle) return;
-        const next = !isPrivate;
-        setIsPrivate(next);
-        login({ ...user, is_private: next } as any);
+    const applyPrivacyState = (newPrivacyState: boolean) => {
+        if (!user) return;
+
+        const updatedUser = { ...user, is_private: newPrivacyState };
+        setIsPrivate(newPrivacyState);
+        login(updatedUser as any);
+
         try {
-            setProfilePrivacy(user.handle, next);
-            await updateAuthProfile({ is_private: next } as any);
+            if (user.handle) {
+                setProfilePrivacy(user.handle, newPrivacyState);
+            }
         } catch (error) {
-            console.error('Failed to update privacy:', error);
+            console.warn('Failed to save privacy locally:', error);
+        }
+
+        setProfileAlert({
+            title: newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public',
+            message: newPrivacyState
+                ? 'Your profile is now private. Only approved followers can view your profile and send you messages.'
+                : 'Your profile is now public. Anyone can view your profile and send you messages.',
+            icon: 'success',
+            confirmButtonText: 'Done',
+        });
+
+        if (isLaravelApiEnabled()) {
+            void updateAuthProfile({ is_private: newPrivacyState } as any).catch((syncError) => {
+                console.warn('Failed to sync privacy setting to backend, keeping local state:', syncError);
+            });
         }
     };
 
-    const handleSaveProfileEdits = async () => {
-        if (!user?.handle) return;
+    const persistEmailDigest = async (enabled: boolean) => {
+        if (emailDigestSaving || !user) return;
+        const previous = emailDigestEnabled;
+        setEmailDigestEnabled(enabled);
+        setEmailDigestSaving(true);
         try {
-            const payload: any = {
-                display_name: profileNameDraft.trim() || undefined,
-                bio: profileBioDraft.trim() || undefined,
-                website: profileWebsiteDraft.trim() || undefined,
-                social_links: {
-                    ...((user as any)?.socialLinks || {}),
-                    website: profileWebsiteDraft.trim() || undefined,
-                    podcast: profilePodcastDraft.trim() || undefined,
-                },
-            };
-            await updateAuthProfile(payload);
-            login({
-                ...user,
-                name: profileNameDraft.trim() || user.name,
-                bio: profileBioDraft.trim() || undefined,
-                website: profileWebsiteDraft.trim() || undefined,
-                socialLinks: {
-                    ...((user as any)?.socialLinks || {}),
-                    website: profileWebsiteDraft.trim() || undefined,
-                    podcast: profilePodcastDraft.trim() || undefined,
-                },
-            } as any);
-            setEditProfileOpen(false);
-            Alert.alert('Saved', 'Your profile has been updated.');
-        } catch (error) {
-            console.error('Failed to save profile edits:', error);
-            Alert.alert('Save failed', 'Could not update profile right now.');
+            if (isLaravelApiEnabled()) {
+                const apiUser = await updateAuthProfile({ email_digest_enabled: enabled });
+                const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+                login({
+                    ...user,
+                    emailDigestEnabled: fromApi.emailDigestEnabled ?? enabled,
+                });
+            } else {
+                login({ ...user, emailDigestEnabled: enabled });
+            }
+        } catch {
+            setEmailDigestEnabled(previous);
+            showProfileAlert({
+                title: 'Error',
+                message: 'Failed to update email preference.',
+                icon: 'alert',
+            });
+        } finally {
+            setEmailDigestSaving(false);
         }
+    };
+
+    const handleTogglePrivacy = () => {
+        if (isTogglingPrivacy || !user) return;
+
+        const newPrivacyState = !isPrivate;
+
+        if (!newPrivacyState) {
+            setProfileAlert({
+                title: 'Set Profile to Public?',
+                message: 'Your posts and stories will still be public on locations news feed.',
+                showCancelButton: true,
+                confirmButtonText: 'Set to Public',
+                cancelButtonText: 'Cancel',
+                onConfirm: () => {
+                    applyPrivacyState(false);
+                    setIsTogglingPrivacy(false);
+                },
+            });
+            return;
+        }
+
+        setIsTogglingPrivacy(true);
+        applyPrivacyState(true);
+        setIsTogglingPrivacy(false);
     };
 
     const handleSendSecurityCode = async () => {
         if (securityBusy) return;
         const digits = phoneInput.replace(/\D+/g, '');
         if (digits.length < 7 || digits.length > 15) {
-            Alert.alert('Invalid number', 'Enter a valid phone number.');
+            showProfileAlert({ title: 'Invalid number', message: 'Enter a valid phone number.', icon: 'alert' });
             return;
         }
-        const fullPhone = `${phoneCountryCode}${digits}`;
+        const fullPhone = toE164Phone(phoneCountryCode, phoneInput);
         setSecurityBusy(true);
         try {
             const res = await sendPhoneVerificationCode(fullPhone);
@@ -497,12 +828,20 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             setSecurityStep('code');
             setOtpInput('');
             if (res.delivery === 'mock' && res.debug_code) {
-                Alert.alert('Demo code', `Use PIN ${res.debug_code}`);
+                showProfileAlert({ title: 'Demo code', message: `Use PIN ${res.debug_code}`, icon: 'info' });
             } else {
-                Alert.alert('Code sent', `A verification code was sent to ${fullPhone}.`);
+                showProfileAlert({
+                    title: 'Code sent',
+                    message: `A verification code was sent to ${fullPhone}.`,
+                    icon: 'success',
+                });
             }
         } catch (error: any) {
-            Alert.alert('Send failed', error?.message || 'Could not send verification code.');
+            showProfileAlert({
+                title: 'Send failed',
+                message: error?.message || 'Could not send verification code.',
+                icon: 'alert',
+            });
         } finally {
             setSecurityBusy(false);
         }
@@ -512,16 +851,97 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         if (securityBusy) return;
         const code = otpInput.replace(/\D+/g, '');
         if (code.length !== 6) {
-            Alert.alert('Invalid code', 'Enter the 6-digit code.');
+            showProfileAlert({ title: 'Invalid code', message: 'Enter the 6-digit code.', icon: 'alert' });
             return;
         }
         setSecurityBusy(true);
         try {
-            await verifyPhoneVerificationCode(pendingPhoneNumber, code);
-            setSecurityModalOpen(false);
-            Alert.alert('Verified', 'Phone verification complete.');
+            const verified = await verifyPhoneVerificationCode(pendingPhoneNumber, code);
+            if (user) {
+                login({
+                    ...user,
+                    phone_number: verified.phone_number || pendingPhoneNumber,
+                    phone_verified_at: verified.phone_verified_at || new Date().toISOString(),
+                });
+            }
+            setChangingPhone(false);
+            setPhoneInput('');
+            setOtpInput('');
+            setSecurityStep('hub');
+            showProfileAlert({ title: 'Verified', message: 'Phone verification complete.', icon: 'success' });
         } catch (error: any) {
-            Alert.alert('Verification failed', error?.message || 'Incorrect code. Try again.');
+            showProfileAlert({
+                title: 'Verification failed',
+                message: error?.message || 'Incorrect code. Try again.',
+                icon: 'alert',
+            });
+        } finally {
+            setSecurityBusy(false);
+        }
+    };
+
+    const handleRemoveVerifiedPhone = () => {
+        showProfileAlert({
+            title: 'Remove phone number?',
+            message: 'Find contacts will no longer match this number until you verify a new one.',
+            icon: 'alert',
+            showCancelButton: true,
+            confirmButtonText: 'Remove',
+            cancelButtonText: 'Keep',
+            onConfirm: async () => {
+                dismissProfileAlert();
+                setSecurityBusy(true);
+                try {
+                    await removeVerifiedPhone();
+                    if (user) {
+                        login({
+                            ...user,
+                            phone_number: null,
+                            phone_verified_at: null,
+                        });
+                    }
+                    setChangingPhone(false);
+                    showProfileAlert({ title: 'Phone removed', icon: 'success' });
+                } catch (error: any) {
+                    showProfileAlert({
+                        title: 'Could not remove phone',
+                        message: error?.message || 'Try again.',
+                        icon: 'alert',
+                    });
+                } finally {
+                    setSecurityBusy(false);
+                }
+            },
+        });
+    };
+
+    const handleChangePassword = async () => {
+        if (securityBusy) return;
+        if (newPassword.length < 6) {
+            showProfileAlert({ title: 'Password too short', message: 'Use at least 6 characters.', icon: 'alert' });
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            showProfileAlert({ title: 'Passwords do not match', icon: 'alert' });
+            return;
+        }
+        setSecurityBusy(true);
+        try {
+            await changePassword({
+                current_password: currentPassword,
+                new_password: newPassword,
+                confirm_password: confirmPassword,
+            });
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            showProfileAlert({ title: 'Password updated', icon: 'success' });
+        } catch (error: any) {
+            showProfileAlert({
+                title: 'Could not change password',
+                message: error?.message || 'Check your current password and try again.',
+                icon: 'alert',
+            });
         } finally {
             setSecurityBusy(false);
         }
@@ -541,7 +961,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             const tokenData = await fb.AccessToken.getCurrentAccessToken();
             const accessToken = tokenData?.accessToken?.toString();
             if (!accessToken) {
-                Alert.alert('Facebook login failed', 'No access token returned.');
+                showProfileAlert({
+                    title: 'Facebook login failed',
+                    message: 'No access token returned.',
+                    icon: 'alert',
+                });
                 setInviteSyncing(false);
                 return;
             }
@@ -549,37 +973,129 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             await linkFacebookAccount(accessToken);
             const matches = await fetchFacebookFriendsMatches(accessToken);
             setInviteMatchedFriends(matches.matched || []);
-            Alert.alert('Facebook synced', matches.matched_count
-                ? `Found ${matches.matched_count} friend${matches.matched_count === 1 ? '' : 's'}.`
-                : (matches.message || 'No matched Facebook friends yet.'));
+            showProfileAlert({
+                title: 'Facebook synced',
+                message: matches.matched_count
+                    ? `Found ${matches.matched_count} friend${matches.matched_count === 1 ? '' : 's'}.`
+                    : (matches.message || 'No Facebook friends on Gazetteer yet. Friends must open the app and link the same Facebook account.'),
+                icon: 'success',
+            });
         } catch (error: any) {
-            Alert.alert('Sync failed', error?.message || 'Could not sync Facebook friends right now.');
+            showProfileAlert({
+                title: 'Sync failed',
+                message: error?.message || 'Could not sync Facebook friends right now.',
+                icon: 'alert',
+            });
         } finally {
             setInviteSyncing(false);
         }
     };
 
+    const inviteShareUrl = useMemo(() => {
+        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        return buildInviteShareUrl(String(user?.handle || ''), apiBase);
+    }, [user?.handle]);
+
     const handleMatchContacts = async () => {
+        if (contactsSyncingRef.current) return;
+        contactsSyncingRef.current = true;
         setContactsSyncing(true);
+
+        const shouldReopenInvite = inviteFriendsOpen;
+        const safetyTimer = setTimeout(() => {
+            contactsSyncingRef.current = false;
+            setContactsSyncing(false);
+        }, 30000);
+
+        const reopenInvite = () => {
+            if (shouldReopenInvite) setInviteFriendsOpen(true);
+        };
+
         try {
-            const ContactsModule = await import('react-native-contacts');
-            const Contacts = ContactsModule.default;
-            let permission = await Contacts.checkPermission();
-            if (permission === 'undefined') {
-                permission = await Contacts.requestPermission();
-            }
-            if (permission !== 'authorized') {
-                Alert.alert('Permission needed', 'Allow contacts permission to sync your contacts.');
-                return;
+            if (Platform.OS === 'android') {
+                setInviteFriendsOpen(false);
+                await new Promise((resolve) => setTimeout(resolve, 600));
+
+                let perm = await ensureContactsPermission();
+                if (!perm.granted) {
+                    const grantedAfter = await PermissionsAndroid.check(
+                        PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
+                    );
+                    if (grantedAfter) {
+                        perm = { granted: true, neverAskAgain: false };
+                    }
+                }
+                if (!perm.granted) {
+                    reopenInvite();
+                    showProfileAlert({
+                        title: 'Allow contacts',
+                        message: perm.neverAskAgain
+                            ? 'Contacts access is turned off. Open Android Settings → Apps → Gazetteer → Permissions and enable Contacts, then tap Find contacts again.'
+                            : 'Gazetteer needs Contacts to find friends on this phone. Tap Allow on the next prompt. If no prompt appears, reinstall the debug APK so Contacts permission is included.',
+                        icon: 'alert',
+                        confirmButtonText: 'Open Settings',
+                        cancelButtonText: 'Not now',
+                        showCancelButton: true,
+                        onConfirm: () => {
+                            dismissProfileAlert();
+                            void Linking.openSettings();
+                        },
+                    });
+                    return;
+                }
+                const stillGranted = await PermissionsAndroid.check(
+                    PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
+                );
+                if (!stillGranted) {
+                    reopenInvite();
+                    showProfileAlert({
+                        title: 'Allow contacts',
+                        message: 'Contacts permission is still off. Allow it before Gazetteer can read your address book.',
+                        icon: 'alert',
+                    });
+                    return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                reopenInvite();
             }
 
-            const deviceContacts = await Contacts.getAll();
-            const phones = deviceContacts
+            const ContactsModule = await import('react-native-contacts');
+            const Contacts = ContactsModule.default;
+            if (Platform.OS === 'ios') {
+                let permission = await Contacts.checkPermission();
+                if (permission !== 'authorized') {
+                    permission = await Contacts.requestPermission();
+                }
+                if (permission !== 'authorized') {
+                    showProfileAlert({
+                        title: 'Permission needed',
+                        message: 'Allow contacts permission to sync your contacts.',
+                        icon: 'alert',
+                    });
+                    return;
+                }
+            }
+
+            const loadContacts =
+                typeof Contacts.getAllWithoutPhotos === 'function'
+                    ? Contacts.getAllWithoutPhotos()
+                    : Contacts.getAll();
+            const deviceContacts = await Promise.race([
+                loadContacts,
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Reading contacts timed out. Try Find contacts again.')), 20000),
+                ),
+            ]);
+            const phones = (Array.isArray(deviceContacts) ? deviceContacts : [])
                 .flatMap((c: any) => Array.isArray(c.phoneNumbers) ? c.phoneNumbers : [])
                 .map((p: any) => String(p?.number || '').trim())
                 .filter(Boolean);
             if (!phones.length) {
-                Alert.alert('No contacts found', 'No phone numbers were found on this device.');
+                showProfileAlert({
+                    title: 'No contacts found',
+                    message: 'No phone numbers were found on this device.',
+                    icon: 'alert',
+                });
                 return;
             }
 
@@ -592,37 +1108,34 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 facebook_id: null,
             }));
             setInviteMatchedFriends(asFriends);
-            Alert.alert('Contacts matched', result.matched_count
-                ? `Matched ${result.matched_count} contact${result.matched_count === 1 ? '' : 's'}.`
-                : 'No matched contacts yet.');
+            if (shouldReopenInvite) setInviteFriendsOpen(true);
+            showProfileAlert({
+                title: 'Contacts matched',
+                message: result.matched_count
+                    ? `Matched ${result.matched_count} contact${result.matched_count === 1 ? '' : 's'}.`
+                    : 'No matched contacts yet. Friends need a phone number saved on their Gazetteer account (Passport → Security).',
+                icon: 'success',
+            });
         } catch (error: any) {
-            Alert.alert('Match failed', error?.message || 'Could not match contacts right now.');
+            if (shouldReopenInvite) setInviteFriendsOpen(true);
+            showProfileAlert({
+                title: 'Match failed',
+                message: error?.message || 'Could not match contacts right now.',
+                icon: 'alert',
+            });
         } finally {
+            clearTimeout(safetyTimer);
+            contactsSyncingRef.current = false;
             setContactsSyncing(false);
         }
     };
 
-    const handleInviteByQrOrLink = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
-        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
-        const profileUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
-        try {
-            await Share.share({
-                message: `Join me on Clips: ${profileUrl}`,
-                url: profileUrl,
-                title: 'Invite by link',
-            });
-        } catch {
-            // ignore share cancel
-        }
-        Clipboard.setString(profileUrl);
-        Alert.alert('Invite link copied', 'Your profile link was copied to clipboard.');
+    const handleInviteByQrOrLink = () => {
+        setShowInviteQR(true);
     };
 
     const handleShareInviteToWhatsApp = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
-        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
-        const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        const inviteUrl = inviteShareUrl;
         const text = `${user?.handle || 'A friend'} invited you to join Gazetteer\n\n${inviteUrl}`;
         const link = `whatsapp://send?text=${encodeURIComponent(text)}`;
         const can = await Linking.canOpenURL(link);
@@ -634,9 +1147,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const handleShareInviteToMessenger = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
-        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
-        const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        const inviteUrl = inviteShareUrl;
         const appId = getRuntimeEnv('VITE_FACEBOOK_APP_ID') || '';
         const messengerLink = `fb-messenger://share/?link=${encodeURIComponent(inviteUrl)}${appId ? `&app_id=${encodeURIComponent(appId)}` : ''}`;
         const can = await Linking.canOpenURL(messengerLink);
@@ -647,27 +1158,62 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
-    if (loading) {
+    if (!user) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.loadingShell}>
                 <ActivityIndicator size="large" color="#f472b6" />
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambientVariant="passport" style={styles.passportShell}>
             <View style={styles.header}>
-                <Avatar
-                    src={user?.avatarUrl}
-                    name={user?.name || 'User'}
-                    size={32}
-                />
-                <Text style={styles.title}>Passport</Text>
-                <TouchableOpacity onPress={() => setSettingsOpen(true)}>
-                    <Icon name="lock-closed" size={24} color="#FFFFFF" />
+                <TouchableOpacity
+                    onPress={() => setShowProfilePictureModal(true)}
+                    accessibilityLabel="Change profile picture"
+                    style={styles.headerAvatarBtn}
+                >
+                    <Avatar
+                        src={user?.avatarUrl}
+                        name={user?.name || 'User'}
+                        size={ox(32)}
+                        hasStory={hasStory}
+                    />
+                    <View style={styles.headerAvatarBadge}>
+                        <Icon name="add" size={ox(14)} color="#FFFFFF" />
+                    </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setOpenPassportCardRequest('name')}
+                    accessibilityLabel="Edit display name"
+                    style={styles.headerNameBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <Text style={styles.title} numberOfLines={1}>
+                        {user?.name || 'Passport'}
+                    </Text>
+                    <Icon name="create-outline" size={ox(16)} color="rgba(255,255,255,0.7)" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={handleTogglePrivacy}
+                    disabled={isTogglingPrivacy}
+                    accessibilityLabel={isPrivate ? 'Make profile public' : 'Make profile private'}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    style={isTogglingPrivacy ? styles.headerPrivacyBtnDisabled : undefined}
+                >
+                    <Icon
+                        name={isPrivate ? 'lock-closed' : 'lock-open'}
+                        size={ox(24)}
+                        color="#FFFFFF"
+                    />
                 </TouchableOpacity>
             </View>
+
+            <ProfilePictureModal
+                visible={showProfilePictureModal}
+                onClose={() => setShowProfilePictureModal(false)}
+            />
 
             {/* Tabs: Messages, Drafts, Collections, Comment Safety, Settings */}
             <View style={styles.tabsWrap} collapsable={false}>
@@ -692,34 +1238,42 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         scrollEventThrottle={16}
                     >
                 <TouchableOpacity
-                    style={styles.tab}
+                    style={[styles.tab, styles.tabInvite]}
                     onPress={() => setInviteFriendsOpen(true)}
                 >
-                    <Icon name="people-outline" size={20} color="#67E8F9" />
-                    <Text style={styles.tabLabel}>Invite Friends</Text>
+                    <Icon name="people-outline" size={ox(20)} color="#A5F3FC" />
+                    <Text style={[styles.tabLabel, styles.tabLabelCyan]}>Invite Friends</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
+                    style={[styles.tab, styles.tabChip]}
                     onPress={() => setMyFeedOpen(true)}
                 >
-                    <Icon name="newspaper-outline" size={20} color="#FFFFFF" />
+                    <Icon name="newspaper-outline" size={ox(20)} color="#F3F4F6" />
                     <Text style={styles.tabLabel}>My feed</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
+                    style={[styles.tab, styles.tabChip]}
                     onPress={() => navigation.navigate('ProfileCover')}
                 >
-                    <Icon name="image-outline" size={20} color="#FFFFFF" />
+                    <Icon name="image-outline" size={ox(20)} color="#F3F4F6" />
                     <Text style={styles.tabLabel}>Cover</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
+                    style={[styles.tab, styles.tabNewGroup]}
+                    onPress={() => setCreateGroupOpen(true)}
+                >
+                    <Icon name="people" size={ox(20)} color="#A5F3FC" />
+                    <Text style={[styles.tabLabel, styles.tabLabelCyan]}>New group</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[styles.tab, styles.tabChip]}
                     onPress={() => navigateMainTab(navigation, 'Inbox')}
                 >
-                    <Icon name="mail" size={20} color="#FFFFFF" />
+                    <Icon name="mail" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Messages</Text>
                     {unreadCount > 0 && (
                         <View style={styles.badge}>
@@ -731,10 +1285,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
-                    onPress={() => setDraftsOpen(true)}
+                    style={[styles.tab, styles.tabChip]}
+                    onPress={() => {
+                        setDraftsOpen(true);
+                        void getDrafts()
+                            .then(setDrafts)
+                            .catch((err) => console.error('Error loading drafts:', err));
+                    }}
                 >
-                    <Icon name="document-text" size={20} color="#FFFFFF" />
+                    <Icon name="document-text" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Drafts</Text>
                     {drafts.length > 0 && (
                         <View style={styles.badge}>
@@ -746,13 +1305,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
+                    style={[styles.tab, styles.tabChip]}
                     onPress={() => {
                         loadCollections();
                         setCollectionsOpen(true);
                     }}
                 >
-                    <Icon name="bookmark" size={20} color="#FFFFFF" />
+                    <Icon name="bookmark" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Collections</Text>
                     {collections.length > 0 && (
                         <View style={styles.badge}>
@@ -764,18 +1323,37 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
-                    onPress={() => setCommentSafetyOpen(true)}
+                    style={[styles.tab, styles.tabCommentSafety]}
+                    onPress={() => {
+                        setSettingsOpen(false);
+                        setCommentSafetyOpen(true);
+                    }}
                 >
-                    <Icon name="shield-checkmark" size={20} color="#FBBF24" />
+                    <Icon name="shield-checkmark" size={ox(20)} color="#FBBF24" />
                     <Text style={styles.tabLabel}>Comment Safety</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={styles.tab}
-                    onPress={() => setSettingsOpen(true)}
+                    style={[styles.tab, styles.tabSecurity]}
+                    onPress={() => {
+                        setSettingsOpen(false);
+                        setCommentSafetyOpen(false);
+                        setSecurityStep('hub');
+                        setSecurityModalOpen(true);
+                    }}
                 >
-                    <Icon name="settings" size={20} color="#FFFFFF" />
+                    <Icon name="shield-checkmark-outline" size={ox(20)} color="#6EE7B7" />
+                    <Text style={styles.tabLabelSecurity}>Security</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[styles.tab, styles.tabChip]}
+                    onPress={() => {
+                        setCommentSafetyOpen(false);
+                        setSettingsOpen(true);
+                    }}
+                >
+                    <Icon name="settings" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Settings</Text>
                 </TouchableOpacity>
                     </ScrollView>
@@ -809,12 +1387,21 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </View>
 
+            <ScrollView
+                style={styles.profileScroll}
+                contentContainerStyle={styles.profileScrollContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                keyboardShouldPersistTaps="handled"
+            >
             <ProfileCoverHero
                 coverUrl={user?.profileBackgroundUrl}
                 avatarUrl={user?.avatarUrl}
                 name={user?.name || user?.handle || 'User'}
+                hasStory={hasStory}
                 showChangeCover
                 onPressChangeCover={() => navigation.navigate('ProfileCover')}
+                onAvatarPress={() => setShowProfilePictureModal(true)}
             />
 
             <View style={styles.profileSection}>
@@ -822,6 +1409,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <View style={styles.userInfo}>
                         <Text style={styles.userName}>{user?.name || user?.handle}</Text>
                         <Text style={styles.userHandle}>{user?.handle}</Text>
+                        {user?.accountType === 'business' ? (
+                            <View style={styles.accountBadgeWrap}>
+                                <AccountTypeBadge accountType="business" compact />
+                            </View>
+                        ) : null}
                         {user?.bio && (
                             <Text style={styles.userBio}>{user.bio}</Text>
                         )}
@@ -834,23 +1426,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Text style={styles.statLabel}>Posts</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{user?.followers_count || 0}</Text>
+                        <Text style={styles.statNumber}>{audienceCounts.followers}</Text>
                         <Text style={styles.statLabel}>Followers</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{user?.following_count || 0}</Text>
+                        <Text style={styles.statNumber}>{audienceCounts.following}</Text>
                         <Text style={styles.statLabel}>Following</Text>
                     </View>
                 </View>
 
-                <TouchableOpacity 
-                    style={styles.editButton}
-                    onPress={() => {
-                        setEditProfileOpen(true);
-                    }}
-                >
-                    <Text style={styles.editButtonText}>Edit Profile</Text>
-                </TouchableOpacity>
+                <ProfilePassportCards
+                    navigation={navigation}
+                    isPrivate={isPrivate}
+                    onPressPhoto={() => setShowProfilePictureModal(true)}
+                    onPressCover={() => navigation.navigate('ProfileCover')}
+                    openCardRequest={openPassportCardRequest}
+                    onOpenCardRequestHandled={() => setOpenPassportCardRequest(null)}
+                />
             </View>
 
             <View style={styles.postsSection}>
@@ -861,7 +1453,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     >
                         <Icon 
                             name="grid" 
-                            size={20} 
+                            size={ox(20)} 
                             color={activeTab === 'posts' ? "#f472b6" : "#6B7280"} 
                         />
                     </TouchableOpacity>
@@ -871,37 +1463,47 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     >
                         <Icon 
                             name="bookmark" 
-                            size={20} 
+                            size={ox(20)} 
                             color={activeTab === 'collections' ? "#f472b6" : "#6B7280"} 
                         />
                     </TouchableOpacity>
                 </View>
 
                 {activeTab === 'posts' ? (
-                    <FlatList
-                        data={posts}
-                        numColumns={3}
-                        keyExtractor={(item) => item.id}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
-                                style={styles.postItem}
-                            >
-                                <ProfileGridThumb post={item} />
-                            </TouchableOpacity>
-                        )}
-                        ListEmptyComponent={
-                            <View style={styles.emptyContainer}>
-                                <Text style={styles.emptyText}>No posts yet</Text>
-                            </View>
-                        }
-                    />
+                    postsLoading && posts.length === 0 ? (
+                        <View style={styles.postsEmptyState}>
+                            <ActivityIndicator size="small" color="#f472b6" />
+                        </View>
+                    ) : posts.length === 0 ? (
+                        <View style={styles.postsEmptyState}>
+                            <Text style={styles.emptyText}>No posts yet</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.postsGrid}>
+                            {posts.map((item) => (
+                                <TouchableOpacity
+                                    key={item.id}
+                                    onPress={() =>
+                                        navigation.navigate('PostDetail', {
+                                            postId: item.id,
+                                            initialPost: item,
+                                        })
+                                    }
+                                    style={styles.postItem}
+                                >
+                                    <ProfileGridThumb post={item} />
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )
+                ) : collections.length === 0 ? (
+                    <View style={styles.postsEmptyState}>
+                        <Text style={styles.emptyText}>No collections yet</Text>
+                    </View>
                 ) : (
-                    <FlatList
-                        data={collections}
-                        keyExtractor={(item) => item.id}
-                        renderItem={({ item }) => {
-                            const thumbSrc = getCollectionThumbnailUrl(item, posts);
+                    <View style={styles.collectionsList}>
+                        {collections.map((item) => {
+                            const thumb = getCollectionThumbSource(item, posts);
                             const firstPost = item.postIds?.length
                                 ? posts.find((p) => p.id === item.postIds[0])
                                 : undefined;
@@ -909,98 +1511,75 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             const thumbBroken = !!brokenCollectionThumbs[item.id];
                             const postCount = item.postIds?.length || 0;
                             return (
-                            <TouchableOpacity
-                                style={styles.collectionItem}
-                                onPress={() => navigation.navigate('CollectionFeed', {
-                                    collectionId: item.id,
-                                    collectionName: item.name,
-                                })}
-                            >
-                                {firstPost ? (
-                                    <View style={styles.collectionThumbnailWrap}>
-                                        <ProfileGridThumb post={firstPost} />
-                                    </View>
-                                ) : thumbSrc && !thumbBroken ? (
-                                    <Image
-                                        source={{ uri: thumbSrc }}
-                                        style={styles.collectionThumbnail}
-                                        onError={() =>
-                                            setBrokenCollectionThumbs((prev) => ({ ...prev, [item.id]: true }))
-                                        }
-                                    />
-                                ) : postCount > 0 && textFallback ? (
-                                    <View style={[styles.collectionThumbnail, styles.collectionThumbnailTextFallback]}>
-                                        <Text style={styles.collectionThumbnailText} numberOfLines={4}>
-                                            {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
+                                <TouchableOpacity
+                                    key={item.id}
+                                    style={styles.collectionItem}
+                                    onPress={() => navigation.navigate('CollectionFeed', {
+                                        collectionId: item.id,
+                                        collectionName: item.name,
+                                    })}
+                                >
+                                    {thumb && !thumbBroken ? (
+                                        <View style={styles.collectionThumbnailWrap}>
+                                            <CollectionCoverThumb
+                                                uri={thumb.uri}
+                                                isVideo={thumb.isVideo}
+                                                style={styles.collectionThumbnail}
+                                                onError={
+                                                    thumb.isVideo
+                                                        ? undefined
+                                                        : () =>
+                                                              setBrokenCollectionThumbs((prev) => ({
+                                                                  ...prev,
+                                                                  [item.id]: true,
+                                                              }))
+                                                }
+                                            />
+                                        </View>
+                                    ) : firstPost ? (
+                                        <View style={styles.collectionThumbnailWrap}>
+                                            <ProfileGridThumb post={firstPost} />
+                                        </View>
+                                    ) : postCount > 0 && textFallback ? (
+                                        <View style={[styles.collectionThumbnail, styles.collectionThumbnailTextFallback]}>
+                                            <Text style={styles.collectionThumbnailText} numberOfLines={4}>
+                                                {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.collectionThumbnailPlaceholder}>
+                                            <Icon name="bookmark" size={ox(24)} color="#6B7280" />
+                                        </View>
+                                    )}
+                                    <View style={styles.collectionInfo}>
+                                        <Text style={styles.collectionName}>{item.name}</Text>
+                                        <Text style={styles.collectionCount}>
+                                            {postCount} {postCount === 1 ? 'post' : 'posts'}
                                         </Text>
                                     </View>
-                                ) : (
-                                    <View style={styles.collectionThumbnailPlaceholder}>
-                                        <Icon name="bookmark" size={24} color="#6B7280" />
-                                    </View>
-                                )}
-                                <View style={styles.collectionInfo}>
-                                    <Text style={styles.collectionName}>{item.name}</Text>
-                                    <Text style={styles.collectionCount}>
-                                        {postCount} {postCount === 1 ? 'post' : 'posts'}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
+                                </TouchableOpacity>
                             );
-                        }}
-                        ListEmptyComponent={
-                            <View style={styles.emptyContainer}>
-                                <Text style={styles.emptyText}>No collections yet</Text>
-                            </View>
-                        }
-                    />
+                        })}
+                    </View>
                 )}
             </View>
+            </ScrollView>
 
             <Modal
                 visible={securityModalOpen}
                 animationType="fade"
                 transparent={true}
-                onRequestClose={() => {}}
+                onRequestClose={closeSecurityModal}
             >
                 <View style={styles.securityOverlay}>
                     <View style={styles.securityCard}>
-                        {securityStep === 'phone' ? (
-                            <>
-                                <Text style={styles.securityTitle}>Add phone</Text>
-                                <View style={styles.securityWhatsAppBadge}>
-                                    <Icon name="logo-whatsapp" size={14} color="#DCFCE7" />
-                                    <Text style={styles.securityWhatsAppBadgeText}>We will text your verification code on WhatsApp</Text>
-                                </View>
-                                <Text style={styles.securityBody}>
-                                    Add your phone number for extra security and easier account recovery.
-                                </Text>
-                                <View style={styles.securityPhoneRow}>
-                                    <TextInput
-                                        value={phoneCountryCode}
-                                        onChangeText={setPhoneCountryCode}
-                                        placeholder="+353"
-                                        placeholderTextColor="#9CA3AF"
-                                        style={styles.securityCountryInput}
-                                    />
-                                    <TextInput
-                                        value={phoneInput}
-                                        onChangeText={setPhoneInput}
-                                        placeholder="Phone number"
-                                        placeholderTextColor="#9CA3AF"
-                                        keyboardType="phone-pad"
-                                        style={styles.securityPhoneInput}
-                                    />
-                                </View>
-                                <TouchableOpacity
-                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
-                                    onPress={handleSendSecurityCode}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Sending...' : 'Continue'}</Text>
-                                </TouchableOpacity>
-                            </>
-                        ) : (
+                        <View style={styles.securityCardHeader}>
+                            <View style={{ flex: 1 }} />
+                            <TouchableOpacity onPress={closeSecurityModal} style={styles.securityCloseButton}>
+                                <Icon name="close" size={ox(22)} color="#9CA3AF" />
+                            </TouchableOpacity>
+                        </View>
+                        {securityStep === 'code' ? (
                             <>
                                 <Text style={styles.securityTitle}>Enter 6-digit code</Text>
                                 <Text style={styles.securityBody}>Your WhatsApp code was sent to {pendingPhoneNumber}</Text>
@@ -1020,7 +1599,161 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 >
                                     <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Verifying...' : 'Verify'}</Text>
                                 </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.securitySecondaryButton}
+                                    onPress={() => {
+                                        setSecurityStep('hub');
+                                        setOtpInput('');
+                                    }}
+                                    disabled={securityBusy}
+                                >
+                                    <Text style={styles.securitySecondaryButtonText}>Back</Text>
+                                </TouchableOpacity>
                             </>
+                        ) : (
+                            <ScrollView
+                                keyboardShouldPersistTaps="handled"
+                                showsVerticalScrollIndicator={false}
+                                contentContainerStyle={styles.securityHubContent}
+                            >
+                                <Text style={styles.securityTitle}>Security</Text>
+
+                                {user?.phone_verified_at && user?.phone_number && !changingPhone ? (
+                                    <View style={styles.securityVerifiedBox}>
+                                        <View style={styles.securityVerifiedHeader}>
+                                            <Icon name="checkmark-circle" size={ox(18)} color="#86EFAC" />
+                                            <Text style={styles.securityVerifiedTitle}>Phone verified</Text>
+                                        </View>
+                                        <Text style={styles.securityMaskedPhone}>
+                                            {maskPhoneNumber(user.phone_number)}
+                                        </Text>
+                                        <View style={styles.securityVerifiedActions}>
+                                            <TouchableOpacity
+                                                style={styles.securityGhostButton}
+                                                onPress={() => {
+                                                    setChangingPhone(true);
+                                                    setPhoneInput('');
+                                                }}
+                                                disabled={securityBusy}
+                                            >
+                                                <Text style={styles.securityGhostButtonText}>Change phone number</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.securityGhostButtonDanger}
+                                                onPress={handleRemoveVerifiedPhone}
+                                                disabled={securityBusy}
+                                            >
+                                                <Text style={styles.securityGhostButtonDangerText}>Remove phone number</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <>
+                                        <Text style={styles.securitySectionLabel}>
+                                            {changingPhone ? 'Change phone number' : 'Add phone'}
+                                        </Text>
+                                        <View style={styles.securityWhatsAppBadge}>
+                                            <Icon name="logo-whatsapp" size={ox(14)} color="#DCFCE7" />
+                                            <Text style={styles.securityWhatsAppBadgeText}>
+                                                We will text your verification code on WhatsApp
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.securityBody}>
+                                            Add your phone number for extra security and easier account recovery.
+                                        </Text>
+                                        <View style={styles.securityPhoneRow}>
+                                            <TextInput
+                                                value={phoneCountryCode}
+                                                onChangeText={setPhoneCountryCode}
+                                                placeholder="+353"
+                                                placeholderTextColor="#9CA3AF"
+                                                style={styles.securityCountryInput}
+                                            />
+                                            <TextInput
+                                                value={phoneInput}
+                                                onChangeText={setPhoneInput}
+                                                placeholder="Phone number"
+                                                placeholderTextColor="#9CA3AF"
+                                                keyboardType="phone-pad"
+                                                style={styles.securityPhoneInput}
+                                            />
+                                        </View>
+                                        <TouchableOpacity
+                                            style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                            onPress={handleSendSecurityCode}
+                                            disabled={securityBusy}
+                                        >
+                                            <Text style={styles.securityPrimaryButtonText}>
+                                                {securityBusy ? 'Sending...' : 'Continue'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        {changingPhone ? (
+                                            <TouchableOpacity
+                                                style={styles.securitySecondaryButton}
+                                                onPress={() => setChangingPhone(false)}
+                                                disabled={securityBusy}
+                                            >
+                                                <Text style={styles.securitySecondaryButtonText}>Cancel</Text>
+                                            </TouchableOpacity>
+                                        ) : null}
+                                    </>
+                                )}
+
+                                <View style={styles.securityDivider} />
+                                <Text style={styles.securitySectionLabel}>Change password</Text>
+                                <TextInput
+                                    value={currentPassword}
+                                    onChangeText={setCurrentPassword}
+                                    placeholder="Current password"
+                                    placeholderTextColor="#9CA3AF"
+                                    secureTextEntry={!showCurrentPassword}
+                                    autoCapitalize="none"
+                                    style={styles.securityPasswordInput}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => setShowCurrentPassword((v) => !v)}
+                                    style={styles.securityShowPassword}
+                                >
+                                    <Text style={styles.securityShowPasswordText}>
+                                        {showCurrentPassword ? 'Hide' : 'Show'} current
+                                    </Text>
+                                </TouchableOpacity>
+                                <TextInput
+                                    value={newPassword}
+                                    onChangeText={setNewPassword}
+                                    placeholder="New password"
+                                    placeholderTextColor="#9CA3AF"
+                                    secureTextEntry={!showNewPassword}
+                                    autoCapitalize="none"
+                                    style={styles.securityPasswordInput}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => setShowNewPassword((v) => !v)}
+                                    style={styles.securityShowPassword}
+                                >
+                                    <Text style={styles.securityShowPasswordText}>
+                                        {showNewPassword ? 'Hide' : 'Show'} new
+                                    </Text>
+                                </TouchableOpacity>
+                                <TextInput
+                                    value={confirmPassword}
+                                    onChangeText={setConfirmPassword}
+                                    placeholder="Confirm new password"
+                                    placeholderTextColor="#9CA3AF"
+                                    secureTextEntry={!showNewPassword}
+                                    autoCapitalize="none"
+                                    style={styles.securityPasswordInput}
+                                />
+                                <TouchableOpacity
+                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                    onPress={handleChangePassword}
+                                    disabled={securityBusy}
+                                >
+                                    <Text style={styles.securityPrimaryButtonText}>
+                                        {securityBusy ? 'Saving...' : 'Update password'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </ScrollView>
                         )}
                     </View>
                 </View>
@@ -1037,7 +1770,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.inviteHeaderRow}>
                             <Text style={styles.securityTitle}>Invite Friends</Text>
                             <TouchableOpacity onPress={() => setInviteFriendsOpen(false)} style={styles.inviteCloseBtn}>
-                                <Icon name="close" size={18} color="#D1D5DB" />
+                                <Icon name="close" size={ox(18)} color="#D1D5DB" />
                             </TouchableOpacity>
                         </View>
                         <TouchableOpacity
@@ -1046,7 +1779,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             disabled={inviteSyncing}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="logo-facebook" size={16} color="#60A5FA" />
+                                <Icon name="logo-facebook" size={ox(16)} color="#60A5FA" />
                                 <Text style={styles.inviteOptionTitle}>{inviteSyncing ? 'Syncing Facebook...' : 'Find Facebook Friends'}</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Sync friends who connected with your app.</Text>
@@ -1056,7 +1789,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             onPress={handleShareInviteToWhatsApp}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="logo-whatsapp" size={16} color="#86EFAC" />
+                                <Icon name="logo-whatsapp" size={ox(16)} color="#86EFAC" />
                                 <Text style={styles.inviteOptionTitle}>Share to WhatsApp</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Share the Gazetteer app with friends.</Text>
@@ -1066,7 +1799,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             onPress={handleShareInviteToMessenger}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="chatbubble-ellipses" size={16} color="#60A5FA" />
+                                <Icon name="chatbubble-ellipses" size={ox(16)} color="#60A5FA" />
                                 <Text style={styles.inviteOptionTitle}>Share to Messenger</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Share the Gazetteer app with friends.</Text>
@@ -1084,14 +1817,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             onPress={handleInviteByQrOrLink}
                         >
                             <View style={styles.inviteOptionRow}>
-                                <Icon name="qr-code-outline" size={16} color="#D1D5DB" />
+                                <Icon name="qr-code-outline" size={ox(16)} color="#D1D5DB" />
                                 <Text style={styles.inviteOptionTitle}>Invite by link or QR</Text>
                             </View>
                             <Text style={styles.inviteOptionBody}>Share your profile and connect faster.</Text>
                         </TouchableOpacity>
                         {inviteMatchedFriends.length > 0 && (
                             <View style={styles.inviteMatchesWrap}>
-                                <Text style={styles.inviteMatchesLabel}>Facebook matches ({inviteMatchedFriends.length})</Text>
+                                <Text style={styles.inviteMatchesLabel}>Matches ({inviteMatchedFriends.length})</Text>
                                 {inviteMatchedFriends.map((friend) => (
                                     <View key={friend.id} style={styles.inviteMatchRow}>
                                         <View style={{ flex: 1 }}>
@@ -1103,11 +1836,37 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                         <TouchableOpacity
                                             style={styles.inviteFollowBtn}
                                             onPress={async () => {
+                                                if (!user?.id || !user?.handle) {
+                                                    showProfileAlert({
+                                                        title: 'Sign in required',
+                                                        message: 'Log in to follow people.',
+                                                        icon: 'alert',
+                                                    });
+                                                    return;
+                                                }
                                                 try {
-                                                    await toggleFollow(friend.handle);
-                                                    Alert.alert('Followed', friend.handle);
+                                                    const { followOrRequest } = await import('../utils/followOrRequest');
+                                                    const result = await followOrRequest({
+                                                        userId: String(user.id),
+                                                        targetHandle: friend.handle,
+                                                        viewerHandle: user.handle,
+                                                        nextFollowing: true,
+                                                    });
+                                                    showProfileAlert({
+                                                        title: result.requested
+                                                            ? 'Follow Request Sent'
+                                                            : result.following
+                                                              ? 'Followed'
+                                                              : 'Updated',
+                                                        message: friend.handle,
+                                                        icon: 'success',
+                                                    });
                                                 } catch {
-                                                    Alert.alert('Error', 'Could not follow right now.');
+                                                    showProfileAlert({
+                                                        title: 'Error',
+                                                        message: 'Could not follow right now.',
+                                                        icon: 'alert',
+                                                    });
                                                 }
                                             }}
                                         >
@@ -1121,6 +1880,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
+            <ProfileQRCodeModal
+                visible={showInviteQR}
+                onClose={() => setShowInviteQR(false)}
+                handle={String(user?.handle || '')}
+                name={String(user?.name || user?.handle || '')}
+                url={inviteShareUrl}
+                subtitle="Scan to join Gazetteer"
+            />
+
             {/* Drafts Modal */}
             <Modal
                 visible={draftsOpen}
@@ -1133,7 +1901,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Drafts</Text>
                             <TouchableOpacity onPress={() => setDraftsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView style={styles.modalBody}>
@@ -1151,7 +1919,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             onPress={() => {
                                                 setDraftsOpen(false);
                                                 if (draft.isTextOnly) {
-                                                    navigation.navigate('TextOnlyPostDetails', {
+                                                    navigation.navigate('TextOnlyCreate', {
                                                         text: draft.textBody || draft.caption || '',
                                                         fromDraft: true,
                                                         location: draft.location || '',
@@ -1198,7 +1966,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             onPress={() => handleDeleteDraft(draft.id)}
                                             style={styles.deleteButton}
                                         >
-                                            <Icon name="trash" size={20} color="#EF4444" />
+                                            <Icon name="trash" size={ox(20)} color="#EF4444" />
                                         </TouchableOpacity>
                                     </View>
                                 ))
@@ -1206,81 +1974,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Text style={styles.emptyText}>No drafts yet</Text>
                             )}
                         </ScrollView>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Edit Profile Modal */}
-            <Modal
-                visible={editProfileOpen}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setEditProfileOpen(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Edit Profile</Text>
-                            <TouchableOpacity onPress={() => setEditProfileOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.modalBody}>
-                            <Text style={styles.inputLabel}>Display name</Text>
-                            <TextInput
-                                style={styles.wordInput}
-                                value={profileNameDraft}
-                                onChangeText={setProfileNameDraft}
-                                placeholder="Enter display name"
-                                placeholderTextColor="#6B7280"
-                            />
-
-                            <Text style={styles.inputLabel}>Bio</Text>
-                            <TextInput
-                                style={[styles.wordInput, { minHeight: 84, textAlignVertical: 'top' }]}
-                                value={profileBioDraft}
-                                onChangeText={setProfileBioDraft}
-                                placeholder="Tell people about yourself"
-                                placeholderTextColor="#6B7280"
-                                multiline
-                                maxLength={220}
-                            />
-
-                            <Text style={styles.inputLabel}>Website</Text>
-                            <TextInput
-                                style={styles.wordInput}
-                                value={profileWebsiteDraft}
-                                onChangeText={setProfileWebsiteDraft}
-                                placeholder="https://"
-                                placeholderTextColor="#6B7280"
-                                autoCapitalize="none"
-                            />
-
-                            <Text style={styles.inputLabel}>Podcast</Text>
-                            <TextInput
-                                style={styles.wordInput}
-                                value={profilePodcastDraft}
-                                onChangeText={setProfilePodcastDraft}
-                                placeholder="https://open.spotify.com/show/..."
-                                placeholderTextColor="#6B7280"
-                                autoCapitalize="none"
-                            />
-
-                            <View style={styles.sheetActionsRow}>
-                                <TouchableOpacity
-                                    style={styles.smallActionButton}
-                                    onPress={() => setEditProfileOpen(false)}
-                                >
-                                    <Text style={styles.smallActionButtonText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.addWordButton}
-                                    onPress={() => { void handleSaveProfileEdits(); }}
-                                >
-                                    <Text style={styles.addWordButtonText}>Save</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
                     </View>
                 </View>
             </Modal>
@@ -1297,14 +1990,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Collections</Text>
                             <TouchableOpacity onPress={() => setCollectionsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView style={styles.modalBody}>
                             {collections.length > 0 ? (
                                 collections.map((collection) => {
                                     const postCount = collection.postIds?.length || 0;
-                                    const thumbSrc = getCollectionThumbnailUrl(collection, posts);
+                                    const thumb = getCollectionThumbSource(collection, posts);
                                     const firstPost = collection.postIds?.length
                                         ? posts.find((p) => p.id === collection.postIds[0])
                                         : undefined;
@@ -1322,15 +2015,19 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 });
                                             }}
                                         >
-                                            {thumbSrc && !thumbBroken ? (
-                                                <Image
-                                                    source={{ uri: thumbSrc }}
+                                            {thumb && !thumbBroken ? (
+                                                <CollectionCoverThumb
+                                                    uri={thumb.uri}
+                                                    isVideo={thumb.isVideo}
                                                     style={styles.collectionModalThumbnail}
-                                                    onError={() =>
-                                                        setBrokenCollectionThumbs((prev) => ({
-                                                            ...prev,
-                                                            [collection.id]: true,
-                                                        }))
+                                                    onError={
+                                                        thumb.isVideo
+                                                            ? undefined
+                                                            : () =>
+                                                                  setBrokenCollectionThumbs((prev) => ({
+                                                                      ...prev,
+                                                                      [collection.id]: true,
+                                                                  }))
                                                     }
                                                 />
                                             ) : postCount > 0 && textFallback ? (
@@ -1341,7 +2038,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 </View>
                                             ) : (
                                                 <View style={styles.collectionModalThumbnailPlaceholder}>
-                                                    <Icon name="bookmark" size={24} color="#6B7280" />
+                                                    <Icon name="bookmark" size={ox(24)} color="#6B7280" />
                                                 </View>
                                             )}
                                             <View style={styles.collectionModalInfo}>
@@ -1361,34 +2058,49 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
-            {/* My Feed Modal */}
+            {/* My Feed Modal — Invite Friends | My feed */}
             <Modal
                 visible={myFeedOpen}
                 animationType="slide"
                 transparent={false}
-                onRequestClose={() => setMyFeedOpen(false)}
+                statusBarTranslucent
+                onRequestClose={() => {
+                    activateMyFeedVideo(null);
+                    setMyFeedOpen(false);
+                }}
             >
-                <SafeAreaView style={styles.myFeedScreen}>
-                    <View style={styles.myFeedHeader}>
-                        <View style={styles.myFeedHeaderLeft}>
-                            <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
-                            <Text style={styles.myFeedTitle}>My feed</Text>
-                        </View>
-                        <TouchableOpacity onPress={() => setMyFeedOpen(false)} style={styles.myFeedCloseButton}>
-                            <Icon name="close" size={22} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
-
+                <View style={styles.myFeedScreen}>
+                    <View style={styles.myFeedListClip}>
                     <FlatList
                         data={posts}
                         keyExtractor={(item) => item.id}
-                        contentContainerStyle={styles.myFeedListContent}
+                        style={styles.myFeedList}
+                        contentContainerStyle={[
+                            styles.myFeedListContent,
+                            {
+                                paddingTop:
+                                    Math.max(
+                                        insets.top,
+                                        Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0,
+                                    ) + ox(56),
+                            },
+                        ]}
+                        extraData={`${myFeedActiveVideoPostId}:${myFeedVideoMuted ? '1' : '0'}`}
+                        viewabilityConfig={myFeedViewabilityConfig}
+                        onViewableItemsChanged={onMyFeedViewableItemsChanged}
+                        removeClippedSubviews={false}
                         renderItem={({ item }) => (
+                            <View style={styles.myFeedCardClip}>
                             <FeedCard
                                 post={item}
                                 isCurrentUser
                                 viewerHandle={user?.handle}
                                 viewerUserId={user?.id}
+                                isVideoActive={
+                                    postHasVideoMedia(item) &&
+                                    String(myFeedActiveVideoPostId) === String(item.id)
+                                }
+                                feedVideoMuted={myFeedVideoMuted}
                                 onLike={async () => {
                                     if (!user?.id) return;
                                     const updated = await toggleLike(user.id, item.id, item);
@@ -1417,9 +2129,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     );
                                 }}
                                 onPostPress={() =>
-                                    navigation.navigate('PostDetail', { postId: item.id })
+                                    navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
                                 }
-                                onShareSuccess={(postId) => {
+                                onShareToStories={() => setMyFeedShareToStoriesPost(item)}
+                                onShareToStoriesSuccess={(postId: string) => {
                                     setPosts((prev) =>
                                         prev.map((p) =>
                                             p.id === postId
@@ -1435,6 +2148,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     );
                                 }}
                             />
+                            </View>
                         )}
                         ListEmptyComponent={
                             <View style={styles.emptyContainer}>
@@ -1442,7 +2156,53 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </View>
                         }
                     />
-                </SafeAreaView>
+                    </View>
+                    <View
+                        pointerEvents="box-none"
+                        style={[
+                            styles.myFeedHeaderOverlay,
+                            {
+                                paddingTop: Math.max(
+                                    insets.top,
+                                    Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0,
+                                ),
+                            },
+                        ]}
+                    >
+                        <View style={styles.myFeedHeader} collapsable={false}>
+                            <View style={styles.myFeedHeaderLeft}>
+                                <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
+                                <Text style={styles.myFeedTitle}>My feed</Text>
+                            </View>
+                            <View style={styles.myFeedHeaderActions}>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        const nextMuted = !myFeedVideoMuted;
+                                        setMyFeedVideoMuted(nextMuted);
+                                        void setGlobalVideoMutedNative(nextMuted);
+                                    }}
+                                    style={styles.myFeedCloseButton}
+                                    accessibilityLabel={myFeedVideoMuted ? 'Unmute videos' : 'Mute videos'}
+                                >
+                                    <Icon
+                                        name={myFeedVideoMuted ? 'volume-mute' : 'volume-high'}
+                                        size={ox(20)}
+                                        color="#FFFFFF"
+                                    />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        activateMyFeedVideo(null);
+                                        setMyFeedOpen(false);
+                                    }}
+                                    style={styles.myFeedCloseButton}
+                                >
+                                    <Icon name="close" size={ox(22)} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
             </Modal>
 
             <PostOverflowMenuModal
@@ -1484,25 +2244,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             resolve();
                             return;
                         }
-                        Alert.alert('Delete post?', 'This cannot be undone.', [
-                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
-                            {
-                                text: 'Delete',
-                                style: 'destructive',
-                                onPress: () => {
-                                    void (async () => {
-                                        try {
-                                            await deletePost(user.id, myFeedOverflowPost.id, user.handle);
-                                            setPosts((prev) =>
-                                                prev.filter((p) => p.id !== myFeedOverflowPost.id),
-                                            );
-                                        } finally {
-                                            resolve();
-                                        }
-                                    })();
-                                },
+                        showProfileAlert({
+                            title: 'Delete post?',
+                            message: 'This cannot be undone.',
+                            icon: 'alert',
+                            showCancelButton: true,
+                            confirmButtonText: 'Delete',
+                            cancelButtonText: 'Cancel',
+                            onConfirm: () => {
+                                setProfileAlert(null);
+                                void (async () => {
+                                    try {
+                                        await deletePost(user.id, myFeedOverflowPost.id, user.handle);
+                                        setPosts((prev) =>
+                                            prev.filter((p) => p.id !== myFeedOverflowPost.id),
+                                        );
+                                    } finally {
+                                        resolve();
+                                    }
+                                })();
                             },
-                        ]);
+                            onDismiss: () => resolve(),
+                        });
                     })
                 }
             />
@@ -1513,13 +2276,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     userId={user?.id || 'anon'}
                     visible={!!myFeedSavePost}
                     onClose={() => setMyFeedSavePost(null)}
-                    onSaved={async () => {
+                    onSaved={async (detail) => {
                         const cols = await getCollectionsForPost(user?.id || 'anon', myFeedSavePost.id);
                         const saved = cols.length > 0;
                         setPosts((prev) =>
-                            prev.map((p) =>
-                                p.id === myFeedSavePost.id ? { ...p, isBookmarked: saved } : p,
-                            ),
+                            prev.map((p) => {
+                                if (p.id !== myFeedSavePost.id) return p;
+                                const was = p.isBookmarked === true;
+                                const prevSaves = Number(p.stats?.saves) || 0;
+                                return {
+                                    ...p,
+                                    isBookmarked: saved,
+                                    stats: {
+                                        ...p.stats,
+                                        saves: applyUniqueSavesCount(
+                                            prevSaves,
+                                            was,
+                                            saved,
+                                            detail?.savesCount,
+                                        ),
+                                    },
+                                };
+                            }),
                         );
                     }}
                 />
@@ -1560,6 +2338,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             ) : null}
 
             <CreateGroupModal
+                visible={createGroupOpen}
+                onClose={() => setCreateGroupOpen(false)}
+                onCreated={(g) => {
+                    setCreateGroupOpen(false);
+                    navigation.navigate('Messages', {
+                        chatGroupId: g.id,
+                        kind: 'group',
+                        groupName: g.name,
+                    });
+                    setProfileAlert({
+                        title: `You're in “${g.name}”`,
+                        message:
+                            'Tap + in the header to invite people, or use their profile → Invite to group.',
+                        icon: 'success',
+                        confirmButtonText: 'Done',
+                    });
+                }}
+            />
+
+            <CreateGroupModal
                 visible={myFeedCreateGroupOpen}
                 onClose={() => setMyFeedCreateGroupOpen(false)}
                 onCreated={(g) => {
@@ -1569,9 +2367,45 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             />
 
             <FeedShareModal
-                post={myFeedSharePost || ({} as Post)}
+                post={myFeedSharePost}
                 isOpen={!!myFeedSharePost}
                 onClose={() => setMyFeedSharePost(null)}
+                onShareSuccess={(postId: string) => {
+                    setPosts((prev) =>
+                        prev.map((p) =>
+                            p.id === postId
+                                ? {
+                                      ...p,
+                                      stats: {
+                                          ...p.stats,
+                                          shares: (p.stats?.shares ?? 0) + 1,
+                                      },
+                                  }
+                                : p,
+                        ),
+                    );
+                }}
+            />
+
+            <ShareToStoriesModal
+                visible={myFeedShareToStoriesPost != null}
+                post={myFeedShareToStoriesPost}
+                onClose={() => setMyFeedShareToStoriesPost(null)}
+                onShareSuccess={(postId: string) => {
+                    setPosts((prev) =>
+                        prev.map((p) =>
+                            p.id === postId
+                                ? {
+                                      ...p,
+                                      stats: {
+                                          ...p.stats,
+                                          shares: (p.stats?.shares ?? 0) + 1,
+                                      },
+                                  }
+                                : p,
+                        ),
+                    );
+                }}
             />
 
             {/* My Feed Comments Modal */}
@@ -1588,7 +2422,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 {myFeedComments.length} {myFeedComments.length === 1 ? 'comment' : 'comments'}
                             </Text>
                             <TouchableOpacity onPress={() => setMyFeedCommentsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
                         <View style={styles.myFeedCommentsModalBody}>
@@ -1695,15 +2529,21 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>Settings</Text>
                             <TouchableOpacity onPress={() => setSettingsOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
+                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
-                        <View style={styles.modalBody}>
+                        <ScrollView
+                            style={[styles.settingsModalScroll, { maxHeight: settingsModalScrollMaxHeight }]}
+                            contentContainerStyle={styles.settingsModalBody}
+                            showsVerticalScrollIndicator
+                            keyboardShouldPersistTaps="handled"
+                            nestedScrollEnabled
+                        >
                             <View style={styles.safetySection}>
                                 <Text style={styles.safetySectionTitle}>Content preferences</Text>
                                 <Text style={styles.toggleDescription}>Edit preferred locations for feed suggestions</Text>
                                 <TouchableOpacity
-                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
                                     onPress={() => {
                                         setSettingsOpen(false);
                                         navigation.navigate('ContentPreferences');
@@ -1719,7 +2559,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     Photo, video, text, and poll stories (Clip studio)
                                 </Text>
                                 <TouchableOpacity
-                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
                                     onPress={() => {
                                         setSettingsOpen(false);
                                         navigation.navigate('Clip');
@@ -1735,7 +2575,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     Feed autoplay and default mute for videos
                                 </Text>
                                 <TouchableOpacity
-                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
                                     onPress={() => {
                                         setSettingsOpen(false);
                                         navigation.navigate('VideoPlaybackSettings');
@@ -1754,7 +2594,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     </View>
                                     <TouchableOpacity
                                         style={[styles.toggleTrack, isPrivate && styles.toggleTrackActive]}
-                                        onPress={handleTogglePrivate}
+                                        onPress={handleTogglePrivacy}
+                                        disabled={isTogglingPrivacy}
                                     >
                                         <View style={[styles.toggleThumb, isPrivate && styles.toggleThumbActive]} />
                                     </TouchableOpacity>
@@ -1762,30 +2603,87 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </View>
 
                             <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Email</Text>
+                                <View style={styles.toggleRow}>
+                                    <View style={styles.toggleInfo}>
+                                        <Text style={styles.toggleLabel}>Missed activity emails</Text>
+                                        <Text style={styles.toggleDescription}>
+                                            Get a summary when you've been away and posts pile up in your area
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.toggleTrack, emailDigestEnabled && styles.toggleTrackActive]}
+                                        onPress={() => {
+                                            if (emailDigestSaving) return;
+                                            void persistEmailDigest(!emailDigestEnabled);
+                                        }}
+                                        disabled={emailDigestSaving}
+                                    >
+                                        <View style={[styles.toggleThumb, emailDigestEnabled && styles.toggleThumbActive]} />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            <View style={styles.safetySection}>
                                 <View style={styles.safetySectionHeader}>
                                     <Text style={styles.safetySectionTitle}>Push Notifications</Text>
-                                    <TouchableOpacity
-                                        style={styles.smallActionButton}
-                                        onPress={() => {
-                                            const reset = resetNotificationPreferences();
-                                            setNotificationPrefs(reset);
-                                        }}
-                                    >
-                                        <Text style={styles.smallActionButtonText}>Reset</Text>
-                                    </TouchableOpacity>
+                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                        <TouchableOpacity
+                                            style={styles.smallActionButton}
+                                            onPress={() => {
+                                                void (async () => {
+                                                    try {
+                                                        const { seedInboxTestNotifications } = await import(
+                                                            '../utils/testNotifications'
+                                                        );
+                                                        const n = await seedInboxTestNotifications();
+                                                        const prefs = getNotificationPreferences();
+                                                        setNotificationPrefs(prefs);
+                                                        showProfileAlert({
+                                                            title: 'Inbox badge test',
+                                                            message: `Added ${n} unread notifications. Check the footer Inbox icon.`,
+                                                            icon: 'success',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                    } catch (err) {
+                                                        showProfileAlert({
+                                                            title: 'Could not seed notifications',
+                                                            message:
+                                                                err instanceof Error
+                                                                    ? err.message
+                                                                    : 'Try again after signing in.',
+                                                            icon: 'alert',
+                                                            confirmButtonText: 'OK',
+                                                        });
+                                                    }
+                                                })();
+                                            }}
+                                        >
+                                            <Text style={styles.smallActionButtonText}>Test badge</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.smallActionButton}
+                                            onPress={() => {
+                                                const reset = resetNotificationPreferences();
+                                                setNotificationPrefs(reset);
+                                            }}
+                                        >
+                                            <Text style={styles.smallActionButtonText}>Reset</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
 
                                 <View style={styles.toggleRow}>
                                     <View style={styles.toggleInfo}>
                                         <Text style={styles.toggleLabel}>Enable notifications</Text>
-                                        <Text style={styles.toggleDescription}>Master switch for alerts on this device</Text>
+                                        <Text style={styles.toggleDescription}>Master switch for push alerts on this account</Text>
                                     </View>
                                     <TouchableOpacity
                                         style={[styles.toggleTrack, notificationPrefs.enabled && styles.toggleTrackActive]}
                                         onPress={() => {
                                             const next = { ...notificationPrefs, enabled: !notificationPrefs.enabled };
                                             setNotificationPrefs(next);
-                                            saveNotificationPreferences(next);
+                                            void saveNotificationPreferencesAsync(next);
                                         }}
                                     >
                                         <View style={[styles.toggleThumb, notificationPrefs.enabled && styles.toggleThumbActive]} />
@@ -1820,7 +2718,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                             [key]: !(notificationPrefs as any)[key],
                                                         } as NotificationPreferences;
                                                         setNotificationPrefs(next);
-                                                        saveNotificationPreferences(next);
+                                                        void saveNotificationPreferencesAsync(next);
                                                     }}
                                                 >
                                                     <View
@@ -1837,185 +2735,50 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </View>
 
                             <TouchableOpacity
-                                style={styles.logoutButton}
+                                style={[styles.logoutButton, loggingOut && { opacity: 0.6 }]}
                                 onPress={handleLogout}
+                                disabled={loggingOut}
                             >
-                                <Text style={styles.logoutButtonText}>Logout</Text>
+                                <Text style={styles.logoutButtonText}>{loggingOut ? 'Logging out…' : 'Logout'}</Text>
                             </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Comment Safety Modal */}
-            <Modal
-                visible={commentSafetyOpen}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setCommentSafetyOpen(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Comment Safety</Text>
-                            <TouchableOpacity onPress={() => setCommentSafetyOpen(false)}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <ScrollView style={styles.modalBody}>
-                            <View style={styles.safetySection}>
-                                <View style={styles.safetySectionHeader}>
-                                    <Text style={styles.safetySectionTitle}>Filters</Text>
-                                    <TouchableOpacity
-                                        style={styles.smallActionButton}
-                                        onPress={() => {
-                                            const resetPrefs = { strictMode: false, customHiddenWords: [] };
-                                            setCommentModerationPrefs(resetPrefs);
-                                            setCommentModerationPreferences(resetPrefs);
-                                            setCommentWordDraft('');
-                                        }}
-                                    >
-                                        <Text style={styles.smallActionButtonText}>Reset</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.toggleRow}>
-                                    <View style={styles.toggleInfo}>
-                                        <Text style={styles.toggleLabel}>Strict filtering</Text>
-                                        <Text style={styles.toggleDescription}>Auto-hide warning-level negative comments</Text>
-                                    </View>
-                                    <TouchableOpacity
-                                        style={[styles.toggleTrack, commentModerationPrefs.strictMode && styles.toggleTrackActive]}
-                                        onPress={() => {
-                                            const next = { ...commentModerationPrefs, strictMode: !commentModerationPrefs.strictMode };
-                                            setCommentModerationPrefs(next);
-                                            setCommentModerationPreferences(next);
-                                        }}
-                                    >
-                                        <View style={[styles.toggleThumb, commentModerationPrefs.strictMode && styles.toggleThumbActive]} />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <Text style={styles.inputLabel}>Hidden words and phrases</Text>
-                                <View style={styles.wordInputRow}>
-                                    <TextInput
-                                        style={styles.wordInput}
-                                        value={commentWordDraft}
-                                        onChangeText={setCommentWordDraft}
-                                        placeholder="Add hidden word or phrase"
-                                        placeholderTextColor="#6B7280"
-                                    />
-                                    <TouchableOpacity
-                                        style={styles.addWordButton}
-                                        onPress={() => {
-                                            const incoming = String(commentWordDraft || '').trim().toLowerCase();
-                                            if (!incoming) return;
-                                            const next = {
-                                                ...commentModerationPrefs,
-                                                customHiddenWords: Array.from(new Set([...(commentModerationPrefs.customHiddenWords || []), incoming])),
-                                            };
-                                            setCommentModerationPrefs(next);
-                                            setCommentModerationPreferences(next);
-                                            setCommentWordDraft('');
-                                        }}
-                                    >
-                                        <Text style={styles.addWordButtonText}>Add</Text>
-                                    </TouchableOpacity>
-                                </View>
-                                <View style={styles.wordChipWrap}>
-                                    {(commentModerationPrefs.customHiddenWords || []).map((word) => (
-                                        <TouchableOpacity
-                                            key={word}
-                                            style={styles.wordChip}
-                                            onPress={() => {
-                                                const next = {
-                                                    ...commentModerationPrefs,
-                                                    customHiddenWords: (commentModerationPrefs.customHiddenWords || []).filter((w) => w !== word),
-                                                };
-                                                setCommentModerationPrefs(next);
-                                                setCommentModerationPreferences(next);
-                                            }}
-                                        >
-                                            <Text style={styles.wordChipText}>{word} ×</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            </View>
-
-                            <View style={styles.safetySection}>
-                                <View style={styles.safetySectionHeader}>
-                                    <Text style={styles.safetySectionTitle}>Hidden comments review</Text>
-                                    <Text style={styles.queueCountText}>{hiddenCommentQueue.length} pending</Text>
-                                </View>
-                                <View style={styles.filterPillsRow}>
-                                    {(['all', 'comments', 'replies'] as const).map((filterKey) => (
-                                        <TouchableOpacity
-                                            key={filterKey}
-                                            style={[
-                                                styles.filterPill,
-                                                hiddenQueueFilter === filterKey && styles.filterPillActive,
-                                            ]}
-                                            onPress={() => setHiddenQueueFilter(filterKey)}
-                                        >
-                                            <Text
-                                                style={[
-                                                    styles.filterPillText,
-                                                    hiddenQueueFilter === filterKey && styles.filterPillTextActive,
-                                                ]}
-                                            >
-                                                {filterKey === 'all' ? 'All' : filterKey === 'comments' ? 'Comments' : 'Replies'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                                {loadingHiddenCommentQueue ? (
-                                    <ActivityIndicator size="small" color="#8B5CF6" style={{ marginTop: 12 }} />
-                                ) : filteredHiddenQueue.length === 0 ? (
-                                    <Text style={styles.emptyText}>No hidden comments to review.</Text>
-                                ) : (
-                                    filteredHiddenQueue.map((item) => (
-                                        <View key={item.id} style={styles.queueItem}>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={styles.queueItemAuthor}>
-                                                    {item.userHandle} {item.isReply ? 'replied' : 'commented'}
-                                                </Text>
-                                                <Text style={styles.queueItemText} numberOfLines={2}>{item.text}</Text>
-                                            </View>
-                                            <View style={styles.queueActions}>
-                                                <TouchableOpacity
-                                                    style={styles.queueActionBtn}
-                                                    onPress={async () => {
-                                                        const ok = await approveHiddenComment(item.id);
-                                                        if (!ok) return;
-                                                        setHiddenCommentQueue((prev) => prev.filter((row) => row.id !== item.id));
-                                                    }}
-                                                >
-                                                    <Text style={styles.queueActionText}>Approve</Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    style={[styles.queueActionBtn, styles.queueActionBtnDanger]}
-                                                    onPress={async () => {
-                                                        const ok = await deleteHiddenComment(item.id);
-                                                        if (!ok) return;
-                                                        setHiddenCommentQueue((prev) => prev.filter((row) => row.id !== item.id));
-                                                    }}
-                                                >
-                                                    <Text style={[styles.queueActionText, styles.queueActionTextDanger]}>Delete</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                    ))
-                                )}
-                            </View>
                         </ScrollView>
                     </View>
                 </View>
             </Modal>
+
+            <CommentSafetyModal
+                visible={commentSafetyOpen}
+                onClose={() => setCommentSafetyOpen(false)}
+                ownerHandle={user?.handle}
+                onOpenPost={handleOpenPostFromCommentSafety}
+                showAlert={showProfileAlert}
+            />
+
+            <GazetteerAlertSheet
+                visible={profileAlert !== null}
+                title={profileAlert?.title ?? ''}
+                message={profileAlert?.message}
+                icon={profileAlert?.icon}
+                confirmButtonText={profileAlert?.confirmButtonText ?? 'OK'}
+                cancelButtonText={profileAlert?.cancelButtonText ?? 'Cancel'}
+                showCancelButton={profileAlert?.showCancelButton ?? false}
+                onConfirm={() => {
+                    if (profileAlert?.onConfirm) {
+                        void profileAlert.onConfirm();
+                        return;
+                    }
+                    dismissProfileAlert();
+                }}
+                onDismiss={dismissProfileAlert}
+            />
         </GazetteerScreenShell>
     );
 };
 
 const styles = StyleSheet.create({
+    passportShell: {
+        backgroundColor: 'transparent',
+    },
     loadingShell: {
         justifyContent: 'center',
         alignItems: 'center',
@@ -2028,89 +2791,145 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: ox(16),
+        paddingVertical: ox(12),
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-        backgroundColor: 'rgba(0, 0, 0, 0.3)',
+        borderBottomColor: profilePassportDivider,
+        backgroundColor: 'transparent',
+        gap: ox(12),
+    },
+    headerAvatarBtn: {
+        position: 'relative',
+        width: ox(32),
+        height: ox(32),
+    },
+    headerAvatarBadge: {
+        position: 'absolute',
+        right: -2,
+        bottom: -2,
+        width: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
+        backgroundColor: '#f472b6',
+        borderWidth: 2,
+        borderColor: '#030712',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     title: {
-        fontSize: 24,
-        fontWeight: 'bold',
+        flexShrink: 1,
+        fontSize: ox(20),
+        fontWeight: '700',
         color: '#FFFFFF',
+        textAlign: 'center',
+    },
+    headerNameBtn: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: ox(6),
+        paddingHorizontal: ox(4),
+    },
+    headerPrivacyBtnDisabled: {
+        opacity: 0.45,
     },
     profileSection: {
-        paddingHorizontal: 16,
-        paddingVertical: 16,
+        paddingHorizontal: profilePassportScrollInset,
+        paddingVertical: ox(16),
     },
     profileInfo: {
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     userInfo: {
         flex: 1,
         justifyContent: 'center',
     },
     userName: {
-        fontSize: 19,
+        fontSize: ox(19),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     userHandle: {
-        fontSize: 15,
+        fontSize: ox(15),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
+    },
+    accountBadgeWrap: {
+        marginTop: ox(8),
+        alignSelf: 'flex-start',
     },
     userBio: {
-        fontSize: 13,
+        fontSize: ox(13),
         color: '#D1D5DB',
-        marginTop: 4,
+        marginTop: ox(4),
     },
     statsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
-        marginBottom: 16,
+        marginBottom: ox(16),
     },
     statItem: {
         alignItems: 'center',
     },
     statNumber: {
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     statLabel: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: ox(2),
     },
     editButton: {
         backgroundColor: '#1F2937',
-        paddingVertical: 9,
-        paddingHorizontal: 20,
-        borderRadius: 9,
+        paddingVertical: ox(9),
+        paddingHorizontal: ox(20),
+        borderRadius: ox(9),
         alignSelf: 'center',
         borderWidth: 1,
         borderColor: '#374151',
     },
     editButtonText: {
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '600',
         color: '#FFFFFF',
     },
-    postsSection: {
+    profileScroll: {
         flex: 1,
+        backgroundColor: 'transparent',
+    },
+    profileScrollContent: {
+        flexGrow: 1,
+        paddingBottom: ox(24),
+        backgroundColor: 'transparent',
+    },
+    postsSection: {
+        backgroundColor: 'transparent',
+    },
+    postsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    collectionsList: {},
+    postsEmptyState: {
+        alignItems: 'center',
+        paddingVertical: ox(32),
+        paddingHorizontal: ox(16),
     },
     postsHeader: {
         flexDirection: 'row',
         justifyContent: 'center',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
         borderTopWidth: 1,
-        borderTopColor: '#1F2937',
-        gap: 32,
+        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+        gap: ox(32),
     },
     postsTab: {
-        paddingHorizontal: 20,
-        paddingVertical: 8,
+        paddingHorizontal: ox(20),
+        paddingVertical: ox(8),
     },
     postsTabActive: {
         borderBottomWidth: 2,
@@ -2134,42 +2953,42 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     collectionItem: {
-        padding: 16,
+        padding: ox(16),
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
     collectionName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     collectionCount: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 40,
+        padding: ox(40),
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#6B7280',
     },
     tabsWrap: {
         position: 'relative',
         overflow: 'visible',
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+        borderTopWidth: 1,
+        borderTopColor: profilePassportDivider,
     },
     /** ScrollView + fixed cue column (Android-safe — no z-order fights with ScrollView) */
     tabsRailShell: {
         flexDirection: 'row',
         alignItems: 'stretch',
         width: '100%',
-        minHeight: 66,
+        minHeight: ox(66),
     },
     tabsScrollFlex: {
         flex: 1,
@@ -2177,37 +2996,77 @@ const styles = StyleSheet.create({
     },
     tabsContentContainer: {
         flexDirection: 'row',
-        paddingVertical: 12,
-        paddingHorizontal: 8,
-        paddingRight: 10,
-        columnGap: 8,
+        paddingVertical: ox(12),
+        paddingHorizontal: ox(8),
+        paddingRight: ox(10),
+        columnGap: ox(8),
     },
     tabsCueColumn: {
-        width: 48,
+        width: ox(48),
         position: 'relative',
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: 'transparent',
     },
     tab: {
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         position: 'relative',
-        paddingHorizontal: 12,
-        minWidth: 84,
+        minHeight: ox(44),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(8),
+        borderRadius: ox(12),
+        gap: ox(8),
+    },
+    tabChip: {
+        borderWidth: 1,
+        borderColor: profilePassportChipBorder,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    },
+    tabInvite: {
+        borderWidth: 1,
+        borderColor: 'rgba(103, 232, 249, 0.4)',
+        backgroundColor: 'rgba(22, 78, 99, 0.3)',
+    },
+    tabCommentSafety: {
+        borderWidth: 1,
+        borderColor: 'rgba(252, 211, 77, 0.4)',
+        backgroundColor: 'rgba(120, 53, 15, 0.3)',
+    },
+    tabSecurity: {
+        borderWidth: 1,
+        borderColor: 'rgba(110, 231, 183, 0.4)',
+        backgroundColor: 'rgba(6, 78, 59, 0.3)',
+    },
+    tabLabelSecurity: {
+        fontSize: ox(12),
+        color: '#D1FAE5',
+        fontWeight: '600',
     },
     tabLabel: {
-        fontSize: 12,
-        color: '#FFFFFF',
-        marginTop: 4,
+        fontSize: ox(12),
+        color: '#F3F4F6',
+        fontWeight: '600',
+    },
+    tabNewGroup: {
+        borderRadius: ox(12),
+        borderWidth: 1,
+        borderColor: 'rgba(6, 182, 212, 0.35)',
+        backgroundColor: 'rgba(8, 51, 68, 0.4)',
+    },
+    tabLabelCyan: {
+        color: '#A5F3FC',
+        fontWeight: '600',
     },
     tabsHintChipColumn: {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 2,
-        paddingHorizontal: 8,
-        paddingVertical: 8,
-        borderRadius: 14,
+        gap: ox(2),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(8),
+        borderRadius: ox(14),
         backgroundColor: 'rgba(15,23,42,0.96)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
@@ -2219,22 +3078,22 @@ const styles = StyleSheet.create({
     },
     tabsHintTextColumn: {
         color: '#F3F4F6',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '800',
-        letterSpacing: 0.3,
+        letterSpacing: ox(0.3),
     },
     tabsHintChevron: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '800',
-        marginTop: -2,
+        marginTop: ox(-2),
         includeFontPadding: false,
     },
     /** After user scrolls: always-visible “more” arrow (fixed column — never under ScrollView) */
     tabsMoreCue: {
-        width: 36,
-        height: 38,
-        borderRadius: 19,
+        width: ox(36),
+        height: ox(38),
+        borderRadius: ox(19),
         backgroundColor: 'rgba(217, 27, 92, 0.35)',
         borderWidth: 1.5,
         borderColor: 'rgba(244, 114, 182, 0.45)',
@@ -2243,10 +3102,10 @@ const styles = StyleSheet.create({
     },
     tabsMoreCueGlyph: {
         color: '#FFFFFF',
-        fontSize: 26,
+        fontSize: ox(26),
         fontWeight: '800',
         marginLeft: 3,
-        marginTop: -3,
+        marginTop: ox(-3),
         includeFontPadding: false,
     },
     badge: {
@@ -2254,35 +3113,35 @@ const styles = StyleSheet.create({
         top: -4,
         right: 0,
         backgroundColor: '#EF4444',
-        borderRadius: 10,
-        minWidth: 20,
-        height: 20,
+        borderRadius: ox(10),
+        minWidth: ox(20),
+        height: ox(20),
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 4,
+        paddingHorizontal: ox(4),
     },
     badgeText: {
         color: '#FFFFFF',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: 'bold',
     },
     collectionThumbnail: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
     },
     collectionThumbnailWrap: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
         overflow: 'hidden',
     },
     collectionThumbnailPlaceholder: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
         justifyContent: 'center',
         alignItems: 'center',
@@ -2290,11 +3149,11 @@ const styles = StyleSheet.create({
     collectionThumbnailTextFallback: {
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 6,
+        paddingHorizontal: ox(6),
         overflow: 'hidden',
     },
     collectionThumbnailText: {
-        fontSize: 10,
+        fontSize: ox(10),
         color: '#D1D5DB',
         textAlign: 'center',
     },
@@ -2306,50 +3165,78 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: GAZETTEER_ABYSS,
     },
+    myFeedHeaderOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        elevation: 24,
+        backgroundColor: GAZETTEER_ABYSS,
+    },
     myFeedHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        ...gazetteerHeader,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(10),
+        backgroundColor: GAZETTEER_ABYSS,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.12)',
+    },
+    myFeedHeaderActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(8),
     },
     myFeedHeaderLeft: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     myFeedLogo: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
+        width: ox(32),
+        height: ox(32),
+        borderRadius: ox(8),
         marginRight: 8,
     },
     myFeedTitle: {
-        fontSize: 22,
+        fontSize: ox(22),
         fontWeight: '700',
         color: '#FFFFFF',
     },
     myFeedCloseButton: {
-        borderRadius: 999,
-        padding: 8,
+        borderRadius: ox(999),
+        padding: ox(8),
         ...glassSurface,
     },
+    myFeedListClip: {
+        flex: 1,
+        overflow: 'hidden',
+        backgroundColor: GAZETTEER_ABYSS,
+        zIndex: 0,
+    },
+    myFeedList: {
+        flex: 1,
+    },
+    myFeedCardClip: {
+        overflow: 'hidden',
+    },
     myFeedListContent: {
-        padding: 12,
-        rowGap: 12,
-        paddingBottom: 28,
+        padding: ox(12),
+        rowGap: ox(12),
+        paddingBottom: ox(28),
     },
     myFeedCard: {
-        borderRadius: 16,
+        borderRadius: ox(16),
         overflow: 'hidden',
         ...glassPanel,
     },
     myFeedCardHeader: {
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-        rowGap: 8,
+        rowGap: ox(8),
     },
     myFeedAuthorRow: {
         flexDirection: 'row',
@@ -2361,20 +3248,20 @@ const styles = StyleSheet.create({
     },
     myFeedLocationPill: {
         alignSelf: 'flex-start',
-        borderRadius: 999,
+        borderRadius: ox(999),
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#0F172A',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(4),
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
+        columnGap: ox(4),
         maxWidth: '100%',
     },
     myFeedLocationText: {
         color: '#BFDBFE',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
         maxWidth: 260,
     },
@@ -2401,47 +3288,47 @@ const styles = StyleSheet.create({
         backgroundColor: '#030712',
     },
     myFeedVideoPlaceholderText: {
-        marginTop: 8,
+        marginTop: ox(8),
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     myFeedTextCard: {
-        paddingHorizontal: 14,
-        paddingVertical: 16,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(16),
         ...glassSurface,
     },
     myFeedTextCardText: {
         color: '#FFFFFF',
-        fontSize: 15,
-        lineHeight: 22,
+        fontSize: ox(15),
+        lineHeight: ox(22),
     },
     myFeedCaptionWrap: {
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
     },
     myFeedCaptionText: {
         color: '#E5E7EB',
-        fontSize: 13,
-        lineHeight: 20,
+        fontSize: ox(13),
+        lineHeight: ox(20),
     },
     myFeedStatsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
         borderTopWidth: 1,
         borderTopColor: 'rgba(255, 255, 255, 0.08)',
-        columnGap: 12,
+        columnGap: ox(12),
     },
     myFeedStatPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 4,
+        columnGap: ox(4),
     },
     myFeedStatText: {
         color: '#D1D5DB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     modalOverlay: {
@@ -2460,17 +3347,26 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     modalTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
     modalBody: {
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
+    },
+    settingsModalScroll: {
+        flexGrow: 0,
+        flexShrink: 1,
+    },
+    settingsModalBody: {
+        paddingHorizontal: ox(14),
+        paddingTop: ox(12),
+        paddingBottom: ox(28),
     },
     myFeedCommentsModalContent: {
         borderTopLeftRadius: 20,
@@ -2483,61 +3379,61 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     myFeedCommentsModalBody: {
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
     },
     draftItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        padding: 12,
-        borderRadius: 12,
-        marginBottom: 12,
+        gap: ox(12),
+        padding: ox(12),
+        borderRadius: ox(12),
+        marginBottom: ox(12),
         ...glassSurface,
     },
     draftThumb: {
-        width: 52,
-        height: 52,
-        borderRadius: 8,
+        width: ox(52),
+        height: ox(52),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
     },
     draftInfo: {
         flex: 1,
     },
     draftDate: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#9CA3AF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     draftText: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#FFFFFF',
     },
     deleteButton: {
-        padding: 8,
+        padding: ox(8),
     },
     collectionModalItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
+        padding: ox(16),
+        borderRadius: ox(12),
+        marginBottom: ox(12),
         ...glassSurface,
     },
     collectionModalThumbnail: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
     },
     collectionModalThumbnailPlaceholder: {
-        width: 64,
-        height: 64,
-        borderRadius: 8,
+        width: ox(64),
+        height: ox(64),
+        borderRadius: ox(8),
         backgroundColor: '#111827',
         justifyContent: 'center',
         alignItems: 'center',
@@ -2547,260 +3443,260 @@ const styles = StyleSheet.create({
         marginLeft: 12,
     },
     collectionModalName: {
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     collectionModalCount: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     logoutButton: {
         backgroundColor: '#EF4444',
-        paddingVertical: 12,
-        paddingHorizontal: 24,
-        borderRadius: 8,
+        paddingVertical: ox(12),
+        paddingHorizontal: ox(24),
+        borderRadius: ox(8),
         alignItems: 'center',
     },
     logoutButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     safetySection: {
-        borderRadius: 10,
-        padding: 11,
-        marginBottom: 10,
+        borderRadius: ox(10),
+        padding: ox(11),
+        marginBottom: ox(10),
         ...glassSurface,
     },
     safetySectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 10,
+        marginBottom: ox(10),
     },
     safetySectionTitle: {
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
         color: '#FFFFFF',
     },
     smallActionButton: {
         backgroundColor: '#374151',
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
     },
     smallActionButtonText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     toggleRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     toggleInfo: {
         flex: 1,
-        paddingRight: 10,
+        paddingRight: ox(10),
     },
     toggleLabel: {
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
         color: '#FFFFFF',
     },
     toggleDescription: {
-        marginTop: 2,
-        fontSize: 12,
+        marginTop: ox(2),
+        fontSize: ox(12),
         color: '#9CA3AF',
     },
     toggleTrack: {
-        width: 46,
-        height: 26,
-        borderRadius: 13,
+        width: ox(46),
+        height: ox(26),
+        borderRadius: ox(13),
         backgroundColor: '#374151',
         justifyContent: 'center',
-        paddingHorizontal: 3,
+        paddingHorizontal: ox(3),
     },
     toggleTrackActive: {
         backgroundColor: '#d91b5c',
     },
     toggleThumb: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: ox(20),
+        height: ox(20),
+        borderRadius: ox(10),
         backgroundColor: '#FFFFFF',
     },
     toggleThumbActive: {
         alignSelf: 'flex-end',
     },
     inputLabel: {
-        fontSize: 13,
+        fontSize: ox(13),
         color: '#D1D5DB',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     wordInputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
+        columnGap: ox(8),
     },
     myFeedCommentsList: {
         maxHeight: 260,
-        marginBottom: 12,
+        marginBottom: ox(12),
     },
     myFeedCommentItem: {
-        paddingVertical: 8,
+        paddingVertical: ox(8),
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
     myFeedEditedBadge: {
         alignSelf: 'flex-start',
-        marginBottom: 4,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 999,
+        marginBottom: ox(4),
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(2),
+        borderRadius: ox(999),
         backgroundColor: '#1E3A8A',
         color: '#DBEAFE',
-        fontSize: 10,
+        fontSize: ox(10),
         fontWeight: '700',
         textTransform: 'uppercase',
     },
     myFeedCommentAuthor: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
-        marginBottom: 2,
+        marginBottom: ox(2),
     },
     myFeedCommentText: {
         color: '#D1D5DB',
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: ox(13),
+        lineHeight: ox(18),
     },
     myFeedCommentTime: {
-        marginTop: 3,
+        marginTop: ox(3),
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
     },
     myFeedCommentActionsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 14,
-        marginTop: 6,
+        columnGap: ox(14),
+        marginTop: ox(6),
     },
     myFeedCommentActionText: {
         color: '#93C5FD',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
     },
     myFeedReplyList: {
-        marginTop: 8,
-        paddingLeft: 10,
+        marginTop: ox(8),
+        paddingLeft: ox(10),
         borderLeftWidth: 1,
         borderLeftColor: '#374151',
-        rowGap: 6,
+        rowGap: ox(6),
     },
     myFeedReplyItem: {},
     myFeedReplyAuthor: {
         color: '#E5E7EB',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     myFeedReplyText: {
         color: '#CBD5E1',
-        fontSize: 12,
-        lineHeight: 17,
+        fontSize: ox(12),
+        lineHeight: ox(17),
     },
     myFeedReplyTime: {
-        marginTop: 2,
+        marginTop: ox(2),
         color: '#94A3B8',
-        fontSize: 10,
+        fontSize: ox(10),
     },
     myFeedReplyActionText: {
-        marginTop: 3,
+        marginTop: ox(3),
         color: '#93C5FD',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
     },
     myFeedCommentInputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
+        columnGap: ox(8),
     },
     myFeedCommentInput: {
         flex: 1,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         ...glassSearch,
     },
     wordInput: {
         flex: 1,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         ...glassSearch,
     },
     addWordButton: {
         backgroundColor: '#d91b5c',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 9,
+        borderRadius: ox(8),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(9),
     },
     addWordButtonText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
     sheetActionsRow: {
-        marginTop: 14,
+        marginTop: ox(14),
         flexDirection: 'row',
         justifyContent: 'flex-end',
-        columnGap: 8,
+        columnGap: ox(8),
     },
     wordChipWrap: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        columnGap: 6,
-        rowGap: 6,
-        marginTop: 10,
+        columnGap: ox(6),
+        rowGap: ox(6),
+        marginTop: ox(10),
     },
     wordChip: {
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         ...glassSurface,
     },
     wordChipText: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#E5E7EB',
     },
     queueCountText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#FBBF24',
         fontWeight: '600',
     },
     filterPillsRow: {
         flexDirection: 'row',
-        columnGap: 8,
-        marginBottom: 10,
+        columnGap: ox(8),
+        marginBottom: ox(10),
     },
     filterPill: {
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(5),
         ...glassSurface,
     },
     filterPillActive: {
         ...chipActiveMagenta,
     },
     filterPillText: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#9CA3AF',
         fontWeight: '600',
     },
@@ -2810,30 +3706,30 @@ const styles = StyleSheet.create({
     queueItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 8,
+        columnGap: ox(8),
+        borderRadius: ox(8),
+        padding: ox(10),
+        marginBottom: ox(8),
         ...glassSurface,
     },
     queueItemAuthor: {
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
         color: '#FFFFFF',
-        marginBottom: 3,
+        marginBottom: ox(3),
     },
     queueItemText: {
-        fontSize: 12,
+        fontSize: ox(12),
         color: '#D1D5DB',
     },
     queueActions: {
         flexDirection: 'row',
-        columnGap: 6,
+        columnGap: ox(6),
     },
     queueActionBtn: {
-        borderRadius: 6,
-        paddingHorizontal: 8,
-        paddingVertical: 6,
+        borderRadius: ox(6),
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(6),
         ...glassSurface,
     },
     queueActionBtnDanger: {
@@ -2842,7 +3738,7 @@ const styles = StyleSheet.create({
     },
     queueActionText: {
         color: '#E5E7EB',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '600',
     },
     queueActionTextDanger: {
@@ -2852,166 +3748,273 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(11, 7, 17, 0.82)',
         justifyContent: 'center',
-        paddingHorizontal: 18,
+        paddingHorizontal: ox(18),
     },
     securityCard: {
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: ox(16),
+        padding: ox(16),
+        maxHeight: '86%',
         ...glassPanel,
+    },
+    securityHubContent: {
+        paddingBottom: ox(8),
+    },
+    securitySectionLabel: {
+        color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '700',
+        marginBottom: ox(8),
+    },
+    securityVerifiedBox: {
+        borderRadius: ox(12),
+        borderWidth: 1,
+        borderColor: 'rgba(134, 239, 172, 0.35)',
+        backgroundColor: 'rgba(5, 46, 22, 0.55)',
+        padding: ox(12),
+        marginBottom: ox(8),
+    },
+    securityVerifiedHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: ox(6),
+        marginBottom: ox(6),
+    },
+    securityVerifiedTitle: {
+        color: '#86EFAC',
+        fontSize: ox(14),
+        fontWeight: '700',
+    },
+    securityMaskedPhone: {
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        fontWeight: '600',
+        letterSpacing: ox(0.4),
+        marginBottom: ox(10),
+    },
+    securityVerifiedActions: {
+        gap: ox(8),
+    },
+    securityGhostButton: {
+        borderRadius: ox(10),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        paddingVertical: ox(8),
+        alignItems: 'center',
+    },
+    securityGhostButtonText: {
+        color: '#E5E7EB',
+        fontSize: ox(13),
+        fontWeight: '600',
+    },
+    securityGhostButtonDanger: {
+        borderRadius: ox(10),
+        borderWidth: 1,
+        borderColor: 'rgba(252, 165, 165, 0.45)',
+        paddingVertical: ox(8),
+        alignItems: 'center',
+    },
+    securityGhostButtonDangerText: {
+        color: '#FCA5A5',
+        fontSize: ox(13),
+        fontWeight: '600',
+    },
+    securityDivider: {
+        height: 1,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        marginVertical: ox(16),
+    },
+    securityPasswordInput: {
+        borderRadius: ox(10),
+        color: '#FFFFFF',
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
+        marginBottom: ox(6),
+        ...glassSearch,
+    },
+    securityShowPassword: {
+        alignSelf: 'flex-end',
+        marginBottom: ox(8),
+    },
+    securityShowPasswordText: {
+        color: '#9CA3AF',
+        fontSize: ox(11),
+        fontWeight: '600',
+    },
+    securityCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: ox(4),
+    },
+    securityCloseButton: {
+        padding: ox(4),
     },
     securityTitle: {
         color: '#FFFFFF',
-        fontSize: 28,
+        fontSize: ox(28),
         fontWeight: '700',
-        marginBottom: 10,
+        marginBottom: ox(10),
     },
     securityBody: {
         color: '#D1D5DB',
-        fontSize: 14,
-        lineHeight: 20,
-        marginBottom: 12,
+        fontSize: ox(14),
+        lineHeight: ox(20),
+        marginBottom: ox(12),
     },
     securityWhatsAppBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
+        columnGap: ox(8),
         backgroundColor: '#052E16',
         borderWidth: 1,
         borderColor: '#166534',
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        marginBottom: 10,
+        borderRadius: ox(10),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
+        marginBottom: ox(10),
     },
     securityWhatsAppBadgeText: {
         color: '#BBF7D0',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '600',
         flex: 1,
     },
     securityPhoneRow: {
         flexDirection: 'row',
-        columnGap: 8,
-        marginBottom: 12,
+        columnGap: ox(8),
+        marginBottom: ox(12),
     },
     securityCountryInput: {
-        width: 92,
-        borderRadius: 10,
+        width: ox(92),
+        borderRadius: ox(10),
         color: '#FFFFFF',
-        paddingHorizontal: 10,
-        paddingVertical: 10,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
         ...glassSearch,
     },
     securityPhoneInput: {
         flex: 1,
-        borderRadius: 10,
+        borderRadius: ox(10),
         color: '#FFFFFF',
-        paddingHorizontal: 10,
-        paddingVertical: 10,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
         ...glassSearch,
     },
     securityCodeInput: {
-        borderRadius: 10,
+        borderRadius: ox(10),
         color: '#FFFFFF',
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        fontSize: 18,
-        letterSpacing: 6,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        fontSize: ox(18),
+        letterSpacing: ox(6),
         textAlign: 'center',
-        marginBottom: 12,
+        marginBottom: ox(12),
         ...glassSearch,
     },
     securityPrimaryButton: {
         backgroundColor: '#d91b5c',
-        borderRadius: 999,
+        borderRadius: ox(999),
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 12,
+        paddingVertical: ox(12),
     },
     securityPrimaryButtonDisabled: {
         opacity: 0.6,
     },
     securityPrimaryButtonText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: ox(15),
         fontWeight: '700',
+    },
+    securitySecondaryButton: {
+        marginTop: ox(10),
+        borderRadius: ox(999),
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: ox(12),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+    },
+    securitySecondaryButtonText: {
+        color: '#D1D5DB',
+        fontSize: ox(15),
+        fontWeight: '600',
     },
     inviteHeaderRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     inviteCloseBtn: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
+        width: ox(30),
+        height: ox(30),
+        borderRadius: ox(15),
         alignItems: 'center',
         justifyContent: 'center',
         ...glassSurface,
     },
     inviteOption: {
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        marginBottom: 10,
+        borderRadius: ox(12),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(12),
+        marginBottom: ox(10),
         ...glassSurface,
     },
     inviteOptionTitle: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
-        marginBottom: 2,
+        marginBottom: ox(2),
     },
     inviteOptionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 8,
-        marginBottom: 2,
+        columnGap: ox(8),
+        marginBottom: ox(2),
     },
     inviteOptionBody: {
         color: '#9CA3AF',
-        fontSize: 12,
+        fontSize: ox(12),
     },
     inviteMatchesWrap: {
-        marginTop: 4,
+        marginTop: ox(4),
     },
     inviteMatchesLabel: {
         color: '#9CA3AF',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
-        marginBottom: 8,
+        marginBottom: ox(8),
         textTransform: 'uppercase',
     },
     inviteMatchRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 10,
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        marginBottom: 8,
+        columnGap: ox(10),
+        borderRadius: ox(10),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(8),
+        marginBottom: ox(8),
         ...glassSurface,
     },
     inviteMatchTitle: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     inviteMatchHandle: {
         color: '#9CA3AF',
-        fontSize: 11,
-        marginTop: 2,
+        fontSize: ox(11),
+        marginTop: ox(2),
     },
     inviteFollowBtn: {
         backgroundColor: '#d91b5c',
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
     },
     inviteFollowBtnText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: ox(12),
         fontWeight: '700',
     },
 });

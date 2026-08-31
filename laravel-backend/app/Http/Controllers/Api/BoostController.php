@@ -52,10 +52,26 @@ class BoostController extends Controller
         if (isset($cache[$label])) return $cache[$label];
 
         $row = DB::table('location_centroids')->where('label', $label)->first(['latitude', 'longitude']);
-        if (!$row) return null;
-        $coords = ['lat' => (float) $row->latitude, 'lng' => (float) $row->longitude];
-        $cache[$label] = $coords;
-        return $coords;
+        if ($row) {
+            $coords = ['lat' => (float) $row->latitude, 'lng' => (float) $row->longitude];
+            $cache[$label] = $coords;
+            return $coords;
+        }
+
+        // Live Google resolve + cache when the seed table does not have this place yet.
+        try {
+            $resolved = (new \App\Services\GoogleMapsLocationService)->resolve(null, $label);
+            if ($resolved && isset($resolved['latitude'], $resolved['longitude'])) {
+                $coords = ['lat' => (float) $resolved['latitude'], 'lng' => (float) $resolved['longitude']];
+                $cache[$label] = $coords;
+                return $coords;
+            }
+        } catch (\Throwable $_) {
+            // ignore — pricing falls back to 0 eligible users
+        }
+
+        $cache[$label] = null;
+        return null;
     }
 
     /**

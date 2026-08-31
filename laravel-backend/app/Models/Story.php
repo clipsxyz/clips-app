@@ -39,6 +39,7 @@ class Story extends Model
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers', // JSON array of StickerOverlay objects
         'tagged_users', // JSON array of user handles
+        'link_preview',
     ];
 
     protected $casts = [
@@ -47,6 +48,7 @@ class Story extends Model
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers' => 'array', // Array of StickerOverlay objects
         'tagged_users' => 'array', // Array of user handles
+        'link_preview' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -77,15 +79,16 @@ class Story extends Model
         return $this->hasMany(StoryView::class);
     }
 
-    // Scopes
+    // Scopes — 24h window in UTC so SQLite/MySQL timezone offsets cannot
+    // treat a just-created story as already expired.
     public function scopeActive($query)
     {
-        return $query->where('expires_at', '>', now());
+        return $query->where('created_at', '>=', now('UTC')->subHours(24));
     }
 
     public function scopeExpired($query)
     {
-        return $query->where('expires_at', '<=', now());
+        return $query->where('created_at', '<', now('UTC')->subHours(24));
     }
 
     public function scopeForUser($query, $userId)
@@ -101,12 +104,12 @@ class Story extends Model
     // Helper methods
     public function isActive()
     {
-        return $this->expires_at > now();
+        return $this->created_at && $this->created_at->gte(now('UTC')->subHours(24));
     }
 
     public function isExpired()
     {
-        return $this->expires_at <= now();
+        return !$this->isActive();
     }
 
     public function hasBeenViewedBy(User $user)

@@ -4,6 +4,9 @@ export type UploadOverlayState = {
     id: string;
     thumbUri?: string;
     thumbType?: 'image' | 'video';
+    /** Text-only post preview tile (web upload overlay parity). */
+    textThumbBackground?: string;
+    textThumbLabel?: string;
     title: string;
     message: string;
     status: UploadOverlayStatus;
@@ -11,6 +14,7 @@ export type UploadOverlayState = {
 
 export type UploadOverlayController = {
     id: string;
+    progress: (message?: string, title?: string) => void;
     success: (message?: string) => void;
     error: (message?: string) => void;
     dismiss: () => void;
@@ -33,6 +37,8 @@ export function subscribeUploadOverlay(listener: Listener): () => void {
 export function showUploadOverlayNative(opts: {
     thumbUri?: string;
     thumbType?: 'image' | 'video';
+    textThumbBackground?: string;
+    textThumbLabel?: string;
     initialMessage?: string;
     uploadingTitle?: string;
     successTitle?: string;
@@ -44,27 +50,37 @@ export function showUploadOverlayNative(opts: {
     const successTitle = opts.successTitle ?? 'Posted!';
     const errorTitle = opts.errorTitle ?? 'Post failed';
 
+    let currentTitle = uploadingTitle;
+    let currentMessage = opts.initialMessage ?? 'Posting to Gazetteer…';
+
     const update = (status: UploadOverlayStatus, message: string, title: string) => {
+        currentTitle = title;
+        currentMessage = message;
         emit({
             id,
             thumbUri: opts.thumbUri,
             thumbType: opts.thumbType ?? 'image',
+            textThumbBackground: opts.textThumbBackground,
+            textThumbLabel: opts.textThumbLabel,
             title,
             message,
             status,
         });
     };
 
-    update('uploading', opts.initialMessage ?? 'Posting to Gazetteer…', uploadingTitle);
+    update('uploading', currentMessage, currentTitle);
 
     const controller: UploadOverlayController = {
         id,
-        success(message = 'Your post is now live on the feed.') {
+        progress(message?: string, title?: string) {
+            update('uploading', message ?? currentMessage, title ?? currentTitle);
+        },
+        success(message = 'Your post is now live') {
             update('success', message, successTitle);
             setTimeout(() => {
                 emit(null);
                 jobControllers.delete(id);
-            }, 1800);
+            }, 2400);
         },
         error(message = 'Could not post. Please try again.') {
             update('error', message, errorTitle);

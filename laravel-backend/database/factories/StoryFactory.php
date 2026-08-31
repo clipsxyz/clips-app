@@ -42,7 +42,9 @@ class StoryFactory extends Factory
     public function expired(): static
     {
         return $this->state(fn (array $attributes) => [
-            'expires_at' => now()->subMinute(),
+            'created_at' => now('UTC')->subHours(25),
+            'updated_at' => now('UTC')->subHours(25),
+            'expires_at' => now('UTC')->subHour(),
         ]);
     }
 

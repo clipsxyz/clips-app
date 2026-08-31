@@ -1,12 +1,31 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import { evaluateCommentModeration } from '../utils/commentModeration';
-import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
+import {
+  getRuntimeEnv,
+  isLaravelApiEnabled,
+  isLaravelUnreachableThisSession,
+  markLaravelUnreachable,
+} from '../config/runtimeEnv';
 import * as apiClient from './client';
+import { isMockMode } from './apiMode';
+import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
+import { mapApiLinkPreview } from '../utils/linkPreview';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
-import { getActiveBoostedPostIds, activateBoost } from './boost';
+import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
+import { setAvatarForHandle } from './users';
+import { isMockDirectoryHandle } from './mockFollowGraph';
+import { regionalFromHandle } from '../utils/gazetteerHandle';
+import {
+  createFollowRequest,
+  hasPendingFollowRequest,
+  isProfilePrivate,
+  removeFollowRequest,
+} from './privacy';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -42,58 +61,38 @@ const AVA_DEMO_TALL_MEDIA_URL = 'https://images.unsplash.com/photo-1514996937319
 
 // Helper function to get user location data from handle
 function getUserLocationFromHandle(userHandle: string): { local: string; regional: string; national: string } {
-  const handleLower = userHandle.toLowerCase();
-
-  // Extract location from handle (check after @ symbol)
-  const afterAt = handleLower.split('@')[1] || '';
-
-  if (afterAt.includes('finglas')) {
-    return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('artane')) {
-    return { local: 'Artane', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('dublin')) {
-    return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('ireland')) {
-    return { local: 'Various', regional: 'Various', national: 'Ireland' };
-  } else if (afterAt.includes('ballymun')) {
-    return { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' };
-  } else if (afterAt.includes('newyork') || afterAt.includes('new york')) {
-    return { local: 'New York', regional: 'New York', national: 'USA' };
-  } else if (afterAt.includes('london')) {
-    return { local: 'London', regional: 'London', national: 'UK' };
-  } else if (afterAt.includes('paris')) {
-    return { local: 'Paris', regional: 'Paris', national: 'France' };
-  } else if (afterAt.includes('tokyo')) {
-    return { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' };
-  } else if (afterAt.includes('sydney')) {
-    return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
+  // Name@Place — only the token after @ is a location. Never scan the name
+  // (Paris@Cork is Cork; Ireland@Dublin is Dublin).
+  const place = regionalFromHandle(userHandle)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  if (!place) {
+    return { local: '', regional: '', national: '' };
   }
 
-  // Fallback: check entire handle (for backward compatibility)
-  if (handleLower.includes('finglas')) {
-    return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('artane')) {
-    return { local: 'Artane', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('dublin')) {
-    return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('ireland')) {
-    return { local: 'Various', regional: 'Various', national: 'Ireland' };
-  } else if (handleLower.includes('ballymun')) {
-    return { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' };
-  } else if (handleLower.includes('newyork') || handleLower.includes('new york')) {
-    return { local: 'New York', regional: 'New York', national: 'USA' };
-  } else if (handleLower.includes('london')) {
-    return { local: 'London', regional: 'London', national: 'UK' };
-  } else if (handleLower.includes('paris')) {
-    return { local: 'Paris', regional: 'Paris', national: 'France' };
-  } else if (handleLower.includes('tokyo')) {
-    return { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' };
-  } else if (handleLower.includes('sydney')) {
-    return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
-  }
+  const fromPlace: Record<string, { local: string; regional: string; national: string }> = {
+    finglas: { local: 'Finglas', regional: 'Dublin', national: 'Ireland' },
+    artane: { local: 'Artane', regional: 'Dublin', national: 'Ireland' },
+    ballymun: { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' },
+    dublin: { local: 'Dublin', regional: 'Dublin', national: 'Ireland' },
+    cork: { local: 'Cork', regional: 'Cork', national: 'Ireland' },
+    countycork: { local: 'Cork', regional: 'Cork', national: 'Ireland' },
+    galway: { local: 'Galway', regional: 'Galway', national: 'Ireland' },
+    limerick: { local: 'Limerick', regional: 'Limerick', national: 'Ireland' },
+    waterford: { local: 'Waterford', regional: 'Waterford', national: 'Ireland' },
+    kilkenny: { local: 'Kilkenny', regional: 'Kilkenny', national: 'Ireland' },
+    belfast: { local: 'Belfast', regional: 'Belfast', national: 'Ireland' },
+    ireland: { local: 'Various', regional: 'Various', national: 'Ireland' },
+    newyork: { local: 'New York', regional: 'New York', national: 'USA' },
+    newyorkstate: { local: 'New York State', regional: 'New York State', national: 'USA' },
+    nyc: { local: 'New York', regional: 'New York', national: 'USA' },
+    london: { local: 'London', regional: 'London', national: 'UK' },
+    paris: { local: 'Paris', regional: 'Paris', national: 'France' },
+    tokyo: { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' },
+    sydney: { local: 'Sydney', regional: 'NSW', national: 'Australia' },
+  };
 
-  // Default - return empty locations
-  return { local: '', regional: '', national: '' };
+  return fromPlace[place] || { local: '', regional: '', national: '' };
 }
 
 /**
@@ -105,7 +104,7 @@ const LOCATION_COUNTRIES = new Set([
   'ireland', 'uk', 'united kingdom', 'england', 'scotland', 'wales', 'france', 'spain', 'portugal', 'germany',
   'netherlands', 'belgium', 'italy', 'switzerland', 'austria', 'poland', 'czech republic', 'hungary', 'greece',
   'romania', 'sweden', 'norway', 'denmark', 'finland', 'russia', 'turkey', 'japan', 'china', 'south korea',
-  'australia', 'new zealand', 'usa', 'united states', 'canada', 'mexico', 'brazil', 'argentina', 'chile',
+  'australia', 'new zealand', 'usa', 'united states', 'united states of america', 'canada', 'mexico', 'brazil', 'argentina', 'chile',
   'colombia', 'india', 'indonesia', 'thailand', 'vietnam', 'malaysia', 'singapore', 'philippines', 'south africa',
   'egypt', 'nigeria', 'morocco', 'israel', 'uae', 'saudi arabia'
 ]);
@@ -121,7 +120,7 @@ const LOCATION_CITIES = new Set([
   'copenhagen', 'stockholm', 'oslo', 'helsinki', 'reykjavik', 'tallinn', 'riga', 'vilnius',
   'moscow', 'saint petersburg', 'istanbul', 'ankara',
   // Americas
-  'new york', 'los angeles', 'chicago', 'houston', 'phoenix', 'philadelphia', 'san antonio', 'san diego',
+  'new york', 'new york state', 'los angeles', 'chicago', 'houston', 'phoenix', 'philadelphia', 'san antonio', 'san diego',
   'san francisco', 'boston', 'seattle', 'miami', 'atlanta', 'denver', 'washington', 'toronto', 'vancouver',
   'montreal', 'calgary', 'mexico city', 'guadalajara', 'monterrey', 'são paulo', 'rio de janeiro',
   'buenos aires', 'lima', 'bogotá', 'bogota', 'santiago', 'caracas',
@@ -133,6 +132,43 @@ const LOCATION_CITIES = new Set([
 ]);
 
 const DUBLIN_LOCAL_AREAS = new Set(['finglas', 'artane', 'ballymun']);
+/** Places whose authors belong on the Ireland news tab (not Dublin-only). */
+const IRELAND_AUTHOR_PLACES = new Set([
+  'ireland',
+  'dublin',
+  'cork',
+  'county cork',
+  'co cork',
+  'galway',
+  'limerick',
+  'waterford',
+  'kilkenny',
+  'belfast',
+  ...DUBLIN_LOCAL_AREAS,
+]);
+/** Places whose authors belong on the USA news tab when national is blank. */
+const USA_AUTHOR_PLACES = new Set([
+  'usa',
+  'us',
+  'united states',
+  'united states of america',
+  'new york',
+  'new york state',
+  'ny',
+  'nyc',
+]);
+
+function isUsaNationalName(value: string): boolean {
+  return value === 'usa' || value === 'us' || value === 'united states' || value === 'united states of america';
+}
+
+function isNewYorkPlaceName(value: string): boolean {
+  return value === 'new york' || value === 'new york state' || value === 'ny' || value === 'nyc';
+}
+
+function isCorkPlaceName(value: string): boolean {
+  return value === 'cork' || value === 'county cork' || value === 'co cork' || value === 'co. cork';
+}
 
 function toLocationLabelCase(value?: string): string {
   const trimmed = (value || '').trim();
@@ -172,9 +208,20 @@ function resolveAuthorLocations(input: {
   }
 
   if (!national) {
-    if (regionalLower === 'dublin' || DUBLIN_LOCAL_AREAS.has(localLower)) {
+    if (
+      IRELAND_AUTHOR_PLACES.has(localLower) ||
+      IRELAND_AUTHOR_PLACES.has(regionalLower) ||
+      DUBLIN_LOCAL_AREAS.has(localLower)
+    ) {
       national = 'Ireland';
-    } else if (regionalLower === 'new york' || localLower === 'new york') {
+    } else if (
+      regionalLower === 'new york' ||
+      localLower === 'new york' ||
+      regionalLower === 'new york state' ||
+      localLower === 'new york state' ||
+      USA_AUTHOR_PLACES.has(regionalLower) ||
+      USA_AUTHOR_PLACES.has(localLower)
+    ) {
       national = 'USA';
     } else if (regionalLower === 'london' || localLower === 'london') {
       national = 'UK';
@@ -201,6 +248,33 @@ const PENDING_CREATED_POST_KEY = 'clips_pending_created_post';
 /** True when comments/likes should use in-memory mock APIs (not Laravel UUID routes). */
 export function isFrontendOnlyPostId(id: string): boolean {
   return isMockPostId(id) || id.startsWith('mock-scenes-');
+}
+
+function shouldUseLivePostApi(id: string): boolean {
+  // Live mode is EXPO_PUBLIC_USE_MOCK=false for web and native. Do not use
+  // isLaravelApiEnabled() here — a single timeout used to flip that off for
+  // the whole session, so likes/comments/shares stayed in memory while Home
+  // reloaded zeros from Laravel. Do not skip Laravel just because Vite is
+  // serving the web app (VITE_DEV_MODE).
+  return !isMockMode() && !isFrontendOnlyPostId(String(id));
+}
+
+function bumpLocalPostCommentCount(postId: string, nextCount?: number, delta = 1): number {
+  const id = String(postId);
+  const idx = posts.findIndex((p) => String(p.id) === id);
+  if (idx < 0) {
+    return typeof nextCount === 'number' && Number.isFinite(nextCount) ? Math.max(0, nextCount) : 0;
+  }
+  const current = Number(posts[idx].stats?.comments) || 0;
+  const comments =
+    typeof nextCount === 'number' && Number.isFinite(nextCount)
+      ? Math.max(current, nextCount)
+      : Math.max(0, current + delta);
+  posts[idx] = {
+    ...posts[idx],
+    stats: { ...posts[idx].stats, comments },
+  };
+  return comments;
 }
 
 /** One comment bucket per Ava demo post (feed may use ava-normal-* or ava-normal-ireland-demo). */
@@ -235,15 +309,27 @@ function isMockPostId(id: string): boolean {
     s.startsWith('post-') ||           // JSON seed posts (post-1-..., post-2-...)
     s.startsWith('artane-post-') ||
     s.startsWith('bob-post-') ||
+    s.startsWith('finglas-post-') ||
+    s.startsWith('venue-3arena-demo-') ||
     s.startsWith('ava-boosted-demo-') ||
+    s.startsWith('ava-boosted-discover-demo') ||
     s.startsWith('ava-normal-') ||      // ava-normal-ireland-demo + ava-normal-*-galway
     s.startsWith('mock-scenes-')
   );
 }
 
+/** Mock/seed cards that must not appear in a live Laravel feed. */
+export function isMockFeedPost(post: { id?: string; userHandle?: string } | null | undefined): boolean {
+  if (!post) return true;
+  if (isMockPostId(String(post.id || ''))) return true;
+  if (isMockDirectoryHandle(post.userHandle)) return true;
+  return false;
+}
+
 // Get posts from localStorage
 function getPostsFromStorage(): Post[] {
   try {
+    if (typeof localStorage === 'undefined') return [];
     const stored = localStorage.getItem(POSTS_STORAGE_KEY);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
@@ -254,21 +340,160 @@ function getPostsFromStorage(): Post[] {
 
 // Save posts to localStorage — only user-created posts (exclude all mock/seed posts to avoid unbounded growth and duplicates on reload)
 function savePostsToStorage(postsToSave: Post[]): void {
+  const userCreatedPosts = postsToSave.filter(p => !isMockFeedPost(p));
   try {
-    const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
-    localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
-    console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
+      console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+    }
   } catch (error) {
     console.error('Error saving posts to localStorage:', error);
   }
+  void import('./postsStorage.native')
+    .then((m) => m.savePostsToStorageNative(userCreatedPosts))
+    .catch(() => {});
+}
+
+/** Wipe local feed cache (used when entering live Laravel mode so Sarah/Bob seeds can't linger). */
+export async function clearLocalFeedPostsStorage(): Promise<void> {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(POSTS_STORAGE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { clearCorruptPostsStorageNative } = await import('./postsStorage.native');
+    await clearCorruptPostsStorageNative();
+  } catch {
+    /* ignore */
+  }
+  if (!isMockMode()) {
+    posts = posts.filter((p) => !isMockFeedPost(p));
+  }
+}
+
+function remapFollowKeyMap(
+  follows: Record<string, boolean>,
+  oldNorm: string,
+  newHandle: string,
+): Record<string, boolean> {
+  const next: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(follows || {})) {
+    const k = String(key || '').replace(/^@/, '').trim();
+    if (k.toLowerCase() === oldNorm) {
+      next[newHandle] = value;
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/**
+ * After a passport name/handle change: rewrite denormalized handles in mock posts,
+ * comments, and follow maps so the feed and profile stay in sync.
+ */
+export async function renameUserHandleEverywhere(
+  oldHandle: string,
+  newHandle: string,
+): Promise<void> {
+  const oldNorm = String(oldHandle || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
+  const nextHandle = String(newHandle || '').replace(/^@/, '').trim();
+  if (!oldNorm || !nextHandle || oldNorm === nextHandle.toLowerCase()) return;
+
+  const rewrite = (h?: string | null) => {
+    if (!h) return h;
+    const n = String(h).replace(/^@/, '').trim().toLowerCase();
+    return n === oldNorm ? nextHandle : h;
+  };
+
+  posts = posts.map((p) => ({
+    ...p,
+    userHandle: rewrite(p.userHandle) || p.userHandle,
+    originalUserHandle: p.originalUserHandle
+      ? rewrite(p.originalUserHandle) || p.originalUserHandle
+      : p.originalUserHandle,
+    taggedUsers: Array.isArray(p.taggedUsers)
+      ? p.taggedUsers.map((t) => rewrite(t) || t)
+      : p.taggedUsers,
+  }));
+  savePostsToStorage(posts);
+
+  comments = comments.map((c) => ({
+    ...c,
+    userHandle: rewrite(c.userHandle) || c.userHandle,
+    replies: Array.isArray(c.replies)
+      ? c.replies.map((r) => ({
+          ...r,
+          userHandle: rewrite(r.userHandle) || r.userHandle,
+        }))
+      : c.replies,
+  }));
+
+  for (const [uid, state] of Object.entries(userState)) {
+    if (!state?.follows) continue;
+    state.follows = remapFollowKeyMap(state.follows, oldNorm, nextHandle);
+    saveFollowsToStorage(uid, state.follows);
+  }
+
+  try {
+    const { renameStoryHandlesEverywhere } = await import('./stories');
+    renameStoryHandlesEverywhere(oldHandle, nextHandle);
+  } catch {
+    /* stories module optional in some environments */
+  }
+
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('userHandleChanged', {
+          detail: { oldHandle, newHandle: nextHandle },
+        }),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { DeviceEventEmitter } = await import('react-native');
+    DeviceEventEmitter.emit('userHandleChanged', { oldHandle, newHandle: nextHandle });
+  } catch {
+    /* web */
+  }
+}
+
+/** Persist Sponsored / boost tier on a post (legal disclosure). Used by mock + Stripe activate flows. */
+export function markPostAsBoosted(
+  postId: string,
+  feedType: 'local' | 'regional' | 'national',
+): void {
+  const id = String(postId);
+  const idx = posts.findIndex((p) => String(p.id) === id);
+  if (idx < 0) return;
+  posts[idx] = {
+    ...posts[idx],
+    isBoosted: true,
+    boostFeedType: feedType,
+  };
+  savePostsToStorage(posts);
 }
 
 function markPendingCreatedPost(post: Post): void {
   try {
-    localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+    }
   } catch {
     // Ignore storage failures; post creation should still succeed.
   }
+  void import('./postsStorage.native')
+    .then((m) => m.markPendingCreatedPostNative(post))
+    .catch(() => {});
 }
 
 export function consumePendingCreatedPost(): Post | null {
@@ -311,7 +536,7 @@ if (!postsInitialized) {
 
   // Load user-created posts from localStorage (only non-mock posts should be stored; old saves may have contained mock data)
   // and normalize any legacy location fields so feed matching is consistent.
-  const storedUserCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+  const storedUserCreatedPosts = getPostsFromStorage().filter(p => !isMockFeedPost(p));
   const userCreatedPosts = storedUserCreatedPosts.map((p) => ({
     ...p,
     ...resolveAuthorLocations({
@@ -336,6 +561,12 @@ if (!postsInitialized) {
   console.log('📂 Loaded', userCreatedPosts.length, 'user-created posts from localStorage');
 
   // Merge: user-created posts first (newest), then JSON posts — mock posts are never loaded from storage
+  // Live mode: never seed Sarah/Bob/Ava/json demos into memory (they leak into feeds).
+  if (!isMockMode()) {
+    posts = [...userCreatedPosts].filter((p) => !isMockFeedPost(p));
+    postsInitialized = true;
+    console.log('[posts] live mode — skipped mock seed posts, kept', posts.length, 'local posts');
+  } else {
   posts = [...userCreatedPosts, ...jsonPosts];
   postsInitialized = true;
 
@@ -366,7 +597,7 @@ if (!postsInitialized) {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=800',
       mediaType: 'image',
       caption: 'Amazing sunset over Galway Bay! The west of Ireland never disappoints.',
       createdAt: artaneNow - 9000000, // 2.5 hours ago
@@ -416,9 +647,8 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: artaneNow - 7200000, // 2 hours ago
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -434,9 +664,8 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: artaneNow - 86400000, // 1 day ago
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -469,7 +698,7 @@ if (!postsInitialized) {
       venue: 'Phoenix Park',
       landmark: 'Phoenix Park',
       tags: [],
-      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+      mediaUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800',
       mediaType: 'image',
       caption: 'Perfect morning walk in Phoenix Park! The deer are out and about 🦌',
       createdAt: artaneNow - 259200000, // 3 days ago
@@ -542,7 +771,62 @@ if (!postsInitialized) {
     userNational: 'Ireland',
   } as Post;
 
-  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
+  // Extra Finglas locals so the home (local) tab has more than Alice's videos
+  const finglasPosts: Post[] = [
+    {
+      id: `finglas-post-1-${artaneNow - 2400000}`,
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas Village',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800',
+      mediaType: 'image',
+      caption: 'Saturday market haul — strawberries were perfect',
+      createdAt: artaneNow - 2400000,
+      stats: { likes: 38, views: 201, comments: 6, shares: 2, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+    } as Post,
+    {
+      id: `finglas-post-2-${artaneNow - 10800000}`,
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas, Dublin',
+      tags: [],
+      text: 'Anyone else hear the buskers on the main street tonight? Absolute class. Community vibes on point. 🎸',
+      createdAt: artaneNow - 10800000,
+      stats: { likes: 19, views: 97, comments: 8, shares: 1, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+      mediaUrl: undefined,
+      mediaType: undefined,
+    } as Post,
+    {
+      id: `finglas-post-3-${artaneNow - 15000000}`,
+      userHandle: 'Bob@Finglas',
+      locationLabel: 'Jamestown Road',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=800',
+      mediaType: 'image',
+      caption: 'New coffee spot near the roundabout — 10/10 flat white',
+      createdAt: artaneNow - 15000000,
+      stats: { likes: 52, views: 310, comments: 11, shares: 4, reclips: 2 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland',
+    } as Post,
+  ];
+
+  posts = [...posts, ...artanePosts, ...bobPosts, ...finglasPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
 
   // Dedupe by id (keep first occurrence) so corrupted localStorage or old saves don't leave thousands of duplicates
   const seenIds = new Set<string>();
@@ -568,6 +852,7 @@ if (!postsInitialized) {
 
   // Activate boost for Ava's post so it appears as Sponsored in Dublin (regional) feed
   activateBoost(avaBoostedPost.id, 'ava-mock-user', 'regional', 5).catch(() => { });
+  } // end isMockMode() seed
 } else {
   console.log('Posts array already initialized, length:', posts.length);
 }
@@ -703,9 +988,45 @@ function saveFollowsToStorage(userId: string, follows: Record<string, boolean>):
       localStorage.setItem(FOLLOWS_STORAGE_KEY(userId), JSON.stringify(follows));
     }
   } catch (_) {}
+  void import('./postsStorage.native')
+    .then((m) => m.saveFollowsToStorageNative(userId, follows))
+    .catch(() => {});
 }
 
-/** Fresh follows from localStorage (no in-memory cache). Merge from all possible keys so phone/tablet never miss follows due to userId mismatch. */
+/** RN: pull follows for a userId into the in-memory localStorage shim (call early on startup). */
+export async function hydrateFollowsStorage(userId: string): Promise<void> {
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  if (!uid) return;
+  try {
+    const m = await import('./postsStorage.native');
+    const follows = await m.getFollowsFromStorageNative(uid);
+    if (follows && Object.keys(follows).length > 0) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(FOLLOWS_STORAGE_KEY(uid), JSON.stringify(follows));
+      }
+      // Keep getState() cache in sync — it may already exist before AsyncStorage resolves.
+      if (userState[uid]) {
+        userState[uid].follows = { ...follows, ...userState[uid].follows };
+        collapseFollowKeys(userState[uid].follows);
+      }
+    }
+  } catch {
+    // web / unavailable
+  }
+}
+
+/** Drop in-memory likes/follows/etc so the next getState() reloads from storage. */
+export function clearUserState(userId?: string): void {
+  if (userId != null && String(userId)) {
+    delete userState[String(userId)];
+    return;
+  }
+  for (const key of Object.keys(userState)) {
+    delete userState[key];
+  }
+}
+
+/** Follows for Following feed: storage + in-memory (RN has no localStorage, so taps live in userState). */
 function getFollowsForDiscover(userId: string): Record<string, boolean> {
   const uid = typeof userId === 'string' ? userId : String(userId);
   const fromUid = loadFollowsFromStorage(uid);
@@ -722,7 +1043,8 @@ function getFollowsForDiscover(userId: string): Record<string, boolean> {
       }
     }
   } catch (_) {}
-  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid };
+  const fromMemory = userState[uid]?.follows || {};
+  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid, ...fromMemory };
 }
 
 export function getState(userId: string): UserState {
@@ -738,6 +1060,9 @@ export function getState(userId: string): UserState {
         try {
           if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('anon'));
         } catch (_) {}
+        void import('./postsStorage.native')
+          .then((m) => m.removeFollowsFromStorageNative('anon'))
+          .catch(() => {});
       }
       // Merge from 'test-user' so follows made before signup don't vanish (test-user is the default pre-login user)
       if (uid !== 'test-user') {
@@ -748,6 +1073,9 @@ export function getState(userId: string): UserState {
           try {
             if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('test-user'));
           } catch (_) {}
+          void import('./postsStorage.native')
+            .then((m) => m.removeFollowsFromStorageNative('test-user'))
+            .catch(() => {});
         }
       }
     }
@@ -759,12 +1087,21 @@ export function getState(userId: string): UserState {
       lastViewed: {}
     };
   }
+  collapseFollowKeys(userState[uid].follows);
   return userState[uid];
 }
 
 const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
-export type Page = { items: Post[]; nextCursor: string | number | null; fromMock?: boolean };
+export type Page = {
+  items: Post[];
+  nextCursor: string | number | null;
+  fromMock?: boolean;
+  /** True when Laravel was skipped because the backend was unreachable this session. */
+  laravelBypassed?: boolean;
+  /** Accepted follows for the viewer (Following tab empty-state). */
+  followingCount?: number;
+};
 
 function isFirstFeedPageCursor(cursor: string | number | null): boolean {
   if (cursor === null) return true;
@@ -780,24 +1117,73 @@ export function getFollowState(follows: Record<string, boolean>, handle: string 
   return key ? !!follows[key] : false;
 }
 
-/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates. */
-function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
+/** True when this handle has an explicit local follow entry (including unfollow → false). */
+export function hasExplicitFollowState(
+  follows: Record<string, boolean>,
+  handle: string | undefined,
+): boolean {
+  if (handle == null || typeof handle !== 'string') return false;
   const lower = handle.toLowerCase();
-  const existingKey = Object.keys(follows).find(k => k.toLowerCase() === lower);
-  if (existingKey) {
-    if (isFollowing) follows[existingKey] = true;
-    else delete follows[existingKey];
-    return;
+  return Object.keys(follows).some((k) => k.toLowerCase() === lower);
+}
+
+/** Collapse case-variant keys. Explicit `false` wins so unfollow is not resurrected. */
+function collapseFollowKeys(follows: Record<string, boolean>): void {
+  const byLower = new Map<string, { key: string; on: boolean }>();
+  for (const [raw, val] of Object.entries(follows)) {
+    const key = String(raw || '').trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    const on = val === true;
+    const prev = byLower.get(lower);
+    if (!prev) {
+      byLower.set(lower, { key, on });
+    } else {
+      prev.on = prev.on && on;
+    }
   }
-  if (isFollowing) follows[handle] = true;
-  else delete follows[handle];
+  for (const k of Object.keys(follows)) delete follows[k];
+  for (const { key, on } of byLower.values()) {
+    follows[key] = on;
+  }
+}
+
+/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates.
+ *  Unfollow stores `false` (does not delete) so decorateForUser won't fall back to a stale post.isFollowing. */
+function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
+  const trimmed = String(handle || '').trim();
+  if (!trimmed) return;
+  const lower = trimmed.toLowerCase();
+  for (const k of Object.keys(follows)) {
+    if (k.toLowerCase() === lower) delete follows[k];
+  }
+  follows[trimmed] = isFollowing;
+}
+
+function emitFollowStateChanged(handle: string, following: boolean): void {
+  try {
+    void import('../utils/dispatchBrowserEvent').then((m) => {
+      m.dispatchBrowserEvent('followStateChanged', { handle, following });
+    });
+  } catch {
+    /* native/web */
+  }
+  // Unfollow: do not refetch the rail — a stale GET can put the postcard back.
+  if (!following) return;
+  try {
+    void import('../utils/storiesRefreshNative').then((m) => {
+      m.emitStoriesRefresh();
+    });
+  } catch {
+    /* rail + avatar rings refresh on follow */
+  }
 }
 
 // Get list of user handles that the current user follows
 export async function getFollowedUsers(userId: string): Promise<string[]> {
   await delay();
   const s = getState(userId);
-  return Object.keys(s.follows).filter(handle => s.follows[handle] === true);
+  return Object.keys(s.follows).filter((handle) => s.follows[handle] === true);
 }
 
 // Explicitly set follow state for a given handle. Persists to localStorage.
@@ -806,6 +1192,48 @@ export function setFollowState(userId: string, handle: string, isFollowing: bool
   const s = getState(uid);
   setFollowStateKey(s.follows, handle, isFollowing);
   saveFollowsToStorage(uid, s.follows);
+  emitFollowStateChanged(handle, isFollowing);
+}
+
+/** Replace local follow cache with the server list. Laravel is the source of truth. */
+export function replaceFollowsFromHandles(userId: string, handles: string[]): void {
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  const next: Record<string, boolean> = {};
+  for (const raw of handles) {
+    const handle = String(raw || '').trim();
+    if (handle) setFollowStateKey(next, handle, true);
+  }
+  const s = getState(uid);
+  s.follows = next;
+  saveFollowsToStorage(uid, next);
+}
+
+/** Pull accepted follows from Laravel so the Following tab and +/check stay aligned. */
+export async function syncFollowsFromLaravel(userId: string, viewerHandle: string): Promise<void> {
+  if (isMockMode()) return;
+  const handle = String(viewerHandle || '').trim();
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  if (!uid || !handle) return;
+  const collected: string[] = [];
+  let cursor: string | number | null = 0;
+  for (let page = 0; page < 8; page += 1) {
+    const res = await apiClient.fetchFollowing(handle, cursor, 50);
+    const items = Array.isArray(res?.items) ? res.items : [];
+    for (const row of items) {
+      const rowHandle = row?.handle ?? row?.userHandle;
+      if (rowHandle) collected.push(String(rowHandle));
+    }
+    if (!res?.nextCursor || items.length === 0) break;
+    cursor = res.nextCursor;
+  }
+  replaceFollowsFromHandles(uid, collected);
+}
+
+/** Set whether the user has saved a post (bookmark). Used for optimistic UI. */
+export function setBookmarkState(userId: string, postId: string, saved: boolean): void {
+  const s = getState(userId);
+  if (saved) s.bookmarks[postId] = true;
+  else delete s.bookmarks[postId];
 }
 
 /** Set whether the user has reclipped a post (so decorateForUser shows green). Used for optimistic UI. */
@@ -815,18 +1243,89 @@ export function setReclipState(userId: string, postId: string, reclipped: boolea
   else delete s.reclips[postId];
 }
 
-// compute view for a user: show following if local state OR API says so (so backend signups and + taps both work)
+/** Look up personal/business from an in-memory post by author handle. */
+export function getAccountTypeForHandle(
+  handle: string | undefined | null,
+): 'personal' | 'business' | undefined {
+  const norm = String(handle || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
+  if (!norm) return undefined;
+  const match = posts.find((p) => {
+    const h = String(p.userHandle || '')
+      .replace(/^@/, '')
+      .trim()
+      .toLowerCase();
+    return h === norm;
+  });
+  if (match?.userAccountType === 'business' || match?.userAccountType === 'personal') {
+    return match.userAccountType;
+  }
+  return undefined;
+}
+
+/**
+ * Keep a hydrated post in the in-memory store (e.g. collection snapshots) so comments/likes
+ * and getPostById keep working after navigation.
+ */
+export function upsertLocalPost(post: Post): Post {
+  if (!post?.id) return post;
+  const idx = posts.findIndex((p) => String(p.id) === String(post.id));
+  if (idx >= 0) {
+    posts[idx] = { ...posts[idx], ...post, id: posts[idx].id };
+    return posts[idx];
+  }
+  posts.unshift(post);
+  return post;
+}
+
+/** Live in-memory post snapshot (for feed pins / fullscreen after like). */
+export function getLocalPostById(postId: string | undefined | null): Post | undefined {
+  if (postId == null || postId === '') return undefined;
+  const idKey = String(postId);
+  return posts.find((p) => String(p.id) === idKey);
+}
+
+// Local follow map wins when present (including explicit unfollow). Otherwise fall back to API flag.
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
   const fromLocal = getFollowState(s.follows, p.userHandle);
   const fromApi = p.isFollowing === true;
-  const isFollowing = fromLocal || fromApi;
+  const isFollowing = hasExplicitFollowState(s.follows, p.userHandle) ? fromLocal : fromApi;
+  const idKey = String(p.id);
+  const localLiked = Object.prototype.hasOwnProperty.call(s.likes, idKey)
+    ? !!s.likes[idKey]
+    : Object.prototype.hasOwnProperty.call(s.likes, String(p.id))
+      ? !!s.likes[String(p.id)]
+      : undefined;
+  const localReclipped = Object.prototype.hasOwnProperty.call(s.reclips, idKey)
+    ? !!s.reclips[idKey]
+    : Object.prototype.hasOwnProperty.call(s.reclips, String(p.id))
+      ? !!s.reclips[String(p.id)]
+      : undefined;
+  const userReclipped = localReclipped !== undefined ? localReclipped : p.userReclipped === true;
+  const reclips = Math.max(Number(p.stats?.reclips) || 0, userReclipped ? 1 : 0);
+  const localBookmarked = Object.prototype.hasOwnProperty.call(s.bookmarks, idKey)
+    ? !!s.bookmarks[idKey]
+    : Object.prototype.hasOwnProperty.call(s.bookmarks, String(p.id))
+      ? !!s.bookmarks[String(p.id)]
+      : undefined;
+  const isBookmarked = localBookmarked !== undefined ? localBookmarked : p.isBookmarked === true;
   const decorated = {
     ...p,
-    userLiked: !!s.likes[p.id],
-    isBookmarked: !!s.bookmarks[p.id],
+    userLiked: localLiked !== undefined ? localLiked : p.userLiked === true,
+    isBookmarked,
     isFollowing,
-    userReclipped: !!s.reclips[p.id],
+    userReclipped,
+    stats: {
+      likes: Number(p.stats?.likes) || 0,
+      views: Number(p.stats?.views) || 0,
+      comments: Number(p.stats?.comments) || 0,
+      shares: Number(p.stats?.shares) || 0,
+      reclips,
+      saves: Math.max(Number(p.stats?.saves) || 0, isBookmarked ? 1 : 0),
+    },
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
     textStyle: p.textStyle,
@@ -836,6 +1335,92 @@ export function decorateForUser(userId: string, p: Post): Post {
   };
   // Preserve taggedUsers for template posts (used by Media for tag display)
   return decorated;
+}
+
+export function mergeEngagementStats(
+  incoming?: Post['stats'],
+  previous?: Post['stats'],
+): Post['stats'] {
+  const a = incoming ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0, saves: 0 };
+  const b = previous ?? { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0, saves: 0 };
+  return {
+    likes: Math.max(Number(a.likes) || 0, Number(b.likes) || 0),
+    views: Math.max(Number(a.views) || 0, Number(b.views) || 0),
+    comments: Math.max(Number(a.comments) || 0, Number(b.comments) || 0),
+    shares: Math.max(Number(a.shares) || 0, Number(b.shares) || 0),
+    reclips: Math.max(Number(a.reclips) || 0, Number(b.reclips) || 0),
+    saves: Math.max(Number(a.saves) || 0, Number(b.saves) || 0),
+  };
+}
+
+function syncLocalBookmarksFromApi(
+  userId: string,
+  rows: Post[],
+  opts?: { allowUndo?: boolean },
+): void {
+  if (!userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  for (const p of rows) {
+    const id = String(p.id);
+    if (p.isBookmarked === true) s.bookmarks[id] = true;
+    else if (opts?.allowUndo) delete s.bookmarks[id];
+  }
+}
+
+/** After a live fetch, adopt server reclips so a restart still shows the green icon. */
+function syncLocalReclipsFromApi(
+  userId: string,
+  rows: Post[],
+  opts?: { allowUndo?: boolean },
+): void {
+  if (!userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  for (const p of rows) {
+    const id = String(p.id);
+    if (p.userReclipped === true) s.reclips[id] = true;
+    else if (opts?.allowUndo) delete s.reclips[id];
+  }
+}
+
+/** After a live fetch, adopt server likes without wiping a just-tapped like when the API omitted the viewer flag. */
+function syncLocalLikesFromApi(
+  userId: string,
+  rows: Post[],
+  opts?: { allowUnlike?: boolean },
+): void {
+  if (!userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  for (const p of rows) {
+    const id = String(p.id);
+    if (p.userLiked === true) s.likes[id] = true;
+    else if (opts?.allowUnlike) s.likes[id] = false;
+  }
+}
+
+/** Adopt Laravel is_following onto the local map so unfollow sees the same state as the checkmark. */
+function syncLocalFollowsFromApi(userId: string, rows: Post[]): void {
+  if (isMockMode() || !userId || !Array.isArray(rows) || rows.length === 0) return;
+  const s = getState(userId);
+  let changed = false;
+  for (const p of rows) {
+    if (!p.userHandle) continue;
+    const apiFollowing = p.isFollowing === true;
+    const localFollowing = getFollowState(s.follows, p.userHandle);
+    const explicit = hasExplicitFollowState(s.follows, p.userHandle);
+    if (apiFollowing) {
+      // Explicit unfollow wins over a stale feed row that still has is_following.
+      if (explicit && !localFollowing) continue;
+      if (localFollowing) continue;
+      setFollowStateKey(s.follows, p.userHandle, true);
+      changed = true;
+      continue;
+    }
+    if (explicit && localFollowing) {
+      setFollowStateKey(s.follows, p.userHandle, false);
+      changed = true;
+    }
+  }
+  if (changed) saveFollowsToStorage(userId, s.follows);
 }
 
 function normalizeCaptionFields<T extends Post>(post: T): T {
@@ -866,22 +1451,61 @@ function normalizeCaptionFields<T extends Post>(post: T): T {
   return normalized as T;
 }
 
-/** Rewrite localhost media URLs so they work when opening app from phone on network */
+/** Rewrite localhost / relative media URLs so they load on device. */
 function rewriteMediaUrlForNetwork(url: string): string {
   if (!url || typeof url !== 'string') return url;
-  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return url;
-  // On phone/tablet: replace localhost:8000 with current host:8000 so backend media loads
-  return url
-    .replace(/http:\/\/localhost:8000\//g, `http://${hostname}:8000/`)
-    .replace(/https:\/\/localhost:8000\//g, `https://${hostname}:8000/`)
-    .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${hostname}:8000/`);
+  const resolved = resolvePublicMediaUrl(url) || url;
+
+  // RN polyfills `window` without a real `location` — never read `.hostname` blindly.
+  let browserHost = '';
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      typeof window.location.hostname === 'string'
+    ) {
+      browserHost = window.location.hostname;
+    }
+  } catch {
+    browserHost = '';
+  }
+
+  let targetHost = browserHost;
+  if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
+    // Prefer configured API host when it's a LAN IP (Wi‑Fi without adb reverse).
+    try {
+      const apiBase = getApiBaseUrl();
+      if (apiBase && /^https?:\/\//i.test(apiBase)) {
+        const apiHost = new URL(apiBase).hostname;
+        if (apiHost && apiHost !== 'localhost' && apiHost !== '127.0.0.1') {
+          targetHost = apiHost;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Physical device + adb reverse: keep localhost media URLs as-is.
+  if (!targetHost || targetHost === 'localhost' || targetHost === '127.0.0.1') {
+    return resolved;
+  }
+
+  return resolved
+    .replace(/http:\/\/localhost:8000\//g, `http://${targetHost}:8000/`)
+    .replace(/https:\/\/localhost:8000\//g, `https://${targetHost}:8000/`)
+    .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${targetHost}:8000/`);
 }
 
 // Transform Laravel API post response to frontend Post format
 export function transformLaravelPost(response: any): Post {
   const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
-  const originalMediaUrl = response.media_url || response.mediaUrl || '';
+  const originalMediaUrl =
+    response.video_url ||
+    response.videoUrl ||
+    response.media_url ||
+    response.mediaUrl ||
+    '';
   const mediaItems = response.media_items || response.mediaItems;
   // Still-image posts often have media only in media_items; ensure we have a single mediaUrl for display
   const firstItem = Array.isArray(mediaItems) && mediaItems.length > 0 ? mediaItems[0] : null;
@@ -891,14 +1515,28 @@ export function transformLaravelPost(response: any): Post {
   resolvedMediaUrl = rewriteMediaUrlForNetwork(resolvedMediaUrl);
   const resolvedMediaType = response.media_type || response.mediaType || firstItemType || undefined;
   const resolvedVideoFrameMode = (response.video_frame_mode || response.videoFrameMode || 'crop') as Post['videoFrameMode'];
-  const resolvedVideoPosterUrl = response.video_poster_url || response.videoPosterUrl || undefined;
+  const firstItemPoster =
+    firstItem && (firstItem.poster_url || firstItem.posterUrl || firstItem.thumbnail_url || firstItem.thumbnailUrl);
+  const resolvedVideoPosterUrl =
+    response.thumbnail_url ||
+    response.thumbnailUrl ||
+    response.video_poster_url ||
+    response.videoPosterUrl ||
+    response.poster_url ||
+    response.posterUrl ||
+    (typeof firstItemPoster === 'string' ? firstItemPoster : undefined) ||
+    undefined;
+  const rewrittenPoster = resolvedVideoPosterUrl
+    ? rewriteMediaUrlForNetwork(String(resolvedVideoPosterUrl))
+    : undefined;
 
   // Rewrite mediaItems URLs for network access
   let processedMediaItems = mediaItems;
   if (Array.isArray(mediaItems) && mediaItems.length > 0) {
     processedMediaItems = mediaItems.map((item: any) => {
       if (!item) return item;
-      const rawPoster = item.poster_url || item.posterUrl;
+      const rawPoster =
+        item.poster_url || item.posterUrl || item.thumbnail_url || item.thumbnailUrl;
       const posterUrl =
         rawPoster && typeof rawPoster === 'string'
           ? rewriteMediaUrlForNetwork(String(rawPoster))
@@ -907,10 +1545,10 @@ export function transformLaravelPost(response: any): Post {
         return {
           ...item,
           url: rewriteMediaUrlForNetwork(String(item.url)),
-          ...(posterUrl ? { posterUrl } : {}),
+          ...(posterUrl ? { posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : {}),
         };
       }
-      return posterUrl ? { ...item, posterUrl } : item;
+      return posterUrl ? { ...item, posterUrl, thumbnailUrl: posterUrl, thumbnail_url: posterUrl } : item;
     });
   }
 
@@ -920,25 +1558,96 @@ export function transformLaravelPost(response: any): Post {
   const existing = posts.find((p) => String(p.id) === String(response.id));
 
   const normalizedLocations = resolveAuthorLocations({
-    userHandle: response.user_handle || response.userHandle,
-    userLocal: response.user?.local || response.userLocal,
-    userRegional: response.user?.regional || response.userRegional,
-    userNational: response.user?.national || response.userNational,
+    userHandle: response.user_handle || response.userHandle || response.user?.handle,
+    userLocal:
+      response.user?.local ||
+      response.user?.location_local ||
+      response.userLocal,
+    userRegional:
+      response.user?.regional ||
+      response.user?.location_regional ||
+      response.userRegional,
+    userNational:
+      response.user?.national ||
+      response.user?.location_national ||
+      response.userNational,
   });
+
+  const authorHandle = String(
+    response.user?.handle || response.user_handle || response.userHandle || '',
+  ).trim();
+  const rawAuthorAvatar =
+    response.user?.avatar_url ||
+    response.user?.avatarUrl ||
+    response.avatar_url ||
+    response.avatarUrl;
+  const authorAvatarUrl =
+    typeof rawAuthorAvatar === 'string' && rawAuthorAvatar.trim()
+      ? rewriteMediaUrlForNetwork(rawAuthorAvatar.trim())
+      : undefined;
+  if (authorHandle && authorAvatarUrl) {
+    setAvatarForHandle(authorHandle, authorAvatarUrl);
+  }
+
+  const rawReclip = response.is_reclipped ?? response.isReclipped;
+  const isReclipped =
+    rawReclip === true ||
+    rawReclip === 1 ||
+    rawReclip === '1' ||
+    (rawReclip == null && existing?.isReclipped === true);
+  const originalUserHandle = isReclipped
+    ? response.original_user_handle ||
+      response.originalUserHandle ||
+      response.original_post?.user_handle ||
+      response.original_post?.userHandle ||
+      response.originalPost?.userHandle ||
+      existing?.originalUserHandle
+    : undefined;
+  const rawOriginalAvatar =
+    response.original_user?.avatar_url ||
+    response.original_user?.avatarUrl ||
+    response.original_user_avatar_url ||
+    response.originalUserAvatarUrl ||
+    response.original_post?.user?.avatar_url ||
+    existing?.originalUserAvatarUrl;
+  const originalUserAvatarUrl =
+    isReclipped && typeof rawOriginalAvatar === 'string' && rawOriginalAvatar.trim()
+      ? rewriteMediaUrlForNetwork(rawOriginalAvatar.trim())
+      : undefined;
+  if (originalUserHandle && originalUserAvatarUrl) {
+    setAvatarForHandle(originalUserHandle, originalUserAvatarUrl);
+  }
 
   return {
     id: response.id,
     publicShareToken: response.public_share_token || response.publicShareToken,
-    userHandle: response.user_handle || response.userHandle,
+    user_id: response.user_id || response.userId || response.user?.id || existing?.user_id,
+    userHandle: authorHandle || response.user_handle || response.userHandle,
+    isReclipped,
+    originalUserHandle,
+    originalUserAvatarUrl,
+    originalPostId: isReclipped
+      ? response.original_post_id || response.originalPostId || existing?.originalPostId
+      : undefined,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
+    placeId: response.place_id || response.placeId || existing?.placeId || null,
+    latitude:
+      typeof response.latitude === 'number'
+        ? response.latitude
+        : existing?.latitude ?? null,
+    longitude:
+      typeof response.longitude === 'number'
+        ? response.longitude
+        : existing?.longitude ?? null,
     socialFormat: (response.social_format || response.socialFormat) as Post['socialFormat'] | undefined,
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
     finalVideoUrl: rewriteMediaUrlForNetwork(finalVideoUrl || '') || undefined,
-    videoPosterUrl: resolvedVideoPosterUrl ? rewriteMediaUrlForNetwork(String(resolvedVideoPosterUrl)) : undefined,
+    videoPosterUrl: rewrittenPoster || undefined,
+    thumbnailUrl: rewrittenPoster || undefined,
     mediaType: resolvedMediaType,
     videoFrameMode: resolvedVideoFrameMode,
     mediaItems: processedMediaItems ?? mediaItems,
@@ -947,23 +1656,35 @@ export function transformLaravelPost(response: any): Post {
     text: response.text_content || response.text || response.caption || existing?.text,
     imageText: response.image_text || response.imageText,
     caption: response.caption || response.text_content || response.text || existing?.caption,
+    linkPreview: mapApiLinkPreview(response.link_preview ?? response.linkPreview) || existing?.linkPreview,
     createdAt: (() => {
       const raw = response.created_at || response.createdAt;
       const ts = raw ? new Date(raw).getTime() : Date.now();
       return Number.isFinite(ts) ? ts : Date.now();
     })(),
-    stats: {
-      likes: response.likes_count || response.stats?.likes || 0,
-      views: response.views_count || response.stats?.views || 0,
-      comments: response.comments_count || response.stats?.comments || 0,
-      shares: response.shares_count || response.stats?.shares || 0,
-      reclips: response.reclips_count || response.stats?.reclips || 0,
-    },
+    stats: (() => {
+      const merged = mergeEngagementStats(
+        {
+          likes: Number(response.likes_count ?? response.stats?.likes ?? 0) || 0,
+          views: Number(response.views_count ?? response.stats?.views ?? 0) || 0,
+          comments: Number(response.comments_count ?? response.stats?.comments ?? 0) || 0,
+          shares: Number(response.shares_count ?? response.stats?.shares ?? 0) || 0,
+          reclips: Number(response.reclips_count ?? response.stats?.reclips ?? 0) || 0,
+          saves: Number(response.saves_count ?? response.stats?.saves ?? 0) || 0,
+        },
+        existing?.stats,
+      );
+      return {
+        ...merged,
+        // Unique saves can go down on unsave — don't keep a stale local max.
+        saves: Number(response.saves_count ?? response.stats?.saves ?? 0) || 0,
+      };
+    })(),
     isBookmarked: response.is_bookmarked || false,
     isFollowing: response.is_following || false,
     authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
     userLiked: response.user_liked || false,
-    userReclipped: response.user_reclipped || false,
+    userReclipped: !!(response.user_reclipped || response.userReclipped),
     stickers: response.stickers,
     templateId: response.template_id || response.templateId,
     bannerText: response.banner_text || response.bannerText,
@@ -974,6 +1695,7 @@ export function transformLaravelPost(response: any): Post {
     subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled,
     subtitleText: response.subtitle_text || response.subtitleText,
     ...normalizedLocations,
+    userAvatarUrl: authorAvatarUrl,
     userAccountType:
       response.user?.account_type === 'business' || response.user?.account_type === 'personal'
         ? response.user.account_type
@@ -1011,7 +1733,7 @@ export async function fetchSuggestedPostsByPlaces(params: {
   });
 }
 
-/** Mock Sarah and Bob video posts for Scenes testing – always merged into first page of feed when in dev. */
+/** Mock Sarah / Bob / Alice video posts for Scenes + feed testing – merged into first page when in mock mode. */
 function getMockScenesVideoPosts(): Post[] {
   const now = Date.now();
   return [
@@ -1020,9 +1742,8 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.escapes,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: now - 7200000,
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -1038,9 +1759,8 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.fun,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: now - 86400000,
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -1056,9 +1776,8 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+      mediaUrl: MOCK_FEED_VIDEO_URLS.joyrides,
       mediaType: 'video',
-      videoPosterUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=1200',
       caption: 'Amazing sunset over Galway Bay!',
       createdAt: now - 9000000,
       stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
@@ -1068,8 +1787,107 @@ function getMockScenesVideoPosts(): Post[] {
       userLocal: 'Galway',
       userRegional: 'Galway',
       userNational: 'Ireland'
-    }
+    },
+    {
+      id: 'mock-scenes-alice-1',
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Finglas, Dublin',
+      tags: [],
+      mediaUrl: MOCK_FEED_VIDEO_URLS.blazes,
+      mediaType: 'video',
+      caption: 'Evening walk around Finglas village — golden hour hits different',
+      createdAt: now - 5400000,
+      stats: { likes: 41, views: 220, comments: 9, shares: 3, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: 'mock-scenes-alice-2',
+      userHandle: 'Alice@Finglas',
+      locationLabel: 'Tolka Valley Park',
+      tags: [],
+      mediaUrl: MOCK_FEED_VIDEO_URLS.elephants,
+      mediaType: 'video',
+      caption: 'Park loop before work — birds were loud today 🐦',
+      createdAt: now - 43200000,
+      stats: { likes: 28, views: 164, comments: 4, shares: 1, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Finglas',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
   ];
+}
+
+/** Demo MP4 feed cards — never hide via mute/hide/not-interested prefs. */
+export function isDevMockFeedVideoPost(post: Post): boolean {
+  const id = String(post.id || '');
+  if (id.startsWith('mock-scenes-')) return true;
+  if (id.startsWith('artane-post-') && postHasVideoMedia(post)) return true;
+  return false;
+}
+
+/** Stable mock-scenes-* posts plus in-memory seed videos (Sarah/Bob Artane posts). */
+function collectDevMockVideoPostCandidates(): Post[] {
+  const byId = new Map<string, Post>();
+  const add = (p: Post) => {
+    const id = String(p.id);
+    if (!byId.has(id)) byId.set(id, p);
+  };
+  for (const p of getMockScenesVideoPosts()) add(p);
+  for (const p of posts) {
+    if (!postHasVideoMedia(p)) continue;
+    if (isMockPostId(p.id) || String(p.id).startsWith('mock-scenes-')) add(p);
+  }
+  return [...byId.values()];
+}
+
+function devMockVideosForDiscoverTab(userId: string): Post[] {
+  const all = collectDevMockVideoPostCandidates();
+  const follows = getFollowsForDiscover(userId);
+  const followsSarah = getFollowState(follows, 'Sarah@Artane');
+  const followsBob =
+    getFollowState(follows, 'Bob@Ireland') || getFollowState(follows, 'Bob@Finglas');
+  const followsAlice = getFollowState(follows, 'Alice@Finglas');
+  // Following feed: only people you actually follow (no “dump all demos in mock” shortcut).
+  if (!followsSarah && !followsBob && !followsAlice) return [];
+  return all.filter((p) => {
+    const h = (p.userHandle || '').toLowerCase();
+    if (followsSarah && h.includes('sarah')) return true;
+    if (followsBob && h.includes('bob')) return true;
+    if (followsAlice && h.includes('alice')) return true;
+    return false;
+  });
+}
+
+/** Which demo MP4 posts belong on this tab (respect author location — no Artane→Finglas leak). */
+function collectDevMockVideoPostsForTab(tab: string, userId: string): Post[] {
+  const t = tab.toLowerCase();
+  if (t === 'clips') return [];
+  if (t === 'discover') return devMockVideosForDiscoverTab(userId);
+  const all = collectDevMockVideoPostCandidates();
+  // Always match author location to the tab (Finglas ≠ Artane).
+  return all.filter((p) => postMatchesLocationTab(p, tab));
+}
+
+/** Prepend demo MP4 cards on feed page 0 (location tabs + Following when you follow Sarah/Bob). */
+function prependDevMockVideoPostsForFirstPage(items: Post[], tab: string, userId: string): Post[] {
+  const t = tab.toLowerCase();
+  if (t === 'clips') return items;
+
+  const candidates = collectDevMockVideoPostsForTab(tab, userId);
+
+  if (!candidates.length) return items;
+
+  const existingIds = new Set(items.map((p) => String(p.id)));
+  const toPrepend = candidates.filter((p) => !existingIds.has(String(p.id)));
+  return toPrepend.length > 0 ? [...toPrepend, ...items] : items;
 }
 
 /** Ava's normal (non-sponsored) mock post for Ireland feed. Stable id for dedupe. */
@@ -1153,17 +1971,29 @@ function dedupeItemsById(items: Post[]): Post[] {
 export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const normalize = (v?: string) => (v || '').trim().toLowerCase();
+  const primaryTag = (v?: string) =>
+    normalize(v)
+      .split(',')[0]
+      .trim()
+      .replace(/\s+(railway station|train station|bus station|metro station|airport|international airport|station)$/i, '')
+      .trim();
+  /** Match post.venue / post.landmark against a Discover venue:/landmark: feed query. */
+  const placeTagMatches = (stored: string | undefined, query: string): boolean => {
+    const s = primaryTag(stored);
+    const q = primaryTag(query);
+    if (!s || !q || q.length < 2) return false;
+    return s === q || s.includes(q) || q.includes(s);
+  };
+
   const isVenueFeed = t.startsWith('venue:');
   const venueQuery = isVenueFeed ? t.slice('venue:'.length).trim() : '';
   if (isVenueFeed) {
-    const venue = normalize((p as any).venue);
-    return !!venue && (venue === venueQuery || venue.includes(venueQuery) || venueQuery.includes(venue));
+    return placeTagMatches((p as any).venue, venueQuery);
   }
   const isLandmarkFeed = t.startsWith('landmark:');
   const landmarkQuery = isLandmarkFeed ? t.slice('landmark:'.length).trim() : '';
   if (isLandmarkFeed) {
-    const lm = normalize((p as any).landmark);
-    return !!lm && (lm === landmarkQuery || lm.includes(landmarkQuery) || landmarkQuery.includes(lm));
+    return placeTagMatches((p as any).landmark, landmarkQuery);
   }
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
@@ -1172,28 +2002,49 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
     const userRegionalLower = normalize(p.userRegional);
     const userNationalLower = normalize(p.userNational);
     if (t === 'finglas') return userLocalLower === 'finglas';
-    if (t === 'dublin') return userRegionalLower === 'dublin';
-    if (t === 'ireland') return userNationalLower === 'ireland';
+    if (t === 'dublin') return userRegionalLower === 'dublin' || userLocalLower === 'dublin';
+    if (t === 'ireland') {
+      if (userNationalLower === 'ireland') return true;
+      // National news: Cork/Galway/Dublin-area authors, not Dublin-only.
+      if (
+        IRELAND_AUTHOR_PLACES.has(userLocalLower) ||
+        IRELAND_AUTHOR_PLACES.has(userRegionalLower) ||
+        isCorkPlaceName(userLocalLower) ||
+        isCorkPlaceName(userRegionalLower)
+      ) {
+        return true;
+      }
+      return false;
+    }
     return false;
   }
-  const query = t.trim().toLowerCase();
+  // Switch-feed / Places often send "New York, NY, USA" — match the primary place token.
+  const query = primaryTag(t) || t.trim().toLowerCase();
+  if (!query) return false;
   const local = normalize(p.userLocal);
   const regional = normalize(p.userRegional);
   const national = normalize(p.userNational);
   const locationLabel = normalize((p as any).locationLabel);
-  if (LOCATION_COUNTRIES.has(query)) {
-    return (
-      national === query ||
-      (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
-      (query === 'usa' && (national === 'usa' || national === 'united states')) ||
-      locationLabel === query ||
-      locationLabel.includes(query)
-    );
+
+  // Author tiers are exact — never substring-match "rome" inside unrelated labels.
+  if (local === query || regional === query || national === query) return true;
+  if (isNewYorkPlaceName(query) && (isNewYorkPlaceName(local) || isNewYorkPlaceName(regional))) return true;
+  if (isCorkPlaceName(query) && (isCorkPlaceName(local) || isCorkPlaceName(regional))) return true;
+  if (LOCATION_COUNTRIES.has(query) || isUsaNationalName(query)) {
+    if (query === 'uk' && (national === 'united kingdom' || national === 'uk')) return true;
+    if (isUsaNationalName(query)) {
+      if (isUsaNationalName(national)) return true;
+      // National news: New York State authors belong even if national was left blank.
+      if (USA_AUTHOR_PLACES.has(local) || USA_AUTHOR_PLACES.has(regional)) return true;
+      return false;
+    }
+    return national === query || (query === 'united kingdom' && national === 'uk');
   }
   if (LOCATION_CITIES.has(query)) {
-    return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
+    return regional === query || local === query;
   }
-  return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
+  // Custom neighbourhood / place name: allow label equality only (no fuzzy includes).
+  return locationLabel === query;
 }
 
 export async function fetchPostsPage(tab: string, cursor: string | number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
@@ -1207,8 +2058,20 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     t !== 'finglas' &&
     t !== 'dublin' &&
     t !== 'ireland';
-  // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
-  const useLaravelAPI = isLaravelApiEnabled() && t !== 'discover';
+  // When mock is on, use local seed feed (Sarah/Bob demos).
+  // Live mode: hit Laravel for all tabs including Following/discover — no mock seed.
+  const mockMode = isMockMode();
+  const useLaravelAPI = !mockMode;
+  console.log('[fetchPostsPage/posts]', {
+    IS_MOCK: mockMode,
+    EXPO_PUBLIC_USE_MOCK: getRuntimeEnv('EXPO_PUBLIC_USE_MOCK'),
+    tab,
+    t,
+    useLaravelAPI,
+    cursor,
+    limit,
+    userId,
+  });
 
   if (useLaravelAPI) {
     try {
@@ -1225,9 +2088,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       } else if (t === 'ireland') {
         filter = 'Ireland';
       } else {
-        // Custom location - use as-is (Laravel will handle it via byLocation scope)
-        filter = tab.charAt(0).toUpperCase() + tab.slice(1).toLowerCase();
+        // Keep USA/UK/New York State as-is — do not title-case "USA" into "Usa".
+        filter = toLocationLabelCase(tab) || tab;
       }
+
+      console.log('[fetchPostsPage/posts] calling live Laravel feed via apiClient.fetchPostsPage', {
+        filter,
+        apiCursor: cursor ?? 0,
+        limit,
+      });
 
       const apiCursor = cursor ?? 0;
       // Only send userId if it looks like a UUID (backend requires uuid|exists:users,id)
@@ -1241,11 +2110,19 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
           : Promise.resolve(new Set<string>());
       const [boostedSetApi, response] = await Promise.all([
         boostedPromise,
-        apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined),
+        apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined) as Promise<{
+          items?: any[];
+          nextCursor?: string | number | null;
+          followingCount?: number;
+          following_count?: number;
+        }>,
       ]);
 
       // Defensive: ensure items is an array (API may return unexpected shape on error)
       const rawItems = Array.isArray(response?.items) ? response.items : [];
+      console.log('[fetchPostsPage/posts] live response item count=', rawItems.length, {
+        nextCursor: response?.nextCursor ?? null,
+      });
       let transformedItems: Post[] = rawItems
         .map((item: any) => {
           try {
@@ -1257,93 +2134,120 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         })
         .filter((x: Post | null): x is Post => x !== null);
 
-      // Guard custom location feeds from server over-broad matches.
-      // Keep only posts whose author/location metadata actually matches the queried location.
-      if (isCustomLocationFeed) {
+      // Guard location / venue / landmark feeds from server over-broad matches.
+      if (
+        t === 'finglas' ||
+        t === 'dublin' ||
+        t === 'ireland' ||
+        isCustomLocationFeed ||
+        isVenueFeed ||
+        isLandmarkFeed
+      ) {
         transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
       }
 
-      // Following (discover): trust the backend – it returns only posts from people the logged-in user follows (from auth token).
-      // Do NOT filter by local follow state here: for backend signups local state is empty and we would empty the feed.
-      if (t === 'discover') {
-        const stateUserId = userId || 'me';
-        const follows = getState(stateUserId).follows || {};
-        const isFirstPageDiscover = isFirstFeedPageCursor(cursor);
-        const followsAva = getFollowState(follows, 'Ava@galway');
-        if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-normal-ireland-demo')) {
-          const avaNormal = getAvaNormalPost();
-          transformedItems = [decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined }), ...transformedItems];
-          if (!posts.find((p) => p.id === avaNormal.id)) posts.push(avaNormal);
+      // Live mode: API posts only. Do not merge AsyncStorage/local seed (Sarah/Bob leak).
+      let items = [...transformedItems];
+
+      // Optionally keep very recent locally created posts that look like Laravel UUIDs
+      // (optimistic create) — never mock seed handles/ids.
+      const uuidRe =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const viewerHandle = String(_currentUserHandle || '').trim().toLowerCase();
+      const recentLocal = getPostsFromStorage().filter((p) => {
+        if (isMockFeedPost(p) || isDevMockFeedVideoPost(p)) return false;
+        if (!uuidRe.test(String(p.id))) return false;
+        const h = String(p.userHandle || '').trim().toLowerCase();
+        if (h === 'gazetteer@dublin') {
+          return false;
         }
-        if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-boosted-discover-demo')) {
-          const avaBoosted = getAvaBoostedPost();
-          transformedItems = [decorateForUser(stateUserId, { ...avaBoosted, isBoosted: true, boostFeedType: 'regional' }), ...transformedItems];
-          if (!posts.find((p) => p.id === avaBoosted.id)) posts.push(avaBoosted);
+        // Following: only optimistic posts you authored. Never other users' cached Dublin feed.
+        if (t === 'discover') {
+          return Boolean(viewerHandle) && h === viewerHandle;
         }
+        return postMatchesLocationTab(p, t);
+      });
+      const apiIds = new Set(items.map((p) => String(p.id)));
+      const dedupedLocal = recentLocal.filter((p) => !apiIds.has(String(p.id)));
+      items = [...dedupedLocal, ...items];
+
+      // Mark ANY actively boosted post as Sponsored (legal disclosure) — not only the current tab's boost tier.
+      let allBoostLabels = new Map<string, BoostFeedType>();
+      try {
+        allBoostLabels = await getAllActiveBoostLabels();
+      } catch {
+        allBoostLabels = new Map();
       }
-
-      // Merge user-created posts from localStorage (e.g. when create returned 401 and used mock)
-      // These would otherwise be missing when feed loads from Laravel API
-      const userCreatedFromStorage = getPostsFromStorage().filter(p => !isMockPostId(p.id));
-      const userCreatedMatchingTab = userCreatedFromStorage.filter(p =>
-        t === 'discover' ? true : postMatchesLocationTab(p, t)
-      );
-      const allApiAndMockIds = new Set(transformedItems.map(p => p.id));
-
-      // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
-      const isFirstPage = isFirstFeedPageCursor(cursor);
-      const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
-      const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-      const dedupedMock = mockVideoPosts.filter(p => !allApiAndMockIds.has(p.id));
-      const dedupedUserCreated = userCreatedMatchingTab.filter(p => !allApiAndMockIds.has(p.id));
-
-      // Order: user-created first (newest), then mock videos, then API posts
-      let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
-      const itemIds = new Set(items.map(p => p.id));
-
-      // Dev/test: inject Ava's Galway demo on first page only when this feed is actually Ireland/Galway (not London, Paris, etc.).
-      if (
-        isFirstPage &&
-        !itemIds.has('ava-normal-ireland-demo') &&
-        postMatchesLocationTab(getAvaNormalPost(), tab)
-      ) {
-        const avaNormal = getAvaNormalPost();
-        const stateUserId = userId || 'me';
-        const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
-        items = [decorated, ...items];
-        if (!posts.find(p => p.id === avaNormal.id)) posts.push(avaNormal);
-      }
-
-      // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-      // boostedSetApi already fetched in parallel above
-      if (boostedSetApi.size > 0) {
-        items = items.map(p =>
-          boostedSetApi.has(p.id)
-            ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedTypeApi ?? 'regional' }
-            : p
-        );
+      for (const id of boostedSetApi) allBoostLabels.set(String(id), (feedTypeApi ?? 'regional') as any);
+      if (allBoostLabels.size > 0) {
+        items = items.map((p) => {
+          const label = allBoostLabels.get(String(p.id));
+          if (!label && !p.isBoosted) return p;
+          return {
+            ...p,
+            isBoosted: true as const,
+            boostFeedType: p.boostFeedType ?? label ?? feedTypeApi ?? 'regional',
+          };
+        });
       }
 
       // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
       const uid = userId || 'me';
+      syncLocalFollowsFromApi(uid, items);
+      syncLocalLikesFromApi(uid, items, { allowUnlike: true });
+      syncLocalReclipsFromApi(uid, items, { allowUndo: true });
+      syncLocalBookmarksFromApi(uid, items, { allowUndo: true });
       items = items.map(p => decorateForUser(uid, p));
 
       return {
         items: items.map(normalizeCaptionFields),
         nextCursor: response?.nextCursor ?? null,
-        fromMock: false
+        fromMock: false,
+        followingCount:
+          typeof response?.followingCount === 'number'
+            ? response.followingCount
+            : typeof (response as { following_count?: number })?.following_count === 'number'
+              ? (response as { following_count: number }).following_count
+              : undefined,
       };
     } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
+      console.log('[fetchPostsPage/posts] live feed failed — throwing (do not fake an empty feed)', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+      });
+      // Live mode: never fall back to mock seed posts. Also never return [] on
+      // timeout/network/429 — that looks like "You're early to this feed".
+      throw error;
     }
+  } else {
+    console.log('[fetchPostsPage/posts] using mock feed path (IS_MOCK=true)', {
+      IS_MOCK: mockMode,
+      tab: t,
+    });
   }
 
-  // Mock implementation (fallback)
+  // Mock implementation — only when EXPO_PUBLIC_USE_MOCK=true
   try {
+    // React Native: hydrate user-created posts from AsyncStorage.
+    // Note: index.js installs an in-memory localStorage shim, so typeof localStorage
+    // is never 'undefined' on RN — always attempt the native hydrate.
+    try {
+      const { getPostsFromStorageNative } = await import('./postsStorage.native');
+      const storedNative = (await getPostsFromStorageNative()).filter((p) => !isMockPostId(p.id));
+      if (storedNative.length > 0) {
+        const seenNative = new Set(posts.map((p) => String(p.id)));
+        for (const p of storedNative) {
+          if (!seenNative.has(String(p.id))) {
+            posts.push(p);
+            seenNative.add(String(p.id));
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     // Reload only user-created posts from localStorage (exclude mock ids to avoid duplicates)
   const userCreatedPosts = getPostsFromStorage()
     .filter(p => !isMockPostId(p.id))
@@ -1356,18 +2260,19 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         userNational: p.userNational,
       }),
     }));
-    // Keep current in-memory mock/seed posts (don't reload mock from storage)
-    const mockPosts = posts.filter(p => isMockPostId(p.id));
-    // Merge: user-created first, then mock/seed (single copy of each)
-    if (userCreatedPosts.length > 0 || posts.length === 0) {
-      const seen = new Set<string>();
-      posts = [...userCreatedPosts, ...mockPosts].filter(p => {
+    // Always keep mock/seed posts (Sarah MP4 demos, JSON seed) even when localStorage has user posts.
+    const mockSeedPosts = posts.filter((p) => isMockPostId(p.id));
+    const nonMockPosts = posts.filter((p) => !isMockPostId(p.id));
+    const userCreatedIds = new Set(userCreatedPosts.map((p) => String(p.id)));
+    const seen = new Set<string>();
+    posts = [...userCreatedPosts, ...mockSeedPosts, ...nonMockPosts.filter((p) => !userCreatedIds.has(String(p.id)))].filter(
+      (p) => {
         const id = String(p.id);
         if (seen.has(id)) return false;
         seen.add(id);
         return true;
-      });
-    }
+      },
+    );
 
     await delay(0);
 
@@ -1381,9 +2286,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       if (isOwn) {
         if (t === 'discover') return true; // Following feed: always show your posts
 
-        // For your own posts in the three core location tabs (local / regional / national),
-        // always show them – users expect to see their own posts in all of their tiers.
-        if (['finglas', 'dublin', 'ireland'].includes(t)) {
+        // Always show your own posts on your profile location tiers (and legacy Dublin demo tabs).
+        const ownTabs = [_userLocal, _userRegional, _userNational]
+          .map((s) => (s || '').trim().toLowerCase())
+          .filter(Boolean);
+        if (ownTabs.includes(t) || ['finglas', 'dublin', 'ireland'].includes(t)) {
           return true;
         }
 
@@ -1416,39 +2323,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        const normalize = (v?: string) => (v || '').trim().toLowerCase();
-        const isVenueQuery = t.startsWith('venue:');
-        const isLandmarkQuery = t.startsWith('landmark:');
-        const query = isVenueQuery
-          ? t.slice('venue:'.length).trim().toLowerCase()
-          : isLandmarkQuery
-            ? t.slice('landmark:'.length).trim().toLowerCase()
-            : t.trim().toLowerCase();
-        const venue = normalize((p as any).venue);
-        const landmark = normalize((p as any).landmark);
-        // Venue feeds: if tab matches a venue, keep posts tagged with that venue.
-        if (isVenueQuery) {
-          return !!venue && (venue === query || venue.includes(query) || query.includes(venue));
-        }
-        if (isLandmarkQuery) {
-          return !!landmark && (landmark === query || landmark.includes(query) || query.includes(landmark));
-        }
-        if (venue && (venue === query || venue.includes(query) || query.includes(venue))) return true;
-        if (landmark && (landmark === query || landmark.includes(query) || query.includes(landmark))) return true;
-        const local = normalize(p.userLocal);
-        const regional = normalize(p.userRegional);
-        const national = normalize(p.userNational);
-        const locationLabel = normalize((p as any).locationLabel);
-        if (LOCATION_COUNTRIES.has(query))
-          return (
-            national === query ||
-            (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
-            (query === 'usa' && (national === 'usa' || national === 'united states')) ||
-            locationLabel === query ||
-            locationLabel.includes(query)
-          );
-        if (LOCATION_CITIES.has(query)) return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
-        return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
+        // Custom location / venue / landmark — one strict matcher, no substring leaks.
+        return postMatchesLocationTab(p, t);
       }
 
       const tabLower = t.toLowerCase();
@@ -1457,10 +2333,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       const userRegionalLower = normalize(p.userRegional);
       const userNationalLower = normalize(p.userNational);
 
-      // For Ireland tab in mock mode, treat Dublin regional/local as Ireland when national is missing.
+      // For Ireland tab in mock mode, treat Irish cities as Ireland when national is missing.
       if (t === 'ireland') {
         if (userNationalLower === 'ireland') return true;
-        if (userNationalLower === '' && (userRegionalLower === 'dublin' || userLocalLower === 'dublin')) return true;
+        if (
+          IRELAND_AUTHOR_PLACES.has(userLocalLower) ||
+          IRELAND_AUTHOR_PLACES.has(userRegionalLower)
+        ) {
+          return true;
+        }
       }
 
       if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) return true;
@@ -1535,12 +2416,9 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
     const start = typeof cursor === 'number' ? cursor : 0;
     const isFirstPage = start === 0;
-    // Only add mock Sarah/Bob posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, not in Galway
-    const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
-    const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-    const existingIdsInSorted = new Set(sorted.map(p => p.id));
-    const dedupedMock = mockVideoPosts.filter(p => !existingIdsInSorted.has(p.id));
-    const sortedWithMock = dedupedMock.length > 0 ? [...dedupedMock, ...sorted] : sorted;
+    const sortedWithMock = isFirstPage
+      ? prependDevMockVideoPostsForFirstPage(sorted, tab, userId)
+      : sorted;
 
     const slice = sortedWithMock.slice(start, start + limit).map(p => decorateForUser(userId, p));
 
@@ -1563,18 +2441,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     if (feedType) {
       const existingIds = new Set(slice.map(p => p.id));
       const boostedPosts: Post[] = [];
-      const tabLower = tab.toLowerCase();
       for (const id of Array.from(boostedIdsSet)) {
         if (existingIds.has(id)) continue;
         const p = await getPostById(id);
         if (!p) continue;
         // Only inject into this tab if the post author's location matches the tab
-        const authorRegional = (p.userRegional || '').toLowerCase();
-        const authorNational = (p.userNational || '').toLowerCase();
-        const authorLocal = (p.userLocal || '').toLowerCase();
-        const matchesTab =
-          tabLower === authorRegional || tabLower === authorNational || tabLower === authorLocal;
-        if (!matchesTab) continue;
+        if (!postMatchesLocationTab(p, tab)) continue;
         const decorated = decorateForUser(userId, { ...p, isBoosted: true, boostFeedType: feedType });
         boostedPosts.push(decorated);
       }
@@ -1594,13 +2466,23 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         items = merged;
       }
     }
-    // Mark any post that is in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-    if (boostedIdsSet.size > 0) {
-      items = items.map(p =>
-        boostedIdsSet.has(p.id)
-          ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedType ?? 'regional' }
-          : p
-      );
+    // Mark ANY actively boosted post as Sponsored (legal disclosure) on every feed tab.
+    const allBoostLabels = await getAllActiveBoostLabels();
+    for (const id of boostedIdsSet) {
+      if (!allBoostLabels.has(String(id))) {
+        allBoostLabels.set(String(id), (feedType ?? 'regional') as any);
+      }
+    }
+    if (allBoostLabels.size > 0) {
+      items = items.map((p) => {
+        const label = allBoostLabels.get(String(p.id));
+        if (!label && !p.isBoosted) return p;
+        return {
+          ...p,
+          isBoosted: true as const,
+          boostFeedType: p.boostFeedType ?? label ?? feedType ?? 'regional',
+        };
+      });
     }
     // Dev/test: inject Ava's Galway demo on first page only when this tab matches her author location (mock path).
     if (isFirstPage && postMatchesLocationTab(getAvaNormalPost(), tab)) {
@@ -1613,53 +2495,150 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     }
     items = dedupeItemsById(items);
 
+    // Final mock-path guard: location feeds never return foreign author cards.
+    if (isCustomLocationFeed || t === 'finglas' || t === 'dublin' || t === 'ireland') {
+      const before = items.length;
+      items = items.filter((p) => postMatchesLocationTab(p, tab));
+      if (items.length < before && typeof console !== 'undefined') {
+        console.warn(
+          `[location-guard] fetchPostsPage dropped ${before - items.length} leak(s) from "${tab}"`,
+        );
+      }
+    }
+
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
-    return { items: items.map(normalizeCaptionFields), nextCursor: next, fromMock: true };
+    return {
+      items: items.map(normalizeCaptionFields),
+      nextCursor: next,
+      fromMock: true,
+      laravelBypassed: isLaravelUnreachableThisSession(),
+      followingCount: Object.values(getFollowsForDiscover(userId)).filter(Boolean).length,
+    };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
-    throw error;
+    const msg = error instanceof Error ? error.message : String(error ?? '');
+    const looksLikeCorruptJson =
+      error instanceof SyntaxError ||
+      /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(msg);
+    // Only wipe posts storage on corrupt JSON — never on unrelated mock errors.
+    if (looksLikeCorruptJson) {
+      try {
+        const { clearCorruptPostsStorageNative } = await import('./postsStorage.native');
+        await clearCorruptPostsStorageNative();
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(POSTS_STORAGE_KEY);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const seed = posts
+      .filter((p) => isMockPostId(p.id))
+      .slice(0, Math.max(1, limit))
+      .map((p) => decorateForUser(userId, p))
+      .map(normalizeCaptionFields);
+    if (seed.length > 0) {
+      return {
+        items: seed,
+        nextCursor: null,
+        fromMock: true,
+      };
+    }
+    return { items: [], nextCursor: null, fromMock: true };
   }
 }
 
 export async function toggleLike(userId: string, id: string, currentPost?: Post): Promise<Post> {
   // In dev/mock mode, skip backend entirely and update the in-memory posts only.
-  const useLaravelAPI = isLaravelApiEnabled() && !isViteDevMode();
+  const livePost = shouldUseLivePostApi(id);
 
-  if (useLaravelAPI) {
+  if (livePost) {
     try {
       const response = await apiClient.toggleLike(id);
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
+      const liked =
+        typeof response?.user_liked === 'boolean'
+          ? response.user_liked
+          : typeof response?.liked === 'boolean'
+            ? response.liked
+            : undefined;
+      const parsedCount = Number(response?.likes_count ?? response?.likesCount);
+      const hasCount = Number.isFinite(parsedCount);
+      const base =
+        currentPost ||
+        posts.find((x) => String(x.id) === String(id));
+      // Like endpoint returns { liked, likes_count, id } — not a full post.
+      if (base && liked !== undefined) {
+        const nextLikes = hasCount
+          ? Math.max(0, parsedCount)
+          : Math.max(0, (base.stats?.likes ?? 0) + (liked === base.userLiked ? 0 : liked ? 1 : -1));
+        const s = getState(userId);
+        s.likes[String(id)] = liked;
+        const next: Post = {
+          ...base,
+          userLiked: liked,
+          stats: { ...base.stats, likes: nextLikes },
+        };
+        const idx = posts.findIndex((x) => String(x.id) === String(id));
+        if (idx >= 0) {
+          posts[idx] = { ...posts[idx], ...next };
+          if (!isMockPostId(String(id))) savePostsToStorage(posts);
+        }
+        return decorateForUser(userId, next);
       }
-      // Fall through to mock implementation
+      if (response?.id && (response.user_handle || response.userHandle)) {
+        return transformLaravelPost(response);
+      }
+      throw new Error('Invalid like response');
+    } catch (error: any) {
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel like failed:', error);
+      }
+      // Live posts must not fall through to mock likes — that leaves a filled icon with count 0.
+      throw error;
     }
   }
 
-  // Pure mock implementation
-  await delay(150);
+  // Pure mock implementation — apply like state synchronously so rapid taps can't all read "unliked".
   const s = getState(userId);
-  let p = posts.find(x => x.id === id);
+  const idKey = String(id);
+  let p = posts.find((x) => String(x.id) === idKey);
+  // Trust persisted like map (not a possibly-stale UI snapshot) so own posts can't +1 forever.
+  const was = !!s.likes[idKey] || !!s.likes[id] || !!s.likes[String(id)];
+  const nextLiked = !was;
+  s.likes[idKey] = nextLiked;
+  s.likes[String(id)] = nextLiked;
+
+  const baseLikes = Math.max(
+    0,
+    Number(p?.stats?.likes) || 0,
+    Number(currentPost?.stats?.likes) || 0,
+  );
+  const nextLikes = Math.max(0, baseLikes + (was ? -1 : 1));
+
   if (!p && currentPost) {
-    // Post not in global store (e.g. mock Ava/Sarah injected only in feed) – update user like state and return updated currentPost
-    const was = !!s.likes[id];
-    s.likes[id] = !was;
-    const nextLikes = Math.max(0, currentPost.stats.likes + (was ? -1 : 1));
-    return decorateForUser(userId, {
+    p = upsertLocalPost({
       ...currentPost,
-      userLiked: !was,
+      id: currentPost.id ?? id,
+      userLiked: nextLiked,
       stats: { ...currentPost.stats, likes: nextLikes },
     });
   }
   if (!p) {
     throw new Error('Post not found');
   }
-  const was = !!s.likes[id];
-  s.likes[id] = !was;
-  p.stats.likes += was ? -1 : 1;
+
+  p.stats = { ...p.stats, likes: nextLikes };
+  // Persist user-created posts so fullscreen / feed reload keep the count (mock Sarah posts stay in RAM).
+  if (!isMockPostId(String(p.id))) {
+    savePostsToStorage(posts);
+  }
+
+  await delay(150);
   return decorateForUser(userId, p);
 }
 
@@ -1701,19 +2680,207 @@ export async function toggleBookmark(userId: string, id: string): Promise<Post> 
   return decorateForUser(userId, p);
 }
 
-export async function toggleFollowForPost(userId: string, id: string, userHandle?: string): Promise<Post> {
+export async function toggleFollowForPost(
+  userId: string,
+  id: string,
+  userHandle?: string,
+  viewerHandle?: string,
+  currentlyFollowing?: boolean,
+): Promise<Post> {
   await delay(150);
-  const p = posts.find(x => x.id === id);
+  let p = posts.find(x => x.id === id);
+  // Feed/Scenes demo videos (mock-scenes-*) often aren't in the in-memory store —
+  // upsert so callers that merge the returned post keep mediaUrl / slides.
+  if (!p && String(id).startsWith('mock-scenes-')) {
+    const mock = getMockScenesVideoPosts().find((x) => x.id === id);
+    if (mock) {
+      p = { ...mock, stats: { ...mock.stats } };
+      posts.push(p);
+    }
+  }
   const handle = p?.userHandle ?? userHandle;
   if (!handle) {
     throw new Error('Post not found');
   }
   const s = getState(userId);
-  const wasFollowing = getFollowState(s.follows, handle);
-  setFollowStateKey(s.follows, handle, !wasFollowing);
-  saveFollowsToStorage(userId, s.follows);
+  // Visible checkmark (feed/API) wins over the local map. If we only used local
+  // state, a Laravel follow looked followed but the tap sent following:true again.
+  const wasFollowing =
+    typeof currentlyFollowing === 'boolean'
+      ? currentlyFollowing
+      : p?.isFollowing === true || getFollowState(s.follows, handle);
+  const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
 
-  if (p) return decorateForUser(userId, p);
+  // Private accounts: follow → request (not instant follow). Matches View Profile / Scenes.
+  if (!wasFollowing && isProfilePrivate(handle)) {
+    // Without a viewer handle we must not silently auto-follow private accounts.
+    if (!viewer) {
+      setFollowStateKey(s.follows, handle, false);
+      saveFollowsToStorage(userId, s.follows);
+      if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+      return {
+        id,
+        userHandle: handle,
+        locationLabel: '',
+        tags: [],
+        createdAt: Date.now(),
+        stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: false,
+        isFollowing: false,
+        userLiked: false,
+      } as Post;
+    }
+
+    // Second tap on a pending request cancels it (matches View Profile / Search / Stories).
+    if (hasPendingFollowRequest(viewer, handle)) {
+      removeFollowRequest(viewer, handle);
+      setFollowStateKey(s.follows, handle, false);
+      saveFollowsToStorage(userId, s.follows);
+      if (!isMockMode()) {
+        try {
+          await apiClient.toggleFollow(handle, false);
+        } catch {
+          // Keep local cancel even if the server call fails.
+        }
+      }
+      if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+      return {
+        id,
+        userHandle: handle,
+        locationLabel: '',
+        tags: [],
+        createdAt: Date.now(),
+        stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: false,
+        isFollowing: false,
+        userLiked: false,
+      } as Post;
+    }
+
+    if (!isMockMode()) {
+      try {
+        const result = await apiClient.toggleFollow(handle, true);
+        if (result?.status === 'pending') {
+          createFollowRequest(viewer, handle);
+          setFollowStateKey(s.follows, handle, false);
+          saveFollowsToStorage(userId, s.follows);
+          if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+          return {
+            id,
+            userHandle: handle,
+            locationLabel: '',
+            tags: [],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: false,
+            userLiked: false,
+          } as Post;
+        }
+        if (result?.status === 'accepted' || result?.following === true) {
+          setFollowStateKey(s.follows, handle, true);
+          saveFollowsToStorage(userId, s.follows);
+          removeFollowRequest(viewer, handle);
+          if (p) return decorateForUser(userId, p);
+          return {
+            id,
+            userHandle: handle,
+            locationLabel: '',
+            tags: [],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+            isBookmarked: false,
+            isFollowing: true,
+            userLiked: false,
+          } as Post;
+        }
+      } catch {
+        // Fall through to local mock request.
+      }
+    }
+
+    createFollowRequest(viewer, handle);
+    setFollowStateKey(s.follows, handle, false);
+    saveFollowsToStorage(userId, s.follows);
+    if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+    return {
+      id,
+      userHandle: handle,
+      locationLabel: '',
+      tags: [],
+      createdAt: Date.now(),
+      stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+    } as Post;
+  }
+
+  const nextFollowing = !wasFollowing;
+  setFollowStateKey(s.follows, handle, nextFollowing);
+  saveFollowsToStorage(userId, s.follows);
+  if (!nextFollowing && viewer) {
+    removeFollowRequest(viewer, handle);
+  }
+
+  if (!isMockMode()) {
+    try {
+      const result = await apiClient.toggleFollow(handle, nextFollowing);
+      if (result?.status === 'pending') {
+        createFollowRequest(viewer, handle);
+        setFollowStateKey(s.follows, handle, false);
+        saveFollowsToStorage(userId, s.follows);
+        if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+        return {
+          id,
+          userHandle: handle,
+          locationLabel: '',
+          tags: [],
+          createdAt: Date.now(),
+          stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+          isBookmarked: false,
+          isFollowing: false,
+          userLiked: false,
+        } as Post;
+      }
+      if (result?.status === 'unfollowed' || result?.following === false) {
+        setFollowStateKey(s.follows, handle, false);
+        saveFollowsToStorage(userId, s.follows);
+        if (p) return { ...decorateForUser(userId, p), isFollowing: false };
+        return {
+          id,
+          userHandle: handle,
+          locationLabel: '',
+          tags: [],
+          createdAt: Date.now(),
+          stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+          isBookmarked: false,
+          isFollowing: false,
+          userLiked: false,
+        } as Post;
+      }
+      if (result?.status === 'accepted' || result?.following === true) {
+        setFollowStateKey(s.follows, handle, true);
+        saveFollowsToStorage(userId, s.follows);
+      }
+    } catch (err) {
+      console.warn('[toggleFollowForPost] Laravel follow sync failed', err);
+      setFollowStateKey(s.follows, handle, wasFollowing);
+      saveFollowsToStorage(userId, s.follows);
+    }
+  }
+
+  // Follow is per-author: keep every in-memory post for this handle aligned.
+  const followingNow = getFollowState(s.follows, handle);
+  emitFollowStateChanged(handle, followingNow);
+  const handleLower = handle.toLowerCase();
+  for (const post of posts) {
+    if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
+      post.isFollowing = followingNow;
+    }
+  }
+
+  if (p) return { ...decorateForUser(userId, p), isFollowing: followingNow };
   // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
   return {
     id,
@@ -1723,7 +2890,7 @@ export async function toggleFollowForPost(userId: string, id: string, userHandle
     createdAt: Date.now(),
     stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
     isBookmarked: false,
-    isFollowing: !wasFollowing,
+    isFollowing: followingNow,
     userLiked: false
   } as Post;
 }
@@ -1735,23 +2902,25 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
     return { id, userHandle: 'Unknown', locationLabel: '', tags: [], createdAt: Date.now(), stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 }, isBookmarked: false, isFollowing: false, userLiked: false };
   }
 
-  const useLaravelAPI = isLaravelApiEnabled();
-
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.incrementView(id);
-      // Laravel returns { success, views } not a full post - return minimal for merge (avoids id: undefined)
-      if (response && typeof response.views === 'number' && (response.id == null || response.user_handle == null)) {
-        return { id, stats: { likes: 0, views: response.views, comments: 0, shares: 0, reclips: 0 } } as Post;
-      }
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
+  if (shouldUseLivePostApi(id)) {
+    const response = await apiClient.incrementView(id);
+    const nextViews =
+      typeof response?.views === 'number'
+        ? Math.max(0, Number(response.views))
+        : typeof response?.views_count === 'number'
+          ? Math.max(0, Number(response.views_count))
+          : undefined;
+    const base = posts.find((x) => String(x.id) === String(id));
+    if (base && nextViews !== undefined) {
+      const next: Post = { ...base, stats: { ...base.stats, views: nextViews } };
+      const idx = posts.findIndex((x) => String(x.id) === String(id));
+      if (idx >= 0) posts[idx] = next;
+      return decorateForUser(userId, next);
     }
+    if (response && typeof response.views === 'number' && (response.id == null || response.user_handle == null)) {
+      return { id, stats: { likes: 0, views: response.views, comments: 0, shares: 0, reclips: 0 } } as Post;
+    }
+    return transformLaravelPost(response);
   }
 
   // Ava demo posts can be referenced by multiple ids across tabs/surfaces.
@@ -1835,36 +3004,51 @@ export function wasViewedRecently(userId: string, postId: string, timeWindowMs: 
 }
 
 export async function incrementShares(userId: string, id: string): Promise<Post> {
-  // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = isLaravelApiEnabled();
-
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.sharePost(id);
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
-    }
+  if (shouldUseLivePostApi(id)) {
+    const response = await apiClient.sharePost(id);
+    return transformLaravelPost(response);
   }
 
   // Mock implementation (fallback)
   await delay(100);
   const idStr = String(id);
-  const p = posts.find(x => String(x.id) === idStr);
+  const normalizedIdStr = idStr
+    .trim()
+    .replace(/\s+/g, '-')
+    // Common typo seen in mock scenes IDs.
+    .replace('srarh', 'sarah');
+  const p =
+    posts.find(x => String(x.id) === idStr) ||
+    posts.find(x => String(x.id) === normalizedIdStr);
   if (!p) {
     // Try storage (user-created posts may exist only there if feed just reloaded)
     const fromStorage = getPostsFromStorage();
-    const inStorage = fromStorage.find(x => String(x.id) === idStr);
+    const inStorage =
+      fromStorage.find(x => String(x.id) === idStr) ||
+      fromStorage.find(x => String(x.id) === normalizedIdStr);
     if (inStorage) {
       inStorage.stats = inStorage.stats || { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
       inStorage.stats.shares += 1;
-      const updated = fromStorage.map(x => (String(x.id) === idStr ? inStorage : x));
+      const updated = fromStorage.map(x =>
+        String(x.id) === idStr || String(x.id) === normalizedIdStr ? inStorage : x
+      );
       savePostsToStorage(updated);
       return decorateForUser(userId, inStorage);
+    }
+    // Frontend-only mock scenes IDs may be stale/misspelled in some paths.
+    // Don't hard-fail share UX when this optimistic increment cannot resolve a mock post.
+    if (idStr.startsWith('mock-scenes-') || normalizedIdStr.startsWith('mock-scenes-')) {
+      const mockCandidates = posts.filter(x => String(x.id).startsWith('mock-scenes-'));
+      if (mockCandidates.length > 0) {
+        const suffix = normalizedIdStr.match(/-(\d+)$/)?.[1];
+        const fallback =
+          (suffix
+            ? mockCandidates.find(x => String(x.id).endsWith(`-${suffix}`))
+            : undefined) || mockCandidates[0];
+        return decorateForUser(userId, fallback);
+      }
+      // As a last resort, no-op fallback to avoid noisy errors in RN share flow.
+      return decorateForUser(userId, posts[0]);
     }
     console.error('Post not found for incrementShares:', id);
     throw new Error(`Post with id ${id} not found`);
@@ -1905,59 +3089,95 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
 }
 
 export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
-  const useLaravelAPI = isLaravelApiEnabled();
+  const livePost = shouldUseLivePostApi(originalPostId);
 
-  if (useLaravelAPI) {
+  if (livePost) {
     try {
       const response = await apiClient.reclipPost(originalPostId);
       const s = getState(userId);
       s.reclips[originalPostId] = true;
-      const reclippedPost = transformLaravelPost(response);
 
-      // Laravel returns the new reclipped row; the feed card is the *original* post.
-      const originalRaw = response?.original_post ?? response?.originalPost;
-      let originalPost: Post;
-      if (originalRaw && String(originalRaw.id) === String(originalPostId)) {
-        originalPost = transformLaravelPost(originalRaw);
-      } else {
-        const cached = posts.find((x) => x.id === originalPostId);
-        const nextReclips = (cached?.stats?.reclips ?? 0) + 1;
-        originalPost = cached
-          ? { ...cached, stats: { ...cached.stats, reclips: nextReclips } }
-          : {
-              ...reclippedPost,
-              id: originalPostId,
-              stats: { ...reclippedPost.stats, reclips: (reclippedPost.stats?.reclips ?? 0) + 1 },
-            };
-      }
+      const originalRaw = response?.original_post ?? response?.originalPost ?? (
+        String(response?.id) === String(originalPostId) && !response?.is_reclipped && !response?.isReclipped
+          ? response
+          : null
+      );
+      const reclippedPost =
+        response &&
+        (response.is_reclipped === true || response.isReclipped === true) &&
+        String(response.id) !== String(originalPostId)
+          ? transformLaravelPost(response)
+          : null;
 
-      const idx = posts.findIndex((x) => x.id === originalPostId);
-      if (idx >= 0) {
-        posts[idx] = {
-          ...posts[idx],
-          stats: { ...posts[idx].stats, reclips: originalPost.stats.reclips },
-        };
-      }
+      const cached = posts.find((x) => String(x.id) === String(originalPostId));
+      let originalPost: Post = originalRaw
+        ? transformLaravelPost(originalRaw)
+        : cached
+          ? { ...cached }
+          : reclippedPost
+            ? { ...reclippedPost, id: originalPostId }
+            : transformLaravelPost(response);
 
-      return { originalPost: decorateForUser(userId, originalPost), reclippedPost };
+      originalPost = decorateForUser(userId, {
+        ...originalPost,
+        id: originalPostId,
+        userReclipped: true,
+        stats: {
+          ...originalPost.stats,
+          reclips: Math.max(
+            Number(originalPost.stats?.reclips) || 0,
+            (cached?.stats?.reclips ?? 0) + 1,
+            1,
+          ),
+        },
+      });
+
+      upsertLocalPost(originalPost);
+
+      return { originalPost, reclippedPost };
     } catch (error: any) {
-      if (error?.name === 'ConnectionRefused' || error?.message?.includes('CONNECTION_REFUSED') || error?.message?.includes('Failed to fetch')) {
-        // Fall through to mock
-      } else {
-        throw error;
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel reclip failed:', error);
       }
+      // Live posts must not fall through to mock reclips — that greens the icon
+      // until refresh, then Laravel feed reloads with reclips_count 0.
+      throw error;
     }
   }
 
   await delay(200);
-  const originalPost = posts.find(x => x.id === originalPostId);
+
+  // Demo / feed-only posts (e.g. mock-scenes-*) are often not in the in-memory `posts`
+  // store — resolve + upsert so Scenes reclip works in mock mode.
+  let originalPost = posts.find((x) => x.id === originalPostId) ?? null;
+  if (!originalPost) {
+    if (String(originalPostId).startsWith('mock-scenes-')) {
+      const mock = getMockScenesVideoPosts().find((p) => p.id === originalPostId);
+      if (mock) {
+        originalPost = { ...mock, stats: { ...mock.stats } };
+        posts.push(originalPost);
+      }
+    }
+  }
+  if (!originalPost) {
+    const resolved = await getPostById(originalPostId, userId);
+    if (resolved) {
+      originalPost = { ...resolved, stats: { ...resolved.stats } };
+      if (!posts.find((x) => x.id === originalPostId)) {
+        posts.push(originalPost);
+      } else {
+        originalPost = posts.find((x) => x.id === originalPostId)!;
+      }
+    }
+  }
   if (!originalPost) {
     console.error('Original post not found for reclipPost (mock):', originalPostId);
     throw new Error(`Original post with id ${originalPostId} not found`);
   }
 
-  // Prevent users from reclipping their own posts
-  if (originalPost.userHandle === userHandle) {
+  // Prevent users from reclipping their own posts (case-insensitive)
+  const norm = (h?: string) => String(h || '').trim().toLowerCase();
+  if (norm(originalPost.userHandle) === norm(userHandle)) {
     console.log('Cannot reclip your own post:', originalPostId);
     throw new Error('Cannot reclip your own post');
   }
@@ -2006,58 +3226,65 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Optional userId: when provided and we fetch from Laravel, we get user_liked etc. and decorate.
 export async function getPostById(postId: string, userId?: string): Promise<Post | null> {
   await delay(0);
-  const local = posts.find(p => p.id === postId);
-  if (local) return userId ? decorateForUser(userId, local) : local;
+  const local = posts.find((p) => String(p.id) === String(postId));
+  const decorate = (row: Post) => (userId ? decorateForUser(userId, row) : row);
 
   // Frontend-only mock posts (mock-scenes-*, Ava demo, etc.) – resolve locally, never call Laravel (API expects UUID)
   if (postId.startsWith('mock-scenes-')) {
     const mockPosts = getMockScenesVideoPosts();
-    const mock = mockPosts.find(p => p.id === postId);
-    if (mock) return userId ? decorateForUser(userId, mock) : mock;
-    return null;
+    const mock = mockPosts.find((p) => p.id === postId);
+    if (mock) return decorate(mock);
+    return local ? decorate(local) : null;
   }
 
-  if (isMockPostId(postId)) {
+  if (isMockPostId(postId) || !shouldUseLivePostApi(postId)) {
     if (postId === 'ava-normal-ireland-demo' || postId.startsWith('ava-normal-')) {
       const avaPost = getAvaNormalPost();
       if (!posts.find((p) => p.id === avaPost.id)) {
         posts.push(avaPost);
       }
-      return userId ? decorateForUser(userId, avaPost) : avaPost;
+      return decorate(avaPost);
     }
     if (postId === 'ava-boosted-discover-demo' || postId.startsWith('ava-boosted-demo-')) {
       const boosted = getAvaBoostedPost();
       if (!posts.find((p) => p.id === boosted.id)) {
         posts.push(boosted);
       }
-      return userId ? decorateForUser(userId, boosted) : boosted;
+      return decorate(boosted);
     }
-    return null;
+    return local ? decorate(local) : null;
   }
 
   // Laravel post ID must be a UUID – don't call API for non-UUID IDs (avoids 400 Bad Request)
-  if (!UUID_REGEX.test(postId)) return null;
-
-  const useLaravelAPI = isLaravelApiEnabled();
-  if (!useLaravelAPI) return null;
+  if (!UUID_REGEX.test(postId)) return local ? decorate(local) : null;
 
   try {
     const uuidLike = typeof userId === 'string' && UUID_REGEX.test(userId);
     const response = await apiClient.fetchPost(postId, uuidLike ? userId : undefined);
     const transformed = transformLaravelPost(response);
-    if (!posts.find(p => p.id === transformed.id)) {
-      posts.push(transformed);
+    const idx = posts.findIndex((p) => String(p.id) === String(transformed.id));
+    if (idx >= 0) {
+      const prev = posts[idx];
+      posts[idx] = {
+        ...prev,
+        ...transformed,
+        stats: mergeEngagementStats(transformed.stats, prev.stats),
+        userLiked: transformed.userLiked === true || prev.userLiked === true,
+      };
+    } else {
+      posts.unshift(transformed);
     }
+    const next = posts.find((p) => String(p.id) === String(transformed.id)) || transformed;
     if (userId) {
-      return decorateForUser(userId, transformed);
+      return decorateForUser(userId, next);
     }
-    markPendingCreatedPost(transformed);
-    return transformed;
+    markPendingCreatedPost(next);
+    return next;
   } catch (e: any) {
     if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
       console.warn('getPostById API fallback failed:', postId, e);
     }
-    return null;
+    return local ? decorate(local) : null;
   }
 }
 
@@ -2116,6 +3343,12 @@ export async function regeneratePublicShareToken(postId: string): Promise<{ toke
 }
 
 export async function fetchComments(postId: string): Promise<Comment[]> {
+  const resolvedPostId = resolveCommentsPostId(postId);
+  if (shouldUseLivePostApi(resolvedPostId)) {
+    const response = await apiClient.fetchComments(postId);
+    const rows = Array.isArray(response) ? response : Array.isArray(response?.items) ? response.items : [];
+    return rows.map(mapLaravelCommentToComment);
+  }
   await delay(200);
   return listTopLevelCommentsForPost(postId);
 }
@@ -2137,24 +3370,52 @@ export type HiddenCommentReviewItem = {
   parentId?: string;
 };
 
+function mapLaravelModeration(raw: any): {
+  moderationState: 'visible' | 'hidden_by_filter';
+  moderationReason?: string;
+} {
+  const status = String(raw?.moderation_status || 'approved');
+  const hidden =
+    raw?.is_hidden === true ||
+    raw?.is_hidden === 1 ||
+    raw?.is_hidden === '1' ||
+    status === 'hidden' ||
+    status === 'pending_review';
+  const keywords = Array.isArray(raw?.flagged_keywords) ? raw.flagged_keywords.map((w: unknown) => String(w || '')) : [];
+  const reason =
+    keywords[0] ||
+    (typeof raw?.moderationReason === 'string' ? raw.moderationReason : undefined) ||
+    (hidden ? (status === 'pending_review' ? 'pending_review' : 'creator_moderation') : undefined);
+  return {
+    moderationState: hidden ? 'hidden_by_filter' : 'visible',
+    moderationReason: reason,
+  };
+}
+
 function mapLaravelCommentToComment(raw: any): Comment {
   const mappedReplies: Comment[] = Array.isArray(raw?.replies)
-    ? raw.replies.map((r: any) => ({
-        id: r.id,
-        postId: r.post_id || r.postId || raw.post_id || raw.postId || '',
-        userHandle: r.user_handle || r.userHandle || r.user?.handle || '',
-        text: r.text_content || r.text || '',
-        createdAt: (() => {
-          const ts = r.created_at || r.createdAt;
-          const val = ts ? new Date(ts).getTime() : Date.now();
-          return Number.isFinite(val) ? val : Date.now();
-        })(),
-        likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
-        userLiked: !!(r.user_liked ?? r.userLiked),
-        parentId: r.parent_id || r.parentId || raw.id,
-      }))
+    ? raw.replies.map((r: any) => {
+        const replyModeration = mapLaravelModeration(r);
+        return {
+          id: r.id,
+          postId: r.post_id || r.postId || raw.post_id || raw.postId || '',
+          userHandle: r.user_handle || r.userHandle || r.user?.handle || '',
+          text: r.text_content || r.text || '',
+          createdAt: (() => {
+            const ts = r.created_at || r.createdAt;
+            const val = ts ? new Date(ts).getTime() : Date.now();
+            return Number.isFinite(val) ? val : Date.now();
+          })(),
+          likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
+          userLiked: !!(r.user_liked ?? r.userLiked),
+          parentId: r.parent_id || r.parentId || raw.id,
+          moderationState: replyModeration.moderationState,
+          moderationReason: replyModeration.moderationReason,
+        };
+      })
     : [];
 
+  const moderation = mapLaravelModeration(raw);
   return {
     id: raw.id,
     postId: raw.post_id || raw.postId || '',
@@ -2169,6 +3430,8 @@ function mapLaravelCommentToComment(raw: any): Comment {
     userLiked: !!(raw.user_liked ?? raw.userLiked),
     replies: mappedReplies,
     replyCount: Number(raw.replies_count ?? raw.replyCount ?? mappedReplies.length) || 0,
+    moderationState: moderation.moderationState,
+    moderationReason: moderation.moderationReason,
   };
 }
 
@@ -2181,7 +3444,7 @@ export async function fetchCommentsPage(
 ): Promise<CommentsPage> {
   const resolvedPostId = resolveCommentsPostId(postId);
   // Demo / seed posts (e.g. Ava@galway) are not in Laravel — always use in-memory comments.
-  if (isFrontendOnlyPostId(resolvedPostId)) {
+  if (isFrontendOnlyPostId(resolvedPostId) || !shouldUseLivePostApi(resolvedPostId)) {
     const all = await fetchComments(resolvedPostId);
     if (!cursor) {
       const slice = all.slice(0, limit);
@@ -2195,38 +3458,107 @@ export async function fetchCommentsPage(
     return { items: [], nextCursor: null, hasMore: false };
   }
 
-  const useLaravelAPI = isLaravelApiEnabled();
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.fetchCommentsPage(postId, cursor, limit, userId, repliesLimit);
-      const itemsRaw = Array.isArray(response?.items) ? response.items : [];
-      return {
-        items: itemsRaw.map(mapLaravelCommentToComment),
-        nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
-        hasMore: !!response?.hasMore,
-      };
-    } catch (error: any) {
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('fetchCommentsPage API failed, falling back to mock:', error);
+  const response = await apiClient.fetchCommentsPage(postId, cursor, limit, userId, repliesLimit);
+  const itemsRaw = Array.isArray(response?.items)
+    ? response.items
+    : Array.isArray(response)
+      ? response
+      : [];
+  return {
+    items: itemsRaw.map(mapLaravelCommentToComment),
+    nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
+    hasMore: !!response?.hasMore,
+  };
+}
+
+export function mapLaravelProfilePosts(raw: unknown): Post[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => {
+      try {
+        if (item && typeof item.userHandle === 'string' && item.userHandle.trim() && item.stats) {
+          return item as Post;
+        }
+        return transformLaravelPost(item);
+      } catch (err) {
+        console.warn('[mapLaravelProfilePosts] skip malformed post', item?.id, err);
+        return null;
       }
+    })
+    .filter((x: Post | null): x is Post => x !== null);
+}
+
+export async function fetchPostsByUser(
+  userHandle: string,
+  limit = 30,
+  viewerUserId?: string,
+  tab: string = 'all',
+): Promise<Post[]> {
+  // Live mode: profile grid comes from Laravel GET /users/{handle|id}/posts?tab=
+  if (!isMockMode()) {
+    try {
+      const identifier = String(userHandle || '').trim();
+      console.log('[fetchPostsByUser] live fetch', { identifier, limit, tab, viewerUserId });
+      const payload = await apiClient.fetchUserPosts(identifier, {
+        viewerId: viewerUserId,
+        postsLimit: limit,
+        tab: tab || 'all',
+        timeoutMs: 15_000,
+      });
+      const transformed = mapLaravelProfilePosts(payload?.posts);
+      console.log('[fetchPostsByUser] live ok', {
+        handle: payload?.handle || identifier,
+        posts_count: payload?.posts_count ?? payload?.postsCount,
+        items: transformed.length,
+      });
+
+      try {
+        const indexById = new Map(posts.map((existing, i) => [String(existing.id), i]));
+        for (const p of transformed) {
+          const idx = indexById.get(String(p.id));
+          if (idx != null) {
+            const prev = posts[idx];
+            posts[idx] = {
+              ...prev,
+              ...p,
+              stats: mergeEngagementStats(p.stats, prev.stats),
+              userLiked: p.userLiked === true || prev.userLiked === true,
+            };
+          } else {
+            posts.unshift(p);
+          }
+        }
+        if (transformed.length > 0) savePostsToStorage(posts);
+      } catch {
+        /* ignore cache sync */
+      }
+
+      const uid = viewerUserId || 'me';
+      syncLocalLikesFromApi(uid, transformed, { allowUnlike: Boolean(viewerUserId) });
+      return transformed.slice(0, limit).map((p) => {
+        const cached = posts.find((existing) => String(existing.id) === String(p.id));
+        return decorateForUser(uid, {
+          ...p,
+          stats: mergeEngagementStats(p.stats, cached?.stats),
+          userLiked: p.userLiked === true || cached?.userLiked === true,
+        });
+      });
+    } catch (error: any) {
+      if (error?.name === 'AbortError' || error?.message === 'Aborted') {
+        return [];
+      }
+      console.error('[fetchPostsByUser] live error', {
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+        response: error?.response,
+      });
+      throw error;
     }
   }
 
-  const all = await fetchComments(postId);
-  if (!cursor) {
-    const slice = all.slice(0, limit);
-    const hasMore = all.length > limit;
-    return {
-      items: slice,
-      nextCursor: hasMore ? 'mock:1' : null,
-      hasMore,
-    };
-  }
-  return { items: [], nextCursor: null, hasMore: false };
-}
-
-export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
   await delay(150);
+
   // Keep in-memory list synchronized with persisted user-created posts so profile/my feed
   // can always see newly created posts even after route transitions on mobile browsers.
   try {
@@ -2253,31 +3585,31 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
   const resolvedPostId = resolveCommentsPostId(postId);
-  const useLaravelAPI = isLaravelApiEnabled();
 
-  if (!isFrontendOnlyPostId(resolvedPostId) && useLaravelAPI) {
-    try {
-      const response = await apiClient.addComment(postId, text);
-      const moderation = evaluateCommentModeration(response.text || response.text_content || text);
-      // Transform Laravel comment response to frontend format
-      return {
-        id: response.id,
-        postId: response.post_id || response.postId || postId,
-        userHandle: response.user_handle || response.userHandle || userHandle,
-        text: response.text || response.text_content,
-        userLiked: false,
-        createdAt: new Date(response.created_at || response.createdAt).getTime(),
-        likes: response.likes_count || response.likes || 0,
-        moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
-        moderationReason: moderation.matched[0]
-      };
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
+  if (shouldUseLivePostApi(resolvedPostId)) {
+    const moderation = evaluateCommentModeration(text);
+    const response = await apiClient.addComment(postId, text, {
+      moderation_status: moderation.level === 'hide' ? 'pending_review' : 'approved',
+      is_hidden: moderation.level === 'hide',
+      flagged_keywords: moderation.matched,
+    });
+    const parsedCount = Number(response?.comments_count ?? response?.commentsCount);
+    if (Number.isFinite(parsedCount)) {
+      bumpLocalPostCommentCount(postId, parsedCount);
+    } else {
+      bumpLocalPostCommentCount(postId, undefined, 1);
     }
+    const mapped = mapLaravelCommentToComment({
+      ...response,
+      user_handle: response.user_handle || response.userHandle || userHandle,
+      text_content: response.text_content || response.text || text,
+      post_id: response.post_id || response.postId || postId,
+    });
+    return {
+      ...mapped,
+      userHandle: mapped.userHandle || userHandle,
+      text: mapped.text || text,
+    };
   }
 
   // Mock implementation (fallback)
@@ -2336,30 +3668,22 @@ export async function addComment(postId: string, userHandle: string, text: strin
       post.stats.comments += 1;
     }
 
-    // Send DM to post owner with comment notification (only if not commenting on own post).
-    // Skip for frontend-only demo posts — Laravel has no Ava mock user / post to message.
+    // Notify post owner in Inbox → Notifs (not Messages / DM).
+    // Skip for frontend-only demo posts and own posts.
     if (post.userHandle !== userHandle && !isFrontendOnlyPostId(resolvedPostId)) {
-      // Dynamically import to avoid circular dependency
-      const { appendMessage } = await import('./messages');
-      console.log('Sending comment notification DM:', {
-        from: userHandle,
-        to: post.userHandle,
-        postId,
-        commentText: text
-      });
       try {
-        await appendMessage(userHandle, post.userHandle, {
-          postId: postId,
+        const { createNotification } = await import('./notifications');
+        await createNotification({
+          type: 'comment',
+          fromHandle: userHandle,
+          toHandle: post.userHandle,
+          message: text,
+          postId: resolvedPostId,
           commentId: comment.id,
-          commentText: text,
-          isSystemMessage: false
         });
-        console.log('Comment notification DM sent successfully');
       } catch (error) {
-        console.error('Failed to send comment notification DM:', error);
+        console.error('Failed to create comment notification:', error);
       }
-    } else {
-      console.log('Skipping DM - user is commenting on their own post');
     }
   } else {
     console.warn('Post not found for comment:', postId, 'Available post IDs:', posts.map(p => p.id).slice(0, 5));
@@ -2403,6 +3727,34 @@ export async function toggleReplyLike(parentCommentId: string, replyId: string):
 }
 
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {
+  if (shouldUseLivePostApi(postId)) {
+    const moderation = evaluateCommentModeration(text);
+    const response = await apiClient.addReply(parentId, text, {
+      moderation_status: moderation.level === 'hide' ? 'pending_review' : 'approved',
+      is_hidden: moderation.level === 'hide',
+      flagged_keywords: moderation.matched,
+    });
+    const parsedCount = Number(response?.comments_count ?? response?.commentsCount);
+    if (Number.isFinite(parsedCount)) {
+      bumpLocalPostCommentCount(postId, parsedCount);
+    } else {
+      bumpLocalPostCommentCount(postId, undefined, 1);
+    }
+    const mapped = mapLaravelCommentToComment({
+      ...response,
+      user_handle: response.user_handle || response.userHandle || userHandle,
+      text_content: response.text_content || response.text || text,
+      post_id: response.post_id || response.postId || postId,
+      parent_id: response.parent_id || response.parentId || parentId,
+    });
+    return {
+      ...mapped,
+      userHandle: mapped.userHandle || userHandle,
+      text: mapped.text || text,
+      parentId: mapped.parentId || parentId,
+    };
+  }
+
   await delay(300);
   const moderation = evaluateCommentModeration(text);
   const reply: Comment = {
@@ -2426,12 +3778,50 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     }
     parentComment.replies.push(reply);
     parentComment.replyCount = (parentComment.replyCount || 0) + 1;
+
+    // Instagram-style: reply-to-comment → Activity/Notifs for the parent author (not a DM).
+    const parentAuthor = String(parentComment.userHandle || '').trim();
+    if (parentAuthor && parentAuthor.toLowerCase() !== String(userHandle || '').trim().toLowerCase()) {
+      try {
+        const { createNotification } = await import('./notifications');
+        await createNotification({
+          type: 'reply',
+          fromHandle: userHandle,
+          toHandle: parentAuthor,
+          message: text,
+          postId,
+          commentId: reply.id,
+        });
+      } catch (error) {
+        console.error('Failed to create comment-reply notification:', error);
+      }
+    }
   }
 
   return reply;
 }
 
 export async function fetchHiddenCommentsForOwner(ownerHandle: string): Promise<HiddenCommentReviewItem[]> {
+  if (!isMockMode()) {
+    try {
+      const payload = await apiClient.fetchCommentReviewQueue();
+      const rows = Array.isArray(payload?.items) ? payload.items : [];
+      return rows.map((item) => ({
+        id: String(item.id),
+        postId: String(item.postId || ''),
+        userHandle: String(item.userHandle || ''),
+        text: String(item.text || ''),
+        createdAt: Number(item.createdAt) || Date.now(),
+        moderationReason: item.moderationReason || undefined,
+        isReply: !!item.isReply,
+        parentId: item.parentId || undefined,
+      }));
+    } catch (error) {
+      console.error('fetchHiddenCommentsForOwner live failed:', error);
+      return [];
+    }
+  }
+
   await delay(80);
   const normalizedOwner = String(ownerHandle || '').trim().toLowerCase();
   if (!normalizedOwner) return [];
@@ -2475,6 +3865,16 @@ export async function fetchHiddenCommentsForOwner(ownerHandle: string): Promise<
 }
 
 export async function approveHiddenComment(commentId: string): Promise<boolean> {
+  if (!isMockMode()) {
+    try {
+      await apiClient.approveComment(commentId);
+      return true;
+    } catch (error) {
+      console.error('approveHiddenComment live failed:', error);
+      return false;
+    }
+  }
+
   await delay(80);
   const target = String(commentId || '').trim();
   if (!target) return false;
@@ -2497,6 +3897,16 @@ export async function approveHiddenComment(commentId: string): Promise<boolean> 
 }
 
 export async function deleteHiddenComment(commentId: string): Promise<boolean> {
+  if (!isMockMode()) {
+    try {
+      await apiClient.deleteComment(commentId);
+      return true;
+    } catch (error) {
+      console.error('deleteHiddenComment live failed:', error);
+      return false;
+    }
+  }
+
   await delay(80);
   const target = String(commentId || '').trim();
   if (!target) return false;
@@ -2530,6 +3940,20 @@ export async function setCommentModerationState(
   state: 'visible' | 'hidden_by_filter',
   reason?: string
 ): Promise<boolean> {
+  if (!isMockMode()) {
+    try {
+      if (state === 'hidden_by_filter') {
+        await apiClient.hideComment(commentId, reason ? [reason] : ['creator_moderation']);
+      } else {
+        await apiClient.approveComment(commentId);
+      }
+      return true;
+    } catch (error) {
+      console.error('setCommentModerationState live failed:', error);
+      return false;
+    }
+  }
+
   await delay(80);
   const target = String(commentId || '').trim();
   if (!target) return false;
@@ -2584,9 +4008,10 @@ export async function createPost(
   socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels', // Create → Shorts / TikTok / Reels upload flow
   videoFrameMode?: 'crop' | 'fit' | 'original',
   videoPosterUrl?: string,
+  placeId?: string,
+  latitude?: number,
+  longitude?: number,
 ): Promise<Post> {
-  // Use real Laravel API
-  const { createPost: createPostAPI } = await import('./client');
   const currentUserAccountType = (() => {
     try {
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
@@ -2599,123 +4024,169 @@ export async function createPost(
     }
   })();
 
-  try {
-    const response = await createPostAPI({
-      text: text || undefined,
-      location: location || undefined,
-      venue: venue || undefined,
-      landmark: landmark || undefined,
-      socialFormat: socialFormat || undefined,
-      mediaUrl: imageUrl || undefined,
-      mediaType: mediaType || undefined,
-      videoFrameMode: videoFrameMode || undefined,
-      videoPosterUrl: videoPosterUrl || undefined,
-      caption: caption || undefined,
-      imageText: imageText || undefined,
-      bannerText: bannerText || undefined,
-      stickers: stickers || undefined,
-      templateId: templateId || undefined,
-      mediaItems: mediaItems || undefined,
-      textStyle: textStyle || undefined,
-      taggedUsers: taggedUsers || undefined,
-      videoCaptionsEnabled: videoCaptionsEnabled || undefined,
-      videoCaptionText: videoCaptionText || undefined,
-      subtitlesEnabled: subtitlesEnabled || undefined,
-      subtitleText: subtitleText || undefined,
-      editTimeline: editTimeline || undefined,
-      musicTrackId: musicTrackId || undefined,
-    });
-
-    // Transform Laravel response using the same helper we use for feeds
-    // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
-    let transformed = transformLaravelPost(response);
-
-    // Ensure we preserve/override location from the current user when available,
-    // and always keep the venue/landmark that the creator entered so the metadata carousel
-    // and feeds can rely on them even if the API omits them.
-    const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
-      for (const v of vals) {
-        if (typeof v === 'string') {
-          const s = v.trim();
-          if (s.length > 0) return s;
-        }
-      }
-      return undefined;
-    };
-
-    const normalizedCreatedLocations = resolveAuthorLocations({
-      userHandle,
-      userLocal: userLocal ?? transformed.userLocal,
-      userRegional: userRegional ?? transformed.userRegional,
-      userNational: userNational ?? transformed.userNational,
-    });
-
-    transformed = {
-      ...transformed,
-      // Preserve user-entered copy even if API response omits it on create.
-      text: pickNonEmptyString(transformed.text, text),
-      caption: pickNonEmptyString(transformed.caption, caption, text),
-      ...normalizedCreatedLocations,
-      userAccountType: transformed.userAccountType ?? currentUserAccountType,
-      venue: venue || transformed.venue,
-      landmark: landmark || transformed.landmark,
-      socialFormat: socialFormat ?? transformed.socialFormat,
-      videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
-      videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
-      mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
-    };
-    (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
-
-    // Also store newly created posts in the local in-memory array + localStorage
-    // so Boost page and mock-mode feeds can see them immediately.
+  // Live migration: use EXPO_PUBLIC_USE_MOCK (via isMockMode), not the RN localhost gate alone.
+  // A dynamic import of ./client on RN can throw LoadBundleFromServerRequestError outside any catch
+  // and mark the upload failed — keep the try/catch around the create call.
+  if (!isMockMode()) {
     try {
-      posts.unshift(transformed);
-      savePostsToStorage(posts);
-    } catch (e) {
-      console.warn('Failed to cache created post locally:', e);
+      console.log('[createPost/posts] live create', {
+        userHandle,
+        mediaType,
+        hasMediaUrl: Boolean(imageUrl),
+        mediaItems: mediaItems?.length ?? 0,
+        location,
+      });
+      const response = await apiClient.createPost({
+        text: text || undefined,
+        location: location || undefined,
+        placeId: placeId || undefined,
+        latitude: typeof latitude === 'number' ? latitude : undefined,
+        longitude: typeof longitude === 'number' ? longitude : undefined,
+        venue: venue || undefined,
+        landmark: landmark || undefined,
+        socialFormat: socialFormat || undefined,
+        mediaUrl: imageUrl || undefined,
+        mediaType: mediaType || undefined,
+        videoFrameMode: videoFrameMode || undefined,
+        videoPosterUrl: videoPosterUrl || undefined,
+        caption: caption || undefined,
+        imageText: imageText || undefined,
+        bannerText: bannerText || undefined,
+        stickers: stickers || undefined,
+        templateId: templateId || undefined,
+        mediaItems: mediaItems || undefined,
+        textStyle: textStyle || undefined,
+        taggedUsers: taggedUsers || undefined,
+        videoCaptionsEnabled: videoCaptionsEnabled || undefined,
+        videoCaptionText: videoCaptionText || undefined,
+        subtitlesEnabled: subtitlesEnabled || undefined,
+        subtitleText: subtitleText || undefined,
+        editTimeline: editTimeline || undefined,
+        musicTrackId: musicTrackId || undefined,
+      });
+      console.log('[createPost/posts] live create ok', {
+        id: response?.id,
+        user_id: response?.user_id,
+        user_handle: response?.user_handle || response?.userHandle,
+      });
+
+      // Transform Laravel response using the same helper we use for feeds
+      // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
+      let transformed = transformLaravelPost(response);
+      const laravelHandle = String(
+        response?.user?.handle || response?.user_handle || response?.userHandle || '',
+      ).trim();
+      const laravelUserId = String(response?.user_id || response?.user?.id || '').trim();
+      if (laravelUserId && laravelUserId !== String(userId)) {
+        console.warn('[createPost/posts] Laravel author does not match local session', {
+          localUserId: userId,
+          localHandle: userHandle,
+          laravelUserId,
+          laravelHandle,
+        });
+      }
+
+      // Ensure we preserve/override location from the current user when available,
+      // and always keep the venue/landmark that the creator entered so the metadata carousel
+      // and feeds can rely on them even if the API omits them.
+      const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
+        for (const v of vals) {
+          if (typeof v === 'string') {
+            const s = v.trim();
+            if (s.length > 0) return s;
+          }
+        }
+        return undefined;
+      };
+
+      const normalizedCreatedLocations = resolveAuthorLocations({
+        userHandle: laravelHandle || userHandle,
+        userLocal: userLocal ?? transformed.userLocal,
+        userRegional: userRegional ?? transformed.userRegional,
+        userNational: userNational ?? transformed.userNational,
+      });
+
+      transformed = {
+        ...transformed,
+        userHandle: laravelHandle || transformed.userHandle || userHandle,
+        user_id: laravelUserId || transformed.user_id || userId,
+        // Preserve user-entered copy even if API response omits it on create.
+        text: pickNonEmptyString(transformed.text, text),
+        caption: pickNonEmptyString(transformed.caption, caption, text),
+        ...normalizedCreatedLocations,
+        userAccountType: transformed.userAccountType ?? currentUserAccountType,
+        venue: venue || transformed.venue,
+        landmark: landmark || transformed.landmark,
+        socialFormat: socialFormat ?? transformed.socialFormat,
+        videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
+        videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
+        mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
+      };
+      (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
+
+      // Also store newly created posts in the local in-memory array + localStorage
+      // so Boost page and mock-mode feeds can see them immediately.
+      try {
+        posts.unshift(transformed);
+        savePostsToStorage(posts);
+      } catch (e) {
+        console.warn('Failed to cache created post locally:', e);
+      }
+
+      void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
+        notifySubscribersOfCreatorPost(userHandle, transformed.id),
+      );
+
+      return transformed;
+    } catch (error: any) {
+      const createUrl = `${getApiBaseUrl().replace(/\/$/, '')}/posts`;
+      console.error('[createPost/posts] Error creating post via API:', error);
+      console.error('[createPost/posts] Error details:', {
+        url: createUrl,
+        name: error?.name,
+        message: error?.message,
+        status: error?.status,
+        response: error?.response,
+      });
+
+      const msg = String(error?.message || '');
+      const isConnectionError =
+        error?.name === 'ConnectionRefused' ||
+        error?.name === 'LoadBundleFromServerRequestError' ||
+        msg.includes('CONNECTION_REFUSED') ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('Could not load bundle') ||
+        msg.includes('Network request failed') ||
+        (error?.name === 'TypeError' && msg.includes('fetch'));
+
+      const isAuthError =
+        msg.includes('Authentication required') ||
+        msg.includes('Unauthenticated') ||
+        error?.status === 401;
+
+      // Live mode: do not silently create a local-only post (profile would stay at 0 Posts).
+      if (!isMockMode()) {
+        if (isConnectionError) markLaravelUnreachable();
+        throw error;
+      }
+
+      if (isConnectionError) {
+        markLaravelUnreachable();
+        console.log('⚠️ API connection failed, using mock fallback for post creation');
+        await delay(500);
+      } else if (isAuthError) {
+        console.log('⚠️ API requires authentication, using mock fallback for post creation');
+        await delay(500);
+      } else {
+        console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
+        await delay(500);
+      }
     }
+  }
 
-    void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
-      notifySubscribersOfCreatorPost(userHandle, transformed.id),
-    );
-
-    return transformed;
-  } catch (error: any) {
-    console.error('Error creating post via API:', error);
-    console.error('Error details:', {
-      name: error?.name,
-      message: error?.message,
-      status: error?.status,
-      response: error?.response
-    });
-
-    // Check if it's a connection error - if so, use mock fallback
-    const isConnectionError =
-      error?.name === 'ConnectionRefused' ||
-      error?.message?.includes('CONNECTION_REFUSED') ||
-      error?.message?.includes('Failed to fetch') ||
-      error?.message?.includes('NetworkError') ||
-      (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-
-    // Also fall back to mock when backend requires auth but user isn't logged in (e.g. no token)
-    const isAuthError =
-      error?.message?.includes('Authentication required') ||
-      error?.message?.includes('Unauthenticated') ||
-      error?.status === 401;
-
-    if (isConnectionError) {
-      console.log('⚠️ API connection failed, using mock fallback for post creation');
-      console.log('This is normal when backend is not running or not accessible from your device');
-      await delay(500);
-    } else if (isAuthError) {
-      console.log('⚠️ API requires authentication, using mock fallback for post creation');
-      await delay(500);
-    } else {
-      // For other errors (validation, etc), still fall back to mock so local dev always works
-      console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
-      await delay(500);
-    }
-
+  // Mock create (local-only) — used when API is off or after API failure.
+  {
     // Helper function to convert blob URL to data URL for persistence
     async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {

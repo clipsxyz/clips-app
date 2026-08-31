@@ -14,8 +14,12 @@ type Props = {
     gradientColors?: string[];
 };
 
+const IG_RADIUS = 18;
+const IG_TAIL_RADIUS = 4;
+
 /**
- * iMessage-style bubble with bottom tail (feed + messages).
+ * DM: Instagram-style bubble (asymmetric bottom corner, no speech tail).
+ * Feed: legacy iMessage-style card with optional triangle tail.
  */
 export default function IMessageDmBubbleShell({
     isFromMe,
@@ -28,9 +32,26 @@ export default function IMessageDmBubbleShell({
 }: Props) {
     const feedBubble = layout === 'feed';
     const useGradient = Boolean(gradientColors && gradientColors.length >= 2);
+    const igCorners = feedBubble
+        ? null
+        : isFromMe
+          ? {
+                borderTopLeftRadius: IG_RADIUS,
+                borderTopRightRadius: IG_RADIUS,
+                borderBottomLeftRadius: IG_RADIUS,
+                borderBottomRightRadius: IG_TAIL_RADIUS,
+            }
+          : {
+                borderTopLeftRadius: IG_RADIUS,
+                borderTopRightRadius: IG_RADIUS,
+                borderBottomRightRadius: IG_RADIUS,
+                borderBottomLeftRadius: IG_TAIL_RADIUS,
+            };
+
     const bubbleStyles = [
         styles.bubble,
-        feedBubble ? styles.bubbleFeed : null,
+        feedBubble ? styles.bubbleFeed : styles.bubbleDm,
+        igCorners,
         !useGradient ? { backgroundColor: tailBackgroundColor } : null,
         bubbleStyle,
     ];
@@ -48,9 +69,11 @@ export default function IMessageDmBubbleShell({
         <View style={bubbleStyles}>{children}</View>
     );
 
+    const useIMessageTail = feedBubble && showTail;
+
     return (
         <View style={[styles.outer, isFromMe ? styles.outerMe : styles.outerOther]}>
-            {showTail ? (
+            {useIMessageTail ? (
                 <View
                     pointerEvents="none"
                     style={[
@@ -74,6 +97,7 @@ export default function IMessageDmBubbleShell({
 const styles = StyleSheet.create({
     outer: {
         position: 'relative',
+        flexShrink: 1,
         maxWidth: '100%',
     },
     outerMe: {
@@ -106,26 +130,30 @@ const styles = StyleSheet.create({
         borderLeftWidth: 0,
     },
     bubble: {
-        borderRadius: 19,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.35,
-        shadowRadius: 2,
-        elevation: 2,
-        overflow: 'visible',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        position: 'relative',
+        overflow: 'hidden',
+        alignSelf: 'flex-start',
+        maxWidth: '100%',
+    },
+    bubbleDm: {
+        // Instagram: flat, no iMessage drop shadow
+        shadowOpacity: 0,
+        elevation: 0,
     },
     bubbleFeed: {
         borderRadius: 16,
         paddingTop: 14,
         paddingBottom: 12,
         paddingHorizontal: 16,
+        shadowColor: '#000',
         shadowOffset: { width: 0, height: 14 },
         shadowOpacity: 0.35,
         shadowRadius: 20,
         elevation: 8,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
+        overflow: 'visible',
     },
 });

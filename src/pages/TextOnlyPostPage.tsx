@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
+import { createStory } from '../api/stories';
 import { saveDraft } from '../api/drafts';
 import { unifiedSearch } from '../api/search';
 import { showToast } from '../utils/toast';
@@ -14,6 +15,7 @@ import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import ComposerLinkPreview from '../components/ComposerLinkPreview';
 
 export default function TextOnlyPostPage() {
     const { user } = useAuth();
@@ -42,6 +44,8 @@ export default function TextOnlyPostPage() {
         : undefined;
 
     const isClip = locationState?.isClip === true;
+    const isLinkPost = locationState?.linkPost === true;
+    const isStory24 = locationState?.story24 === true || isLinkPost;
 
     // Auto-expand textarea height as the user types, similar to Bluesky's composer
     useEffect(() => {
@@ -202,14 +206,13 @@ export default function TextOnlyPostPage() {
             return;
         }
 
-        // Show TikTok-style mini overlay and immediately return to feed.
-        // For text-only posts we reflect the chosen template background in the mini thumbnail.
+        // Show TikTok-style mini overlay while posting, then land on feed with the new post injected.
+        // (Do not navigate before createPost finishes — that races postCreated clearing an empty cursor=0 feed.)
         const overlay = showUploadOverlay({
-            initialMessage: 'Posting to Gazetteer…',
+            initialMessage: isStory24 ? 'Posting to your story…' : 'Posting to Gazetteer…',
             background: activeTemplate ? activeTemplate.background : '#000000',
             label: activeTemplate ? activeTemplate.name?.charAt(0).toUpperCase() || 'Aa' : 'Aa',
         });
-        navigate('/feed');
 
         setIsSubmitting(true);
         try {
@@ -224,7 +227,38 @@ export default function TextOnlyPostPage() {
                 }
                 : { color: '#ffffff', size: 'medium', background: '#000000' };
 
-            await createPost(
+            if (isStory24) {
+                await createStory(
+                    user.id,
+                    user.handle,
+                    undefined,
+                    undefined,
+                    text.trim(),
+                    locationText.trim() || undefined,
+                    textStyle.color,
+                    textStyle.size,
+                    undefined,
+                    undefined,
+                    textStyle,
+                    undefined,
+                    taggedUsers.length > 0 ? taggedUsers : undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    venueText.trim() || landmarkText.trim() || undefined,
+                    undefined,
+                    'public',
+                );
+                window.dispatchEvent(new CustomEvent('storyCreated', {
+                    detail: { userHandle: user.handle },
+                }));
+                showToast('Story created successfully!');
+                overlay.success('Your story is live for 24 hours.');
+                navigate('/stories');
+                return;
+            }
+
+            const newPost = await createPost(
                 user.id,
                 user.handle,
                 text.trim(), // text
@@ -252,9 +286,19 @@ export default function TextOnlyPostPage() {
                 landmarkText.trim() || undefined // landmark
             );
 
+            window.dispatchEvent(new CustomEvent('localPostCreated', {
+                detail: { post: newPost },
+            }));
             window.dispatchEvent(new CustomEvent('postCreated'));
             showToast('Post created successfully!');
             overlay.success('Your post is now live on the feed.');
+            // Prefer id-only route state so large payloads (images) never blow History state limits.
+            navigate('/feed', {
+                state: {
+                    createdPostId: newPost.id,
+                    forceRefreshAt: Date.now(),
+                },
+            });
         } catch (error) {
             console.error('Error creating post:', error);
             showToast('Failed to create post. Please try again.');
@@ -314,7 +358,7 @@ export default function TextOnlyPostPage() {
                             disabled={!canPost || isSubmitting}
                             className="px-5 py-2 rounded-full text-sm font-semibold border border-white text-white hover:bg-white hover:text-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white"
                         >
-                            {isSubmitting ? 'Posting...' : isClip ? 'Add to Post' : 'Post'}
+                            {isSubmitting ? 'Posting...' : isClip ? 'Add to Post' : isStory24 ? 'Post story' : 'Post'}
                         </button>
                     </div>
                 </div>
@@ -341,7 +385,11 @@ export default function TextOnlyPostPage() {
                                 ref={textInputRef}
                                 value={text}
                                 onChange={(e) => setText(e.target.value)}
-                                placeholder="What's up?"
+                                placeholder={
+                                    isLinkPost
+                                        ? 'Paste a YouTube, TikTok, Instagram, or web link'
+                                        : "What's up?"
+                                }
                                 maxLength={TEXT_POST_BODY_MAX_LENGTH}
                                 className="w-full bg-transparent text-[17px] leading-snug resize-none border-none outline-none min-h-[96px] py-2 placeholder:text-gray-400 focus:outline-none focus:ring-0"
                                 rows={1}
@@ -358,6 +406,12 @@ export default function TextOnlyPostPage() {
                                 }}
                             />
                         </div>
+                        <ComposerLinkPreview text={text} />
+                        {isLinkPost ? (
+                            <p className="mt-2 text-xs text-gray-400">
+                                We’ll fetch a cover, title, and source badge for your story.
+                            </p>
+                        ) : null}
                         <div className="flex justify-end mt-1">
                             <span className={`text-xs ${text.length > TEXT_POST_BODY_MAX_LENGTH - 50 ? (text.length >= TEXT_POST_BODY_MAX_LENGTH ? 'text-red-400' : 'text-amber-400') : 'text-gray-500'}`}>
                                 {text.length}/{TEXT_POST_BODY_MAX_LENGTH}

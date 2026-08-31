@@ -1,52 +1,91 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+    View,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    StyleSheet,
+    Platform,
+} from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ox } from '../../constants/nativeOpticalScale';
+
+const QUICK_REACTIONS = ['😍', '😂'] as const;
 
 type Props = {
     hidden?: boolean;
+    /** Owner viewing their own story — share only (insights live in the top banner). */
+    ownerMode?: boolean;
     showReplyComposer: boolean;
     replyText: string;
-    replyPlaceholder: string;
+    replyPlaceholder?: string;
     isSending: boolean;
     hasReaction: boolean;
+    activeQuickEmoji?: string | null;
     onReplyTextChange: (text: string) => void;
     onOpenReply: () => void;
     onCancelReply: () => void;
     onSendReply: () => void;
     onLike: () => void;
     onShare: () => void;
+    onQuickReact: (emoji: string) => void;
 };
 
-/** Instagram-style bottom bar: Send message pill, like, share (web StoriesPage parity). */
+/**
+ * TikTok-style story footer: bordered Message pill · spaced emojis · heart · share.
+ * Owner mode: share icon only.
+ */
 export default function StoryBottomBar({
     hidden,
+    ownerMode = false,
     showReplyComposer,
     replyText,
-    replyPlaceholder,
+    replyPlaceholder = 'Message...',
     isSending,
     hasReaction,
+    activeQuickEmoji,
     onReplyTextChange,
     onOpenReply,
     onCancelReply,
     onSendReply,
     onLike,
     onShare,
+    onQuickReact,
 }: Props) {
+    const insets = useSafeAreaInsets();
     if (hidden) return null;
 
     return (
-        <View style={styles.bar}>
-            {showReplyComposer ? (
-                <View style={styles.composerRow}>
+        <View
+            style={[styles.host, { paddingBottom: Math.max(insets.bottom, ox(12)) }]}
+            pointerEvents="box-none"
+        >
+            {ownerMode ? (
+                <View style={styles.ownerShareRow} pointerEvents="box-none">
+                    <TouchableOpacity
+                        onPress={onShare}
+                        style={styles.actionBtn}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Share story"
+                    >
+                        <Icon name="arrow-redo-outline" size={ox(28)} color="#FFFFFF" />
+                    </TouchableOpacity>
+                </View>
+            ) : showReplyComposer ? (
+                <View style={styles.tray}>
                     <TextInput
                         value={replyText}
                         onChangeText={onReplyTextChange}
                         placeholder={replyPlaceholder}
-                        placeholderTextColor="rgba(255,255,255,0.7)"
+                        placeholderTextColor="rgba(255,255,255,0.55)"
                         style={styles.input}
                         autoFocus
                         editable={!isSending}
                         returnKeyType="send"
+                        blurOnSubmit={false}
                         onSubmitEditing={() => {
                             if (!isSending && replyText.trim()) onSendReply();
                         }}
@@ -54,95 +93,171 @@ export default function StoryBottomBar({
                     <TouchableOpacity
                         onPress={onSendReply}
                         disabled={!replyText.trim() || isSending}
-                        style={[styles.sendBtn, (!replyText.trim() || isSending) && styles.sendBtnDisabled]}
+                        style={[
+                            styles.sendBtn,
+                            (!replyText.trim() || isSending) && styles.sendBtnDisabled,
+                        ]}
+                        activeOpacity={0.75}
                     >
-                        <Text style={styles.sendBtnText}>{isSending ? '…' : 'Send'}</Text>
+                        <Icon name="send" size={ox(16)} color="#000000" />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={onCancelReply} style={styles.cancelBtn}>
-                        <Text style={styles.cancelBtnText}>Cancel</Text>
+                    <TouchableOpacity
+                        onPress={onCancelReply}
+                        style={styles.cancelBtn}
+                        activeOpacity={0.75}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <Icon name="close" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
             ) : (
-                <TouchableOpacity style={styles.messagePill} onPress={onOpenReply} activeOpacity={0.9}>
-                    <Text style={styles.messagePillText}>Send message</Text>
-                </TouchableOpacity>
-            )}
+                <View style={styles.tray}>
+                    <TouchableOpacity
+                        style={styles.messagePill}
+                        onPress={onOpenReply}
+                        activeOpacity={0.75}
+                    >
+                        <Text style={styles.messagePillText}>Message...</Text>
+                    </TouchableOpacity>
 
-            <TouchableOpacity onPress={onLike} style={styles.iconBtn}>
-                <Icon
-                    name="thumbs-up"
-                    size={22}
-                    color={hasReaction ? '#22D3EE' : '#FFFFFF'}
-                />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onShare} style={styles.iconBtn}>
-                <Icon name="paper-plane-outline" size={22} color="#FFFFFF" />
-            </TouchableOpacity>
+                    {QUICK_REACTIONS.map((emoji) => {
+                        const selected = activeQuickEmoji === emoji;
+                        return (
+                            <TouchableOpacity
+                                key={emoji}
+                                onPress={() => onQuickReact(emoji)}
+                                style={[styles.actionBtn, selected && styles.actionBtnSelected]}
+                                activeOpacity={0.7}
+                                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                                accessibilityRole="button"
+                                accessibilityLabel={`React ${emoji}`}
+                            >
+                                <Text style={styles.emoji} allowFontScaling={false}>
+                                    {emoji}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+
+                    <TouchableOpacity
+                        onPress={onLike}
+                        style={styles.actionBtn}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Like story"
+                    >
+                        <Icon
+                            name={hasReaction ? 'heart' : 'heart-outline'}
+                            size={ox(28)}
+                            color={hasReaction ? '#FF2D55' : '#FFFFFF'}
+                        />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={onShare}
+                        style={styles.actionBtn}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Share story"
+                    >
+                        <Icon name="arrow-redo-outline" size={ox(28)} color="#FFFFFF" />
+                    </TouchableOpacity>
+                </View>
+            )}
         </View>
     );
 }
 
+const ACTION = ox(44);
+
 const styles = StyleSheet.create({
-    bar: {
+    host: {
         position: 'absolute',
-        left: 8,
-        right: 8,
-        bottom: 16,
-        zIndex: 60,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        maxWidth: 420,
-        alignSelf: 'center',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 120,
+        elevation: 24,
+        paddingHorizontal: ox(10),
+        paddingTop: ox(8),
     },
-    composerRow: {
-        flex: 1,
+    tray: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        minWidth: 0,
+        width: '100%',
+        borderRadius: ox(999),
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.65)',
+        backgroundColor: 'rgba(0,0,0,0.38)',
+        paddingLeft: ox(4),
+        paddingRight: ox(6),
+        paddingVertical: ox(4),
+        minHeight: ox(52),
+    },
+    ownerShareRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        minHeight: ox(52),
+        paddingRight: ox(2),
+    },
+    messagePill: {
+        flex: 1,
+        minWidth: ox(110),
+        justifyContent: 'center',
+        paddingHorizontal: ox(14),
+        paddingVertical: Platform.OS === 'android' ? ox(10) : ox(11),
+        marginRight: ox(4),
+    },
+    messagePillText: {
+        color: 'rgba(255,255,255,0.75)',
+        fontSize: ox(15),
+        fontWeight: '500',
+    },
+    actionBtn: {
+        width: ACTION,
+        height: ACTION,
+        marginLeft: ox(2),
+        borderRadius: ACTION / 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+    },
+    actionBtnSelected: {
+        backgroundColor: 'rgba(255,255,255,0.16)',
+    },
+    emoji: {
+        fontSize: ox(28),
+        lineHeight: ox(34),
+        textAlign: 'center',
     },
     input: {
         flex: 1,
         minWidth: 0,
-        borderRadius: 999,
-        borderWidth: 2,
-        borderColor: '#fff',
-        backgroundColor: 'rgba(0,0,0,0.45)',
-        color: '#fff',
-        fontSize: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        color: '#FFFFFF',
+        fontSize: ox(15),
+        paddingHorizontal: ox(14),
+        paddingVertical: Platform.OS === 'android' ? ox(10) : ox(11),
     },
     sendBtn: {
-        borderRadius: 999,
-        backgroundColor: '#fff',
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        width: ACTION,
+        height: ACTION,
+        borderRadius: ACTION / 2,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        marginLeft: ox(4),
     },
-    sendBtnDisabled: { opacity: 0.5 },
-    sendBtnText: { color: '#000', fontSize: 12, fontWeight: '700' },
+    sendBtnDisabled: { opacity: 0.45 },
     cancelBtn: {
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        width: ox(40),
+        height: ACTION,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        marginLeft: ox(2),
     },
-    cancelBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-    messagePill: {
-        flex: 1,
-        minWidth: 0,
-        borderRadius: 999,
-        borderWidth: 2,
-        borderColor: '#fff',
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        paddingHorizontal: 12,
-        paddingVertical: 9,
-    },
-    messagePillText: {
-        color: 'rgba(255,255,255,0.8)',
-        fontSize: 12,
-        fontWeight: '700',
-    },
-    iconBtn: { padding: 6, flexShrink: 0 },
 });

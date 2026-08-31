@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { getRuntimeEnv } from '../config/runtimeEnv';
+import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 
 let socket: Socket | null = null;
 
@@ -38,8 +39,7 @@ export function connectSocket(userHandle: string): Socket | null {
     });
 
     socket.on('connect_error', () => {
-        // Connection failed; socket.io-client will retry up to reconnectionAttempts (3).
-        // App continues to work via Custom Events fallback.
+        // Silent — optional realtime channel; app works without it.
     });
 
     return socket;
@@ -56,11 +56,7 @@ export function emitMessage(from: string, to: string, message: any): void {
     if (socket?.connected) {
         socket.emit('newMessage', { from, to, message });
     } else {
-        console.warn('Socket not connected, falling back to Custom Events');
-        // Fallback to Custom Events if Socket.IO is not available
-        window.dispatchEvent(new CustomEvent('conversationUpdated', { 
-            detail: { participants: [from, to], message } 
-        }));
+        dispatchBrowserEvent('conversationUpdated', { participants: [from, to], message });
     }
 }
 
@@ -68,8 +64,7 @@ export function emitConversationUpdate(data: any): void {
     if (socket?.connected) {
         socket.emit('conversationUpdate', data);
     } else {
-        // Fallback to Custom Events
-        window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: data }));
+        dispatchBrowserEvent('conversationUpdated', data);
     }
 }
 
@@ -77,9 +72,6 @@ export function emitInboxUnreadChanged(handle: string, unread: number): void {
     if (socket?.connected) {
         socket.emit('inboxUnreadChanged', { handle, unread });
     } else {
-        // Fallback to Custom Events
-        window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { 
-            detail: { handle, unread } 
-        }));
+        dispatchBrowserEvent('inboxUnreadChanged', { handle, unread });
     }
 }

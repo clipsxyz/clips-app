@@ -3,14 +3,13 @@
 /* eslint-disable */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-refresh/only-export-components */
+// @refresh reset — FeedScreen is large; full remount on edit avoids hook-order HMR glitches.
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
     Text,
     StyleSheet,
-    FlatList,
-    RefreshControl,
     TouchableOpacity,
     Image,
     ActivityIndicator,
@@ -21,10 +20,16 @@ import {
     Linking,
     Pressable,
     Platform,
+    useWindowDimensions,
+    Animated,
+    DeviceEventEmitter,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
+import PassportTravelingBorder from '../components/PassportTravelingBorder.native';
+import { PASSPORT_ABYSS, PASSPORT_CANVAS_WASH, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -35,6 +40,7 @@ import {
     reclipPost,
     deletePost,
     setReclipState,
+    setBookmarkState,
     addComment,
     fetchComments,
     incrementShares,
@@ -44,19 +50,34 @@ import {
     deleteCommentById,
     setCommentModerationState,
     decorateForUser,
+    getLocalPostById,
+    upsertLocalPost,
+    getFollowState,
+    getState,
+    mergeEngagementStats,
+    postMatchesLocationTab,
+    clearLocalFeedPostsStorage,
+    syncFollowsFromLaravel,
 } from '../api/posts';
+import { isMockMode } from '../api/apiMode';
 import { getUnreadTotal } from '../api/messages';
 import { blockUser } from '../api/messages';
 import { isUserBlocked } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
-import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDimensions';
-import { FEED_UI } from '../constants/feedUiTokens';
+import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
+import { FEED_UI, feedCardMediaHeight } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
-import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
+import FeedScenesMediaExpand, {
+    type FeedScenesOrigin,
+} from '../components/FeedScenesMediaExpand.native';
+import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
+import ImageFullscreenModal, {
+    type ImageFullscreenOrigin,
+} from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
-import { postHasVideoMedia } from '../utils/postMedia';
+import { postHasVideoMedia, currentFeedSlideIsVideo } from '../utils/postMedia';
 import NetInfo from '@react-native-community/netinfo';
 import {
     getFeedAutoplayPref,
@@ -64,13 +85,85 @@ import {
     subscribeFeedAutoplayPref,
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
-import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
-import { consumeFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
+import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
+import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
+import { setFeedScenesFullscreen } from '../utils/feedScenesFullscreenNative';
+import {
+    setFeedScenesOverlaySession,
+    subscribeFeedScenesOverlaySession,
+} from '../utils/feedScenesOverlayNative';
+import { subscribeScenesPostUpdates } from '../utils/scenesPostSyncNative';
+import {
+    setScenesViewerActive,
+    subscribeScenesViewerActive,
+} from '../utils/scenesViewerActiveNative';
 import {
     getGlobalVideoMutedNative,
+    setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import FeedPageLayout, { FEED_CARD_BG, FEED_PAGE_BG, FEED_POST_CARD_STYLE } from '../components/FeedPageLayout.native';
+import { FlatList, RefreshControl } from 'react-native-gesture-handler';
+import {
+    useSharedValue,
+} from 'react-native-reanimated';
+
+import FeedPageLayout, {
+    FEED_CARD_BODY,
+    FEED_CARD_CAPTION_PADDING,
+    FEED_CARD_CAPTION_ROW,
+    FEED_CARD_CAPTION_TEXT_SLOT,
+    FEED_CARD_ENGAGEMENT_BAR,
+    FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+    FEED_CARD_ENGAGEMENT_LEFT,
+    FEED_CARD_HEADER_WRAP,
+    FEED_CARD_MEDIA_WRAP,
+    FEED_CARD_SPONSORED_FEED_TYPE,
+    FEED_CARD_SPONSORED_PILL,
+    FEED_CARD_SPONSORED_ROW,
+    FEED_CARD_SPONSORED_TEXT,
+    FEED_CARD_UPLOAD_OVERLAY,
+    FEED_CARD_UPLOAD_SUBTITLE,
+    FEED_CARD_UPLOAD_TITLE,
+    FEED_HEADER_ACTIVE_DOT,
+    FEED_HEADER_CENTER,
+    FEED_HEADER_DROPDOWN_MENU,
+    FEED_HEADER_DROPDOWN_MENU_ITEM,
+    FEED_HEADER_DROPDOWN_MENU_TEXT,
+    FEED_HEADER_DROPDOWN_META,
+    FEED_HEADER_DROPDOWN_SEARCH_HINT,
+    FEED_HEADER_DROPDOWN_SEARCH_INPUT,
+    FEED_HEADER_DROPDOWN_SEARCH_WRAP,
+    FEED_HEADER_DROPDOWN_SUGGESTION_ITEM,
+    FEED_HEADER_DROPDOWN_SUGGESTION_TEXT,
+    FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP,
+    FEED_HEADER_ICON_BUTTON,
+    FEED_HEADER_LOCATION_PILL,
+    FEED_HEADER_LOCATION_TITLE,
+    FEED_HEADER_PASSPORT_AVATAR,
+    FEED_HEADER_PASSPORT_INITIALS,
+    FEED_HEADER_PICKER_ROW,
+    FEED_HEADER_RIGHT_ACTIONS,
+    FEED_HEADER_SIDE_ACTION,
+    FEED_HEADER_SIDE_LABEL,
+    FEED_PAGE_BG,
+    FEED_POST_CARD_STYLE,
+    FEED_EMPTY_BADGE,
+    FEED_EMPTY_CARD,
+    FEED_EMPTY_CREATE_GRADIENT,
+    FEED_EMPTY_FOLLOWING_SUBTITLE,
+    FEED_EMPTY_FOLLOWING_TITLE,
+    FEED_EMPTY_GRADIENT_BTN,
+    FEED_EMPTY_GRADIENT_BTN_TEXT,
+    FEED_EMPTY_NOTIFY_GRADIENT,
+    FEED_EMPTY_SUBTITLE,
+    FEED_EMPTY_TITLE,
+} from '../components/FeedPageLayout.native';
+import FeedPostProfileQuickMenu, {
+    type ProfileQuickMenuAnchor,
+} from '../components/FeedPostProfileQuickMenu.native';
+import { isDevMockFeedVideoPost } from '../api/posts';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigateMainTab } from '../navigation/mainTabs';
@@ -83,32 +176,36 @@ import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedPostTagRow from '../components/FeedPostTagRow.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
-import FeedHeartDrop from '../components/FeedHeartDrop.native';
 import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
+import { setImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
 import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
+import { getPostCaptionWithoutLink, excludeLinkShareFeedPosts, isLinkShareFeedPost } from '../utils/linkPreview';
 import FeedShareModal from '../components/FeedShareModal';
 import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
-import { getActiveBoost } from '../api/boost';
+import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
-import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/Stories24FeedRail.native';
+import Stories24FeedShelf, { type Stories24FeedShelfHandle } from '../components/Stories24FeedShelf.native';
+import { getInboxUnreadPollMs, getStoriesRailPollMs } from '../utils/backgroundPollMs';
 import {
     buildStories24RailItems,
-    consumeStories24FeedScrollRestore,
-    consumeStories24FeedScrollRestore,
     consumeStories24FeedScrollRestore,
     consumeStories24RailReturn,
     persistStories24RailOpenHandle,
     buildStories24StoryNavParams,
     isStories24AddYoursHandle,
+    normalizeStories24Handle,
     resolveStories24OpenTarget,
     snapshotStories24FeedScroll,
+    takeStories24RailReturnSync,
+    STORIES24_RAIL_RETURN_KEY,
     type Stories24RailItem,
     type Stories24RailReturnPayload,
 } from '../utils/stories24Rail';
@@ -131,6 +228,7 @@ import {
     getCollectionsForPost,
     savePostToDefaultCollection,
     unsavePost,
+    applyUniqueSavesCount,
 } from '../api/collections';
 import {
     markFeedPostArchivedMobile,
@@ -152,8 +250,6 @@ import {
 } from '../utils/feedContentPrefsMobile';
 import {
     dismissPendingFeedUpload,
-    getPendingFeedUploads,
-    pendingUploadToPost,
     subscribePendingFeedUploadComplete,
     subscribePendingFeedUploads,
 } from '../utils/pendingFeedUploadNative';
@@ -166,8 +262,13 @@ import {
 } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { clearPendingLocationFeed, readPendingLocationFeed } from '../utils/pendingLocationNative';
+import {
+    filterPostsForLocationFeed,
+    findLocationFeedLeaks,
+    isLocationScopedFeedTab,
+} from '../utils/locationFeedGuard';
 import type { FeedScope } from '../utils/placeFeedLevels';
-import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal';
+import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import FeedDmSheet from '../components/FeedDmSheet.native';
 import FeedDmDeliveryFx, { type FeedDmDeliveryFxState } from '../components/FeedDmDeliveryFx.native';
@@ -178,7 +279,8 @@ import {
     saveLocationNotifyPrefs,
 } from '../utils/locationNotifyPrefNative';
 import { useMutualFollow } from '../hooks/useMutualFollow';
-import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard';
+import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
+import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard.native';
 import SuggestedPlacesFeedSection from '../components/SuggestedPlacesFeedSection.native';
 import LocalBusinessSuggestionCard from '../components/LocalBusinessSuggestionCard.native';
 import FeedAdCard from '../components/FeedAdCard.native';
@@ -205,6 +307,7 @@ import {
 import { fetchSuggestedPostsByPlaces, transformLaravelPost } from '../api/posts';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
+import { ox } from '../constants/nativeOpticalScale';
 
 type Tab = string;
 
@@ -223,6 +326,7 @@ function PillTabs({
     onOpenPassport,
     onOpenDiscover,
     onSearchLocation,
+    onHeaderPlacePick,
     onClearCustom,
 }: {
     active: Tab;
@@ -251,6 +355,10 @@ function PillTabs({
 }) {
     const { user } = useAuth();
     const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
+    const onHeaderPlacePickRef = useRef(onHeaderPlacePick);
+    const onSearchLocationRef = useRef(onSearchLocation);
+    onHeaderPlacePickRef.current = onHeaderPlacePick;
+    onSearchLocationRef.current = onSearchLocation;
 
     type HeaderSuggestion = {
         name: string;
@@ -284,17 +392,24 @@ function PillTabs({
         suggestion: LocationSuggestion,
         filterType: 'location' | 'venue' | 'landmark'
     ) => {
-        if (onHeaderPlacePick) {
-            onHeaderPlacePick(suggestion, filterType);
+        const pickHandler = onHeaderPlacePickRef.current;
+        if (typeof pickHandler === 'function') {
+            pickHandler(suggestion, filterType);
             return;
         }
-        onSearchLocation?.(suggestion.name, filterType, {
+        onSearchLocationRef.current?.(suggestion.name, filterType, {
             label: suggestion.name,
             placeId: suggestion.place_id ?? null,
         });
     };
     const [menuOpen, setMenuOpen] = useState(false);
+    const [showFeedSwitchCue, setShowFeedSwitchCue] = useState(false);
+    const feedSwitchBadgeAnim = useRef(new Animated.Value(0)).current;
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
+    const sheetInsets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
+    const sheetWidth = Math.min(windowWidth - 32, 400);
+    const sheetMarginH = Math.max(16, Math.floor((windowWidth - sheetWidth) / 2));
     const [locationQuery, setLocationQuery] = useState('');
     const [locationSuggestions, setLocationSuggestions] = useState<HeaderSuggestion[]>([]);
     const [usingFallbackSuggestions, setUsingFallbackSuggestions] = useState(false);
@@ -383,6 +498,31 @@ function PillTabs({
     }, []);
 
     useEffect(() => {
+        const appears = setTimeout(() => {
+            setShowFeedSwitchCue(true);
+            Animated.spring(feedSwitchBadgeAnim, {
+                toValue: 1,
+                friction: 6,
+                tension: 120,
+                useNativeDriver: true,
+            }).start();
+        }, 700);
+        const bursts = setTimeout(() => {
+            Animated.timing(feedSwitchBadgeAnim, {
+                toValue: 0,
+                duration: 220,
+                useNativeDriver: true,
+            }).start(({ finished }) => {
+                if (finished) setShowFeedSwitchCue(false);
+            });
+        }, 3900);
+        return () => {
+            clearTimeout(appears);
+            clearTimeout(bursts);
+        };
+    }, [feedSwitchBadgeAnim]);
+
+    useEffect(() => {
         if (!menuOpen) return;
         setLocationQuery(customLocation || '');
         setLocationSuggestions([]);
@@ -436,24 +576,38 @@ function PillTabs({
                 const res = await searchLocations(q, 6, modeForApi);
                 if (!cancelled) {
                     const allApiSuggestions = Array.isArray(res) ? res : [];
-                    const mappedApi: HeaderSuggestion[] = allApiSuggestions.map((s) => {
-                        const sel = resolvePlaceFeedSelection(s as LocationSuggestion);
-                        const t = String((s as any)?.type || '').toLowerCase();
-                        const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
-                            ? 'venue'
-                            : t.includes('landmark')
-                                ? 'landmark'
-                                : 'location';
-                        return {
-                            name: s.name,
-                            country: (s as any).country,
-                            type: kind,
-                            filter: sel.filter,
-                            label: sel.label,
-                            placeId: sel.placeId,
-                            scope: sel.scope,
-                            source: s as LocationSuggestion,
-                        };
+                    const mappedApi: HeaderSuggestion[] = allApiSuggestions.flatMap((raw) => {
+                        if (!raw || typeof raw !== 'object') return [];
+                        const s = raw as LocationSuggestion;
+                        const name = String(s.name || s.display_name || '').trim();
+                        if (!name) return [];
+                        try {
+                            const normalized: LocationSuggestion = {
+                                ...s,
+                                name,
+                                country: s.country != null ? String(s.country) : undefined,
+                                type: s.type || 'location',
+                            };
+                            const sel = resolvePlaceFeedSelection(normalized);
+                            const t = String(normalized.type || '').toLowerCase();
+                            const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
+                                ? 'venue'
+                                : t.includes('landmark')
+                                    ? 'landmark'
+                                    : 'location';
+                            return [{
+                                name,
+                                country: normalized.country,
+                                type: kind,
+                                filter: sel.filter,
+                                label: sel.label,
+                                placeId: sel.placeId,
+                                scope: sel.scope,
+                                source: normalized,
+                            }];
+                        } catch {
+                            return [];
+                        }
                     });
                     const fallbackCombined: HeaderSuggestion[] = [
                         ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
@@ -523,159 +677,283 @@ function PillTabs({
             filterType = 'landmark';
         }
         if (!next) return;
-        commitHeaderPlace(
-            {
-                name: next,
-                type: filterType === 'venue' ? 'venue' : filterType === 'landmark' ? 'landmark' : 'location',
-                country: next,
-                national: next,
-                local: next,
-                regional: next,
-            },
-            filterType
-        );
         setMenuOpen(false);
+        setTimeout(() => {
+            commitHeaderPlace(
+                {
+                    name: next,
+                    type: filterType === 'venue' ? 'venue' : filterType === 'landmark' ? 'landmark' : 'location',
+                    country: next,
+                    national: next,
+                    local: next,
+                    regional: next,
+                },
+                filterType
+            );
+        }, 80);
     };
 
     return (
         <View style={styles.tabContainer}>
-            <View style={styles.feedHeaderPickerRow}>
+            <View style={FEED_HEADER_PICKER_ROW}>
                 <TouchableOpacity
                     onPress={() => onOpenStories24?.()}
-                    style={styles.feedHeaderSideAction}
+                    style={FEED_HEADER_SIDE_ACTION}
                     accessibilityLabel="Stories 24"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Stories24HeaderIcon size={32} />
-                        <Text style={styles.feedHeaderPassportLabel}>Stories</Text>
+                        <Stories24HeaderIcon size={FEED_UI.icon.headerStories} />
+                        <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
                     </View>
                 </TouchableOpacity>
 
-                <View style={styles.feedHeaderCenter}>
-                    <TouchableOpacity
-                        onPress={() => setMenuOpen((prev) => !prev)}
-                        style={styles.feedDropdownTrigger}
-                        activeOpacity={0.85}
-                    >
-                        <Icon
-                            name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
-                            size={16}
-                            color="#FFFFFF"
-                            style={styles.feedDropdownActiveIcon}
-                        />
-                        <View style={[styles.feedDropdownActiveDot, { backgroundColor: activeIndicatorColor }]} />
-                        <Text
-                            style={styles.feedDropdownActiveText}
-                            numberOfLines={1}
-                            ellipsizeMode="tail"
-                        >
-                            {headerLabel}
-                        </Text>
-                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="#E5E7EB" />
-                    </TouchableOpacity>
-
-                    {menuOpen && (
-                        <View style={styles.feedDropdownMenu}>
-                            <View style={styles.feedDropdownSearchWrap}>
-                                <Icon name="search-outline" size={16} color="#CBD5E1" />
-                                <TextInput
-                                    value={locationQuery}
-                                    onChangeText={setLocationQuery}
-                                    placeholder={searchHints[searchHintIndex]}
-                                    placeholderTextColor="rgba(255,255,255,0.45)"
-                                    underlineColorAndroid="transparent"
-                                    onFocus={() => setSearchInputFocused(true)}
-                                    onBlur={() => setSearchInputFocused(false)}
-                                    onSubmitEditing={submitLocationSearch}
-                                    returnKeyType="search"
-                                    autoCapitalize="words"
-                                    style={styles.feedDropdownSearchInput}
-                                />
-                            </View>
-                            <Text style={styles.feedDropdownSearchHint}>
-                                Tip: use venue: or landmark:
-                            </Text>
-                            {locationQuery.trim().length >= 2 ? (
-                                <View style={styles.feedDropdownSuggestionsWrap}>
-                                    {loadingSuggestions ? (
-                                        <Text style={styles.feedDropdownSuggestionsMeta}>Searching places...</Text>
-                                    ) : locationSuggestions.length > 0 ? (
-                                        locationSuggestions.map((s, idx) => (
-                                            <TouchableOpacity
-                                                key={`${s.name}-${idx}`}
-                                                style={styles.feedDropdownSuggestionItem}
-                                                onPress={() => {
-                                                    const raw = locationQuery.trim();
-                                                    const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
-                                                        ? 'venue'
-                                                        : /^landmark\s*:/i.test(raw)
-                                                            ? 'landmark'
-                                                            : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
-                                                                ? 'venue'
-                                                                : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
-                                                                    ? 'landmark'
-                                                                    : 'location');
-                                                    setLocationQuery(s.name);
-                                                    commitHeaderPlace(
-                                                        headerSuggestionToLocation(s, s.name),
-                                                        mode
-                                                    );
-                                                    setMenuOpen(false);
-                                                }}
-                                            >
-                                                <Text style={styles.feedDropdownSuggestionText}>
-                                                    {s.name}
-                                                    {s.type === 'venue'
-                                                        ? ' · venue'
-                                                        : s.type === 'landmark'
-                                                            ? ' · landmark'
-                                                            : (usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : ''))}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))
-                                    ) : (
-                                        <Text style={styles.feedDropdownSuggestionsMeta}>No matches yet</Text>
-                                    )}
+                <View style={FEED_HEADER_CENTER}>
+                    <View style={styles.feedSwitchPillWrap}>
+                        {showFeedSwitchCue && !menuOpen ? (
+                            <Animated.View
+                                pointerEvents="none"
+                                style={[
+                                    styles.feedSwitchBadge,
+                                    {
+                                        opacity: feedSwitchBadgeAnim,
+                                        transform: [
+                                            {
+                                                translateY: feedSwitchBadgeAnim.interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [-8, 0],
+                                                }),
+                                            },
+                                            {
+                                                scale: feedSwitchBadgeAnim.interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [0.86, 1],
+                                                }),
+                                            },
+                                        ],
+                                    },
+                                ]}
+                            >
+                                <View style={styles.feedSwitchBadgeCaret} />
+                                <View style={styles.feedSwitchBadgeInner}>
+                                    <Icon name="location" size={11} color="#FFFFFF" />
+                                    <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
                                 </View>
-                            ) : null}
-                            {customLocation ? (
-                                <TouchableOpacity
-                                    style={styles.feedDropdownMenuItem}
-                                    onPress={() => {
-                                        onClearCustom?.();
-                                        setMenuOpen(false);
-                                    }}
+                            </Animated.View>
+                        ) : null}
+                        <PassportTravelingBorder borderRadius={10} borderWidth={2}>
+                            <TouchableOpacity
+                                onPress={() => setMenuOpen((prev) => !prev)}
+                                style={FEED_HEADER_LOCATION_PILL}
+                                activeOpacity={0.85}
+                                accessibilityLabel="Change feed"
+                            >
+                                <Icon
+                                    name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
+                                    size={FEED_UI.icon.headerLocation}
+                                    color="#FFFFFF"
+                                />
+                                <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
+                                <Text
+                                    style={FEED_HEADER_LOCATION_TITLE}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
                                 >
-                                    <Icon name="home-outline" size={18} color="#E5E7EB" />
-                                    <Text style={styles.feedDropdownMenuText}>Back to home feed</Text>
-                                </TouchableOpacity>
-                            ) : null}
-                            {menuItems.map((item) => (
-                                <TouchableOpacity
-                                    key={item.key}
-                                    style={styles.feedDropdownMenuItem}
-                                    onPress={() => {
-                                        item.onPress();
-                                        setMenuOpen(false);
-                                    }}
-                                >
-                                    <Icon name={item.icon} size={18} color={item.iconColor} />
-                                    <Text style={styles.feedDropdownMenuText}>{item.label}</Text>
-                                </TouchableOpacity>
-                            ))}
+                                    {headerLabel}
+                                </Text>
+                                <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
+                            </TouchableOpacity>
+                        </PassportTravelingBorder>
+                    </View>
+
+                    <Modal
+                        visible={menuOpen}
+                        transparent
+                        animationType="slide"
+                        onRequestClose={() => setMenuOpen(false)}
+                        statusBarTranslucent
+                    >
+                        <View style={styles.feedSwitchSheetOverlay}>
+                            <Pressable style={styles.feedSwitchSheetBackdrop} onPress={() => setMenuOpen(false)} />
+                            <View
+                                style={[
+                                    styles.feedSwitchSheet,
+                                    {
+                                        width: sheetWidth,
+                                        marginHorizontal: sheetMarginH,
+                                        paddingBottom: Math.max(sheetInsets.bottom, 16),
+                                    },
+                                ]}
+                            >
+                                {(() => {
+                                    const sheetBody = (
+                                        <>
+                                            <View style={styles.feedSwitchSheetHandle} />
+                                            <View style={styles.feedSwitchSheetHeader}>
+                                                <View style={styles.feedSwitchSheetHeaderSpacer} />
+                                                <TouchableOpacity
+                                                    onPress={() => setMenuOpen(false)}
+                                                    style={styles.feedSwitchSheetClose}
+                                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                    accessibilityLabel="Close"
+                                                >
+                                                    <Icon name="close" size={ox(24)} color="#FFFFFF" />
+                                                </TouchableOpacity>
+                                            </View>
+                                            <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
+                                            <Text style={styles.feedSwitchSheetTitle}>Switch feed</Text>
+                                            <Text style={styles.feedSwitchSheetSub}>
+                                                Nearby, city, country, Discover, or Following
+                                            </Text>
+                                            <View style={styles.feedSwitchSearchWrap}>
+                                                <Icon name="search-outline" size={ox(18)} color="rgba(255,255,255,0.75)" />
+                                                <TextInput
+                                                    value={locationQuery}
+                                                    onChangeText={setLocationQuery}
+                                                    placeholder={searchHints[searchHintIndex]}
+                                                    placeholderTextColor="rgba(255,255,255,0.45)"
+                                                    underlineColorAndroid="transparent"
+                                                    onFocus={() => setSearchInputFocused(true)}
+                                                    onBlur={() => setSearchInputFocused(false)}
+                                                    onSubmitEditing={submitLocationSearch}
+                                                    returnKeyType="search"
+                                                    autoCapitalize="words"
+                                                    style={styles.feedSwitchSearchInput}
+                                                />
+                                            </View>
+                                            <Text style={styles.feedSwitchSearchHint}>
+                                                Tip: use venue: or landmark:
+                                            </Text>
+                                            <ScrollView
+                                                style={styles.feedSwitchSheetScroll}
+                                                contentContainerStyle={styles.feedSwitchSheetScrollContent}
+                                                keyboardShouldPersistTaps="handled"
+                                                showsVerticalScrollIndicator={false}
+                                            >
+                                                {locationQuery.trim().length >= 2 ? (
+                                                    <View style={styles.feedSwitchSuggestionsWrap}>
+                                                        {loadingSuggestions ? (
+                                                            <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
+                                                        ) : locationSuggestions.length > 0 ? (
+                                                            locationSuggestions.map((s, idx) => {
+                                                                const suggestionName = String(s.name || '').trim();
+                                                                if (!suggestionName) return null;
+                                                                const countryLabel = s.country != null ? String(s.country) : '';
+                                                                const metaLabel =
+                                                                    s.type === 'venue'
+                                                                        ? ' · venue'
+                                                                        : s.type === 'landmark'
+                                                                            ? ' · landmark'
+                                                                            : usingFallbackSuggestions
+                                                                                ? ' · quick suggestion'
+                                                                                : countryLabel
+                                                                                    ? ` · ${countryLabel}`
+                                                                                    : '';
+                                                                return (
+                                                                <TouchableOpacity
+                                                                    key={`${suggestionName}-${idx}`}
+                                                                    style={FEED_HEADER_DROPDOWN_SUGGESTION_ITEM}
+                                                                    onPress={() => {
+                                                                        const raw = locationQuery.trim();
+                                                                        const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
+                                                                            ? 'venue'
+                                                                            : /^landmark\s*:/i.test(raw)
+                                                                                ? 'landmark'
+                                                                                : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
+                                                                                    ? 'venue'
+                                                                                    : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
+                                                                                        ? 'landmark'
+                                                                                        : 'location');
+                                                                        setLocationQuery(suggestionName);
+                                                                        setMenuOpen(false);
+                                                                        // Defer so the feed-switch Modal unmounts before scope picker opens (Android nested Modal crash).
+                                                                        setTimeout(() => {
+                                                                            commitHeaderPlace(
+                                                                                headerSuggestionToLocation(s, suggestionName),
+                                                                                mode
+                                                                            );
+                                                                        }, 80);
+                                                                    }}
+                                                                >
+                                                                    <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
+                                                                        {suggestionName}
+                                                                        {metaLabel}
+                                                                    </Text>
+                                                                </TouchableOpacity>
+                                                                );
+                                                            })
+                                                        ) : (
+                                                            <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
+                                                        )}
+                                                    </View>
+                                                ) : null}
+                                                {customLocation ? (
+                                                    <TouchableOpacity
+                                                        style={styles.feedSwitchMenuItem}
+                                                        onPress={() => {
+                                                            onClearCustom?.();
+                                                            setMenuOpen(false);
+                                                        }}
+                                                    >
+                                                        <Icon name="home-outline" size={ox(22)} color="rgba(255,255,255,0.8)" />
+                                                        <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
+                                                    </TouchableOpacity>
+                                                ) : null}
+                                                {menuItems.map((item) => (
+                                                    <TouchableOpacity
+                                                        key={item.key}
+                                                        style={styles.feedSwitchMenuItem}
+                                                        onPress={() => {
+                                                            item.onPress();
+                                                            setMenuOpen(false);
+                                                        }}
+                                                    >
+                                                        <Icon name={item.icon} size={ox(22)} color={item.iconColor} />
+                                                        <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </ScrollView>
+                                        </>
+                                    );
+                                    if (Platform.OS === 'ios') {
+                                        return (
+                                            <View style={styles.feedSwitchSheetCanvas} collapsable={false}>
+                                                <View style={styles.feedSwitchSheetAmbient} pointerEvents="none" collapsable={false}>
+                                                    <DiscoverAmbientCanvas variant="passport" fillParent />
+                                                </View>
+                                                <View style={styles.feedSwitchSheetContent} collapsable={false}>
+                                                    {sheetBody}
+                                                </View>
+                                            </View>
+                                        );
+                                    }
+                                    return (
+                                        <LinearGradient
+                                            colors={[...PASSPORT_CANVAS_WASH]}
+                                            locations={[0, 0.28, 0.55, 0.78, 1]}
+                                            start={{ x: 0.1, y: 1 }}
+                                            end={{ x: 0.9, y: 0 }}
+                                            style={styles.feedSwitchSheetCanvas}
+                                        >
+                                            <View style={styles.feedSwitchSheetContent} collapsable={false}>
+                                                {sheetBody}
+                                            </View>
+                                        </LinearGradient>
+                                    );
+                                })()}
+                            </View>
                         </View>
-                    )}
+                    </Modal>
                 </View>
 
-                <View style={styles.feedHeaderRightActions}>
+                <View style={FEED_HEADER_RIGHT_ACTIONS}>
                     {customLocation ? (
-                        <>
+                        <View style={styles.feedHeaderIconGroup}>
                             <TouchableOpacity
                                 onPress={() => setPlaceInfoOpen(true)}
-                                style={styles.feedHeaderIconButton}
+                                style={FEED_HEADER_ICON_BUTTON}
                                 accessibilityLabel={`About ${activeLabel}`}
                             >
-                                <Icon name="information-circle-outline" size={22} color="#FFFFFF" />
+                                <Icon name="information-circle-outline" size={ox(24)} color="#FFFFFF" />
                             </TouchableOpacity>
                             <LocationPlaceSummaryModal
                                 open={placeInfoOpen}
@@ -683,92 +961,30 @@ function PillTabs({
                                 locationLabel={customLocationLabel || customLocation}
                                 placeId={customLocationPlaceId}
                             />
-                        </>
+                        </View>
                     ) : null}
                     <TouchableOpacity
                         onPress={onOpenPassport}
-                        style={styles.feedHeaderSideAction}
+                        style={FEED_HEADER_SIDE_ACTION}
                         accessibilityLabel="My Passport"
                     >
                         <View style={styles.feedHeaderNotifWrap}>
-                            <View style={styles.feedHeaderPassportAvatarWrap}>
+                            <View style={FEED_HEADER_PASSPORT_AVATAR}>
                                 {user?.avatarUrl ? (
                                     <Image
                                         source={{ uri: user.avatarUrl }}
                                         style={styles.feedHeaderPassportAvatarImage}
                                     />
                                 ) : (
-                                    <Text style={styles.feedHeaderPassportInitials}>{passportInitials}</Text>
+                                    <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
                                 )}
                             </View>
-                            <Text style={styles.feedHeaderPassportLabel}>Passport</Text>
+                            <Text style={FEED_HEADER_SIDE_LABEL}>Passport</Text>
                         </View>
                     </TouchableOpacity>
                 </View>
             </View>
         </View>
-    );
-}
-
-function Avatar({
-    src,
-    name,
-    size = 32,
-    hasStory = false,
-    onPress
-}: {
-    src?: string;
-    name: string;
-    size?: number;
-    hasStory?: boolean;
-    onPress?: () => void;
-}) {
-    const getInitials = (fullName: string): string => {
-        const names = fullName.trim().split(' ');
-        if (names.length === 1) {
-            return names[0].charAt(0).toUpperCase();
-        }
-        return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase();
-    };
-
-    const initials = getInitials(name);
-    const Component = onPress ? TouchableOpacity : View;
-
-    if (hasStory) {
-        return (
-            <Component onPress={onPress} style={styles.avatarContainer}>
-                <LinearGradient
-                    colors={['#a78bfa', '#7c3aed']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[styles.storyBorder, { width: size + 4, height: size + 4, borderRadius: (size + 4) / 2 }]}
-                >
-                    <View style={[styles.avatarInner, { width: size, height: size }]}>
-                        {src ? (
-                            <Image source={{ uri: src }} style={styles.avatarImage} />
-                        ) : (
-                            <View style={[styles.avatarFallback, { width: size, height: size }]}>
-                                <Text style={styles.avatarInitials}>{initials}</Text>
-                            </View>
-                        )}
-                    </View>
-                </LinearGradient>
-            </Component>
-        );
-    }
-
-    return (
-        <Component onPress={onPress} style={styles.avatarContainer}>
-            <View style={[styles.avatarInner, { width: size, height: size }]}>
-                {src ? (
-                    <Image source={{ uri: src }} style={styles.avatarImage} />
-                ) : (
-                    <View style={[styles.avatarFallback, { width: size, height: size }]}>
-                        <Text style={styles.avatarInitials}>{initials}</Text>
-                    </View>
-                )}
-            </View>
-        </Component>
     );
 }
 
@@ -792,13 +1008,21 @@ const FeedCard = React.memo(function FeedCard({
     onOverflowPress,
     isVideoActive,
     feedVideoMuted,
+    suspendNativeVideo,
     viewerHandle,
     viewerUserId,
     onOpenDM,
     onRegisterDmAnchor,
     onOpenImageFullscreen,
     onOpenScenes,
-    onShareSuccess,
+    onOpenLikesSheet,
+    onOpenTaggedSheet,
+    onLikeBurst,
+    onShareToStories,
+    onShareToStoriesSuccess,
+    scenesExpanding = false,
+    scenesExpandProgress,
+    scenesExpandOrigin,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -809,8 +1033,13 @@ const FeedCard = React.memo(function FeedCard({
     onReclip: () => Promise<void>;
     onBookmark: () => Promise<void>;
     onPostPress?: () => void;
-    onOpenImageFullscreen?: (startIndex?: number) => void;
-    onOpenScenes?: () => void;
+    onOpenImageFullscreen?: (startIndex?: number, origin?: ImageFullscreenOrigin | null) => void;
+    onOpenScenes?: (origin?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }) => void;
     onVisitProfile?: () => void;
     onVisitHandle?: (handle: string) => void;
     onViewStories?: () => void;
@@ -820,32 +1049,53 @@ const FeedCard = React.memo(function FeedCard({
     onOverflowPress?: () => void;
     isVideoActive?: boolean;
     feedVideoMuted?: boolean;
+    suspendNativeVideo?: boolean;
     viewerHandle?: string | null;
     viewerUserId?: string;
     onOpenDM?: (handle: string, postId: string) => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
-    onShareSuccess?: (postId: string) => void;
+    onOpenLikesSheet?: () => void;
+    onOpenTaggedSheet?: () => void;
+    /** Window coords — parent keeps one Modal so Android doesn't jump the FlatList. */
+    onLikeBurst?: (windowX: number, windowY: number) => void;
+    /** Parent-owned share modal — per-card Modal show/hide jumps FlatList on Android. */
+    onShareToStories?: () => void;
+    onShareToStoriesSuccess?: (postId: string) => void;
+    scenesExpanding?: boolean;
+    scenesExpandProgress?: import('react-native-reanimated').SharedValue<number>;
+    scenesExpandOrigin?: FeedScenesOrigin | null;
 }) {
-    const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
+    const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
+    const profileMenuAnchorRef = React.useRef<View>(null);
+    const openProfileMenu = React.useCallback(() => {
+        profileMenuAnchorRef.current?.measureInWindow((x, y, width, height) => {
+            setProfileMenuAnchor({ x, y, width, height });
+            setProfileMenuVisible(true);
+        });
+    }, []);
+    const closeProfileMenu = React.useCallback(() => {
+        setProfileMenuVisible(false);
+        setProfileMenuAnchor(null);
+    }, []);
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
     const [carouselIndex, setCarouselIndex] = React.useState(0);
-    const [heartDrop, setHeartDrop] = React.useState<{ startX: number; startY: number } | null>(null);
     const likeButtonRef = React.useRef<View>(null);
-    const mediaWrapRef = React.useRef<View>(null);
-    const [likesSheetVisible, setLikesSheetVisible] = React.useState(false);
-    const [taggedSheetVisible, setTaggedSheetVisible] = React.useState(false);
-    const [shareToStoriesVisible, setShareToStoriesVisible] = React.useState(false);
     const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
     const [boostMetricsActive, setBoostMetricsActive] = React.useState(Boolean(post.isBoosted));
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
-    const lastMediaTapRef = React.useRef(0);
-    const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
+    const mediaWrapRef = React.useRef<View>(null);
     const postViewRecordedRef = React.useRef(false);
-    const screenWidth = Dimensions.get('window').width;
-    const cardMediaWidth = screenWidth;
-    const DOUBLE_TAP_DELAY_MS = 260;
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
+    // 4:5 portrait (default) or 16:9 landscape, capped to ~58% of the screen so
+    // header + media + likes/comments/share fit without scrolling one post.
+    const mediaFrameHeight = feedCardMediaHeight(
+        cardMediaWidth,
+        safePositiveLayoutNumber(windowHeight, 720),
+        postHasVideoMedia(post),
+    );
 
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
@@ -853,7 +1103,6 @@ const FeedCard = React.memo(function FeedCard({
     const textOnlyPost = isTextOnlyPost(post);
     const hasFeedMedia = !textOnlyPost && Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
     const hasTaggedUsers = Boolean(post.taggedUsers && post.taggedUsers.length > 0);
-    const showVideoMuteOnMedia = hasFeedMedia && postHasVideoMedia(post);
     const carouselThumbItems = React.useMemo(
         () =>
             (post.mediaItems || []).filter(
@@ -862,7 +1111,20 @@ const FeedCard = React.memo(function FeedCard({
         [post.mediaItems],
     );
     const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
+    const captionWithoutLink = React.useMemo(
+        () => getPostCaptionWithoutLink(post, displayCaption),
+        [post, displayCaption],
+    );
+    const showCaptionRow =
+        !textOnlyPost && hasFeedMedia && (captionWithoutLink.length > 0 || hasTaggedUsers);
     const { profileHandle } = getReclipDisplay(post, viewerHandle);
+    const isRequested = Boolean(
+        !isCurrentUser &&
+            !post.isFollowing &&
+            viewerHandle &&
+            isProfilePrivate(profileHandle) &&
+            hasPendingFollowRequest(viewerHandle, profileHandle),
+    );
     const postTags = Array.isArray(post.tags) ? post.tags : [];
     const showBoostMetrics =
         isCurrentUser && !post.originalUserHandle && (post.isBoosted || boostMetricsActive);
@@ -886,136 +1148,83 @@ const FeedCard = React.memo(function FeedCard({
         };
     }, [post.id, isCurrentUser, post.originalUserHandle, post.isBoosted]);
 
-    /** Lock frame size to first carousel slide so swiping does not resize the card (web parity). */
-    const mediaSizingUrl = React.useMemo(() => {
-        if (!hasFeedMedia) return null;
-        const first = carouselThumbItems[0];
-        if (first?.type === 'video' && post.videoPosterUrl) return post.videoPosterUrl;
-        if (first?.url) return first.url;
-        if (isVideoPost(post) && post.videoPosterUrl) return post.videoPosterUrl;
-        return post.mediaUrl || post.mediaItems?.[0]?.url || null;
-    }, [hasFeedMedia, post, carouselThumbItems]);
-
-    React.useEffect(() => {
-        setImageDimensions(null);
-    }, [post.id]);
-
-    React.useEffect(() => {
-        if (mediaSizingUrl && isLikelyImageUri(mediaSizingUrl) && !imageDimensions) {
-            Image.getSize(
-                mediaSizingUrl,
-                (width, height) => {
-                    // Calculate Instagram-style dimensions with clamping
-                    const dimensions = getInstagramImageDimensions(width, height, cardMediaWidth);
-                    const minHeight = cardMediaWidth * FEED_UI.media.minAspect;
-                    const maxHeight = cardMediaWidth * FEED_UI.media.maxAspect;
-                    const portraitFirstHeight = Math.min(Math.max(dimensions.height, minHeight), maxHeight);
-                    setImageDimensions({ width: dimensions.width, height: portraitFirstHeight });
-                },
-                (error) => {
-                    console.warn('Skipping invalid image sizing URL:', mediaSizingUrl, error);
-                    // Fallback to default dimensions
-                    setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * FEED_UI.media.maxAspect });
-                }
-            );
-        } else if (mediaSizingUrl && !imageDimensions) {
-            setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * FEED_UI.media.maxAspect });
-        }
-    }, [mediaSizingUrl, cardMediaWidth, imageDimensions]);
-
-    // Calculate image style with Instagram clamping
-    const imageStyle = React.useMemo(() => {
-        if (imageDimensions) {
-            return {
-                width: imageDimensions.width,
-                height: imageDimensions.height,
-                backgroundColor: '#000000',
-            };
-        }
-        // Default while loading
-        return {
-            width: cardMediaWidth,
-            height: cardMediaWidth * FEED_UI.media.maxAspect, // Default to max portrait aspect ratio
-            backgroundColor: '#000000',
-        };
-    }, [imageDimensions, cardMediaWidth]);
-
-    const triggerHeartDrop = React.useCallback((pageX: number, pageY: number) => {
-        setHeartDrop({ startX: pageX, startY: pageY });
-    }, []);
-
-    const resolveTapCoords = React.useCallback((pageX?: number, pageY?: number): Promise<{ x: number; y: number }> => {
-        if (typeof pageX === 'number' && typeof pageY === 'number') {
-            return Promise.resolve({ x: pageX, y: pageY });
-        }
-        return new Promise((resolve) => {
-            mediaWrapRef.current?.measureInWindow((x, y, w, h) => {
-                resolve({ x: x + w / 2, y: y + h / 2 });
+    const handleOpenScenesPress = React.useCallback(() => {
+        const handoff = videoMediaRef.current?.getPlaybackHandoff?.();
+        if (handoff && handoff.currentTime > 0.05) {
+            setFeedVideoHandoff(String(post.id), {
+                currentTime: handoff.currentTime,
+                muted: handoff.muted,
+                mediaUrl: post.mediaUrl,
             });
-        });
-    }, []);
-
-    const handleMediaPress = React.useCallback(
-        (event?: { nativeEvent?: { pageX?: number; pageY?: number } }) => {
-            const now = Date.now();
-            if (now - lastMediaTapRef.current <= DOUBLE_TAP_DELAY_MS) {
-                if (singleMediaTapTimerRef.current) {
-                    clearTimeout(singleMediaTapTimerRef.current);
-                    singleMediaTapTimerRef.current = null;
-                }
-                lastMediaTapRef.current = 0;
-                if (!post.userLiked) {
-                    onLike().catch((error) => console.error('Error in media double-tap like:', error));
-                }
-                const { pageX, pageY } = event?.nativeEvent || {};
-                void resolveTapCoords(pageX, pageY).then(({ x, y }) => triggerHeartDrop(x, y));
-                return;
+        }
+        const node = mediaWrapRef.current;
+        if (!node?.measureInWindow) {
+            onOpenScenes?.();
+            return;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            if (width > 8 && height > 8) {
+                onOpenScenes?.({ x, y, width, height });
+            } else {
+                onOpenScenes?.();
             }
-            lastMediaTapRef.current = now;
-            singleMediaTapTimerRef.current = setTimeout(() => {
-                if (postHasVideoMedia(post)) {
-                    videoMediaRef.current?.toggleVideoMute();
-                } else if (onPostPress) {
-                    onPostPress();
-                } else {
-                    const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
-                    onOpenImageFullscreen?.(startIndex);
-                }
-                singleMediaTapTimerRef.current = null;
-            }, DOUBLE_TAP_DELAY_MS + 20);
+        });
+    }, [onOpenScenes, post.id, post.mediaUrl]);
+
+    const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
+
+    const handleMediaDoubleLike = React.useCallback(
+        (_x?: number, _y?: number) => {
+            void onLike();
         },
-        [
-            DOUBLE_TAP_DELAY_MS,
-            carouselIndex,
-            onLike,
-            onOpenImageFullscreen,
-            onPostPress,
-            post,
-            resolveTapCoords,
-            triggerHeartDrop,
-        ],
+        [onLike],
     );
 
-    React.useEffect(() => {
-        return () => {
-            if (singleMediaTapTimerRef.current) {
-                clearTimeout(singleMediaTapTimerRef.current);
-            }
+    const openStillFullscreen = React.useCallback(() => {
+        const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
+        const open = (origin?: ImageFullscreenOrigin | null) => {
+            onOpenImageFullscreen?.(startIndex, origin ?? null);
         };
-    }, []);
+        const node = mediaWrapRef.current;
+        if (!node?.measureInWindow) {
+            open(null);
+            return;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            if (width > 8 && height > 8) {
+                open({ x, y, width, height });
+            } else {
+                open(null);
+            }
+        });
+    }, [carouselIndex, onOpenImageFullscreen, post]);
+
+    const handleMediaSingleTap = React.useCallback(() => {
+        // Active video: toggle mute (button always visible too).
+        if (currentFeedSlideIsVideo(post, carouselIndex)) {
+            videoMediaRef.current?.toggleVideoMute();
+            return;
+        }
+        openStillFullscreen();
+    }, [carouselIndex, openStillFullscreen, post]);
 
     return (
-        <View style={styles.feedCard}>
+        <View
+            style={[
+                FEED_POST_CARD_STYLE,
+                scenesExpanding ? { overflow: 'visible', zIndex: 9999 } : null,
+            ]}
+        >
             <FeedPostTagRow tags={postTags} />
 
             {post.isBoosted && (
-                <View style={styles.sponsoredBadge}>
-                    <View style={styles.sponsoredPill}>
-                        <Text style={styles.sponsoredText}>Sponsored</Text>
+                <View style={FEED_CARD_SPONSORED_ROW}>
+                    <View style={FEED_CARD_SPONSORED_PILL}>
+                        <Text style={FEED_CARD_SPONSORED_TEXT}>Sponsored</Text>
                     </View>
-                    {post.boostFeedType && (
-                        <Text style={styles.sponsoredFeedType}>· {post.boostFeedType} boost</Text>
-                    )}
+                    {post.boostFeedType ? (
+                        <Text style={FEED_CARD_SPONSORED_FEED_TYPE}>· {post.boostFeedType} boost</Text>
+                    ) : null}
                 </View>
             )}
 
@@ -1027,18 +1236,56 @@ const FeedCard = React.memo(function FeedCard({
                     isCurrentUser={isCurrentUser}
                     onFollow={onFollow}
                     onOpenDM={onOpenDM}
-                    onProfileMenuPress={() => setProfileMenuVisible(true)}
+                    onProfileMenuPress={openProfileMenu}
                     onOverflowPress={onOverflowPress}
                     onDoubleLike={() => {
                         void onLike();
                     }}
                     onRegisterDmAnchor={onRegisterDmAnchor}
-                    onShowTaggedUsers={() => setTaggedSheetVisible(true)}
+                    onShowTaggedUsers={() => onOpenTaggedSheet?.()}
+                    menuAnchorRef={profileMenuAnchorRef}
+                    showLinkPreview={false}
                 />
             ) : (
-                <>
+                <View
+                    style={[
+                        FEED_CARD_BODY,
+                        scenesExpanding ? { overflow: 'visible', zIndex: 9999 } : null,
+                    ]}
+                >
+                    <View style={FEED_CARD_HEADER_WRAP}>
+                        <FeedPostHeader
+                            post={post}
+                            viewerHandle={viewerHandle}
+                            isCurrentUser={isCurrentUser}
+                            onFollow={onFollow}
+                            onOpenDM={onOpenDM}
+                            onProfileMenuPress={openProfileMenu}
+                            onHasStoryChange={setHeaderHasStory}
+                            onOverflowPress={onOverflowPress}
+                            onRegisterDmAnchor={onRegisterDmAnchor}
+                            menuAnchorRef={profileMenuAnchorRef}
+                        />
+                    </View>
                     {hasFeedMedia ? (
-                        <View style={styles.mediaWrap} ref={mediaWrapRef} collapsable={false}>
+                        <FeedScenesMediaExpand
+                            expanding={scenesExpanding}
+                            progress={scenesExpandProgress}
+                            origin={scenesExpandOrigin ?? null}
+                            screenWidth={windowWidth}
+                            screenHeight={windowHeight}
+                            style={{
+                                ...FEED_CARD_MEDIA_WRAP,
+                                ...(scenesExpanding
+                                    ? { overflow: 'visible' as const }
+                                    : null),
+                            }}
+                        >
+                        <View
+                            style={{ width: '100%' }}
+                            ref={mediaWrapRef}
+                            collapsable={false}
+                        >
                             <FeedPostMedia
                                 ref={videoMediaRef}
                                 post={post}
@@ -1046,8 +1293,10 @@ const FeedCard = React.memo(function FeedCard({
                                 onCarouselIndexChange={setCarouselIndex}
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
-                                height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
-                                onPress={isClientUploading || isClientUploadFailed ? undefined : handleMediaPress}
+                                height={mediaFrameHeight}
+                                onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
+                                onLikeBurst={mediaGesturesEnabled ? onLikeBurst : undefined}
+                                onSingleTap={mediaGesturesEnabled ? handleMediaSingleTap : undefined}
                                 onMediaLoad={
                                     isClientUploading
                                         ? undefined
@@ -1059,60 +1308,35 @@ const FeedCard = React.memo(function FeedCard({
                                 }
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
+                                suspendNativeVideo={suspendNativeVideo}
                                 muted={feedVideoMuted}
+                                hideOverlayChrome={scenesExpanding}
+                                fillViewport={scenesExpanding}
                                 onOpenScenes={
-                                    isClientUploading || isClientUploadFailed ? undefined : onOpenScenes
+                                    mediaGesturesEnabled && !scenesExpanding
+                                        ? handleOpenScenesPress
+                                        : undefined
                                 }
                             />
-                            <FeedPostHeader
-                                post={post}
-                                viewerHandle={viewerHandle}
-                                isCurrentUser={isCurrentUser}
-                                isOverlaid
-                                onFollow={onFollow}
-                                onOpenDM={onOpenDM}
-                                onProfileMenuPress={() => setProfileMenuVisible(true)}
-                                onHasStoryChange={setHeaderHasStory}
-                                onOverflowPress={onOverflowPress}
-                                onRegisterDmAnchor={onRegisterDmAnchor}
-                            />
                             {isClientUploading ? (
-                                <View style={styles.uploadingOverlay} pointerEvents="none">
+                                <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
                                     <ActivityIndicator size="large" color="#FFFFFF" />
-                                    <Text style={styles.uploadingOverlayTitle}>Posting…</Text>
-                                    <Text style={styles.uploadingOverlaySubtitle}>Preparing your post</Text>
+                                    <Text style={FEED_CARD_UPLOAD_TITLE}>Posting…</Text>
+                                    <Text style={FEED_CARD_UPLOAD_SUBTITLE}>Preparing your post</Text>
                                 </View>
                             ) : null}
                             {isClientUploadFailed ? (
-                                <View style={styles.uploadingOverlay}>
-                                    <Icon name="alert-circle-outline" size={28} color="#FCA5A5" />
-                                    <Text style={styles.uploadingOverlayTitle}>Post failed</Text>
-                                    <Text style={styles.uploadingOverlaySubtitle} numberOfLines={2}>
+                                <View style={FEED_CARD_UPLOAD_OVERLAY}>
+                                    <Icon name="alert-circle-outline" size={ox(28)} color="#FCA5A5" />
+                                    <Text style={FEED_CARD_UPLOAD_TITLE}>Post failed</Text>
+                                    <Text style={FEED_CARD_UPLOAD_SUBTITLE} numberOfLines={2}>
                                         {post.clientUploadError || 'Could not post. Tap to dismiss.'}
                                     </Text>
                                 </View>
                             ) : null}
-                            {hasTaggedUsers ? (
-                                <FeedTaggedMediaBadge
-                                    count={post.taggedUsers!.length}
-                                    aboveMuteControl={showVideoMuteOnMedia}
-                                    onPress={() => setTaggedSheetVisible(true)}
-                                />
-                            ) : null}
                         </View>
-                    ) : (
-                        <FeedPostHeader
-                            post={post}
-                            viewerHandle={viewerHandle}
-                            isCurrentUser={isCurrentUser}
-                            onFollow={onFollow}
-                            onOpenDM={onOpenDM}
-                            onProfileMenuPress={() => setProfileMenuVisible(true)}
-                            onHasStoryChange={setHeaderHasStory}
-                            onOverflowPress={onOverflowPress}
-                            onRegisterDmAnchor={onRegisterDmAnchor}
-                        />
-                    )}
+                        </FeedScenesMediaExpand>
+                    ) : null}
 
                     {carouselThumbItems.length > 1 ? (
                         <FeedMediaCarouselThumbs
@@ -1122,56 +1346,71 @@ const FeedCard = React.memo(function FeedCard({
                         />
                     ) : null}
 
-                </>
+                </View>
             )}
 
-            {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
-                <Pressable
-                    style={styles.captionWrap}
-                    onPress={onPostPress}
-                    disabled={!onPostPress}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open post"
-                >
-                    <FeedCaptionText
-                        caption={displayCaption}
-                        onHandlePress={(handle) => {
-                            if (onVisitHandle) onVisitHandle(handle);
-                            else onVisitProfile?.();
-                        }}
-                    />
-                </Pressable>
+            {showCaptionRow ? (
+                <View style={FEED_CARD_CAPTION_PADDING}>
+                    <View style={FEED_CARD_CAPTION_ROW}>
+                        {captionWithoutLink.length > 0 ? (
+                            <Pressable
+                                style={FEED_CARD_CAPTION_TEXT_SLOT}
+                                onPress={onPostPress}
+                                disabled={!onPostPress}
+                                accessibilityRole="button"
+                                accessibilityLabel="Open post"
+                            >
+                                <FeedCaptionText
+                                    caption={captionWithoutLink}
+                                    onHandlePress={(handle) => {
+                                        if (onVisitHandle) onVisitHandle(handle);
+                                        else onVisitProfile?.();
+                                    }}
+                                />
+                            </Pressable>
+                        ) : (
+                            <View style={FEED_CARD_CAPTION_TEXT_SLOT} />
+                        )}
+                        {hasTaggedUsers ? (
+                            <FeedTaggedMediaBadge
+                                count={post.taggedUsers!.length}
+                                onPress={() => onOpenTaggedSheet?.()}
+                            />
+                        ) : null}
+                    </View>
+                </View>
             ) : null}
 
-            <FeedHeartDrop
-                visible={heartDrop != null}
-                startX={heartDrop?.startX ?? 0}
-                startY={heartDrop?.startY ?? 0}
-                targetRef={likeButtonRef}
-                onComplete={() => setHeartDrop(null)}
-            />
-
-            <View style={[styles.engagementBar, (isClientUploading || isClientUploadFailed) && styles.engagementBarDimmed]}>
-                <View style={styles.actionButtons}>
+            <View
+                style={[
+                    FEED_CARD_ENGAGEMENT_BAR,
+                    (isClientUploading || isClientUploadFailed) && FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+                ]}
+            >
+                <View style={FEED_CARD_ENGAGEMENT_LEFT}>
                     <FeedEngagementRow
                         likeButtonRef={likeButtonRef}
                         likes={post.stats.likes}
                         comments={post.stats.comments}
                         shares={post.stats.shares}
                         reclips={post.stats.reclips}
+                        saves={post.stats.saves ?? 0}
                         views={post.stats.views}
                         userLiked={post.userLiked}
                         userReclipped={post.userReclipped}
                         isSaved={post.isBookmarked}
                         onLike={() => { void onLike(); }}
                         onLikesPress={() => {
-                            if (post.stats.likes > 0) setLikesSheetVisible(true);
+                            onOpenLikesSheet?.();
                         }}
                         onComment={onComment}
-                        onShareToStories={() => setShareToStoriesVisible(true)}
+                        onShareToStories={() => onShareToStories?.()}
                         onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                        reclipDisabled={isCurrentUser}
                         onSave={() => { void onBookmark(); }}
-                        showReclip={!isCurrentUser}
+                        showReclip
+                        showSaveLabel={!showBoostMetrics}
+                        compact={showBoostMetrics}
                         tone="feed"
                     />
                 </View>
@@ -1180,6 +1419,7 @@ const FeedCard = React.memo(function FeedCard({
                     showMetrics={showBoostMetrics}
                     metricsOpen={isMetricsOpen}
                     onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
+                    shares={post.stats.shares}
                     onShare={() => { void onShare(); }}
                 />
             </View>
@@ -1188,121 +1428,31 @@ const FeedCard = React.memo(function FeedCard({
                 <BoostMetricsPanel post={post} isOpen={isMetricsOpen} />
             ) : null}
 
-            <ShareToStoriesModal
-                visible={shareToStoriesVisible}
-                post={post}
-                onClose={() => setShareToStoriesVisible(false)}
-                onShareSuccess={() => {
-                    onShareSuccess?.(post.id);
-                }}
-            />
-
             {post.bannerText ? <FeedNewsTicker text={post.bannerText} /> : null}
 
-            <FeedLikesSheet
-                visible={likesSheetVisible}
-                postId={String(post.id)}
-                userId={viewerUserId || 'anon'}
-                viewerHandle={viewerHandle}
-                likeCount={post.stats.likes}
-                viewCount={post.stats.views}
-                onClose={() => setLikesSheetVisible(false)}
-                onVisitProfile={onVisitHandle}
-            />
-
-            {hasTaggedUsers ? (
-                <TaggedUsersBottomSheet
-                    visible={taggedSheetVisible}
-                    taggedUserHandles={post.taggedUsers!}
-                    onClose={() => setTaggedSheetVisible(false)}
-                    onVisitProfile={onVisitHandle}
-                />
-            ) : null}
-
             {/* Profile quick actions menu (Visit profile / Follow-Unfollow / View stories) */}
-            {profileMenuVisible && (
-                <View style={styles.profileMenuCard}>
-                    <TouchableOpacity
-                        style={styles.profileMenuItem}
-                        onPress={() => {
-                            setProfileMenuVisible(false);
-                            if (onVisitHandle) onVisitHandle(profileHandle);
-                            else onVisitProfile?.();
-                        }}
-                    >
-                        <Icon name="person-outline" size={18} color="#FFFFFF" />
-                        <Text style={styles.profileMenuItemText}>Visit profile</Text>
-                    </TouchableOpacity>
-
-                    {!isCurrentUser && onFollow && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={async () => {
-                                setProfileMenuVisible(false);
-                                await onFollow();
-                            }}
-                        >
-                            <Icon
-                                name={post.isFollowing ? 'person-remove-outline' : 'person-add-outline'}
-                                size={18}
-                                color="#FFFFFF"
-                            />
-                            <Text style={styles.profileMenuItemText}>
-                                {post.isFollowing ? 'Unfollow' : 'Follow'}
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-
-                    {onViewStories && headerHasStory && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={() => {
-                                setProfileMenuVisible(false);
-                                onViewStories();
-                            }}
-                        >
-                            <Icon name="play-circle-outline" size={18} color="#FFFFFF" />
-                            <Text style={styles.profileMenuItemText}>View stories</Text>
-                        </TouchableOpacity>
-                    )}
-                    {!isCurrentUser && isMutualFollow && onOpenDM && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={() => {
-                                setProfileMenuVisible(false);
-                                onOpenDM(post.userHandle, post.id);
-                            }}
-                        >
-                            <Icon name="chatbubble-outline" size={18} color="#67E8F9" />
-                            <Text style={[styles.profileMenuItemText, { color: '#A5F3FC' }]}>Message</Text>
-                        </TouchableOpacity>
-                    )}
-                    {!isCurrentUser && onBlockUser && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={async () => {
-                                setProfileMenuVisible(false);
-                                await onBlockUser();
-                            }}
-                        >
-                            <Icon name="ban-outline" size={18} color="#FCA5A5" />
-                            <Text style={[styles.profileMenuItemText, { color: '#FCA5A5' }]}>Block user</Text>
-                        </TouchableOpacity>
-                    )}
-                    {!isCurrentUser && onReportUser && (
-                        <TouchableOpacity
-                            style={styles.profileMenuItem}
-                            onPress={async () => {
-                                setProfileMenuVisible(false);
-                                await onReportUser();
-                            }}
-                        >
-                            <Icon name="flag-outline" size={18} color="#FDE68A" />
-                            <Text style={[styles.profileMenuItemText, { color: '#FDE68A' }]}>Report</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            )}
+            <FeedPostProfileQuickMenu
+                visible={profileMenuVisible}
+                anchor={profileMenuAnchor}
+                profileHandle={profileHandle}
+                isCurrentUser={isCurrentUser}
+                isMutualFollow={isMutualFollow}
+                hasStory={headerHasStory}
+                isFollowing={post.isFollowing === true}
+                isRequested={isRequested}
+                onClose={closeProfileMenu}
+                onVisitProfile={() => {
+                    if (onVisitHandle) onVisitHandle(profileHandle);
+                    else onVisitProfile?.();
+                }}
+                onFollow={onFollow}
+                onViewStories={onViewStories ? () => onViewStories() : undefined}
+                onMessage={
+                    onOpenDM ? () => onOpenDM(post.userHandle, post.id) : undefined
+                }
+                onBlock={onBlockUser}
+                onReport={onReportUser}
+            />
         </View>
     );
 }, (prev, next) => {
@@ -1313,12 +1463,17 @@ const FeedCard = React.memo(function FeedCard({
         a.userLiked === b.userLiked &&
         a.isBookmarked === b.isBookmarked &&
         a.isFollowing === b.isFollowing &&
+        a.authorFollowsYou === b.authorFollowsYou &&
+        (a as { isFollowRequested?: boolean }).isFollowRequested ===
+            (b as { isFollowRequested?: boolean }).isFollowRequested &&
         a.stats.likes === b.stats.likes &&
         a.stats.comments === b.stats.comments &&
         a.stats.views === b.stats.views &&
         a.stats.reclips === b.stats.reclips &&
+        a.stats.saves === b.stats.saves &&
         a.stats.shares === b.stats.shares &&
         a.mediaUrl === b.mediaUrl &&
+        a.mediaType === b.mediaType &&
         a.videoPosterUrl === b.videoPosterUrl &&
         a.templateId === b.templateId &&
         a.text === b.text &&
@@ -1328,6 +1483,10 @@ const FeedCard = React.memo(function FeedCard({
         prev.isCurrentUser === next.isCurrentUser &&
         prev.isVideoActive === next.isVideoActive &&
         prev.feedVideoMuted === next.feedVideoMuted &&
+        prev.suspendNativeVideo === next.suspendNativeVideo &&
+        prev.scenesExpanding === next.scenesExpanding &&
+        prev.viewerHandle === next.viewerHandle &&
+        prev.onShareToStoriesSuccess === next.onShareToStoriesSuccess &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
         a.clientLocalMediaUri === b.clientLocalMediaUri &&
@@ -1346,13 +1505,39 @@ type FeedListRow =
     | { kind: 'ad'; ad: Ad }
     | { kind: 'local_business'; posts: Post[]; pinnedPaidPostId?: string; useMockPreview?: boolean }
     | { kind: 'suggested_places'; bundleKey: string; suggestions: PlaceMatchedPost[] }
-    | { kind: 'stories24'; id: string }
+    | { kind: 'stories24'; id: string; railItems: Stories24RailItem[]; railKey: string }
     | { kind: 'interests'; id: string }
     | { kind: 'suggested_follower'; suggestion: SuggestedFollowerSuggestion };
 
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
+    const isFeedFocused = useIsFocused();
+    const [scenesViewerActive, setScenesViewerActiveState] = useState(false);
+    const scenesExpandProgress = useSharedValue(0);
+    const [scenesOverlay, setScenesOverlay] = useState(null);
+    useEffect(() => {
+        // Overlay session is module-level and survives Fast Refresh. A leftover
+        // session locks the feed (no scroll, no tab bar) with nothing to close.
+        setFeedScenesOverlaySession(null);
+        setScenesViewerActive(false);
+        setScenesViewerActiveState(false);
+        return subscribeFeedScenesOverlaySession(setScenesOverlay);
+    }, []);
+    useEffect(() => {
+        setFeedScenesFullscreen(Boolean(scenesOverlay));
+        return () => setFeedScenesFullscreen(false);
+    }, [scenesOverlay]);
+    useEffect(() => {
+        // Keep feed ExoPlayer dead for the whole Scenes session (focus blur is unreliable).
+        return subscribeScenesViewerActive((active) => {
+            setScenesViewerActiveState(active);
+            if (active) {
+                activeVideoPostIdRef.current = null;
+                setActiveFeedVideoPostId(null);
+            }
+        });
+    }, []);
     const defaultLocal = user?.local || 'Finglas';
     const defaultNational = user?.national || 'Ireland';
     const defaultRegional = user?.regional || 'Dublin';
@@ -1365,12 +1550,98 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         hiddenPostIds: new Set(),
         notInterestedPostIds: new Set(),
     });
+
+    // Legal: keep Sponsored visible on any actively boosted post in the loaded feed.
+    const applySponsoredLabels = useCallback(async () => {
+        try {
+            const labels = await getAllActiveBoostLabels();
+            if (labels.size === 0) return;
+            setPages((prev) =>
+                prev.map((page) =>
+                    page.map((p) => {
+                        const ft = labels.get(String(p.id));
+                        if (!ft) return p;
+                        if (p.isBoosted && p.boostFeedType === ft) return p;
+                        return {
+                            ...p,
+                            isBoosted: true,
+                            boostFeedType: p.boostFeedType ?? ft,
+                        };
+                    }),
+                ),
+            );
+        } catch {
+            /* ignore */
+        }
+    }, []);
+
+    useEffect(() => {
+        const sub = DeviceEventEmitter.addListener(
+            'boostActivated',
+            (payload: { postId?: string; feedType?: 'local' | 'regional' | 'national' }) => {
+                const postId = payload?.postId ? String(payload.postId) : '';
+                if (!postId) return;
+                setPages((prev) =>
+                    prev.map((page) =>
+                        page.map((p) =>
+                            String(p.id) === postId
+                                ? {
+                                      ...p,
+                                      isBoosted: true,
+                                      boostFeedType: payload.feedType ?? p.boostFeedType ?? 'regional',
+                                  }
+                                : p,
+                        ),
+                    ),
+                );
+            },
+        );
+        return () => sub.remove();
+    }, []);
+
+    useEffect(() => {
+        const rewrite = (h: string | undefined, oldNorm: string, nextHandle: string) => {
+            if (!h) return h;
+            return String(h).replace(/^@/, '').trim().toLowerCase() === oldNorm ? nextHandle : h;
+        };
+        const sub = DeviceEventEmitter.addListener(
+            'userHandleChanged',
+            (payload: { oldHandle?: string; newHandle?: string }) => {
+                const oldNorm = String(payload?.oldHandle || '')
+                    .replace(/^@/, '')
+                    .trim()
+                    .toLowerCase();
+                const nextHandle = String(payload?.newHandle || '').replace(/^@/, '').trim();
+                if (!oldNorm || !nextHandle) return;
+                setPages((prev) =>
+                    prev.map((page) =>
+                        page.map((p) => ({
+                            ...p,
+                            userHandle: rewrite(p.userHandle, oldNorm, nextHandle) || p.userHandle,
+                            originalUserHandle: p.originalUserHandle
+                                ? rewrite(p.originalUserHandle, oldNorm, nextHandle) || p.originalUserHandle
+                                : p.originalUserHandle,
+                        })),
+                    ),
+                );
+            },
+        );
+        return () => sub.remove();
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            void applySponsoredLabels();
+        }, [applySponsoredLabels]),
+    );
     const [cursor, setCursor] = useState<string | number | null>(0);
-    const [loading, setLoading] = useState(false);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [end, setEnd] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
+    const [followingCount, setFollowingCount] = useState<number | null>(null);
     const [customLocation, setCustomLocation] = useState<string | null>(null);
     const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null);
     const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
@@ -1380,17 +1651,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
     const [imageFullscreenStartIndex, setImageFullscreenStartIndex] = useState(0);
+    const [imageFullscreenOrigin, setImageFullscreenOrigin] = useState<ImageFullscreenOrigin | null>(
+        null,
+    );
+    /** Feed under Scenes / image fullscreen / comments — kill ExoPlayer so audio cannot leak. */
+    const feedNativeVideoSuspended =
+        commentsModalOpen ||
+        !isFeedFocused ||
+        scenesViewerActive ||
+        Boolean(scenesOverlay) ||
+        Boolean(imageFullscreenPost);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
+    const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
+    const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
+    const [feedGazetteerAlert, setFeedGazetteerAlert] = useState<{
+        title: string;
+        message: string;
+        icon?: 'alert' | 'success' | 'info';
+    } | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
     const [hasInbox, setHasInbox] = useState(false);
     const insets = useSafeAreaInsets();
     const [reloadTick, setReloadTick] = useState(0);
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
+    const [likesSheetPost, setLikesSheetPost] = useState<Post | null>(null);
+    const [taggedSheetPost, setTaggedSheetPost] = useState<Post | null>(null);
     const [dmSheetOpen, setDmSheetOpen] = useState(false);
     const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
     const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
-    const [dmSheetMessage, setDmSheetMessage] = useState('');
     const [feedDmDeliveryFx, setFeedDmDeliveryFx] = useState<FeedDmDeliveryFxState | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
     const [headerScopePicker, setHeaderScopePicker] = useState<LocationSuggestion | null>(null);
@@ -1409,9 +1698,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [inviteGroupHandle, setInviteGroupHandle] = useState<string | null>(null);
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
+    const activeVideoPostIdRef = useRef<string | null>(null);
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
+    useEffect(() => subscribeActiveFeedVideo(setActiveVideoPostId), []);
     const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(true);
-    const [feedVideoMuted, setFeedVideoMuted] = useState(true);
+    const [feedVideoMuted, setFeedVideoMuted] = useState(false);
     const [pendingUploadTick, setPendingUploadTick] = useState(0);
     const [ads, setAds] = useState<Ad[]>([]);
     const [online, setOnline] = useState(true);
@@ -1427,11 +1718,80 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [serverPlaceSuggestions, setServerPlaceSuggestions] = useState<PlaceMatchedPost[] | undefined>(
         undefined,
     );
+    const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
+    const [interestsSaving, setInterestsSaving] = React.useState(false);
+    const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
+    const [onboardingDismissed, setOnboardingDismissed] = React.useState<boolean | null>(null);
+    const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(false);
+    const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(new Set());
+    const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
+    const [stories24CollapsePayload, setStories24CollapsePayload] =
+        React.useState<Stories24RailReturnPayload | null>(null);
+    const stories24RailRef = React.useRef<Stories24FeedShelfHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
+    const pinFeedScrollSoon = useCallback((explicitY?: number | null) => {
+        const y = explicitY ?? feedScrollYRef.current;
+        const apply = () => {
+            flatListRef.current?.scrollToOffset({ offset: y, animated: false });
+        };
+        apply();
+        requestAnimationFrame(() => {
+            apply();
+            requestAnimationFrame(apply);
+        });
+    }, []);
+    /** One feed-level burst Modal — per-card Modal show/hide jumps FlatList on Android. */
+    const [feedLikeBurst, setFeedLikeBurst] = useState<{ x: number; y: number; key: number } | null>(
+        null,
+    );
+    const feedLikeBurstClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const showFeedLikeBurst = useCallback((windowX: number, windowY: number) => {
+        setFeedLikeBurst({ x: windowX, y: windowY, key: Date.now() });
+        if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
+        feedLikeBurstClearRef.current = setTimeout(() => {
+            setFeedLikeBurst(null);
+            feedLikeBurstClearRef.current = null;
+        }, 750);
+    }, []);
+    useEffect(
+        () => () => {
+            if (feedLikeBurstClearRef.current) clearTimeout(feedLikeBurstClearRef.current);
+        },
+        [],
+    );
+    const flatForRenderRef = useRef<FeedListRow[]>([]);
+    /** Scroll Y captured when opening Scenes — restored on return to avoid jump. */
+    const scenesReturnScrollYRef = useRef<number | null>(null);
+    const suppressFeedViewabilityRef = useRef(false);
     const pendingFeedScrollRestoreRef = useRef<number | null>(null);
+    const pendingStories24CollapseRef = useRef<Stories24RailReturnPayload | null>(null);
     const feedLoadGenRef = useRef(0);
+    const stories24RailGenRef = useRef(0);
+    const stories24ViewerRef = useRef({ userId, handle: user?.handle as string | undefined });
+    stories24ViewerRef.current = { userId, handle: user?.handle };
+    const reloadStories24Rail = React.useCallback(() => {
+        const uid = user?.id;
+        if (!uid) return Promise.resolve();
+        const gen = ++stories24RailGenRef.current;
+        return buildStories24RailItems(uid, user?.handle)
+            .then((items) => {
+                if (gen !== stories24RailGenRef.current) return;
+                setStories24Items(items);
+            })
+            .catch((err) => {
+                console.warn('Stories 24 rail load failed; keeping current items', err);
+            });
+    }, [user?.id, user?.handle]);
+    /** Keeps freshly created posts visible if a force-refresh finishes after upload complete. */
+    const recentCreatedPostsRef = useRef<Post[]>([]);
+    const feedRetryBusyRef = useRef(false);
     const pagesRef = useRef<Post[][]>([]);
+    const lastEngagementByIdRef = useRef(
+        new Map<string, { stats: Post['stats']; userLiked?: boolean }>(),
+    );
+    const recordedFeedViewIdsRef = useRef(new Set<string>());
+    const recordFeedViewRef = useRef<(postId: string) => void>(() => {});
     const feedFetchCtxRef = useRef({
         filter: 'ireland',
         viewerUserId: 'anon',
@@ -1440,13 +1800,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         userRegional: 'Dublin',
         userNational: 'Ireland',
     });
-    const reloadFeedFromStartRef = useRef<() => Promise<void>>(async () => {});
+    const reloadFeedFromStartRef = useRef<(opts?: { quiet?: boolean }) => Promise<void>>(
+        async () => {},
+    );
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        itemVisiblePercentThreshold: 55,
-        minimumViewTime: 180,
+        // Play only when a post is mostly on screen (in-cell Video, no portal).
+        itemVisiblePercentThreshold: 70,
+        minimumViewTime: 80,
     });
+    const feedScrollingRef = useRef(false);
+    const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastViewableVideoPostIdRef = useRef<string | null>(null);
+    /** Video that was playing (or the video card under the overlay) — restore on overlay close. */
+    const overlayResumeVideoPostIdRef = useRef<string | null>(null);
 
     const feedAutoplayPrefRef = useRef<FeedAutoplayPref>('always');
 
@@ -1462,9 +1830,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (cancelled) return;
             void syncFeedAutoplayAllowed(pref);
         });
-        void getGlobalVideoMutedNative().then((muted) => {
+        void (async () => {
+            try {
+                const migrated = await AsyncStorage.getItem('clips:feedAudioDefaultUnmuted_v1');
+                if (migrated !== '1') {
+                    await setGlobalVideoMutedNative(false);
+                    await AsyncStorage.setItem('clips:feedAudioDefaultUnmuted_v1', '1');
+                }
+            } catch {
+                /* ignore */
+            }
+            if (cancelled) return;
+            const muted = await getGlobalVideoMutedNative();
             if (!cancelled) setFeedVideoMuted(muted);
-        });
+        })();
         const unsubPref = subscribeFeedAutoplayPref((pref) => {
             void syncFeedAutoplayAllowed(pref);
         });
@@ -1497,28 +1876,228 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, []);
 
+    useFocusEffect(
+        useCallback(() => {
+            let active = true;
+            // Sync first — mount shrink overlay in the same turn as Stories dismiss.
+            const sync = takeStories24RailReturnSync();
+            if (sync) {
+                pendingStories24CollapseRef.current = null;
+                setStories24CollapsePayload((prev) =>
+                    prev && normalizeStories24Handle(prev.handle) === normalizeStories24Handle(sync.handle)
+                        ? prev
+                        : sync,
+                );
+                void AsyncStorage.removeItem(STORIES24_RAIL_RETURN_KEY).catch(() => {});
+            }
+            void (async () => {
+                const [payload, scrollY] = await Promise.all([
+                    sync ? Promise.resolve(null) : consumeStories24RailReturn(),
+                    consumeStories24FeedScrollRestore(),
+                ]);
+                if (!active) return;
+                if (payload) {
+                    pendingStories24CollapseRef.current = null;
+                    setStories24CollapsePayload((prev) =>
+                        prev &&
+                        normalizeStories24Handle(prev.handle) === normalizeStories24Handle(payload.handle)
+                            ? prev
+                            : payload,
+                    );
+                }
+                if (scrollY != null) pendingFeedScrollRestoreRef.current = scrollY;
+            })();
+            return () => {
+                active = false;
+            };
+        }, []),
+    );
+
+    React.useEffect(() => {
+        if (!user?.id || customLocation || showFollowingFeed) {
+            return;
+        }
+        void reloadStories24Rail();
+        const pollMs = getStoriesRailPollMs();
+        const interval = pollMs != null ? setInterval(() => void reloadStories24Rail(), pollMs) : null;
+        const unsubRefresh = subscribeStoriesRefresh(() => {
+            void reloadStories24Rail();
+        });
+        return () => {
+            if (interval) clearInterval(interval);
+            unsubRefresh();
+        };
+    }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]);
+
+    useFocusEffect(
+        React.useCallback(() => {
+            if (!user?.id || customLocation || showFollowingFeed) return;
+            void reloadStories24Rail();
+        }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]),
+    );
+
+    React.useEffect(() => {
+        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_DISMISSED_KEY).then((v) => {
+            if (v === '1') setSuggestedFollowerDismissed(true);
+        });
+        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY).then((raw) => {
+            try {
+                setHiddenFollowerHandles(new Set(raw ? JSON.parse(raw) : []));
+            } catch {
+                setHiddenFollowerHandles(new Set());
+            }
+        });
+    }, []);
+
+    React.useEffect(() => {
+        setInterestsDraft(user?.interests ?? []);
+        setInterestsCardDismissed(false);
+    }, [user?.id]);
+
+    React.useEffect(() => {
+        if (!user?.id) {
+            setOnboardingDismissed(null);
+            return;
+        }
+        void AsyncStorage.getItem(INTERESTS_ONBOARDING_DISMISSED_KEY).then((v) => {
+            setOnboardingDismissed(v === '1');
+        });
+    }, [user?.id]);
+
+    useEffect(() => {
+        void loadLocationNotifyPrefs().then(setNotifyLocations);
+    }, []);
+
     const feedAutoplayAllowedRef = useRef(feedAutoplayAllowed);
     feedAutoplayAllowedRef.current = feedAutoplayAllowed;
 
-    const scheduleActiveFeedVideo = useCallback((postId: string | null) => {
+    const scenesViewerActiveRef = useRef(scenesViewerActive);
+    scenesViewerActiveRef.current = scenesViewerActive;
+
+    const imageFullscreenOpenRef = useRef(Boolean(imageFullscreenPost));
+    imageFullscreenOpenRef.current = Boolean(imageFullscreenPost);
+
+    const commentsModalOpenRef = useRef(commentsModalOpen);
+    commentsModalOpenRef.current = commentsModalOpen;
+
+    /** True after the first viewability pass — list data patches must never invent a player. */
+    const feedViewabilitySeenRef = useRef(false);
+
+    const feedAutoplayOverlayBlocks = () =>
+        scenesViewerActiveRef.current ||
+        imageFullscreenOpenRef.current ||
+        commentsModalOpenRef.current;
+
+    const captureOverlayVideoResume = useCallback((fallbackPost?: Post | null) => {
+        const active = activeVideoPostIdRef.current;
+        if (active) {
+            overlayResumeVideoPostIdRef.current = String(active);
+            return;
+        }
+        if (fallbackPost && postHasVideoMedia(fallbackPost)) {
+            overlayResumeVideoPostIdRef.current = String(fallbackPost.id);
+            return;
+        }
+        overlayResumeVideoPostIdRef.current = null;
+    }, []);
+
+    const restoreFeedVideoAfterOverlay = useCallback(() => {
+        const resumeId = overlayResumeVideoPostIdRef.current;
+        if (!resumeId || !feedAutoplayAllowedRef.current) {
+            if (!feedAutoplayOverlayBlocks()) {
+                overlayResumeVideoPostIdRef.current = null;
+            }
+            return;
+        }
+        // Another overlay still open (e.g. comments under image fullscreen) — keep resume id.
+        if (feedAutoplayOverlayBlocks()) return;
+        overlayResumeVideoPostIdRef.current = null;
+        lastViewableVideoPostIdRef.current = resumeId;
+        // Force a clean remount — suspend unmounts TextureView and leaves a blank frame
+        // if we only flip suspend without re-arming the active id.
+        activeVideoPostIdRef.current = null;
+        setActiveFeedVideoPostId(null);
+        requestAnimationFrame(() => {
+            if (feedAutoplayOverlayBlocks()) {
+                overlayResumeVideoPostIdRef.current = resumeId;
+                return;
+            }
+            if (!feedAutoplayAllowedRef.current) return;
+            scheduleActiveFeedVideoRef.current(resumeId, true);
+        });
+    }, []);
+
+    const hadScenesOverlayRef = useRef(false);
+    useEffect(() => {
+        if (scenesOverlay || scenesViewerActive) {
+            hadScenesOverlayRef.current = true;
+            return;
+        }
+        if (!hadScenesOverlayRef.current) return;
+        hadScenesOverlayRef.current = false;
+        restoreFeedVideoAfterOverlay();
+    }, [restoreFeedVideoAfterOverlay, scenesOverlay, scenesViewerActive]);
+
+    useEffect(() => {
+        if (!scenesViewerActive && !imageFullscreenPost && !commentsModalOpen) return;
         if (autoplayTimerRef.current) {
             clearTimeout(autoplayTimerRef.current);
             autoplayTimerRef.current = null;
         }
-        if (!feedAutoplayAllowedRef.current || !postId) {
-            setActiveVideoPostId(null);
+        activeVideoPostIdRef.current = null;
+        setActiveFeedVideoPostId(null);
+    }, [scenesViewerActive, imageFullscreenPost, commentsModalOpen]);
+
+    const scheduleActiveFeedVideo = useCallback((postId: string | null, force = false) => {
+        if (autoplayTimerRef.current) {
+            clearTimeout(autoplayTimerRef.current);
+            autoplayTimerRef.current = null;
+        }
+        // Overlays / comments: never re-arm from list re-renders or stale viewability.
+        if (feedAutoplayOverlayBlocks()) {
+            activeVideoPostIdRef.current = null;
             setActiveFeedVideoPostId(null);
             return;
         }
-        const minGapMs = 320;
-        const sinceLast = Date.now() - lastFeedAutoplayAtMsRef.current;
-        const delayMs = sinceLast >= minGapMs ? 0 : minGapMs - sinceLast;
-        autoplayTimerRef.current = setTimeout(() => {
-            setActiveVideoPostId(postId);
-            setActiveFeedVideoPostId(postId);
+        if (!feedAutoplayAllowedRef.current || !postId) {
+            activeVideoPostIdRef.current = null;
+            setActiveFeedVideoPostId(null);
+            return;
+        }
+        // Same id already active — do not force-notify (that remounts/resumes ExoPlayer
+        // when like/comment merely re-renders the FlatList / re-fires viewability).
+        if (!force && String(activeVideoPostIdRef.current) === String(postId)) {
+            return;
+        }
+        if (force && String(activeVideoPostIdRef.current) === String(postId)) {
+            // Explicit scroll/focus restore of the same card — re-broadcast once.
+            forceActiveFeedVideoPostId(postId);
+            return;
+        }
+        const apply = () => {
+            if (feedAutoplayOverlayBlocks()) {
+                activeVideoPostIdRef.current = null;
+                setActiveFeedVideoPostId(null);
+                autoplayTimerRef.current = null;
+                return;
+            }
+            activeVideoPostIdRef.current = postId;
+            if (force) {
+                forceActiveFeedVideoPostId(postId);
+            } else {
+                setActiveFeedVideoPostId(postId);
+            }
             lastFeedAutoplayAtMsRef.current = Date.now();
             autoplayTimerRef.current = null;
-        }, delayMs);
+        };
+        if (force) {
+            apply();
+            return;
+        }
+        const minGapMs = 40;
+        const sinceLast = Date.now() - lastFeedAutoplayAtMsRef.current;
+        const delayMs = sinceLast >= minGapMs ? 0 : minGapMs - sinceLast;
+        autoplayTimerRef.current = setTimeout(apply, delayMs);
     }, []);
 
     const scheduleActiveFeedVideoRef = useRef(scheduleActiveFeedVideo);
@@ -1536,39 +2115,109 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }: {
             viewableItems: Array<{ isViewable?: boolean; item?: FeedListRow; index?: number | null }>;
         }) => {
+            if (suppressFeedViewabilityRef.current) return;
+            for (const token of viewableItems) {
+                if (!token.isViewable || !token.item || token.item.kind !== 'post') continue;
+                recordFeedViewRef.current(String(token.item.post.id));
+            }
             if (!feedAutoplayAllowedRef.current) {
                 scheduleActiveFeedVideoRef.current(null);
                 return;
             }
-            let best: Post | null = null;
-            let bestIndex = Number.POSITIVE_INFINITY;
+            feedViewabilitySeenRef.current = true;
+            const visibleVideos: Array<{ post: Post; index: number }> = [];
             for (const token of viewableItems) {
                 if (!token.isViewable || !token.item) continue;
                 const row = token.item;
                 if (row.kind !== 'post') continue;
                 const candidate = row.post;
                 if (!postHasVideoMedia(candidate)) continue;
-                const idx = token.index ?? 0;
-                if (idx < bestIndex) {
-                    best = candidate;
-                    bestIndex = idx;
-                }
+                visibleVideos.push({ post: candidate, index: token.index ?? 0 });
             }
-            scheduleActiveFeedVideoRef.current(best?.id ?? null);
+            visibleVideos.sort((a, b) => a.index - b.index);
+
+            const currentId = activeVideoPostIdRef.current;
+            // While scrolling, always track the top-most qualifying video (no sticky) so
+            // settle lands on what the user scrolled to. When idle, stick on the playing
+            // card while it remains viewable so a peek of the next row can't steal it.
+            let nextId: string | null = null;
+            if (
+                !feedScrollingRef.current &&
+                currentId &&
+                visibleVideos.some((v) => String(v.post.id) === String(currentId))
+            ) {
+                nextId = currentId;
+            } else if (visibleVideos.length > 0) {
+                nextId = visibleVideos[0].post.id;
+            }
+
+            lastViewableVideoPostIdRef.current = nextId;
+            // In-cell Video scrolls with the list — update active id immediately.
+            scheduleActiveFeedVideoRef.current(nextId);
         }
     ).current;
 
+    const viewabilityConfigCallbackPairs = useRef([
+        {
+            viewabilityConfig: viewabilityConfigRef.current,
+            onViewableItemsChanged,
+        },
+    ]);
+
     useFocusEffect(
         useCallback(() => {
+            // Scroll flags can stick true across navigations on some Android OEMs.
+            feedScrollingRef.current = false;
+            setFeedScrollBusy(false);
+            suppressFeedViewabilityRef.current = false;
+
+            const scenesReturn = peekScenesReturnHandoff();
+            // Prefer the post Scenes just closed on — not sticky pre-Scenes autoplay.
+            if (scenesReturn?.postId) {
+                lastViewableVideoPostIdRef.current = scenesReturn.postId;
+                activeVideoPostIdRef.current = null; // force re-notify below
+            }
+
+            const restoreId =
+                scenesReturn?.postId ?? lastViewableVideoPostIdRef.current;
+            const pinnedY = scenesReturnScrollYRef.current;
+            scenesReturnScrollYRef.current = null;
+
+            const finishRestore = () => {
+                if (feedAutoplayOverlayBlocks()) return;
+                if (restoreId && feedAutoplayAllowedRef.current) {
+                    // Force so blur→focus with the same post still remounts/plays.
+                    activeVideoPostIdRef.current = null;
+                    scheduleActiveFeedVideoRef.current(restoreId, true);
+                }
+                setTimeout(() => {
+                    suppressFeedViewabilityRef.current = false;
+                }, 160);
+            };
+
+            if (scenesReturn?.postId || pinnedY != null) {
+                suppressFeedViewabilityRef.current = true;
+                pinFeedScrollSoon(pinnedY ?? feedScrollYRef.current);
+                requestAnimationFrame(() => {
+                    pinFeedScrollSoon(pinnedY ?? feedScrollYRef.current);
+                    finishRestore();
+                });
+            } else {
+                // Resume autoplay immediately — do not wait for FlatList viewability
+                // (that caused multi-second Scenes→feed MP4 lag).
+                finishRestore();
+            }
             return () => {
                 if (autoplayTimerRef.current) {
                     clearTimeout(autoplayTimerRef.current);
                     autoplayTimerRef.current = null;
                 }
-                setActiveVideoPostId(null);
+                // Pause decode while covered (Scenes / profile). Keep lastViewable /
+                // scenes handoff so focus restore is instant.
+                activeVideoPostIdRef.current = null;
                 setActiveFeedVideoPostId(null);
             };
-        }, [])
+        }, [pinFeedScrollSoon])
     );
 
     // Custom Gazetteer search must win over Following: otherwise the UI can show "Wembley Stadium"
@@ -1593,16 +2242,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return tab.toLowerCase() === 'following' ? 'discover' : tab;
     }, [active, customLocation, currentFilter, showFollowingFeed, user?.national]);
 
-    useEffect(() => {
+    const syncFeedFetchCtx = React.useCallback((filter: string) => {
         feedFetchCtxRef.current = {
-            filter: feedFetchFilter,
+            filter,
             viewerUserId: userId,
             viewerHandle: user?.handle,
             userLocal: user?.local || 'Finglas',
             userRegional: user?.regional || 'Dublin',
             userNational: user?.national || 'Ireland',
         };
-    }, [feedFetchFilter, userId, user?.handle, user?.local, user?.regional, user?.national]);
+    }, [userId, user?.handle, user?.local, user?.regional, user?.national]);
+
+    useEffect(() => {
+        syncFeedFetchCtx(feedFetchFilter);
+    }, [feedFetchFilter, syncFeedFetchCtx]);
 
     React.useEffect(() => {
         if (!user) {
@@ -1626,8 +2279,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     React.useEffect(() => {
         let cancelled = false;
-        const useLaravel = isLaravelApiEnabled() && !!getAuthToken();
-        if (!useLaravel || !user || customLocation) {
+        const laravelApiActive = isLaravelApiEnabled() && !!getAuthToken();
+        if (!laravelApiActive || !user || customLocation) {
             setServerPlaceSuggestions(undefined);
             return () => {
                 cancelled = true;
@@ -1672,10 +2325,101 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     // Helper to update a post in pages
     const updatePost = (postId: string, updater: (post: Post) => Post) => {
-        setPages(prev => prev.map(page =>
-            page.map(p => p.id === postId ? updater(p) : p)
-        ));
+        const id = String(postId);
+        setPages((prev) =>
+            prev.map((page) => page.map((p) => (String(p.id) === id ? updater(p) : p))),
+        );
+        setImageFullscreenPost((prev) =>
+            prev && String(prev.id) === id ? updater(prev) : prev,
+        );
+        setSelectedPostForComments((prev) =>
+            prev && String(prev.id) === id ? updater(prev) : prev,
+        );
+        setOverflowPost((prev) => (prev && String(prev.id) === id ? updater(prev) : prev));
+        const live = getLocalPostById(id);
+        if (live) upsertLocalPost(updater(live));
     };
+
+    const recordFeedView = useCallback(
+        (postId: string) => {
+            const id = String(postId || '');
+            if (!id || recordedFeedViewIdsRef.current.has(id)) return;
+            recordedFeedViewIdsRef.current.add(id);
+            void incrementViews(userId, id)
+                .then((updated) => {
+                    const nextViews = updated?.stats?.views;
+                    if (typeof nextViews !== 'number') return;
+                    updatePost(id, (p) => ({
+                        ...p,
+                        stats: { ...p.stats, views: nextViews },
+                    }));
+                })
+                .catch(() => {
+                    recordedFeedViewIdsRef.current.delete(id);
+                });
+        },
+        [userId],
+    );
+    recordFeedViewRef.current = recordFeedView;
+
+    /** Follow is per-author — keep every visible post for that handle in sync. */
+    const patchFollowForHandle = React.useCallback(
+        (handle: string | undefined, isFollowing: boolean, extras?: Partial<Post>) => {
+            const lower = String(handle || '')
+                .trim()
+                .toLowerCase();
+            if (!lower) return;
+            setPages((prev) =>
+                prev.map((page) =>
+                    page.map((p) =>
+                        String(p.userHandle || '')
+                            .trim()
+                            .toLowerCase() === lower
+                            ? ({ ...p, ...extras, isFollowing } as Post)
+                            : p,
+                    ),
+                ),
+            );
+            if (!isFollowing) {
+                const drop = normalizeStories24Handle(handle || '');
+                stories24RailGenRef.current += 1;
+                const viewer = stories24ViewerRef.current;
+                const follows = getState(viewer.userId).follows;
+                const self = normalizeStories24Handle(viewer.handle || '');
+                setStories24Items((prev) =>
+                    prev.filter((item) => {
+                        if (isStories24AddYoursHandle(item.handle)) return true;
+                        const itemKey = normalizeStories24Handle(item.handle);
+                        if (itemKey === drop) return false;
+                        if (self && itemKey === self) return true;
+                        return getFollowState(follows, item.handle);
+                    }),
+                );
+            }
+        },
+        [],
+    );
+
+    useEffect(() => {
+        const sub = DeviceEventEmitter.addListener(
+            'followStateChanged',
+            (payload: { handle?: string; following?: boolean }) => {
+                const handle = String(payload?.handle || '').trim();
+                if (!handle) return;
+                const following = payload?.following === true;
+                patchFollowForHandle(handle, following);
+                const followingTab =
+                    String(feedFetchCtxRef.current.filter || '').toLowerCase() === 'discover';
+                if (!following && followingTab) {
+                    setReloadTick((t) => t + 1);
+                }
+                if (following) {
+                    void reloadStories24Rail();
+                }
+            },
+        );
+        return () => sub.remove();
+    }, [patchFollowForHandle, reloadStories24Rail]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1685,7 +2429,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 feedContentPrefsRef.current = prefs;
                 setPages((prev) => {
                     const next = prev
-                        .map((page) => filterPostsByContentPrefs(page, prefs))
+                        .map((page) =>
+                            excludeLinkShareFeedPosts(
+                                filterPostsByContentPrefs(page, prefs, {
+                                    isProtectedDevMockVideo: isDevMockFeedVideoPost,
+                                }),
+                            ),
+                        )
                         .filter((page) => page.length > 0);
                     // Avoid wiping a loaded feed if prefs were empty on first paint.
                     if (next.flat().length === 0 && prev.flat().length > 0) {
@@ -1774,16 +2524,42 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const toggleCollectionsSaveForPost = React.useCallback(
         async (target: Post) => {
+            const wasSaved = target.isBookmarked === true;
+            const prevSaves = Number(target.stats?.saves) || 0;
             try {
                 const cols = await getCollectionsForPost(userId, target.id);
                 if (cols.length > 0) {
-                    await unsavePost(userId, target.id);
+                    const unsaved = await unsavePost(userId, target.id);
+                    setBookmarkState(userId, target.id, false);
                     setSavedByPostId((prev) => ({ ...prev, [target.id]: false }));
-                    updatePost(target.id, (p) => ({ ...p, isBookmarked: false }));
+                    updatePost(target.id, (p) => ({
+                        ...p,
+                        isBookmarked: false,
+                        stats: {
+                            ...p.stats,
+                            saves: applyUniqueSavesCount(
+                                Number(p.stats?.saves) || prevSaves,
+                                true,
+                                false,
+                                unsaved.savesCount,
+                            ),
+                        },
+                    }));
                 } else {
-                    await savePostToDefaultCollection(userId, target.id, target);
+                    const saved = await savePostToDefaultCollection(userId, target.id, target);
+                    const nextSaves = applyUniqueSavesCount(
+                        prevSaves,
+                        wasSaved,
+                        true,
+                        saved.savesCount,
+                    );
+                    setBookmarkState(userId, target.id, true);
                     setSavedByPostId((prev) => ({ ...prev, [target.id]: true }));
-                    updatePost(target.id, (p) => ({ ...p, isBookmarked: true }));
+                    updatePost(target.id, (p) => ({
+                        ...p,
+                        isBookmarked: true,
+                        stats: { ...p.stats, saves: nextSaves },
+                    }));
                 }
             } catch (err) {
                 console.error('Collections save toggle failed:', err);
@@ -1830,42 +2606,88 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [updatePost],
     );
 
+    const openShareToStoriesForPost = React.useCallback(
+        (post: Post) => {
+            pinFeedScrollSoon();
+            setShareToStoriesPost(post);
+        },
+        [pinFeedScrollSoon],
+    );
+
     const tryReclipPost = React.useCallback(
         async (p: Post) => {
-            if (!user || p.userHandle === user.handle) {
-                Alert.alert('Cannot reclip', 'You cannot reclip your own post');
+            const norm = (h?: string) => String(h || '').trim().toLowerCase();
+            if (!user || norm(p.userHandle) === norm(user.handle)) {
+                setFeedGazetteerAlert({
+                    title: 'Cannot reclip',
+                    message: 'You cannot reclip your own post',
+                    icon: 'alert',
+                });
                 return;
             }
             if (p.userReclipped) {
-                Alert.alert('Already reclipped', 'You have already reclipped this post');
+                setFeedGazetteerAlert({
+                    title: 'Already reclipped',
+                    message: 'You have already reclipped this post',
+                    icon: 'info',
+                });
                 return;
             }
-            const confirmed = await new Promise<boolean>((resolve) => {
-                Alert.alert(
-                    'Reshare this to followers?',
-                    'This post will be shared to your followers in their Following feed.',
-                    [
-                        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                        { text: 'OK', onPress: () => resolve(true) },
-                    ],
-                );
-            });
-            if (!confirmed) return;
-            const newReclips = p.stats.reclips + 1;
-            setReclipState(userId, p.id, true);
+            setReclipConfirmPost(p);
+        },
+        [user],
+    );
+
+    const confirmReclipPost = React.useCallback(async () => {
+        const p = reclipConfirmPost;
+        setReclipConfirmPost(null);
+        if (!p || !user) return;
+        const prevReclips = Number(p.stats?.reclips) || 0;
+        const newReclips = prevReclips + 1;
+        setReclipState(userId, p.id, true);
+        updatePost(p.id, (prev) => ({
+            ...prev,
+            userReclipped: true,
+            stats: {
+                ...prev.stats,
+                reclips: Math.max(Number(prev.stats?.reclips) || 0, newReclips),
+            },
+        }));
+        try {
+            const result = await reclipPost(userId, p.id, user.handle);
+            if (result.originalPost && String(result.originalPost.id) === String(p.id)) {
+                updatePost(p.id, (prev) => ({
+                    ...prev,
+                    userReclipped: true,
+                    stats: {
+                        ...mergeEngagementStats(result.originalPost.stats, prev.stats),
+                        reclips: Math.max(
+                            Number(result.originalPost.stats?.reclips) || 0,
+                            Number(prev.stats?.reclips) || 0,
+                            newReclips,
+                        ),
+                    },
+                }));
+            }
+            // Following feed should pick up your reclip on next load.
+            if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                setReloadTick((t) => t + 1);
+            }
+        } catch (err: any) {
+            console.warn('Reclip failed:', err);
+            setReclipState(userId, p.id, false);
             updatePost(p.id, (prev) => ({
                 ...prev,
-                userReclipped: true,
-                stats: { ...prev.stats, reclips: newReclips },
+                userReclipped: false,
+                stats: { ...prev.stats, reclips: prevReclips },
             }));
-            try {
-                await reclipPost(userId, p.id, user.handle);
-            } catch (err: any) {
-                console.warn('Reclip failed (UI already updated):', err);
-            }
-        },
-        [userId, user, updatePost]
-    );
+            setFeedGazetteerAlert({
+                title: 'Could not reclip',
+                message: err?.message || 'Please try again.',
+                icon: 'alert',
+            });
+        }
+    }, [reclipConfirmPost, user, userId, updatePost, showFollowingFeed, currentFilter]);
 
     useEffect(() => {
         if (user?.national) {
@@ -1876,7 +2698,54 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     }, [user?.national, user?.regional, user?.local]);
 
+    /** Footer Home tab — same as web `goHomeFeed` / `resetFeed`. */
     useEffect(() => {
+        if (!isFeedFocused && !navigation?.isFocused?.()) return;
+        if (!route?.params || route.params.resetHomeFeedAt == null) return;
+        const nextFilter = user?.national || defaultNational;
+        // Drop in-flight Dublin/search results before they can apply under the USA header.
+        feedLoadGenRef.current += 1;
+        syncFeedFetchCtx(nextFilter);
+        setShowFollowingFeed(false);
+        setActive(nextFilter);
+        setCustomLocation(null);
+        setCustomLocationLabel(null);
+        setCustomLocationPlaceId(null);
+        setCustomFilterType(null);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+        setReloadTick((t) => t + 1);
+        let cancelled = false;
+        void (async () => {
+            await clearPendingLocationFeed();
+            if (cancelled) return;
+            try {
+                if (navigation.isFocused()) {
+                    // `undefined` is ignored by React Navigation and leaves a prior
+                    // Dublin search param in place — use null so Home actually clears it.
+                    navigation.setParams({
+                        resetHomeFeedAt: null,
+                        location: null,
+                        locationLabel: null,
+                        locationScope: null,
+                        filterType: null,
+                        placeId: null,
+                    });
+                }
+            } catch {
+                // ignore
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational, isFeedFocused, syncFeedFetchCtx]);
+
+    useEffect(() => {
+        // A live Home-tab reset token must win; null/undefined means apply location.
+        if (route?.params?.resetHomeFeedAt != null) return;
         const requestedLocation = route?.params?.location;
         const requestedLabel = route?.params?.locationLabel;
         const requestedPlaceId = route?.params?.placeId;
@@ -1911,12 +2780,45 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ? 'landmark'
                     : 'location'
         );
+        // Drop previous feed cards immediately so home posts never flash under a foreign place header.
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
         setReloadTick((t) => t + 1);
-    }, [route?.params?.location, route?.params?.locationLabel, route?.params?.filterType, route?.params?.placeId]);
+    }, [
+        route?.params?.location,
+        route?.params?.locationLabel,
+        route?.params?.filterType,
+        route?.params?.placeId,
+        route?.params?.resetHomeFeedAt,
+    ]);
 
     useEffect(() => {
         pagesRef.current = pages;
+        for (const p of pages.flat()) {
+            lastEngagementByIdRef.current.set(String(p.id), {
+                stats: p.stats,
+                userLiked: p.userLiked,
+            });
+        }
     }, [pages]);
+
+    // Live mode: strip cached Sarah/Bob seed posts once on mount, then refresh.
+    useEffect(() => {
+        if (isMockMode()) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                await clearLocalFeedPostsStorage();
+            } catch {
+                /* ignore */
+            }
+            if (!cancelled) setReloadTick((t) => t + 1);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     // Update unread count function
     const updateUnreadCount = React.useCallback(async () => {
@@ -1938,7 +2840,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         updateUnreadCount();
 
         // Poll for updates every 10 seconds
-        const interval = setInterval(updateUnreadCount, 10000);
+        const interval = setInterval(updateUnreadCount, getInboxUnreadPollMs());
 
         return () => {
             clearInterval(interval);
@@ -1952,6 +2854,39 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, [updateUnreadCount])
     );
 
+    const applyScenesPostUpdates = React.useCallback((updates: Post[]) => {
+        if (!updates.length) return;
+        const pinnedY = feedScrollYRef.current;
+        setPages((prev) =>
+            prev.map((page) =>
+                page.map((p) => {
+                    const next = updates.find((u) => u.id === p.id);
+                    if (!next) return p;
+                    return {
+                        ...p,
+                        ...next,
+                        stats: { ...p.stats, ...next.stats },
+                    };
+                }),
+            ),
+        );
+        setSavedByPostId((prev) => {
+            let changed = false;
+            const nextMap = { ...prev };
+            for (const update of updates) {
+                if (typeof update.isBookmarked === 'boolean' && nextMap[update.id] !== update.isBookmarked) {
+                    nextMap[update.id] = update.isBookmarked;
+                    changed = true;
+                }
+            }
+            return changed ? nextMap : prev;
+        });
+        // Keep the same viewport after post patches remount/remeasure rows.
+        pinFeedScrollSoon(pinnedY);
+    }, [pinFeedScrollSoon]);
+
+    useEffect(() => subscribeScenesPostUpdates(applyScenesPostUpdates), [applyScenesPostUpdates]);
+
     useEffect(() => {
         if (!route?.params?.forceRefreshAt) return;
         setReloadTick((prev) => prev + 1);
@@ -1963,9 +2898,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, []);
 
+    // Avoid leaking another account's just-created posts into this viewer's feed.
+    useEffect(() => {
+        recentCreatedPostsRef.current = [];
+        setFollowingCount(null);
+    }, [userId]);
+
     useEffect(() => {
         return subscribePendingFeedUploadComplete((tempId, createdPost) => {
             const decorated = decorateForUser(userId, createdPost);
+            recentCreatedPostsRef.current = [
+                decorated,
+                ...recentCreatedPostsRef.current.filter((p) => String(p.id) !== String(decorated.id)),
+            ].slice(0, 20);
+            const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+            // Never pin a new post onto a foreign location feed (Rome/Berlin ≠ Finglas).
+            if (feedTab && feedTab.toLowerCase() !== 'discover' && !postMatchesLocationTab(decorated, feedTab)) {
+                setPendingUploadTick((tick) => tick + 1);
+                return;
+            }
+            if (isLinkShareFeedPost(decorated)) {
+                setPendingUploadTick((tick) => tick + 1);
+                return;
+            }
             setPages((prev) => {
                 if (prev.length === 0) {
                     return [[decorated]];
@@ -1985,16 +2940,62 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, [userId]);
 
-    const reloadFeedFromStart = React.useCallback(async () => {
-        const gen = ++feedLoadGenRef.current;
-        setEnd(false);
-        setLoading(true);
-        setError(null);
-        try {
-            const { items, nextCursor } = await fetchInitialVisibleFeed(buildFeedFetchParams(0));
-            if (gen !== feedLoadGenRef.current) return;
-            if (items.length > 0) {
-                setPages([items]);
+    const applyFeedPageResult = React.useCallback(
+        (
+            items: Post[],
+            nextCursor: string | number | null,
+            nextFollowingCount?: number,
+            requestedFilter?: string,
+        ) => {
+            if (typeof nextFollowingCount === 'number') {
+                setFollowingCount(nextFollowingCount);
+            }
+            const feedTab = String((requestedFilter ?? feedFetchCtxRef.current.filter) || '').trim();
+            const recent = recentCreatedPostsRef.current
+                .map((p) => {
+                    const live = getLocalPostById(p.id);
+                    const merged = live
+                        ? {
+                              ...p,
+                              ...live,
+                              stats: { ...p.stats, ...live.stats },
+                          }
+                        : p;
+                    return decorateForUser(userId, merged);
+                })
+                .filter((p) => {
+                    if (!feedTab || feedTab.toLowerCase() === 'discover') return true;
+                    return postMatchesLocationTab(p, feedTab);
+                });
+            recentCreatedPostsRef.current = recent;
+            const recentIds = new Set(recent.map((p) => String(p.id)));
+            const withoutDupes = items.filter((p) => !recentIds.has(String(p.id)));
+            let merged = recent.length > 0 ? [...recent, ...withoutDupes] : items;
+            // Keep counters already shown this session when Laravel still returns 0.
+            // Home clears `pages` before refetch, so do not read pagesRef here.
+            merged = merged.map((p) => {
+                const prev = lastEngagementByIdRef.current.get(String(p.id));
+                if (!prev) return p;
+                return {
+                    ...p,
+                    userLiked: p.userLiked === true || prev.userLiked === true,
+                    stats: mergeEngagementStats(p.stats, prev.stats),
+                };
+            });
+            // Hard guard: never render a card on a place feed unless author location matches.
+            if (isLocationScopedFeedTab(feedTab)) {
+                const leaks = findLocationFeedLeaks(merged, feedTab);
+                if (leaks.length > 0) {
+                    console.warn(
+                        `[location-guard] blocked ${leaks.length} post(s) from "${feedTab}":`,
+                        leaks.slice(0, 8).join(', '),
+                    );
+                }
+                merged = filterPostsForLocationFeed(merged, feedTab);
+            }
+            merged = excludeLinkShareFeedPosts(merged);
+            if (merged.length > 0) {
+                setPages([merged]);
                 setCursor(nextCursor);
                 setEnd(nextCursor == null);
             } else {
@@ -2002,29 +3003,115 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 setCursor(0);
                 setEnd(true);
             }
+        },
+        [userId],
+    );
+
+    const reloadFeedFromStart = React.useCallback(async (opts?: { quiet?: boolean }) => {
+        const gen = ++feedLoadGenRef.current;
+        setEnd(false);
+        // Pull-to-refresh keeps existing cards visible (quiet); cold load shows skeleton.
+        if (!opts?.quiet) {
+            setInitialLoading(true);
+        }
+        setError(null);
+        const timeoutMs = Platform.OS === 'web' ? 12000 : 15000;
+
+        const makeLoadTimeout = () => {
+            let loadTimeoutId: ReturnType<typeof setTimeout> | undefined;
+            const promise = new Promise<never>((_, reject) => {
+                loadTimeoutId = setTimeout(
+                    () => reject(new Error('Feed load timed out')),
+                    timeoutMs,
+                );
+            });
+            return { promise, clear: () => loadTimeoutId && clearTimeout(loadTimeoutId) };
+        };
+
+        const params = buildFeedFetchParams(0);
+        const requestedFilter = params.filter;
+        const runFetch = () => fetchInitialVisibleFeed(params);
+        const firstTimeout = makeLoadTimeout();
+        try {
+            const result = await Promise.race([runFetch(), firstTimeout.promise]);
+            if (gen !== feedLoadGenRef.current) return;
+            applyFeedPageResult(result.items, result.nextCursor, result.followingCount, requestedFilter);
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
             console.error('Error loading feed:', err);
-            setError('Failed to load feed');
+            const errMsg = err instanceof Error ? err.message : String(err ?? '');
+            const looksLikeCorruptJson =
+                err instanceof SyntaxError ||
+                /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(errMsg);
+
+            // Only clear posts cache on corrupt JSON — never wipe collections on timeouts.
+            if (looksLikeCorruptJson) {
+                try {
+                    const { clearCorruptPostsStorageNative } = await import('../api/postsStorage.native');
+                    await clearCorruptPostsStorageNative();
+                } catch {
+                    /* ignore */
+                }
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        localStorage.removeItem('clips_app_posts');
+                    }
+                } catch {
+                    /* ignore */
+                }
+            }
+
+            if (isLaravelApiEnabled()) {
+                // Soft-fail only: don't poison the whole session so login/upload keep working.
+                console.warn('[FeedScreen] feed load failed (Laravel still enabled for auth/upload)');
+            }
+
+            const retryTimeout = makeLoadTimeout();
+            try {
+                const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
+                if (gen !== feedLoadGenRef.current) return;
+                applyFeedPageResult(retryResult.items, retryResult.nextCursor, retryResult.followingCount, requestedFilter);
+                return;
+            } catch (retryErr) {
+                console.error('Feed recover retry failed:', retryErr);
+            } finally {
+                retryTimeout.clear();
+            }
+
+            const msg = err instanceof Error ? err.message : '';
+            setError(
+                msg.includes('timed out')
+                    ? 'Feed load timed out — tap Retry'
+                    : msg
+                      ? `Failed to load feed (${msg.slice(0, 100)})`
+                      : 'Failed to load feed',
+            );
+            // Keep whatever cards we already have. Applying [] here used to look like
+            // "You're early to this feed" after a timeout or dropped adb reverse.
+            if (pagesRef.current.flat().length === 0) {
+                setEnd(true);
+            }
         } finally {
+            firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
-                setLoading(false);
+                setInitialLoading(false);
             }
         }
-    }, [buildFeedFetchParams]);
+    }, [applyFeedPageResult, buildFeedFetchParams]);
 
     reloadFeedFromStartRef.current = reloadFeedFromStart;
 
     const loadMore = React.useCallback(async () => {
-        if (loading || end || cursor === null) {
+        if (initialLoading || loadingMore || end || cursor === null) {
             return;
         }
         const gen = feedLoadGenRef.current;
-        setLoading(true);
+        setLoadingMore(true);
         setError(null);
         try {
             let walkCursor: string | number | null = cursor;
             let appended: Post[] = [];
+            const feedTab = String(buildFeedFetchParams(cursor).filter || '').trim();
             for (let step = 0; step < 16; step += 1) {
                 if (gen !== feedLoadGenRef.current) return;
                 const page = await fetchVisibleFeedPage(buildFeedFetchParams(walkCursor));
@@ -2041,7 +3128,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             if (gen !== feedLoadGenRef.current) return;
             if (appended.length > 0) {
-                setPages((prev) => [...prev, appended]);
+                const safeAppended = excludeLinkShareFeedPosts(
+                    isLocationScopedFeedTab(feedTab)
+                    ? filterPostsForLocationFeed(appended, feedTab)
+                    : appended,
+                );
+                if (safeAppended.length === 0) {
+                    setCursor(walkCursor);
+                    setEnd(walkCursor == null);
+                    return;
+                }
+                setPages((prev) => [...prev, safeAppended]);
                 setCursor(walkCursor);
                 setEnd(walkCursor == null);
             } else {
@@ -2052,32 +3149,79 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             console.error('Error loading feed:', err);
             setError('Failed to load feed');
         } finally {
-            if (gen === feedLoadGenRef.current) {
-                setLoading(false);
-            }
+            setLoadingMore(false);
         }
-    }, [buildFeedFetchParams, cursor, end, loading]);
+    }, [buildFeedFetchParams, cursor, end, initialLoading, loadingMore]);
 
     useEffect(() => {
-        void reloadFeedFromStartRef.current();
+        const t = setTimeout(() => {
+            void reloadFeedFromStartRef.current();
+        }, 0);
+        return () => clearTimeout(t);
     }, [reloadTick, feedFetchFilter, userId]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!showFollowingFeed) return undefined;
+            let cancelled = false;
+            const t = setTimeout(() => {
+                void (async () => {
+                    if (user?.id && user?.handle && !isMockMode()) {
+                        try {
+                            await syncFollowsFromLaravel(user.id, user.handle);
+                        } catch {
+                            // Feed still loads from Laravel.
+                        }
+                    }
+                    if (!cancelled) {
+                        void reloadFeedFromStartRef.current({ quiet: true });
+                    }
+                })();
+            }, 0);
+            return () => {
+                cancelled = true;
+                clearTimeout(t);
+            };
+        }, [showFollowingFeed, user?.id, user?.handle]),
+    );
 
     const feedPostCount = useMemo(() => pages.flat().length, [pages]);
 
     const retryFeedLoad = React.useCallback(() => {
+        if (feedRetryBusyRef.current) return;
+        feedRetryBusyRef.current = true;
         setError(null);
         setReloadTick((t) => t + 1);
+        setTimeout(() => {
+            feedRetryBusyRef.current = false;
+        }, 800);
     }, []);
 
-    const onRefresh = async () => {
+    const refreshingLockRef = useRef(false);
+
+    const onRefresh = React.useCallback(async () => {
+        if (refreshingLockRef.current) return;
+        refreshingLockRef.current = true;
         setRefreshing(true);
-        setCursor(0);
-        await reloadFeedFromStartRef.current();
-        setRefreshing(false);
-    };
+        try {
+            await Promise.all([
+                reloadFeedFromStartRef.current({ quiet: true }),
+                (async () => {
+                    if (!user?.id || customLocation || showFollowingFeed) return;
+                    await reloadStories24Rail();
+                })(),
+            ]);
+        } catch (err) {
+            console.error('Feed pull-to-refresh failed:', err);
+        } finally {
+            refreshingLockRef.current = false;
+            setRefreshing(false);
+        }
+    }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]);
 
     const handleTabChange = (tab: Tab) => {
         setError(null);
+        const nextFilter = tab === 'Following' ? 'discover' : tab;
         if (tab === 'Following') {
             setShowFollowingFeed(true);
             setCustomLocation(null);
@@ -2093,14 +3237,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setCustomFilterType(null);
             setActive(tab);
         }
+        syncFeedFetchCtx(nextFilter);
         try {
-            navigation?.setParams?.({
-                location: undefined,
-                locationLabel: undefined,
-                locationScope: undefined,
-                filterType: undefined,
-                placeId: undefined,
-            });
+            if (navigation.isFocused()) {
+                navigation.setParams({
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
+                });
+            }
         } catch {
             // ignore
         }
@@ -2109,26 +3256,38 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const applyCustomLocationFeed = useCallback(
         (selection: PlaceFeedSelection, filterType: 'location' | 'venue' | 'landmark') => {
+            const nextFilter =
+                filterType === 'venue'
+                    ? `venue:${selection.filter}`
+                    : filterType === 'landmark'
+                        ? `landmark:${selection.filter}`
+                        : selection.filter;
+            syncFeedFetchCtx(nextFilter);
             setShowFollowingFeed(false);
             setCustomLocation(selection.filter);
             setCustomLocationLabel(selection.label);
             setCustomLocationPlaceId(selection.placeId?.trim() || null);
             setCustomFilterType(filterType);
             setError(null);
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
             setReloadTick((t) => t + 1);
             try {
-                navigation?.setParams?.({
-                    location: selection.filter,
-                    locationLabel: selection.label,
-                    locationScope: selection.scope,
-                    filterType,
-                    placeId: selection.placeId || undefined,
-                });
+                if (navigation.isFocused()) {
+                    navigation.setParams({
+                        location: selection.filter,
+                        locationLabel: selection.label,
+                        locationScope: selection.scope,
+                        filterType,
+                        placeId: selection.placeId || undefined,
+                    });
+                }
             } catch {
                 // ignore
             }
         },
-        [navigation]
+        [navigation, syncFeedFetchCtx]
     );
 
     const handleHeaderLocationSearch = useCallback(
@@ -2160,12 +3319,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const handleHeaderPlacePick = useCallback(
         (suggestion: LocationSuggestion, filterType: 'location' | 'venue' | 'landmark') => {
-            if (filterType === 'location' && getPlaceFeedPickerOptions(suggestion)) {
-                setHeaderScopePicker(suggestion);
+            const typed: LocationSuggestion =
+                filterType === 'venue' || filterType === 'landmark'
+                    ? { ...suggestion, type: filterType }
+                    : suggestion;
+            if (filterType === 'location' && getPlaceFeedPickerOptions(typed)) {
+                setHeaderScopePicker(typed);
                 setHeaderScopePickerKind(filterType);
                 return;
             }
-            applyCustomLocationFeed(resolvePlaceFeedSelection(suggestion), filterType);
+            applyCustomLocationFeed(resolvePlaceFeedSelection(typed), filterType);
         },
         [applyCustomLocationFeed]
     );
@@ -2201,6 +3364,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     );
 
     const clearCustomLocation = () => {
+        void clearPendingLocationFeed();
+        const nextFilter = user?.national || defaultNational;
+        syncFeedFetchCtx(nextFilter);
+        setShowFollowingFeed(false);
+        setActive(nextFilter);
         setCustomLocation(null);
         setCustomLocationLabel(null);
         setCustomLocationPlaceId(null);
@@ -2209,24 +3377,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setCursor(0);
         setEnd(false);
         setError(null);
+        setReloadTick((t) => t + 1);
         try {
-            navigation?.setParams?.({
-                location: undefined,
-                locationLabel: undefined,
-                locationScope: undefined,
-                filterType: undefined,
-                placeId: undefined,
-            });
+            if (navigation.isFocused()) {
+                navigation.setParams({
+                    location: null,
+                    locationLabel: null,
+                    locationScope: null,
+                    filterType: null,
+                    placeId: null,
+                    resetHomeFeedAt: null,
+                });
+            }
         } catch {
             // ignore
         }
     };
 
-    const pendingPosts = React.useMemo(
-        () =>
-            getPendingFeedUploads().map((job) => decorateForUser(userId, pendingUploadToPost(job))),
-        [pendingUploadTick, userId],
-    );
+    // Uploading/failed placeholders live in UploadProgressToast only — not in the feed list.
+    const pendingPosts = React.useMemo(() => [], [pendingUploadTick]);
 
     const flatPosts = React.useMemo(() => {
         const pendingIds = new Set(pendingPosts.map((p) => p.id));
@@ -2292,84 +3461,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const flat = flatPosts;
 
-    const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
-    const [interestsSaving, setInterestsSaving] = React.useState(false);
-    const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
-    const [onboardingDismissed, setOnboardingDismissed] = React.useState<boolean | null>(null);
-    const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(false);
-    const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(new Set());
-    const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
-    const [stories24CollapsePayload, setStories24CollapsePayload] =
-        React.useState<Stories24RailReturnPayload | null>(null);
-    const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
-
-    useFocusEffect(
-        useCallback(() => {
-            let active = true;
-            void (async () => {
-                const [payload, scrollY] = await Promise.all([
-                    consumeStories24RailReturn(),
-                    consumeStories24FeedScrollRestore(),
-                ]);
-                if (!active) return;
-                if (payload) setStories24CollapsePayload(payload);
-                if (scrollY != null) pendingFeedScrollRestoreRef.current = scrollY;
-            })();
-            return () => {
-                active = false;
-            };
-        }, []),
-    );
-
-    React.useEffect(() => {
-        if (!user?.id || customLocation || showFollowingFeed) {
-            setStories24Items([]);
-            return;
-        }
-        let cancelled = false;
-        const load = () => {
-            void buildStories24RailItems(user.id, user.handle).then((items) => {
-                if (!cancelled) setStories24Items(items);
-            });
-        };
-        load();
-        const interval = setInterval(load, 12000);
-        const unsubRefresh = subscribeStoriesRefresh(load);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-            unsubRefresh();
-        };
-    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
-
-    React.useEffect(() => {
-        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_DISMISSED_KEY).then((v) => {
-            if (v === '1') setSuggestedFollowerDismissed(true);
-        });
-        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY).then((raw) => {
-            try {
-                setHiddenFollowerHandles(new Set(raw ? JSON.parse(raw) : []));
-            } catch {
-                setHiddenFollowerHandles(new Set());
-            }
-        });
-    }, []);
-
-    React.useEffect(() => {
-        setInterestsDraft(user?.interests ?? []);
-        setInterestsCardDismissed(false);
-    }, [user?.id]);
-
-    React.useEffect(() => {
-        if (!user?.id) {
-            setOnboardingDismissed(null);
-            return;
-        }
-        void AsyncStorage.getItem(INTERESTS_ONBOARDING_DISMISSED_KEY).then((v) => {
-            setOnboardingDismissed(v === '1');
-        });
-    }, [user?.id]);
-
     const showInterestsFeedCard = React.useMemo(() => {
         if (!user || interestsCardDismissed) return false;
         if ((user.interests?.length ?? 0) >= MAX_INTEREST_SELECTIONS) return false;
@@ -2398,6 +3489,27 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const showStories24Rail = !customLocation && !showFollowingFeed && stories24Items.length > 0;
 
+    React.useEffect(() => {
+        const pending = pendingStories24CollapseRef.current;
+        if (!pending) return;
+        if (!showStories24Rail) {
+            pendingStories24CollapseRef.current = null;
+            return;
+        }
+        const handleKey = normalizeStories24Handle(pending.handle);
+        const hasCard = stories24Items.some(
+            (item) => normalizeStories24Handle(item.handle) === handleKey,
+        );
+        if (!hasCard) {
+            pendingStories24CollapseRef.current = null;
+            return;
+        }
+        pendingStories24CollapseRef.current = null;
+        setStories24CollapsePayload((prev) =>
+            prev && normalizeStories24Handle(prev.handle) === handleKey ? prev : pending,
+        );
+    }, [showStories24Rail, stories24Items]);
+
     const openStoryFromRail = React.useCallback(
         (item: Stories24RailItem, railHandles: string[]) => {
             if (isStories24AddYoursHandle(item.handle)) {
@@ -2416,8 +3528,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
         if (!target && user?.id) {
             try {
+                const gen = ++stories24RailGenRef.current;
                 items = await buildStories24RailItems(user.id, user.handle);
-                setStories24Items(items);
+                if (gen === stories24RailGenRef.current) {
+                    setStories24Items(items);
+                }
                 target = resolveStories24OpenTarget(items);
             } catch (err) {
                 console.warn('Stories24 header: failed to refresh rail items', err);
@@ -2441,12 +3556,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             .map((x) => x.item);
         const business = posts.filter((p) => p.userAccountType === 'business');
         const source = business.length > 0 ? business : posts;
-        const shuffled = [...source];
-        for (let i = shuffled.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        return shuffled.slice(0, 8);
+        return [...source]
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+            .slice(0, 8);
     }, [flatStream]);
 
     const previewSuggestedPlaces = React.useMemo((): PlaceMatchedPost[] => {
@@ -2460,24 +3572,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             includePosterRegionalNational: suggestedPlacesPrefs.includePosterLocale,
         });
         if (matched.length > 0) {
-            const shuffledMatched = [...matched];
-            for (let i = shuffledMatched.length - 1; i > 0; i -= 1) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [shuffledMatched[i], shuffledMatched[j]] = [shuffledMatched[j], shuffledMatched[i]];
-            }
-            return shuffledMatched.slice(0, 3);
+            return [...matched]
+                .sort((a, b) => String(a.post.id).localeCompare(String(b.post.id)))
+                .slice(0, 3);
         }
-        const shuffledPosts = [...posts];
-        for (let i = shuffledPosts.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffledPosts[i], shuffledPosts[j]] = [shuffledPosts[j], shuffledPosts[i]];
-        }
-        return shuffledPosts.slice(0, 3).map((post) => ({
-            post,
-            matchedPlace: post.venue || post.landmark || post.locationLabel || user.local || 'Your area',
-            reason: 'home_area' as const,
-            confidence: 'medium' as const,
-        }));
+        return [...posts]
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+            .slice(0, 3)
+            .map((post) => ({
+                post,
+                matchedPlace: post.venue || post.landmark || post.locationLabel || user.local || 'Your area',
+                reason: 'home_area' as const,
+                confidence: 'medium' as const,
+            }));
     }, [flatStream, user, suggestedPlacesPrefs.includePosterLocale]);
 
     const flatForRender = React.useMemo((): FeedListRow[] => {
@@ -2491,7 +3598,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 out.push({ kind: 'post', post: item.item });
                 postCount += 1;
                 if (!stories24Inserted && showStories24Rail && postCount === 1) {
-                    out.push({ kind: 'stories24', id: 'stories24-feed-rail' });
+                    out.push({
+                        kind: 'stories24',
+                        id: 'stories24-feed-rail',
+                        railItems: stories24Items,
+                        railKey: stories24Items.map((i) => i.handle).join('|'),
+                    });
                     stories24Inserted = true;
                 }
                 if (
@@ -2545,37 +3657,62 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         showSuggestedFollowerCard,
         suggestedFollowerSuggestion,
         showStories24Rail,
+        stories24Items,
         previewSuggestedCards,
         customLocation,
         previewLocalBusinessPosts,
         previewSuggestedPlaces,
     ]);
+    flatForRenderRef.current = flatForRender;
+
+    // First-paint bootstrap only. Like/comment patch `pages` → new `flat` identity;
+    // that must NEVER re-arm a player. After viewability has spoken, it owns autoplay.
+    const feedHasPosts = flat.length > 0;
+    React.useEffect(() => {
+        if (feedHasPosts) return;
+        feedViewabilitySeenRef.current = false;
+        lastViewableVideoPostIdRef.current = null;
+    }, [feedHasPosts]);
+    React.useEffect(() => {
+        if (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost) || commentsModalOpen) {
+            return;
+        }
+        if (!feedAutoplayAllowed || !feedHasPosts) return;
+        if (activeVideoPostIdRef.current) return;
+        // Once FlatList viewability has run, stay quiet — do not invent playback from data updates.
+        if (feedViewabilitySeenRef.current) return;
+        const preferred = lastViewableVideoPostIdRef.current;
+        if (!preferred) return;
+        const t = setTimeout(() => {
+            if (activeVideoPostIdRef.current) return;
+            if (feedAutoplayOverlayBlocks()) return;
+            if (!feedAutoplayAllowedRef.current) return;
+            if (feedViewabilitySeenRef.current) return;
+            scheduleActiveFeedVideoRef.current(String(preferred), true);
+        }, 200);
+        return () => clearTimeout(t);
+    }, [
+        isFeedFocused,
+        scenesViewerActive,
+        imageFullscreenPost,
+        commentsModalOpen,
+        feedAutoplayAllowed,
+        feedHasPosts,
+    ]);
 
     React.useEffect(() => {
         const pendingY = pendingFeedScrollRestoreRef.current;
         if (pendingY == null || flatForRender.length === 0) return;
+        if (stories24CollapsePayload) return;
         pendingFeedScrollRestoreRef.current = null;
         requestAnimationFrame(() => {
             flatListRef.current?.scrollToOffset({ offset: pendingY, animated: false });
         });
     }, [flatForRender.length, stories24CollapsePayload]);
 
-    const scrollStories24RailIntoView = React.useCallback(async () => {
-        const idx = flatForRender.findIndex((row) => row.kind === 'stories24');
-        if (idx < 0) return;
-        await new Promise<void>((resolve) => {
-            flatListRef.current?.scrollToIndex({ index: idx, animated: false, viewPosition: 0.5 });
-            setTimeout(resolve, 80);
-        });
-    }, [flatForRender]);
-
     const videoPostsForScenes = React.useMemo(() => flat.filter(postHasVideoMedia), [flat]);
 
     const customLocationDisplay = customLocationLabel || customLocation;
-
-    useEffect(() => {
-        void loadLocationNotifyPrefs().then(setNotifyLocations);
-    }, []);
 
     const isNotifyOnForCurrentLocation = useMemo(() => {
         if (!customLocation) return false;
@@ -2653,25 +3790,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const openDmSheet = useCallback((handle: string, postId: string) => {
         setDmSheetRecipientHandle(handle);
         setDmSheetAnchorPostId(postId);
-        setDmSheetMessage('');
         setDmSheetOpen(true);
     }, []);
 
-    const sendDmFromSheet = useCallback(() => {
-        const text = dmSheetMessage.trim();
-        if (!text || !user?.handle || !dmSheetRecipientHandle) return;
+    const sendDmFromSheet = useCallback((text: string) => {
+        const trimmed = String(text || '').trim();
+        if (!trimmed || !user?.handle || !dmSheetRecipientHandle) return;
         const recipient = dmSheetRecipientHandle;
         const anchorId = dmSheetAnchorPostId;
-        appendMessage(user.handle, recipient, { text, sourcePostId: anchorId ?? undefined })
+        appendMessage(user.handle, recipient, { text: trimmed, sourcePostId: anchorId ?? undefined })
             .then(() => {
-                setDmSheetMessage('');
                 setDmSheetOpen(false);
                 setDmSheetRecipientHandle(null);
                 setDmSheetAnchorPostId(null);
                 setTimeout(() => startFeedDmDeliveryFx(recipient, anchorId), 50);
             })
             .catch((err) => console.error('Send DM failed:', err));
-    }, [dmSheetMessage, user?.handle, dmSheetRecipientHandle, dmSheetAnchorPostId, startFeedDmDeliveryFx]);
+    }, [user?.handle, dmSheetRecipientHandle, dmSheetAnchorPostId, startFeedDmDeliveryFx]);
 
     const isVisitorInCustomLocation = useMemo(() => {
         if (!customLocation || !user) return false;
@@ -2698,39 +3833,68 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         async (post: Post) => {
             if (!user) return;
             try {
-                const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
-                setPages((prev) => prev.map((page) => page.map((p) => (p.id === post.id ? updated : p))));
+                const updated = await toggleFollowForPost(userId, post.id, post.userHandle, user.handle, post.isFollowing === true);
+                const isFollowRequested = Boolean(
+                    !updated.isFollowing &&
+                        user.handle &&
+                        isProfilePrivate(post.userHandle) &&
+                        hasPendingFollowRequest(user.handle, post.userHandle),
+                );
+                patchFollowForHandle(post.userHandle, updated.isFollowing === true, {
+                    isFollowRequested,
+                } as Partial<Post>);
             } catch (err) {
                 console.error('Follow from suggestion card failed:', err);
             }
         },
-        [user, userId],
+        [user, userId, patchFollowForHandle],
     );
 
-    const feedListCellRenderer = React.useCallback(
-        ({ children, style, ...rest }: { children: React.ReactNode; style?: object }) => (
-            <View {...rest} style={[style, styles.feedListCell]}>
-                {children}
-            </View>
-        ),
-        [],
-    );
+    const syncFullscreenPost = React.useCallback((updated: Post) => {
+        const updatedId = String(updated.id);
+        setImageFullscreenPost((prev) =>
+            prev && String(prev.id) === updatedId ? { ...prev, ...updated } : prev,
+        );
+        setSelectedPostForComments((prev) =>
+            prev && String(prev.id) === updatedId ? { ...prev, ...updated } : prev,
+        );
+    }, []);
 
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
         ({ item }: { item: FeedListRow }) => {
+            const wrapRow = (row: React.ReactElement, postId?: string) => (
+                <View
+                    collapsable={false}
+                    style={styles.feedListRow}
+                >
+                    {row}
+                </View>
+            );
             if (item.kind === 'suggested_follower') {
                 const sug = item.suggestion;
-                return (
+                return wrapRow(
                     <SuggestedFollowerFeedCard
                         suggestion={sug}
                         onFollow={async (post) => {
                             if (!user) return;
                             try {
-                                const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
-                                setPages((prev) =>
-                                    prev.map((page) => page.map((p) => (p.id === post.id ? updated : p))),
+                                const updated = await toggleFollowForPost(
+                                    userId,
+                                    post.id,
+                                    post.userHandle,
+                                    user?.handle,
+                                    post.isFollowing === true,
                                 );
+                                const isFollowRequested = Boolean(
+                                    !updated.isFollowing &&
+                                        user?.handle &&
+                                        isProfilePrivate(post.userHandle) &&
+                                        hasPendingFollowRequest(user.handle, post.userHandle),
+                                );
+                                patchFollowForHandle(post.userHandle, updated.isFollowing === true, {
+                                    isFollowRequested,
+                                } as Partial<Post>);
                             } catch (err) {
                                 console.error('Follow from suggested card failed:', err);
                             }
@@ -2752,24 +3916,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             });
                         }}
                         onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'stories24') {
-                return (
-                    <Stories24FeedRail
+                return wrapRow(
+                    <Stories24FeedShelf
+                        key={item.railKey}
                         ref={stories24RailRef}
-                        items={stories24Items}
+                        items={item.railItems}
                         onOpenStory={openStoryFromRail}
-                        onAddYours={() => navigation.navigate('Clip')}
-                        onScrollCardIntoView={scrollStories24RailIntoView}
+                        onAddYours={() => navigation.navigate('InstantCreate', { openStoryPicker: true })}
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'interests') {
-                return (
+                return wrapRow(
                     <InterestsFeedCard
                         selected={interestsDraft}
                         saving={interestsSaving}
@@ -2796,12 +3960,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             void AsyncStorage.setItem(INTERESTS_ONBOARDING_DISMISSED_KEY, '1');
                             setInterestsCardDismissed(true);
                         }}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'ad') {
                 const ad = item.ad;
-                return (
+                return wrapRow(
                     <FeedAdCard
                         ad={ad}
                         onImpression={async () => {
@@ -2818,11 +3982,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 console.error('Error tracking ad click:', err);
                             }
                         }}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'local_business') {
-                return (
+                return wrapRow(
                     <LocalBusinessSuggestionCard
                         posts={item.posts}
                         userLocal={user?.local}
@@ -2851,11 +4015,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onStripShown={() => {
                             void markBusinessStripInserted().then(() => setBusinessStripEligible(false));
                         }}
-                    />
+                    />,
                 );
             }
             if (item.kind === 'suggested_places') {
-                return (
+                return wrapRow(
                     <SuggestedPlacesFeedSection
                         bundleKey={item.bundleKey}
                         suggestions={item.suggestions}
@@ -2865,7 +4029,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
                         onScrollToPost={scrollToFeedPost}
                         onAdjust={() => navigation.navigate('ContentPreferences')}
-                    />
+                    />,
                 );
             }
             if (item.kind !== 'post') {
@@ -2879,39 +4043,127 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             const isPendingUpload =
                 mergedPost.clientUploadStatus === 'uploading' ||
                 mergedPost.clientUploadStatus === 'failed';
-            return (
+            const isVideoPostRow = postHasVideoMedia(mergedPost);
+            return wrapRow(
                 <FeedCard
+                    key={mergedPost.id}
                     post={mergedPost}
-                    isVideoActive={activeVideoPostId === mergedPost.id}
+                    isVideoActive={
+                        isFeedFocused &&
+                        !scenesViewerActive &&
+                        !scenesOverlay &&
+                        isVideoPostRow &&
+                        !commentsModalOpen &&
+                        String(activeVideoPostId) === String(mergedPost.id)
+                    }
+                    scenesExpanding={false}
+                    scenesExpandProgress={scenesExpandProgress}
+                    scenesExpandOrigin={null}
                     feedVideoMuted={feedVideoMuted}
+                    suspendNativeVideo={feedNativeVideoSuspended}
                     onLike={async () => {
                         if (isPendingUpload) return;
-                        const updated = await toggleLike(userId, mergedPost.id, mergedPost);
+                        const postId = String(mergedPost.id);
+                        const prevLiked = mergedPost.userLiked === true;
+                        const prevLikes = mergedPost.stats?.likes ?? 0;
+                        // Optimistic like-only patch — avoid full post replace (layout churn).
                         setPages((prev) =>
-                            prev.map((page) => page.map((p) => (p.id === mergedPost.id ? updated : p)))
+                            prev.map((page) =>
+                                page.map((p) =>
+                                    String(p.id) === postId
+                                        ? {
+                                              ...p,
+                                              userLiked: !prevLiked,
+                                              stats: {
+                                                  ...p.stats,
+                                                  likes: Math.max(0, prevLikes + (prevLiked ? -1 : 1)),
+                                              },
+                                          }
+                                        : p,
+                                ),
+                            ),
                         );
+                        try {
+                            const updated = await toggleLike(userId, mergedPost.id, mergedPost);
+                            const nextLiked = updated.userLiked ?? !prevLiked;
+                            const nextLikes = Math.max(
+                                0,
+                                typeof updated.stats?.likes === 'number'
+                                    ? updated.stats.likes
+                                    : prevLikes + (prevLiked ? -1 : 1),
+                            );
+                            setPages((prev) =>
+                                prev.map((page) =>
+                                    page.map((p) =>
+                                        String(p.id) === postId
+                                            ? {
+                                                  ...p,
+                                                  userLiked: nextLiked,
+                                                  stats: {
+                                                      ...p.stats,
+                                                      likes: nextLikes,
+                                                  },
+                                              }
+                                            : p,
+                                    ),
+                                ),
+                            );
+                            recentCreatedPostsRef.current = recentCreatedPostsRef.current.map((p) =>
+                                String(p.id) === postId
+                                    ? {
+                                          ...p,
+                                          userLiked: nextLiked,
+                                          stats: { ...p.stats, likes: nextLikes },
+                                      }
+                                    : p,
+                            );
+                            syncFullscreenPost({
+                                ...mergedPost,
+                                ...updated,
+                                userLiked: nextLiked,
+                                stats: { ...mergedPost.stats, ...updated.stats, likes: nextLikes },
+                            });
+                        } catch {
+                            setPages((prev) =>
+                                prev.map((page) =>
+                                    page.map((p) =>
+                                        String(p.id) === postId
+                                            ? {
+                                                  ...p,
+                                                  userLiked: prevLiked,
+                                                  stats: { ...p.stats, likes: prevLikes },
+                                              }
+                                            : p,
+                                    ),
+                                ),
+                            );
+                        }
                     }}
+                    onLikeBurst={showFeedLikeBurst}
                     onFollow={async () => {
                         if (isPendingUpload || !user) return;
                         try {
                             const updated = await toggleFollowForPost(
                                 userId,
                                 mergedPost.id,
-                                mergedPost.userHandle
+                                mergedPost.userHandle,
+                                user.handle,
+                                mergedPost.isFollowing === true,
                             );
-                            setPages((prev) =>
-                                prev.map((page) =>
-                                    page.map((p) => (p.id === mergedPost.id ? updated : p))
-                                )
+                            const isFollowRequested = Boolean(
+                                !updated.isFollowing &&
+                                    user.handle &&
+                                    isProfilePrivate(mergedPost.userHandle) &&
+                                    hasPendingFollowRequest(user.handle, mergedPost.userHandle),
                             );
+                            patchFollowForHandle(mergedPost.userHandle, updated.isFollowing === true, {
+                                isFollowRequested,
+                            } as Partial<Post>);
                         } catch (err) {
                             console.error('Error toggling follow in FeedScreen:', err);
-                            setPages((prev) =>
-                                prev.map((page) =>
-                                    page.map((p) =>
-                                        p.id === mergedPost.id ? { ...p, isFollowing: !p.isFollowing } : p
-                                    )
-                                )
+                            patchFollowForHandle(
+                                mergedPost.userHandle,
+                                !(mergedPost.isFollowing === true),
                             );
                         }
                         if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
@@ -2920,10 +4172,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onView={async () => {
                         if (isPendingUpload) return;
-                        await incrementViews(userId, mergedPost.id);
+                        recordFeedView(mergedPost.id);
                     }}
                     onComment={() => {
                         if (isPendingUpload) return;
+                        captureOverlayVideoResume(mergedPost);
+                        commentsModalOpenRef.current = true;
+                        activeVideoPostIdRef.current = null;
+                        setActiveFeedVideoPostId(null);
                         setSelectedPostId(mergedPost.id);
                         setSelectedPostForComments(mergedPost);
                         setCommentsModalOpen(true);
@@ -2950,19 +4206,66 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setOverflowPost(mergedPost);
                         setOverflowVisible(true);
                     }}
-                    onOpenImageFullscreen={(startIndex = 0) => {
+                    onOpenImageFullscreen={(startIndex = 0, origin = null) => {
                         if (isPendingUpload) return;
+                        // Stop any feed video audio before image fullscreen / like re-renders.
+                        if (autoplayTimerRef.current) {
+                            clearTimeout(autoplayTimerRef.current);
+                            autoplayTimerRef.current = null;
+                        }
+                        captureOverlayVideoResume(mergedPost);
+                        imageFullscreenOpenRef.current = true;
+                        activeVideoPostIdRef.current = null;
+                        setActiveFeedVideoPostId(null);
                         setImageFullscreenStartIndex(startIndex);
-                        setImageFullscreenPost(mergedPost);
+                        setImageFullscreenOrigin(origin);
+                        // Prefer live in-memory stats (mock like map + persisted count) over a stale card snapshot.
+                        const live = getLocalPostById(mergedPost.id);
+                        const latest = live
+                            ? {
+                                  ...mergedPost,
+                                  ...live,
+                                  stats: mergeEngagementStats(live.stats, mergedPost.stats),
+                                  userLiked: live.userLiked ?? mergedPost.userLiked,
+                                  userReclipped: live.userReclipped || mergedPost.userReclipped,
+                              }
+                            : mergedPost;
+                        const snapshot = decorateForUser(userId, latest);
+                        setImageFullscreenLaunch({ post: snapshot, startIndex });
+                        setImageFullscreenPost(snapshot);
                     }}
-                    onOpenScenes={() => {
+                    onOpenScenes={(origin) => {
                         if (isPendingUpload) return;
-                        const handoff = consumeFeedVideoHandoff(mergedPost.id);
-                        navigation.navigate('Scenes', {
-                            initialPostId: mergedPost.id,
-                            posts: videoPostsForScenes,
+                        scenesReturnScrollYRef.current = feedScrollYRef.current;
+                        captureOverlayVideoResume(mergedPost);
+                        const tappedId = String(mergedPost.id);
+                        const handoff = peekFeedVideoHandoff(tappedId);
+                        const scenesFeedLabel = showFollowingFeed
+                            ? 'Following'
+                            : String(active || user?.national || 'Ireland');
+                        const scenesPosts = (
+                            videoPostsForScenes.some((p) => String(p.id) === tappedId)
+                                ? videoPostsForScenes
+                                : [mergedPost, ...videoPostsForScenes]
+                        ).map((p) => decorateForUser(userId, p));
+                        setScenesViewerActive(true);
+                        setScenesViewerActiveState(true);
+                        activeVideoPostIdRef.current = null;
+                        setActiveFeedVideoPostId(null);
+                        setScenesLaunchPayload({
+                            initialPostId: tappedId,
+                            posts: scenesPosts,
                             initialVideoTime: handoff?.currentTime,
                             initialMuted: handoff?.muted ?? feedVideoMuted,
+                            feedLabel: scenesFeedLabel,
+                            originRect:
+                                origin && origin.width > 8 && origin.height > 8 ? origin : null,
+                        });
+                        navigation.navigate('Scenes', {
+                            initialPostId: tappedId,
+                            initialVideoTime: handoff?.currentTime,
+                            initialMuted: handoff?.muted ?? feedVideoMuted,
+                            feedLabel: scenesFeedLabel,
                         });
                     }}
                     onPostPress={() => {
@@ -2975,10 +4278,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         navigation.navigate('PostDetail', { postId: mergedPost.id });
                     }}
                     onVisitProfile={() =>
-                        navigation.navigate('ViewProfile', { handle: mergedPost.userHandle })
+                        navigation.navigate('ViewProfile', {
+                            handle: mergedPost.userHandle,
+                            sourcePostId: mergedPost.id,
+                        })
                     }
                     onVisitHandle={(handle) =>
-                        navigation.navigate('ViewProfile', { handle })
+                        navigation.navigate('ViewProfile', {
+                            handle,
+                            sourcePostId: mergedPost.id,
+                        })
                     }
                     onViewStories={() =>
                         navigation.navigate('Stories', { openUserHandle: mergedPost.userHandle })
@@ -3009,22 +4318,36 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         const { promptReportPostNative } = await import('../utils/promptReportPostNative');
                         promptReportPostNative(mergedPost.id);
                     }}
-                    onShareSuccess={handleShareToStoriesSuccess}
-                    isCurrentUser={user?.handle === mergedPost.userHandle}
+                    onShareToStories={() => openShareToStoriesForPost(mergedPost)}
+                    isCurrentUser={
+                      Boolean(
+                        (user?.id &&
+                          mergedPost.user_id &&
+                          String(user.id) === String(mergedPost.user_id)) ||
+                          (user?.handle &&
+                            String(user.handle).trim().toLowerCase() ===
+                              String(mergedPost.userHandle || '').trim().toLowerCase()),
+                      )
+                    }
                     viewerHandle={user?.handle}
                     viewerUserId={userId}
                     onOpenDM={user?.handle ? openDmSheet : undefined}
                     onRegisterDmAnchor={registerDmAnchor}
-                />
+                    onOpenLikesSheet={() => setLikesSheetPost(mergedPost)}
+                    onOpenTaggedSheet={() => setTaggedSheetPost(mergedPost)}
+                />,
+                mergedPost.id,
             );
         },
         [
             userId,
             user,
+            active,
             showFollowingFeed,
             currentFilter,
             navigation,
             handleShareToStoriesSuccess,
+            openShareToStoriesForPost,
             updatePost,
             loadMore,
             savedByPostId,
@@ -3032,8 +4355,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             tryReclipPost,
             toggleCollectionsSaveForPost,
             hideUserFromFeed,
+            isFeedFocused,
             activeVideoPostId,
             feedVideoMuted,
+            commentsModalOpen,
+            scenesViewerActive,
+            feedNativeVideoSuspended,
             pendingUploadTick,
             videoPostsForScenes,
             interestsDraft,
@@ -3041,17 +4368,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             saveInterests,
             stories24Items,
             openStoryFromRail,
-            scrollStories24RailIntoView,
             stories24CollapsePayload,
+            patchFollowForHandle,
+            showFeedLikeBurst,
+            syncFullscreenPost,
+            captureOverlayVideoResume,
+            scenesOverlay,
         ]
     );
 
-    const syncFullscreenPost = React.useCallback(
-        (updated: Post) => {
-            setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
-        },
-        [],
-    );
+    const closeCommentsSheet = React.useCallback(() => {
+        commentsModalOpenRef.current = false;
+        const y = feedScrollYRef.current;
+        setCommentsModalOpen(false);
+        setSelectedPostId(null);
+        setSelectedPostForComments(null);
+        restoreFeedVideoAfterOverlay();
+        pinFeedScrollSoon(y);
+    }, [restoreFeedVideoAfterOverlay, pinFeedScrollSoon]);
 
     return (
         <View style={styles.container}>
@@ -3083,105 +4417,189 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     />
                 }
             >
+            <View style={styles.feedListShell}>
             <FlatList
                 ref={flatListRef}
                 style={styles.feedList}
                 data={flatForRender}
                 renderItem={renderItem}
-                keyExtractor={(item, index) => {
-                    const baseKey =
-                        item.kind === 'interests' || item.kind === 'stories24'
-                            ? item.id
-                            : item.kind === 'suggested_follower'
-                              ? `suggested-follower-${item.suggestion.userHandle}`
-                              : item.kind === 'ad'
-                                ? `ad-${item.ad.id}`
-                                : item.kind === 'local_business'
-                                  ? `local-business-${item.posts.map((p) => p.id).join('-')}`
-                                  : item.kind === 'suggested_places'
-                                    ? `suggested-places-${item.bundleKey}`
-                                    : item.post.id;
-                    // Keep keys stable but collision-safe for mixed/demo feeds.
-                    return `${item.kind}:${baseKey}:${index}`;
+                keyExtractor={(item) => {
+                    if (item.kind === 'post') return `post:${item.post.id}`;
+                    if (item.kind === 'interests' || item.kind === 'stories24') {
+                        return item.kind === 'stories24'
+                            ? `stories24:${item.railKey}`
+                            : `${item.kind}:${item.id}`;
+                    }
+                    if (item.kind === 'suggested_follower') {
+                        return `suggested-follower:${item.suggestion.userHandle}`;
+                    }
+                    if (item.kind === 'ad') return `ad:${item.ad.id}`;
+                    if (item.kind === 'local_business') {
+                        return `local-business:${item.posts.map((p) => p.id).join('-')}`;
+                    }
+                    if (item.kind === 'suggested_places') {
+                        return `suggested-places:${item.bundleKey}`;
+                    }
+                    return 'feed-row';
                 }}
-                extraData={`${activeVideoPostId}-${pendingUploadTick}`}
-                onViewableItemsChanged={onViewableItemsChanged}
-                viewabilityConfig={viewabilityConfigRef.current}
-                {...(Platform.OS === 'android' ? { CellRendererComponent: feedListCellRenderer } : {})}
-                // Performance optimizations - Instagram-style
+                extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}-${scenesOverlay?.postId || ''}-${stories24Items.map((i) => i.handle).join('|')}`}
+                viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
+                // Keep the render window tight for max FPS while flinging; clip offscreen cells.
                 initialNumToRender={2}
                 maxToRenderPerBatch={2}
-                windowSize={7}
+                windowSize={5}
                 updateCellsBatchingPeriod={50}
-                removeClippedSubviews={Platform.OS === 'ios'}
+                removeClippedSubviews={!scenesOverlay}
+                scrollEnabled={!scenesOverlay}
+                onScrollBeginDrag={() => {
+                    feedScrollingRef.current = true;
+                    setFeedScrollBusy(true);
+                    if (feedScrollIdleTimerRef.current) {
+                        clearTimeout(feedScrollIdleTimerRef.current);
+                        feedScrollIdleTimerRef.current = null;
+                    }
+                }}
+                onMomentumScrollBegin={() => {
+                    if (feedScrollIdleTimerRef.current) {
+                        clearTimeout(feedScrollIdleTimerRef.current);
+                        feedScrollIdleTimerRef.current = null;
+                    }
+                    feedScrollingRef.current = true;
+                    setFeedScrollBusy(true);
+                }}
+                onMomentumScrollEnd={() => {
+                    feedScrollingRef.current = false;
+                    if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+                    feedScrollIdleTimerRef.current = setTimeout(() => {
+                        // Scroll settle only — never from like/comment re-renders.
+                        if (feedAutoplayOverlayBlocks()) {
+                            requestAnimationFrame(() => setFeedScrollBusy(false));
+                            return;
+                        }
+                        scheduleActiveFeedVideoRef.current(
+                            feedAutoplayAllowedRef.current
+                                ? lastViewableVideoPostIdRef.current
+                                : null,
+                            false,
+                        );
+                        requestAnimationFrame(() => setFeedScrollBusy(false));
+                    }, 80);
+                }}
+                onScrollEndDrag={(e) => {
+                    feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+                    if (e.nativeEvent.velocity && Math.abs(e.nativeEvent.velocity.y) > 0.05) {
+                        // Momentum will follow — keep busy until momentum end.
+                        return;
+                    }
+                    if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+                    feedScrollIdleTimerRef.current = setTimeout(() => {
+                        feedScrollingRef.current = false;
+                        if (feedAutoplayOverlayBlocks()) {
+                            requestAnimationFrame(() => setFeedScrollBusy(false));
+                            return;
+                        }
+                        scheduleActiveFeedVideoRef.current(
+                            feedAutoplayAllowedRef.current
+                                ? lastViewableVideoPostIdRef.current
+                                : null,
+                            false,
+                        );
+                        requestAnimationFrame(() => setFeedScrollBusy(false));
+                    }, 80);
+                }}
                 // Scroll performance
                 onScroll={(e) => {
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
                 }}
-                scrollEventThrottle={16}           // Smooth scroll events (60fps)
-                decelerationRate="fast"            // Faster deceleration for snappier feel
+                scrollEventThrottle={32}
+                decelerationRate={Platform.OS === 'ios' ? 'normal' : 0.985}
                 refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={() => {
+                            void onRefresh();
+                        }}
+                        tintColor="#FFFFFF"
+                        colors={['#FFFFFF']}
+                        progressBackgroundColor="#030712"
+                        progressViewOffset={Platform.OS === 'android' ? 12 : 0}
+                    />
                 }
                 onEndReached={() => {
-                    if (!loading && !end) {
+                    if (!initialLoading && !loadingMore && !end) {
                         loadMore();
                     }
                 }}
-                onScrollToIndexFailed={(info) => {
-                    flatListRef.current?.scrollToOffset({
-                        offset: Math.max(0, info.averageItemLength * info.index),
-                        animated: true,
-                    });
+                onScrollToIndexFailed={() => {
+                    pinFeedScrollSoon();
                 }}
                 onEndReachedThreshold={0.5}
                 ListFooterComponent={
-                    loading ? (
+                    loadingMore ? (
                         <View style={styles.loadingContainer}>
                             <ActivityIndicator size="small" color="#8B5CF6" />
                         </View>
                     ) : null
                 }
                 ListEmptyComponent={
-                    loading || (pages.length === 0 && !end) ? (
+                    error && flatForRender.length === 0 ? (
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyFeedTitle}>Could not load feed</Text>
+                            <Text style={styles.emptyFeedSubtitle}>{error}</Text>
+                            <TouchableOpacity style={styles.emptyFeedSecondaryBtn} onPress={retryFeedLoad}>
+                                <Text style={styles.emptyFeedSecondaryBtnText}>Try again</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : flatForRender.length === 0 && (initialLoading || !end) ? (
                         <FeedPostSkeleton count={2} />
-                    ) : end ? (
+                    ) : end && flatForRender.length === 0 ? (
                         <View style={styles.emptyContainer}>
                             {customLocation ? (
-                                <>
-                                    <View style={styles.emptyFeedCard}>
-                                        <Text style={styles.emptyFeedBadge}>
-                                            {isVisitorInCustomLocation ? "YOU'RE EARLY TO THIS FEED" : 'YOUR HOME FEED'}
+                                <View style={styles.emptyDefaultWrap}>
+                                    <View style={FEED_EMPTY_CARD}>
+                                        <Text style={FEED_EMPTY_BADGE}>
+                                            {isVisitorInCustomLocation ? "You're early to this feed" : 'Your home feed'}
                                         </Text>
-                                        <Text style={styles.emptyFeedTitle}>
+                                        <Text style={FEED_EMPTY_TITLE}>
                                             {isVisitorInCustomLocation
                                                 ? `No locals are posting in ${customLocationDisplay} yet`
                                                 : `No posts in your ${customLocationDisplay} feed yet`}
                                         </Text>
-                                        <Text style={styles.emptyFeedSubtitle}>
+                                        <Text style={FEED_EMPTY_SUBTITLE}>
                                             {isVisitorInCustomLocation
                                                 ? `We'll light up this feed once people in ${customLocationDisplay} start sharing.`
-                                                : 'You can be the first to post here. Share what’s happening around you.'}
+                                                : 'You can be the first to post here. Share what\'s happening around you to start this feed.'}
                                         </Text>
                                         {isVisitorInCustomLocation ? (
-                                            <>
+                                            <View style={styles.emptyCustomActions}>
                                                 <TouchableOpacity
-                                                    style={[
-                                                        styles.emptyFeedNotifyBtn,
-                                                        isNotifyOnForCurrentLocation && styles.emptyFeedNotifyBtnActive,
-                                                    ]}
+                                                    activeOpacity={0.85}
                                                     onPress={toggleNotifyForCurrentLocation}
+                                                    style={styles.emptyNotifyBtnWrap}
                                                 >
-                                                    <Text
-                                                        style={[
-                                                            styles.emptyFeedNotifyBtnText,
-                                                            isNotifyOnForCurrentLocation && styles.emptyFeedNotifyBtnTextActive,
-                                                        ]}
-                                                    >
-                                                        {isNotifyOnForCurrentLocation
-                                                            ? "You'll be notified"
-                                                            : `Notify me when ${customLocationDisplay} wakes up`}
-                                                    </Text>
+                                                    {isNotifyOnForCurrentLocation ? (
+                                                        <View
+                                                            style={[
+                                                                FEED_EMPTY_GRADIENT_BTN,
+                                                                styles.emptyFeedNotifyBtnActive,
+                                                            ]}
+                                                        >
+                                                            <Text style={styles.emptyFeedNotifyBtnTextActive}>
+                                                                You&apos;ll be notified
+                                                            </Text>
+                                                        </View>
+                                                    ) : (
+                                                        <LinearGradient
+                                                            colors={[...FEED_EMPTY_NOTIFY_GRADIENT]}
+                                                            start={{ x: 0, y: 0.5 }}
+                                                            end={{ x: 1, y: 0.5 }}
+                                                            style={FEED_EMPTY_GRADIENT_BTN}
+                                                        >
+                                                            <Text style={styles.emptyFeedNotifyBtnText}>
+                                                                {`Notify me when ${customLocationDisplay} wakes up`}
+                                                            </Text>
+                                                        </LinearGradient>
+                                                    )}
                                                 </TouchableOpacity>
                                                 <TouchableOpacity
                                                     style={styles.emptyFeedSecondaryBtn}
@@ -3190,16 +4608,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                                     <Text style={styles.emptyFeedSecondaryBtnText}>Back to your home feed</Text>
                                                 </TouchableOpacity>
                                                 <Text style={styles.emptyFeedNotifyHint}>
-                                                    Feed warming up · we'll only ping you when real clips from{' '}
+                                                    Feed warming up · we&apos;ll only ping you when real clips from{' '}
                                                     {customLocationDisplay} start to appear.
                                                 </Text>
-                                            </>
+                                            </View>
                                         ) : (
                                             <TouchableOpacity
-                                                style={styles.emptyFeedPrimaryBtn}
-                                                onPress={() => navigation.navigate('CreateComposer')}
+                                                activeOpacity={0.85}
+                                                onPress={() => navigation.navigate('InstantCreate')}
                                             >
-                                                <Text style={styles.emptyFeedPrimaryBtnText}>Create a clip in this feed</Text>
+                                                <LinearGradient
+                                                    colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                    start={{ x: 0, y: 0.5 }}
+                                                    end={{ x: 1, y: 0.5 }}
+                                                    style={FEED_EMPTY_GRADIENT_BTN}
+                                                >
+                                                    <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                        Create a clip in this feed
+                                                    </Text>
+                                                </LinearGradient>
                                             </TouchableOpacity>
                                         )}
                                     </View>
@@ -3207,23 +4634,52 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                         locationLabel={customLocationDisplay || customLocation}
                                         placeId={customLocationPlaceId}
                                     />
-                                </>
+                                </View>
                             ) : (
-                                <>
-                                    <Text style={styles.emptyText}>
-                                        {showFollowingFeed
-                                            ? 'No posts from people you follow yet.'
-                                            : 'No posts found for this feed.'}
-                                    </Text>
-                                    {showFollowingFeed ? (
-                                        <Text style={styles.emptyFeedSubtitle}>
-                                            In demo mode, tap Ireland or Dublin for local posts.
-                                        </Text>
-                                    ) : null}
-                                    <TouchableOpacity style={styles.emptyFeedPrimaryBtn} onPress={retryFeedLoad}>
-                                        <Text style={styles.emptyFeedPrimaryBtnText}>Reload feed</Text>
-                                    </TouchableOpacity>
-                                </>
+                                <View style={styles.emptyDefaultWrap}>
+                                    {showFollowingFeed || String(currentFilter).toLowerCase() === 'discover' ? (
+                                        <View style={FEED_EMPTY_CARD}>
+                                            <Text style={FEED_EMPTY_FOLLOWING_TITLE}>
+                                                {followingCount && followingCount > 0
+                                                    ? "People you follow haven't posted yet"
+                                                    : 'Unlock Your Following News Feed'}
+                                            </Text>
+                                            <Text style={FEED_EMPTY_FOLLOWING_SUBTITLE}>
+                                                {followingCount && followingCount > 0
+                                                    ? "You'll see their clips here as soon as they share."
+                                                    : 'This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream.'}
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View style={FEED_EMPTY_CARD}>
+                                            <Text style={FEED_EMPTY_BADGE}>Your home feed</Text>
+                                            <Text style={FEED_EMPTY_TITLE}>
+                                                {currentFilter
+                                                    ? `No posts in your ${currentFilter} feed yet`
+                                                    : 'No posts yet'}
+                                            </Text>
+                                            <Text style={FEED_EMPTY_SUBTITLE}>
+                                                You can be the first to post here. Share what&apos;s happening
+                                                around you to start this feed.
+                                            </Text>
+                                            <TouchableOpacity
+                                                activeOpacity={0.85}
+                                                onPress={() => navigation.navigate('InstantCreate')}
+                                            >
+                                                <LinearGradient
+                                                    colors={[...FEED_EMPTY_CREATE_GRADIENT]}
+                                                    start={{ x: 0, y: 0.5 }}
+                                                    end={{ x: 1, y: 0.5 }}
+                                                    style={FEED_EMPTY_GRADIENT_BTN}
+                                                >
+                                                    <Text style={FEED_EMPTY_GRADIENT_BTN_TEXT}>
+                                                        Create a clip in this feed
+                                                    </Text>
+                                                </LinearGradient>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                </View>
                             )}
                         </View>
                     ) : null
@@ -3231,21 +4687,27 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[
                     styles.feedListContent,
-                    styles.feedContent,
                     {
                         paddingBottom: Math.max(insets.bottom, 8) + 12,
                     },
                 ]}
             />
+            </View>
             </FeedPageLayout>
 
             <ImageFullscreenModal
                 post={imageFullscreenPost}
                 visible={Boolean(imageFullscreenPost)}
                 initialIndex={imageFullscreenStartIndex}
+                originRect={imageFullscreenOrigin}
                 onClose={() => {
+                    imageFullscreenOpenRef.current = false;
+                    const y = feedScrollYRef.current;
                     setImageFullscreenPost(null);
                     setImageFullscreenStartIndex(0);
+                    setImageFullscreenOrigin(null);
+                    restoreFeedVideoAfterOverlay();
+                    pinFeedScrollSoon(y);
                 }}
                 onLike={
                     imageFullscreenPost
@@ -3263,6 +4725,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 onComment={
                     imageFullscreenPost
                         ? () => {
+                              captureOverlayVideoResume(imageFullscreenPost);
+                              commentsModalOpenRef.current = true;
                               setSelectedPostId(imageFullscreenPost.id);
                               setSelectedPostForComments(imageFullscreenPost);
                               setCommentsModalOpen(true);
@@ -3273,8 +4737,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     imageFullscreenPost
                         ? async () => {
                               await tryReclipPost(imageFullscreenPost);
-                              const refreshed = flat.find((p) => p.id === imageFullscreenPost.id);
-                              if (refreshed) syncFullscreenPost(refreshed);
                           }
                         : undefined
                 }
@@ -3285,76 +4747,228 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                           }
                         : undefined
                 }
+                onFollow={
+                    imageFullscreenPost &&
+                    user?.handle &&
+                    imageFullscreenPost.userHandle !== user.handle
+                        ? async () => {
+                              const updated = await toggleFollowForPost(
+                                  userId,
+                                  imageFullscreenPost.id,
+                                  imageFullscreenPost.userHandle,
+                                  user.handle,
+                                  imageFullscreenPost.isFollowing === true,
+                              );
+                              const nextFollowing = updated.isFollowing === true;
+                              const isFollowRequested = Boolean(
+                                  !nextFollowing &&
+                                      user.handle &&
+                                      isProfilePrivate(imageFullscreenPost.userHandle) &&
+                                      hasPendingFollowRequest(user.handle, imageFullscreenPost.userHandle),
+                              );
+                              patchFollowForHandle(imageFullscreenPost.userHandle, nextFollowing, {
+                                  isFollowRequested,
+                              } as Partial<Post>);
+                              syncFullscreenPost({
+                                  ...imageFullscreenPost,
+                                  ...updated,
+                                  isFollowing: nextFollowing,
+                                  isFollowRequested,
+                              } as Post);
+                          }
+                        : undefined
+                }
+                onVisitProfile={
+                    imageFullscreenPost
+                        ? () => {
+                              const handle = imageFullscreenPost.userHandle;
+                              const sourcePostId = imageFullscreenPost.id;
+                              setImageFullscreenPost(null);
+                              setImageFullscreenStartIndex(0);
+                              setImageFullscreenOrigin(null);
+                              navigation.navigate('ViewProfile', {
+                                  handle,
+                                  sourcePostId,
+                              });
+                          }
+                        : undefined
+                }
+                onMenu={
+                    imageFullscreenPost
+                        ? () => {
+                              setOverflowPost(imageFullscreenPost);
+                              setOverflowVisible(true);
+                          }
+                        : undefined
+                }
+                onSave={
+                    imageFullscreenPost
+                        ? () => {
+                              setSaveModalPost(imageFullscreenPost);
+                          }
+                        : undefined
+                }
+                isSaved={
+                    imageFullscreenPost
+                        ? Boolean(
+                              savedByPostId[imageFullscreenPost.id] ??
+                                  imageFullscreenPost.isBookmarked,
+                          )
+                        : false
+                }
             />
 
-            {commentsModalOpen && selectedPostId ? (
-                <PostCommentsSheet
-                    postId={selectedPostId}
-                    post={selectedPostForComments}
-                    isOpen={commentsModalOpen}
-                    commentAuthorHandle={user?.handle ?? ''}
-                    currentUserHandle={user?.handle}
-                    onAfterClose={() => {
-                        const pid = selectedPostId;
-                        if (!pid) return;
-                        fetchComments(pid)
-                            .then((list) =>
-                                updatePost(pid, (p) => ({
-                                    ...p,
-                                    stats: { ...p.stats, comments: list.length },
-                                }))
-                            )
-                            .catch(() => {});
-                    }}
+            <Modal
+                visible={commentsModalOpen && Boolean(selectedPostId)}
+                transparent
+                animationType="slide"
+                statusBarTranslucent
+                hardwareAccelerated
+                onRequestClose={closeCommentsSheet}
+                onShow={() => pinFeedScrollSoon()}
+            >
+                    <View style={styles.fullscreenOverlayRoot}>
+                        <Pressable
+                            style={styles.fullscreenOverlayBackdrop}
+                            onPress={closeCommentsSheet}
+                            accessibilityLabel="Dismiss comments"
+                        />
+                        <View style={styles.fullscreenCommentsSheet}>
+                            {selectedPostId ? (
+                            <PostCommentsSheet
+                                variant="scenesEmbed"
+                                postId={selectedPostId}
+                                post={selectedPostForComments}
+                                isOpen={commentsModalOpen}
+                                commentAuthorHandle={user?.handle ?? ''}
+                                currentUserHandle={user?.handle}
+                                onCommentCountChange={(n) => {
+                                    const pid = selectedPostId;
+                                    if (!pid) return;
+                                    updatePost(pid, (p) => ({
+                                        ...p,
+                                        stats: { ...p.stats, comments: Math.max(0, n) },
+                                    }));
+                                }}
+                                onAfterClose={() => {
+                                    const pid = selectedPostId;
+                                    if (!pid) return;
+                                    fetchComments(pid)
+                                        .then((list) =>
+                                            updatePost(pid, (p) => ({
+                                                ...p,
+                                                stats: {
+                                                    ...p.stats,
+                                                    comments: Math.max(p.stats.comments || 0, list.length),
+                                                },
+                                            })),
+                                        )
+                                        .catch(() => {});
+                                }}
+                                onClose={closeCommentsSheet}
+                            />
+                            ) : null}
+                        </View>
+                    </View>
+                </Modal>
+
+            {likesSheetPost ? (
+                <FeedLikesSheet
+                    visible={true}
+                    postId={String(likesSheetPost.id)}
+                    userId={userId}
+                    viewerHandle={user?.handle}
+                    likeCount={likesSheetPost.stats.likes}
+                    viewCount={likesSheetPost.stats.views}
+                    onClose={() => setLikesSheetPost(null)}
+                    onVisitProfile={(handle) =>
+                        navigation.navigate('ViewProfile', { handle })
+                    }
+                />
+            ) : null}
+
+            {taggedSheetPost?.taggedUsers && taggedSheetPost.taggedUsers.length > 0 ? (
+                <TaggedUsersBottomSheet
+                    visible={true}
+                    taggedUserHandles={taggedSheetPost.taggedUsers}
+                    onClose={() => setTaggedSheetPost(null)}
+                    onVisitProfile={(handle) =>
+                        navigation.navigate('ViewProfile', { handle })
+                    }
+                />
+            ) : null}
+
+            {shareModalOpen && selectedPostForShare ? (
+                <FeedShareModal
+                    post={selectedPostForShare}
+                    isOpen
                     onClose={() => {
-                        setCommentsModalOpen(false);
-                        setSelectedPostId(null);
-                        setSelectedPostForComments(null);
+                        const y = feedScrollYRef.current;
+                        setShareModalOpen(false);
+                        setSelectedPostForShare(null);
+                        pinFeedScrollSoon(y);
+                    }}
+                    onShareSuccess={handleShareToStoriesSuccess}
+                />
+            ) : null}
+
+            <GazetteerAlertSheet
+                visible={reclipConfirmPost != null}
+                title="Reshare this to followers?"
+                message="This post will be shared to your followers in their Following feed."
+                icon="alert"
+                showCancelButton
+                confirmButtonText="OK"
+                cancelButtonText="Cancel"
+                onConfirm={() => {
+                    void confirmReclipPost();
+                }}
+                onDismiss={() => setReclipConfirmPost(null)}
+            />
+
+            <GazetteerAlertSheet
+                visible={feedGazetteerAlert != null}
+                title={feedGazetteerAlert?.title || ''}
+                message={feedGazetteerAlert?.message}
+                icon={feedGazetteerAlert?.icon || 'alert'}
+                confirmButtonText="OK"
+                onConfirm={() => setFeedGazetteerAlert(null)}
+                onDismiss={() => setFeedGazetteerAlert(null)}
+            />
+
+            {dmSheetOpen && dmSheetRecipientHandle ? (
+                <FeedDmSheet
+                    open={dmSheetOpen}
+                    recipientHandle={dmSheetRecipientHandle}
+                    onClose={() => {
+                        setDmSheetOpen(false);
+                        setDmSheetRecipientHandle(null);
+                        setDmSheetAnchorPostId(null);
+                    }}
+                    onSend={sendDmFromSheet}
+                />
+            ) : null}
+
+            <FeedDmDeliveryFx fx={feedDmDeliveryFx} />
+
+            {headerScopePicker ? (
+                <PlaceFeedScopePickerModal
+                    visible
+                    suggestion={headerScopePicker}
+                    onClose={() => setHeaderScopePicker(null)}
+                    onSelectScope={(scope) => {
+                        applyCustomLocationFeed(
+                            resolvePlaceFeedSelection(headerScopePicker, scope),
+                            headerScopePickerKind
+                        );
+                        setHeaderScopePicker(null);
                     }}
                 />
             ) : null}
 
-            <FeedShareModal
-                post={selectedPostForShare}
-                isOpen={shareModalOpen}
-                onClose={() => {
-                    setShareModalOpen(false);
-                    setSelectedPostForShare(null);
-                }}
-            />
-
-            <FeedDmSheet
-                open={dmSheetOpen}
-                recipientHandle={dmSheetRecipientHandle}
-                message={dmSheetMessage}
-                onChangeMessage={setDmSheetMessage}
-                onClose={() => {
-                    setDmSheetOpen(false);
-                    setDmSheetRecipientHandle(null);
-                    setDmSheetAnchorPostId(null);
-                    setDmSheetMessage('');
-                }}
-                onSend={sendDmFromSheet}
-            />
-
-            <FeedDmDeliveryFx fx={feedDmDeliveryFx} />
-
-            <PlaceFeedScopePickerModal
-                visible={!!headerScopePicker}
-                suggestion={headerScopePicker}
-                onClose={() => setHeaderScopePicker(null)}
-                onSelectScope={(scope) => {
-                    if (!headerScopePicker) return;
-                    applyCustomLocationFeed(
-                        resolvePlaceFeedSelection(headerScopePicker, scope),
-                        headerScopePickerKind
-                    );
-                    setHeaderScopePicker(null);
-                }}
-            />
-
+            {overflowVisible && overflowPost ? (
             <PostOverflowMenuModal
-                visible={overflowVisible}
+                visible
                 post={overflowPost}
                 viewerUserId={userId}
                 viewerHandle={user?.handle}
@@ -3425,12 +5039,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     const updated = await toggleFollowForPost(
                         userId,
                         overflowPost.id,
-                        overflowPost.userHandle
+                        overflowPost.userHandle,
+                        user?.handle,
+                        true,
                     );
-                    updatePost(overflowPost.id, (p) => ({
-                        ...p,
-                        isFollowing: updated?.isFollowing ?? !p.isFollowing,
-                    }));
+                    const nextFollowing = updated?.isFollowing === true;
+                    patchFollowForHandle(overflowPost.userHandle, nextFollowing);
                 }}
                 onMute={async () => {
                     if (!overflowPost) return;
@@ -3509,6 +5123,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     })
                 }
             />
+            ) : null}
 
             {saveModalPost ? (
                 <SavePostModal
@@ -3516,11 +5131,28 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     userId={userId}
                     visible={!!saveModalPost}
                     onClose={() => setSaveModalPost(null)}
-                    onSaved={async () => {
+                    onSaved={async (detail) => {
                         const cols = await getCollectionsForPost(userId, saveModalPost.id);
                         const saved = cols.length > 0;
+                        setBookmarkState(userId, saveModalPost.id, saved);
                         setSavedByPostId((prev) => ({ ...prev, [saveModalPost.id]: saved }));
-                        updatePost(saveModalPost.id, (p) => ({ ...p, isBookmarked: saved }));
+                        updatePost(saveModalPost.id, (p) => {
+                            const was = p.isBookmarked === true;
+                            const prevSaves = Number(p.stats?.saves) || 0;
+                            return {
+                                ...p,
+                                isBookmarked: saved,
+                                stats: {
+                                    ...p.stats,
+                                    saves: applyUniqueSavesCount(
+                                        prevSaves,
+                                        was,
+                                        saved,
+                                        detail?.savesCount,
+                                    ),
+                                },
+                            };
+                        });
                     }}
                 />
             ) : null}
@@ -3533,20 +5165,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 />
             ) : null}
 
-            <CreateGroupModal
-                visible={createGroupOpen}
-                onClose={() => setCreateGroupOpen(false)}
-                onCreated={(g) => {
-                    setCreateGroupOpen(false);
-                    navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
-                }}
-            />
+            {createGroupOpen ? (
+                <CreateGroupModal
+                    visible
+                    onClose={() => setCreateGroupOpen(false)}
+                    onCreated={(g) => {
+                        setCreateGroupOpen(false);
+                        navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
+                    }}
+                />
+            ) : null}
 
-            <PickGroupToInviteFeedUserModal
-                visible={!!inviteGroupHandle}
-                inviteeHandle={inviteGroupHandle || ''}
-                onClose={() => setInviteGroupHandle(null)}
-            />
+            {inviteGroupHandle ? (
+                <PickGroupToInviteFeedUserModal
+                    visible
+                    inviteeHandle={inviteGroupHandle}
+                    onClose={() => setInviteGroupHandle(null)}
+                />
+            ) : null}
 
             {editPost ? (
                 <EditPostModal
@@ -3599,669 +5235,354 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     </View>
                 </View>
             </Modal>
+
+            {/* Feed-level share-to-stories. Per-card Modal mount/unmount jumps FlatList on Android. */}
+            <ShareToStoriesModal
+                visible={shareToStoriesPost != null}
+                post={shareToStoriesPost}
+                onClose={() => {
+                    const y = feedScrollYRef.current;
+                    setShareToStoriesPost(null);
+                    pinFeedScrollSoon(y);
+                }}
+                onShareSuccess={handleShareToStoriesSuccess}
+                onShow={() => pinFeedScrollSoon()}
+                onDismiss={() => pinFeedScrollSoon()}
+            />
+
+            {/* Above the list; high elevation so Android TextureView does not cover the thumb. */}
+            <View style={styles.mediaBurstPortal} pointerEvents="none" collapsable={false}>
+                {feedLikeBurst ? (
+                    <FeedDoubleTapLikeBurst
+                        key={feedLikeBurst.key}
+                        x={feedLikeBurst.x}
+                        y={feedLikeBurst.y}
+                    />
+                ) : null}
+            </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
+    mediaBurstPortal: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 80,
+        overflow: 'visible',
+    },
     container: {
         flex: 1,
         backgroundColor: FEED_PAGE_BG,
+    },
+    fullscreenOverlayRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    fullscreenOverlayBackdrop: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    fullscreenCommentsSheet: {
+        height: Math.round(Dimensions.get('window').height * 0.78),
+        backgroundColor: 'transparent',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: 'hidden',
+    },
+    feedListShell: {
+        flex: 1,
+        backgroundColor: FEED_PAGE_BG,
+        position: 'relative',
+        overflow: 'hidden',
     },
     feedList: {
         flex: 1,
         backgroundColor: FEED_PAGE_BG,
         elevation: 0,
     },
+    feedListRow: {
+        position: 'relative',
+        overflow: 'hidden',
+        width: '100%',
+        alignSelf: 'stretch',
+        marginBottom: 16,
+        backgroundColor: FEED_PAGE_BG,
+    },
     feedListContent: {
         backgroundColor: FEED_PAGE_BG,
         flexGrow: 1,
     },
-    feedListCell: {
-        backgroundColor: FEED_PAGE_BG,
-    },
-    feedHeaderTopRow: {
-        paddingTop: 12,
-        paddingBottom: 4,
-        alignItems: 'stretch',
-        justifyContent: 'center',
-        zIndex: 1,
-        paddingHorizontal: 12,
-    },
-    topHeaderRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    topHeaderActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    headerMiniAction: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        borderRadius: 999,
-        ...glassSurface,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-    },
-    boostHeaderAction: {
-        borderColor: '#FDE68A',
-        backgroundColor: '#FBBF24',
-    },
-    headerMiniActionText: {
-        color: '#F9FAFB',
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    storiesHeaderAction: {
-        borderColor: '#6B7280',
-        backgroundColor: '#0B1220',
-    },
-    storiesHeaderActionText: {
-        color: '#E5E7EB',
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    gazetteerButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    gazetteerText: {
-        fontSize: 18,
-        fontWeight: '300',
-        color: '#FFFFFF',
-        letterSpacing: 0.5,
-    },
-    notificationButton: {
-        position: 'relative',
-    },
-    notificationBadge: {
-        position: 'absolute',
-        top: -4,
-        right: -4,
-        minWidth: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: '#3B82F6',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 4,
-    },
-    notificationBadgeText: {
-        color: '#FFFFFF',
-        fontSize: 9,
-        fontWeight: 'bold',
-    },
-    profileMenuCard: {
-        marginTop: 60,
-        marginLeft: 16,
-        borderRadius: 12,
-        paddingVertical: 4,
-        minWidth: 170,
-        shadowColor: '#000',
-        shadowOpacity: 0.35,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 6 },
-        elevation: 12,
-        ...glassPanel,
-    },
-    profileMenuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        columnGap: 8,
-    },
-    profileMenuItemText: {
-        fontSize: 14,
-        color: '#F9FAFB',
-        fontWeight: '500',
-    },
     tabContainer: {
         backgroundColor: 'transparent',
-        paddingVertical: 8,
-        position: 'relative',
-        zIndex: 1,
-    },
-    tabGrid: {
-        flexDirection: 'row',
-        paddingHorizontal: 12,
-        gap: 8,
-    },
-    feedHeaderPickerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        minHeight: 40,
-        zIndex: 30,
-    },
-    feedHeaderIconButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    feedHeaderSideAction: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 2,
-    },
-    feedHeaderRightActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    feedHeaderCenter: {
-        flex: 1,
-        minWidth: 0,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    feedDropdownTrigger: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        maxWidth: '100%',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 10,
-        backgroundColor: '#36454F',
-    },
-    feedDropdownActiveIcon: {
-        marginTop: 1,
-    },
-    feedDropdownActiveDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 999,
-    },
-    feedDropdownActiveText: {
-        flexShrink: 1,
-        maxWidth: 160,
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#E5E7EB',
-        letterSpacing: 0.2,
-    },
-    feedDropdownMenu: {
-        position: 'absolute',
-        top: 44,
-        alignSelf: 'center',
-        width: 232,
-        backgroundColor: 'rgba(36, 40, 49, 0.94)',
-        borderRadius: 24,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
-        paddingVertical: 7,
-        zIndex: 60,
-        shadowColor: '#000',
-        shadowOpacity: 0.5,
-        shadowRadius: 14,
-        shadowOffset: { width: 0, height: 12 },
-        elevation: 36,
-    },
-    feedDropdownSearchWrap: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginHorizontal: 12,
-        marginTop: 8,
-        marginBottom: 4,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#FFFFFF',
-        backgroundColor: 'transparent',
-    },
-    feedDropdownSearchInput: {
-        flex: 1,
-        color: '#F9FAFB',
-        fontSize: 14,
-        marginLeft: 8,
-        paddingVertical: 0,
-        borderWidth: 0,
-        includeFontPadding: false,
-    },
-    feedDropdownSearchHint: {
-        marginTop: 5,
-        marginBottom: 4,
-        marginHorizontal: 14,
-        color: 'rgba(255,255,255,0.48)',
-        fontSize: 11,
-    },
-    feedDropdownSuggestionsWrap: {
-        marginHorizontal: 12,
-        marginBottom: 4,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: 'rgba(0,0,0,0.2)',
-        overflow: 'hidden',
-    },
-    feedDropdownSuggestionItem: {
-        paddingHorizontal: 12,
-        paddingVertical: 9,
-    },
-    feedDropdownSuggestionText: {
-        color: '#F9FAFB',
-        fontSize: 13,
-    },
-    feedDropdownSuggestionsMeta: {
-        color: 'rgba(255,255,255,0.55)',
-        fontSize: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 9,
-    },
-    feedDropdownMenuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 11,
-        paddingHorizontal: 15,
-        paddingVertical: 11,
-    },
-    feedDropdownMenuText: {
-        fontSize: 16,
-        color: '#F9FAFB',
-        fontWeight: '600',
     },
     feedHeaderNotifWrap: {
-        position: 'relative',
         alignItems: 'center',
     },
-    feedHeaderPassportAvatarWrap: {
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        overflow: 'hidden',
-        backgroundColor: '#374151',
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
+    feedHeaderIconGroup: {
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
     },
     feedHeaderPassportAvatarImage: {
         width: '100%',
         height: '100%',
     },
-    feedHeaderPassportInitials: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    feedHeaderPassportLabel: {
-        marginTop: 1,
-        fontSize: 9,
-        color: '#FFFFFF',
-        fontWeight: '600',
-    },
-    feedContent: {},
-    feedCard: {
-        ...FEED_POST_CARD_STYLE,
-        backgroundColor: FEED_CARD_BG,
-        marginHorizontal: 0,
-        borderRadius: 0,
-        overflow: 'visible',
-    },
-    mediaWrap: {
-        width: '100%',
-        backgroundColor: '#000000',
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    uploadingOverlay: {
-        ...StyleSheet.absoluteFill,
-        backgroundColor: 'rgba(0,0,0,0.55)',
+    feedSwitchBadge: {
+        position: 'absolute',
+        top: 44,
+        left: 0,
+        right: 0,
+        marginTop: ox(10),
+        zIndex: 20,
         alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 20,
-        gap: 6,
     },
-    uploadingOverlayTitle: {
-        color: '#FFFFFF',
-        fontSize: 15,
-        fontWeight: '700',
-        marginTop: 4,
+    feedSwitchPillWrap: {
+        position: 'relative',
+        alignSelf: 'center',
+        maxWidth: '100%',
     },
-    uploadingOverlaySubtitle: {
-        color: '#D1D5DB',
-        fontSize: 12,
-        textAlign: 'center',
-    },
-    engagementBarDimmed: {
-        opacity: 0.45,
-    },
-    captionWrap: {
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-    },
-    sponsoredBadge: {
+    feedSwitchBadgeInner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 6,
-    },
-    sponsoredPill: {
-        paddingHorizontal: 10,
-        paddingVertical: 2,
-        borderRadius: 999,
-        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+        gap: 3,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: 'rgba(245, 158, 11, 0.4)',
-    },
-    sponsoredText: {
-        fontSize: 12,
-        fontWeight: '500',
-        color: '#FBBF24',
-    },
-    sponsoredFeedType: {
-        fontSize: 12,
-        color: '#9CA3AF',
-        textTransform: 'capitalize',
-    },
-    postHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        paddingHorizontal: FEED_UI.spacing.inset,
-        paddingTop: 10,
-        paddingBottom: 6,
-    },
-    postHeaderLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-    },
-    avatarWrapper: {
-        position: 'relative',
-        marginRight: 10,
-    },
-    avatarContainer: {
-        position: 'relative',
-    },
-    storyBorder: {
-        padding: 2,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarInner: {
-        borderRadius: 16,
-        overflow: 'hidden',
+        borderColor: '#FFFFFF',
         backgroundColor: '#000000',
     },
-    avatarImage: {
-        width: '100%',
-        height: '100%',
+    feedSwitchBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '700',
     },
-    avatarFallback: {
+    feedSwitchBadgeCaret: {
+        width: 7,
+        height: 7,
+        marginBottom: -3.5,
         backgroundColor: '#000000',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarInitials: {
-        color: '#FFFFFF',
-        fontWeight: 'bold',
-        fontSize: 12,
-    },
-    followPlusButton: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#d91b5c',
-        borderWidth: 2,
-        borderColor: 'rgba(26, 21, 36, 0.95)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 30,
-    },
-    followCheckButton: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#22c55e',
-        borderWidth: 2,
-        borderColor: 'rgba(26, 21, 36, 0.95)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 30,
-    },
-    postHeaderInfo: {
-        flex: 1,
-    },
-    userHandle: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    postMeta: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 3,
-        gap: 4,
-    },
-    locationText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    separator: {
-        fontSize: 12,
-        color: '#6B7280',
-    },
-    timeText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    postHeaderRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    postOverflowButton: {
-        padding: 4,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    gazetteerOverlayText: {
-        fontSize: 12,
-        fontWeight: '300',
-        color: '#FFFFFF',
-        letterSpacing: 0.5,
-    },
-    locationButton: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: 'rgba(217, 27, 92, 0.18)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    postImage: {
-        width: '100%',
-        height: 400,
-        backgroundColor: '#111827',
-    },
-    textCardWrapper: {
-        marginHorizontal: 16,
-        marginVertical: 10,
-        alignItems: 'center',
-    },
-    textCard: {
-        padding: 16,
-        borderRadius: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        width: '100%',
-        ...glassSurface,
-    },
-    textCardDecorativeLine: {
-        width: 2,
-        height: 40,
-        backgroundColor: 'rgba(255, 255, 255, 0.18)',
-        marginHorizontal: 8,
-    },
-    textCardContent: {
-        flex: 1,
-        fontSize: 16,
-        color: '#F3F4F6',
-        lineHeight: 22,
-    },
-    textCardTail: {
-        width: 0,
-        height: 0,
-        borderLeftWidth: 8,
-        borderRightWidth: 8,
-        borderTopWidth: 8,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderTopColor: 'rgba(24, 24, 28, 0.65)',
-        marginTop: -1,
-    },
-    engagementBar: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingTop: 8,
-        paddingBottom: 10,
+        borderLeftWidth: 1,
         borderTopWidth: 1,
-        borderTopColor: FEED_PAGE_BG,
+        borderColor: '#FFFFFF',
+        transform: [{ rotate: '45deg' }],
+        borderRadius: 1,
+        zIndex: 1,
     },
-    actionButtons: {
+    feedSwitchSheetOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    feedSwitchSheetBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+    },
+    feedSwitchSheet: {
+        alignSelf: 'center',
+        backgroundColor: PASSPORT_ABYSS,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255,255,255,0.1)',
+        maxHeight: '78%',
+        paddingTop: ox(4),
+        overflow: 'hidden',
+    },
+    feedSwitchSheetCanvas: {
+        backgroundColor: PASSPORT_ABYSS,
+        overflow: 'hidden',
+    },
+    feedSwitchSheetAmbient: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+    },
+    feedSwitchSheetContent: {
+        position: 'relative',
+        zIndex: 1,
+        backgroundColor: 'transparent',
+    },
+    feedSwitchSheetHandle: {
+        alignSelf: 'center',
+        width: ox(44),
+        height: 5,
+        borderRadius: ox(3),
+        backgroundColor: 'rgba(255,255,255,0.28)',
+        marginTop: ox(8),
+        marginBottom: ox(6),
+    },
+    feedSwitchSheetHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: FEED_UI.spacing.groupGap,
+        justifyContent: 'flex-end',
+        paddingHorizontal: ox(12),
+        minHeight: ox(40),
     },
-    rightActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: FEED_UI.spacing.groupGapTight,
+    feedSwitchSheetHeaderSpacer: {
+        flex: 1,
     },
-    externalShareButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+    feedSwitchSheetClose: {
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    feedSwitchSheetGazetteer: {
+        textAlign: 'center',
+        color: PASSPORT_PALETTE.wavePrimary,
+        fontSize: ox(13),
+        fontWeight: '700',
+        letterSpacing: ox(1.4),
+        textTransform: 'uppercase',
+        marginBottom: ox(12),
+        paddingHorizontal: ox(20),
+    },
+    feedSwitchSheetTitle: {
+        textAlign: 'center',
+        color: '#FFFFFF',
+        fontSize: ox(24),
+        fontWeight: '700',
+        paddingHorizontal: ox(20),
+    },
+    feedSwitchSheetSub: {
+        textAlign: 'center',
+        color: '#A3A3A3',
+        fontSize: ox(15),
+        lineHeight: ox(22),
+        marginTop: ox(8),
+        marginBottom: ox(18),
+        paddingHorizontal: ox(20),
+    },
+    feedSwitchSearchWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
+        borderRadius: ox(999),
+        borderWidth: 1.5,
+        borderColor: '#FFFFFF',
+        backgroundColor: 'transparent',
+    },
+    feedSwitchSearchInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        marginLeft: 10,
+        paddingVertical: 0,
+        borderWidth: 0,
+    },
+    feedSwitchSearchHint: {
+        marginHorizontal: ox(20),
+        marginBottom: ox(10),
+        color: 'rgba(255,255,255,0.45)',
+        fontSize: ox(12),
+    },
+    feedSwitchSheetScroll: {
+        maxHeight: 360,
+    },
+    feedSwitchSheetScrollContent: {
+        paddingBottom: ox(10),
+    },
+    feedSwitchSuggestionsWrap: {
+        marginHorizontal: ox(16),
+        marginBottom: ox(8),
+        borderRadius: ox(12),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        overflow: 'hidden',
+    },
+    feedSwitchMenuItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(12),
+        paddingHorizontal: ox(20),
+        paddingVertical: ox(16),
+        minHeight: ox(52),
     },
     errorContainer: {
-        padding: 16,
+        padding: ox(16),
         backgroundColor: '#FEE2E2',
     },
     errorText: {
         color: '#DC2626',
-        fontSize: 14,
+        fontSize: ox(14),
     },
     loadingContainer: {
-        padding: 20,
+        padding: ox(20),
         alignItems: 'center',
     },
     emptyContainer: {
-        padding: 24,
+        padding: ox(24),
         alignItems: 'stretch',
     },
-    emptyText: {
-        color: '#6B7280',
-        fontSize: 16,
-        textAlign: 'center',
+    emptyDefaultWrap: {
+        alignItems: 'center',
+        width: '100%',
+    },
+    emptyCustomActions: {
+        width: '100%',
+        alignItems: 'stretch',
+        gap: ox(12),
+    },
+    emptyNotifyBtnWrap: {
+        width: '100%',
     },
     emptyLoadingText: {
-        marginTop: 12,
+        marginTop: ox(12),
         color: '#9CA3AF',
-        fontSize: 15,
-        textAlign: 'center',
-    },
-    emptyFeedCard: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(55, 65, 81, 0.9)',
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        paddingHorizontal: 20,
-        paddingVertical: 24,
-        alignItems: 'center',
-    },
-    emptyFeedBadge: {
-        fontSize: 12,
-        fontWeight: '600',
-        letterSpacing: 0.5,
-        color: '#9CA3AF',
-        marginBottom: 12,
+        fontSize: ox(15),
         textAlign: 'center',
     },
     emptyFeedTitle: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: '700',
         color: '#FFFFFF',
         textAlign: 'center',
-        marginBottom: 8,
+        marginBottom: ox(8),
     },
     emptyFeedSubtitle: {
-        fontSize: 14,
-        lineHeight: 20,
+        fontSize: ox(14),
+        lineHeight: ox(20),
         color: '#9CA3AF',
         textAlign: 'center',
-        marginBottom: 16,
-    },
-    emptyFeedPrimaryBtn: {
-        borderRadius: 999,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        backgroundColor: '#EF4444',
-    },
-    emptyFeedPrimaryBtnText: {
-        color: '#000000',
-        fontSize: 14,
-        fontWeight: '700',
+        marginBottom: ox(16),
     },
     emptyFeedSecondaryBtn: {
-        borderRadius: 999,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
+        borderRadius: ox(999),
+        paddingHorizontal: ox(20),
+        paddingVertical: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.35)',
     },
     emptyFeedSecondaryBtnText: {
         color: '#D1D5DB',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '600',
-    },
-    emptyFeedNotifyBtn: {
-        marginTop: 4,
-        borderRadius: 999,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        backgroundColor: '#0EA5E9',
-        width: '100%',
-        alignItems: 'center',
     },
     emptyFeedNotifyBtnActive: {
         backgroundColor: '#16A34A',
+        width: '100%',
     },
     emptyFeedNotifyBtnText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: ox(14),
         fontWeight: '700',
         textAlign: 'center',
     },
     emptyFeedNotifyBtnTextActive: {
         color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '700',
+        textAlign: 'center',
     },
     emptyFeedNotifyHint: {
-        marginTop: 12,
-        fontSize: 11,
-        lineHeight: 16,
+        marginTop: ox(12),
+        fontSize: ox(11),
+        lineHeight: ox(16),
         color: '#6B7280',
         textAlign: 'center',
     },
@@ -4271,49 +5592,49 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     boostPromptCard: {
-        margin: 24,
-        borderRadius: 14,
-        padding: 16,
-        gap: 10,
+        margin: ox(24),
+        borderRadius: ox(14),
+        padding: ox(16),
+        gap: ox(10),
         ...glassPanel,
     },
     boostPromptTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: ox(18),
         fontWeight: '800',
     },
     boostPromptText: {
         color: '#D1D5DB',
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: ox(13),
+        lineHeight: ox(18),
     },
     boostPromptActions: {
         flexDirection: 'row',
-        gap: 8,
-        marginTop: 4,
+        gap: ox(8),
+        marginTop: ox(4),
     },
     boostPromptSecondaryBtn: {
         flex: 1,
-        borderRadius: 10,
-        paddingVertical: 10,
+        borderRadius: ox(10),
+        paddingVertical: ox(10),
         alignItems: 'center',
         ...glassSurface,
     },
     boostPromptSecondaryText: {
         color: '#E5E7EB',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '700',
     },
     boostPromptPrimaryBtn: {
         flex: 1,
-        borderRadius: 10,
+        borderRadius: ox(10),
         backgroundColor: '#d91b5c',
-        paddingVertical: 10,
+        paddingVertical: ox(10),
         alignItems: 'center',
     },
     boostPromptPrimaryText: {
         color: '#FFFFFF',
-        fontSize: 13,
+        fontSize: ox(13),
         fontWeight: '800',
     },
 });

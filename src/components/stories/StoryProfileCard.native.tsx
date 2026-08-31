@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'rea
 
 type Props = {
     isFollowing: boolean;
+    isRequested?: boolean;
     followLoading: boolean;
     isOwnStory: boolean;
     onViewProfile: () => void;
@@ -12,6 +13,7 @@ type Props = {
 
 export default function StoryProfileCard({
     isFollowing,
+    isRequested = false,
     followLoading,
     isOwnStory,
     onViewProfile,
@@ -28,7 +30,9 @@ export default function StoryProfileCard({
                     {followLoading ? (
                         <ActivityIndicator color="#67e8f9" size="small" />
                     ) : (
-                        <Text style={styles.followText}>{isFollowing ? 'Unfollow' : 'Follow'}</Text>
+                        <Text style={styles.followText}>
+                            {isFollowing ? 'Unfollow' : isRequested ? 'Requested' : 'Follow'}
+                        </Text>
                     )}
                 </TouchableOpacity>
             ) : null}

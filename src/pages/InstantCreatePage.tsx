@@ -6,7 +6,7 @@ import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
 import { TEMPLATE_IDS } from '../constants';
 import Swal from 'sweetalert2';
-import { bottomSheet } from '../utils/swalBottomSheet';
+import { bottomSheet, mediaSourceChoiceSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import CreateGroupModal from '../components/CreateGroupModal';
 import CreateSourceAppsCarousel from '../components/CreateSourceAppsCarousel';
@@ -144,6 +144,7 @@ export default function InstantCreatePage() {
     const [showCreateModePicker, setShowCreateModePicker] = React.useState(true);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
     const pendingSocialUploadRef = React.useRef<null>(null);
+    const storyPickRef = React.useRef(false);
     const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS);
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
     const [centeredCreateMode, setCenteredCreateMode] = React.useState<CreateModeAction>('gallery');
@@ -844,7 +845,9 @@ export default function InstantCreatePage() {
                                         mediaUrl: undefined,
                                         mediaType: 'video' as const,
                                         videoDuration: duration,
-                                        fromInstantRecording: true
+                                        fromInstantRecording: true,
+                                        story24: storyPickRef.current || isStoryMode,
+                                        storyAudience,
                                     }
                                 });
                             }
@@ -1200,6 +1203,34 @@ export default function InstantCreatePage() {
             videoRef.current.srcObject = null;
         }
 
+        const story24 = storyPickRef.current || isStoryMode;
+        if (story24) {
+            const first = clipsToPass[0];
+            const blob = first.blob || blobRef.current;
+            const mediaType: 'image' | 'video' =
+                (blob && blob.type.startsWith('image/')) ||
+                (typeof first.url === 'string' && /\.(png|jpe?g|gif|webp)(?:$|\?)/i.test(first.url))
+                    ? 'image'
+                    : 'video';
+            if (blob) {
+                setGalleryPreviewMedia([{
+                    blob,
+                    mediaType,
+                    videoDuration: first.duration || (mediaType === 'image' ? 3 : 0),
+                }]);
+            }
+            navigate('/create/gallery-preview', {
+                state: {
+                    mediaUrl: blob ? undefined : first.url,
+                    mediaType,
+                    videoDuration: first.duration || (mediaType === 'image' ? 3 : 0),
+                    story24: true,
+                    storyAudience,
+                },
+            });
+            return;
+        }
+
         // For now, pass the first clip's URL for preview in filters page
         // The full clips array will be passed through to CreatePage
         navigate('/create', {
@@ -1414,9 +1445,50 @@ export default function InstantCreatePage() {
         </svg>
     );
 
+    const openMediaSourceSheet = (mode: 'feed' | 'story24') => {
+        const isStory = mode === 'story24';
+        void Swal.fire(
+            mediaSourceChoiceSheet(
+                (action) => {
+                    if (action === 'library') {
+                        storyPickRef.current = isStory;
+                        setIsStoryMode(isStory);
+                        pendingSocialUploadRef.current = null;
+                        cameraRollInputRef.current?.click();
+                        return;
+                    }
+                    if (action === 'camera') {
+                        storyPickRef.current = isStory;
+                        setIsStoryMode(isStory);
+                        pendingSocialUploadRef.current = null;
+                        setShowCreateModePicker(false);
+                        setCameraOn(true);
+                        return;
+                    }
+                    pendingSocialUploadRef.current = null;
+                    setIsStoryMode(false);
+                    storyPickRef.current = false;
+                    navigate('/create/story-link');
+                },
+                isStory
+                    ? { title: 'Add to your story', message: 'Photo, video, or a link', includeLink: true }
+                    : { title: 'Add to your post', message: 'Photo or video', includeLink: false },
+            ),
+        );
+    };
+
+    React.useEffect(() => {
+        const state = location.state as { storyMode?: boolean; openStoryPicker?: boolean } | null;
+        if (!state?.storyMode && !state?.openStoryPicker) return;
+        openMediaSourceSheet('story24');
+        navigate(location.pathname, { replace: true, state: {} });
+        // Open once when arriving from Stories 24 / clip shortcuts.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
         return (
-        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-[#0b0711]">
-            <DiscoverAmbientCanvas />
+        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-[#060d16]">
+            <DiscoverAmbientCanvas variant="passport" />
             {/* Top bar: mode picker (simple) vs camera controls */}
             <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/50 to-transparent px-4 py-3">
                 {showCreateModePicker && !previewUrl ? (
@@ -1653,9 +1725,7 @@ export default function InstantCreatePage() {
                                                             return;
                                                         }
                                                             if (item.id === 'gallery') {
-                                                                setIsStoryMode(false);
-                                                                pendingSocialUploadRef.current = null;
-                                                                cameraRollInputRef.current?.click();
+                                                                openMediaSourceSheet('feed');
                                                                 return;
                                                             }
                                                             if (item.id === 'community') {
@@ -1677,8 +1747,7 @@ export default function InstantCreatePage() {
                                                             }
                                                             if (item.id === 'story') {
                                                                 pendingSocialUploadRef.current = null;
-                                                                setIsStoryMode(true);
-                                                                navigate('/clip', { state: { storyMode: true, storyAudience } });
+                                                                openMediaSourceSheet('story24');
                                                                 return;
                                                             }
                                                             if (item.id === 'text') {
@@ -2457,7 +2526,7 @@ export default function InstantCreatePage() {
                             <button
                                 onClick={() => {
                                     setShowGazetteerMenu(false);
-                                    navigate('/clip', { state: { storyMode: true, storyAudience } });
+                                    openMediaSourceSheet('story24');
                                 }}
                                 className="w-full p-4 rounded-xl bg-white/5 border border-white/15 hover:border-white/35 transition-all text-left"
                             >
@@ -2692,12 +2761,16 @@ export default function InstantCreatePage() {
                     const firstItem = galleryItems[0];
                     const socialUploadTarget = pendingSocialUploadRef.current;
                     pendingSocialUploadRef.current = null;
+                    const story24 = storyPickRef.current || isStoryMode;
+                    storyPickRef.current = false;
                     navigate('/create/gallery-preview', {
                         state: {
                             mediaUrl: undefined,
                             mediaType: firstItem.mediaType,
                             videoDuration: firstItem.videoDuration,
                             socialUploadTarget: socialUploadTarget ?? undefined,
+                            story24: story24 || undefined,
+                            storyAudience: story24 ? storyAudience : undefined,
                         },
                     });
 

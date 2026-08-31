@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage, FiTrash2, FiPlay, FiPause, FiSquare } from 'react-icons/fi';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
 import { MdStickyNote2, MdTranslate } from 'react-icons/md';
@@ -26,14 +26,16 @@ import {
     fetchGroupThreadMessagesPage,
     markGroupConversationReadById,
 } from '../api/messages';
-import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { getAvatarForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
-import { getPostById, getFollowedUsers, getState, toggleLike } from '../api/posts';
+import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } from '../api/posts';
 import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
+import { fetchMyChatGroups } from '../api/chatGroups';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import type { Post } from '../types';
-import Flag from '../components/Flag';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { timeAgo } from '../utils/timeAgo';
 import { showToast } from '../utils/toast';
 import { getSocket } from '../services/socketio';
@@ -49,8 +51,12 @@ import {
     setDmSentBubblePreference,
     dmSentBubbleBgClass,
 } from '../constants/dmImessageTheme';
+import { dmSenderNameColor } from '../utils/dmSenderNameColor';
 
 const DEBUG_MESSAGE_PAGING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_MESSAGE_PAGING === 'true';
+
+/** Voice notes / gold mic — off for now (text + images only). */
+const ENABLE_VOICE_NOTES = false;
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -71,6 +77,38 @@ function isLikelyVideoUrl(url: string | undefined): boolean {
     if (!url) return false;
     const trimmed = url.trim();
     return /^data:video\//i.test(trimmed) || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(trimmed);
+}
+
+function dmShortName(handle?: string | null): string {
+    const raw = String(handle || '').trim();
+    if (!raw) return 'them';
+    return raw.split('@')[0] || raw;
+}
+
+function sameDmHandle(a?: string | null, b?: string | null): boolean {
+    return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
+function findQuotedMessage(
+    messages: MessageUI[],
+    replyTo?: { messageId?: string; text?: string; senderHandle?: string } | null,
+): MessageUI | undefined {
+    if (!replyTo) return undefined;
+    const id = String(replyTo.messageId || '').trim();
+    if (id) {
+        const byId = messages.find((m) => String(m.id) === id);
+        if (byId) return byId;
+    }
+    const text = String(replyTo.text || '').trim();
+    const sender = replyTo.senderHandle;
+    if (!sender && !text) return undefined;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        const textMatch = !text || (m.text || '').trim() === text;
+        const senderMatch = !sender || sameDmHandle(m.senderHandle, sender);
+        if (textMatch && senderMatch) return m;
+    }
+    return undefined;
 }
 
 /** Story-reply media can be mp4 URL without extension; try video first unless clearly image. */
@@ -99,6 +137,59 @@ function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: s
         return <div className={`${className || ''} flex items-center justify-center text-[10px] font-semibold text-white/85 bg-black/50`}>Preview</div>;
     }
     return <img src={url} alt={alt} className={className} onError={() => setImageFailed(true)} />;
+}
+
+function DmReplyQuoteCard({
+    replyTo,
+    quotedFromMe,
+    sentBubbleBg,
+    onJump,
+}: {
+    replyTo: NonNullable<MessageUI['replyTo']>;
+    quotedFromMe: boolean;
+    sentBubbleBg: string;
+    onJump: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onJump();
+            }}
+            className={`mb-2 min-w-[min(17.5rem,55vw)] w-max max-w-full text-left rounded-xl overflow-hidden px-2.5 py-2 ring-1 ring-inset ring-black/20 ${
+                quotedFromMe ? sentBubbleBg : 'bg-[#262626]'
+            }`}
+        >
+            <div className="flex items-center gap-2 min-w-0">
+                {replyTo.imageUrl ? (
+                    <div className="w-7 h-7 rounded overflow-hidden flex-shrink-0 bg-black">
+                        <DmImageOrVideoAttachment
+                            url={replyTo.imageUrl}
+                            alt="Reply preview"
+                            className="w-full h-full object-cover"
+                        />
+                    </div>
+                ) : null}
+                <div className="flex-1 min-w-0">
+                <div
+                    className="text-[12px] font-bold leading-tight"
+                    style={quotedFromMe ? undefined : { color: dmSenderNameColor(replyTo.senderHandle) }}
+                >
+                    {quotedFromMe ? 'You' : dmShortName(replyTo.senderHandle)}
+                </div>
+                    <div className="text-[13px] text-white/75 truncate">
+                        {replyTo.imageUrl
+                            ? isLikelyImageUrl(replyTo.imageUrl)
+                                ? 'Photo'
+                                : 'Video'
+                            : replyTo.text || 'Message'}
+                    </div>
+                </div>
+            </div>
+        </button>
+    );
 }
 
 // Helper function to parse question messages
@@ -216,10 +307,7 @@ function CommentCard({ post, commentText, commenterHandle }: { post: Post; comme
                     <div className="flex-1">
                         <div className="flex items-center gap-1.5">
                             <span className="font-semibold text-sm" style={{ color: '#111827' }}>{commenterHandle}</span>
-                            <Flag
-                                value={getFlagForHandle(commenterHandle) || ''}
-                                size={12}
-                            />
+                            <VerifiedBadge accountType="personal" size={12} />
                             <span className="text-xs" style={{ color: '#6b7280' }}>commented</span>
                         </div>
                     </div>
@@ -245,10 +333,7 @@ function CommentCard({ post, commentText, commenterHandle }: { post: Post; comme
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 mb-1">
                             <span className="font-semibold text-xs" style={{ color: '#111827' }}>{post.userHandle}</span>
-                            <Flag
-                                value={getFlagForHandle(post.userHandle) || ''}
-                                size={10}
-                            />
+                            <VerifiedBadge accountType="personal" size={10} />
                         </div>
                         {post.text && (
                             <p className="text-xs line-clamp-2 mb-2" style={{ color: '#4b5563' }}>{post.text}</p>
@@ -417,10 +502,7 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
                         <div className="flex-1">
                             <h3 className="font-semibold flex items-center gap-1.5 text-sm" style={{ color: '#111827' }}>
                                 <span>{post.userHandle}</span>
-                                <Flag
-                                    value={getFlagForHandle(post.userHandle) || ''}
-                                    size={14}
-                                />
+                                <VerifiedBadge accountType="personal" size={14} />
                             </h3>
                             <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: '#4b5563' }}>
                                 {post.locationLabel && (
@@ -577,6 +659,12 @@ export default function MessagesPage() {
                         const post = await getPostById(state.sharePostId, user?.id);
                         if (post) setSharedPosts(prev => ({ ...prev, [state.sharePostId!]: post }));
                     } catch (_) { /* ignore */ }
+                    if (user?.id) {
+                        try {
+                            await incrementShares(String(user.id), String(state.sharePostId));
+                            window.dispatchEvent(new CustomEvent(`shareAdded-${state.sharePostId}`));
+                        } catch (_) { /* ignore */ }
+                    }
                 }
                 // Clear state so placeholder doesn't show and effect won't re-run
                 navigate(location.pathname, { replace: true, state: {} });
@@ -652,6 +740,34 @@ export default function MessagesPage() {
     /** Sent bubble: iMessage blue vs SMS green (persisted). */
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>(() => getDmSentBubblePreference());
     const sentBubbleBg = dmSentBubbleBgClass(dmSentStyle);
+    const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+    const highlightClearRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const jumpToQuotedMessage = React.useCallback(
+        (replyTo?: MessageUI['replyTo'] | null) => {
+            const target = findQuotedMessage(messages, replyTo);
+            if (!target) return;
+            const el = document.querySelector(
+                `[data-message-bubble-id="${CSS.escape(String(target.id))}"]`,
+            ) as HTMLElement | null;
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (el) {
+                const prevShadow = el.style.boxShadow;
+                el.style.transition = 'box-shadow 160ms ease';
+                el.style.boxShadow = '0 0 0 4px rgba(255,255,255,0.22)';
+                window.setTimeout(() => {
+                    el.style.boxShadow = prevShadow;
+                }, 1600);
+            }
+            if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
+            setHighlightedMessageId(target.id);
+            highlightClearRef.current = setTimeout(() => {
+                setHighlightedMessageId((cur) => (cur === target.id ? null : cur));
+                highlightClearRef.current = null;
+            }, 1600);
+        },
+        [messages],
+    );
     
     // Edit state
     const [editingMessage, setEditingMessage] = useState<MessageUI | null>(null);
@@ -662,9 +778,32 @@ export default function MessagesPage() {
     // Voice message state
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
+    const [recordingGestureHint, setRecordingGestureHint] = useState<'none' | 'cancel'>('none');
+    const [voiceDraft, setVoiceDraft] = useState<{
+        audioUrl: string;
+        durationSeconds: number;
+        canContinue?: boolean;
+        segments?: { audioUrl: string; durationSeconds: number }[];
+    } | null>(null);
+    const [isPlayingVoiceDraft, setIsPlayingVoiceDraft] = useState(false);
+    const [voiceDraftPlaySeconds, setVoiceDraftPlaySeconds] = useState(0);
     const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
     const audioChunksRef = React.useRef<Blob[]>([]);
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+    const recordingTimeRef = React.useRef(0);
+    const discardRecordingRef = React.useRef(false);
+    const recordingStreamRef = React.useRef<MediaStream | null>(null);
+    const voiceDraftAudioRef = React.useRef<HTMLAudioElement | null>(null);
+    const recorderSessionActiveRef = React.useRef(false);
+    const voiceDraftPreviewUrlRef = React.useRef<string | null>(null);
+    const micPointerStartRef = React.useRef({ x: 0, y: 0, at: 0, wasRecording: false });
+    const isRecordingRef = React.useRef(false);
+    const recordingGestureHintRef = React.useRef<'none' | 'cancel'>('none');
+    const voiceDraftRef = React.useRef<typeof voiceDraft>(null);
+    const micCaptureRef = React.useRef<HTMLButtonElement | null>(null);
+    const sendAfterFinalizeRef = React.useRef(false);
+    const previewFinalizeRef = React.useRef(false);
+    const webVoiceSegmentsRef = React.useRef<Array<{ audioUrl: string; durationSeconds: number }>>([]);
     
     // Vanish mode state
     const [vanishMode, setVanishMode] = useState(false);
@@ -675,6 +814,7 @@ export default function MessagesPage() {
     const [scenesOpen, setScenesOpen] = useState(false);
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
     const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
+    const [isGroupAdmin, setIsGroupAdmin] = useState(false);
     const [compactPhone, setCompactPhone] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
     const threadCardMaxWidth = compactPhone ? '86vw' : '448px';
     const [groupDisplayName, setGroupDisplayName] = useState<string>('Group');
@@ -696,6 +836,26 @@ export default function MessagesPage() {
         return () => window.removeEventListener('resize', onResize);
     }, []);
 
+    useEffect(() => {
+        if (!isGroupThread || !groupId || !user?.handle) {
+            setIsGroupAdmin(false);
+            return;
+        }
+        let cancelled = false;
+        void fetchMyChatGroups(user.handle)
+            .then((groups) => {
+                if (cancelled) return;
+                const mine = groups.find((g) => g.id === groupId);
+                setIsGroupAdmin(Boolean(mine?.is_admin));
+            })
+            .catch(() => {
+                if (!cancelled) setIsGroupAdmin(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isGroupThread, groupId, user?.handle]);
+
     const openScenesForPost = (post: Post) => {
         setSelectedPostForScenes(post);
         setScenesOpen(true);
@@ -712,23 +872,92 @@ export default function MessagesPage() {
         }).catch(() => showToast?.('Could not load post'));
     };
     
+    const formatVoiceDuration = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const stopVoiceDraftPlayback = React.useCallback(() => {
+        const audio = voiceDraftAudioRef.current;
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.onended = null;
+            audio.ontimeupdate = null;
+        }
+        setIsPlayingVoiceDraft(false);
+        setVoiceDraftPlaySeconds(0);
+    }, []);
+
+    const revokeVoiceDraftPreviewUrl = () => {
+        if (voiceDraftPreviewUrlRef.current) {
+            URL.revokeObjectURL(voiceDraftPreviewUrlRef.current);
+            voiceDraftPreviewUrlRef.current = null;
+        }
+    };
+
+    const buildVoiceDraftPreview = React.useCallback(() => {
+        if (!audioChunksRef.current.length) return null;
+        revokeVoiceDraftPreviewUrl();
+        const previewBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const previewUrl = URL.createObjectURL(previewBlob);
+        voiceDraftPreviewUrlRef.current = previewUrl;
+        return previewUrl;
+    }, []);
+
+    React.useEffect(() => {
+        isRecordingRef.current = isRecording;
+    }, [isRecording]);
+
+    React.useEffect(() => {
+        recordingGestureHintRef.current = recordingGestureHint;
+    }, [recordingGestureHint]);
+
+    React.useEffect(() => {
+        voiceDraftRef.current = voiceDraft;
+    }, [voiceDraft]);
+
+    const clearRecordingTimer = () => {
+        if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = null;
+        }
+    };
+
+    const stopRecordingStream = () => {
+        recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+    };
+
+    const resetVoiceCaptureState = () => {
+        setIsRecording(false);
+        setRecordingTime(0);
+        recordingTimeRef.current = 0;
+        setRecordingGestureHint('none');
+        recorderSessionActiveRef.current = false;
+    };
+
     // Start voice recording
-    const handleStartRecording = async () => {
+    const handleStartRecording = async (appendSegment = false) => {
+        if (voiceDraftRef.current && !appendSegment) return false;
         try {
             if (!window.isSecureContext) {
                 showToast?.('Microphone requires HTTPS (or localhost).');
-                return;
+                return false;
             }
             if (!navigator.mediaDevices?.getUserMedia) {
                 showToast?.('Microphone is not supported in this browser.');
-                return;
+                return false;
             }
             if (typeof MediaRecorder === 'undefined') {
                 showToast?.('Voice recording is not supported on this browser/device.');
-                return;
+                return false;
             }
 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recordingStreamRef.current = stream;
+            discardRecordingRef.current = false;
             const preferredMimeType =
                 MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
                     ? 'audio/webm;codecs=opus'
@@ -740,6 +969,7 @@ export default function MessagesPage() {
                 : new MediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
             audioChunksRef.current = [];
+            recorderSessionActiveRef.current = true;
             
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -748,38 +978,72 @@ export default function MessagesPage() {
             };
             
             mediaRecorder.onstop = async () => {
+                const capturedDuration = recordingTimeRef.current;
+                clearRecordingTimer();
+                resetVoiceCaptureState();
+                stopRecordingStream();
+
+                if (discardRecordingRef.current) {
+                    audioChunksRef.current = [];
+                    revokeVoiceDraftPreviewUrl();
+                    return;
+                }
+
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                // Convert to data URL for storage (in production, upload to server and get URL)
+                audioChunksRef.current = [];
                 const reader = new FileReader();
-                reader.onloadend = async () => {
+                reader.onloadend = () => {
                     const base64Audio = reader.result as string;
-                    if (user?.handle && (handle || groupId)) {
-                        try {
-                            await appendToThread({
-                                text: `🎤 Voice Message`,
-                                audioUrl: base64Audio, // Use audioUrl field for voice messages
-                            });
-                        } catch {
-                            showToast?.('Could not send voice message in this chat');
-                        }
-                        scrollToBottom();
+                    if (!base64Audio) return;
+                    revokeVoiceDraftPreviewUrl();
+                    stopVoiceDraftPlayback();
+                    if (sendAfterFinalizeRef.current && user?.handle && (handle || groupId)) {
+                        sendAfterFinalizeRef.current = false;
+                        void appendToThread({ audioUrl: base64Audio })
+                            .then(() => scrollToBottom())
+                            .catch(() => showToast?.('Could not send voice message in this chat'));
+                        webVoiceSegmentsRef.current = [];
+                        return;
                     }
+                    if (previewFinalizeRef.current) {
+                        previewFinalizeRef.current = false;
+                        const segment = {
+                            audioUrl: base64Audio,
+                            durationSeconds: Math.max(1, capturedDuration),
+                        };
+                        const segments = [...webVoiceSegmentsRef.current, segment];
+                        webVoiceSegmentsRef.current = segments;
+                        setVoiceDraft({
+                            audioUrl: base64Audio,
+                            durationSeconds: segments.reduce((sum, s) => sum + s.durationSeconds, 0),
+                            segments,
+                            canContinue: true,
+                        });
+                        return;
+                    }
+                    setVoiceDraft({
+                        audioUrl: base64Audio,
+                        durationSeconds: Math.max(1, capturedDuration),
+                    });
                 };
                 reader.readAsDataURL(audioBlob);
-                
-                stream.getTracks().forEach(track => track.stop());
             };
             
-            mediaRecorder.start();
+            mediaRecorder.start(250);
             setIsRecording(true);
             setRecordingTime(0);
+            recordingTimeRef.current = 0;
             
             // Start timer
             recordingTimerRef.current = setInterval(() => {
-                setRecordingTime(prev => prev + 1);
+                recordingTimeRef.current += 1;
+                setRecordingTime(recordingTimeRef.current);
             }, 1000);
+            return true;
         } catch (error) {
             console.error('Error starting recording:', error);
+            resetVoiceCaptureState();
+            stopRecordingStream();
             const err = error as { name?: string; message?: string };
             if (err?.name === 'NotAllowedError') {
                 showToast?.('Microphone permission denied. Please allow mic access in browser settings.');
@@ -788,21 +1052,205 @@ export default function MessagesPage() {
             } else {
                 showToast?.('Failed to start recording. Please check microphone permissions.');
             }
+            return false;
         }
     };
     
-    // Stop voice recording
-    const handleStopRecording = () => {
-        if (mediaRecorderRef.current && isRecording) {
+    const handleFinishRecording = () => {
+        if (!mediaRecorderRef.current || !isRecordingRef.current) return;
+        previewFinalizeRef.current = true;
+        discardRecordingRef.current = false;
+        if (mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
-            setIsRecording(false);
-            if (recordingTimerRef.current) {
-                clearInterval(recordingTimerRef.current);
-                recordingTimerRef.current = null;
-            }
-            setRecordingTime(0);
         }
     };
+
+    const handleCancelRecording = () => {
+        if (!mediaRecorderRef.current || !recorderSessionActiveRef.current) {
+            revokeVoiceDraftPreviewUrl();
+            resetVoiceCaptureState();
+            webVoiceSegmentsRef.current = [];
+            setVoiceDraft(null);
+            return;
+        }
+        discardRecordingRef.current = true;
+        if (mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        clearRecordingTimer();
+        audioChunksRef.current = [];
+        revokeVoiceDraftPreviewUrl();
+        resetVoiceCaptureState();
+        webVoiceSegmentsRef.current = [];
+        setVoiceDraft(null);
+        stopRecordingStream();
+    };
+
+    const continueVoiceRecording = () => {
+        if (!voiceDraft?.canContinue || recorderSessionActiveRef.current) return;
+        try {
+            stopVoiceDraftPlayback();
+            revokeVoiceDraftPreviewUrl();
+            setVoiceDraft(null);
+            void handleStartRecording(true).then((started) => {
+                if (!started) return;
+            });
+        } catch {
+            showToast?.('Could not continue voice recording.');
+        }
+    };
+
+    const discardVoiceDraft = () => {
+        stopVoiceDraftPlayback();
+        if (recorderSessionActiveRef.current) {
+            handleCancelRecording();
+            return;
+        }
+        revokeVoiceDraftPreviewUrl();
+        webVoiceSegmentsRef.current = [];
+        setVoiceDraft(null);
+    };
+
+    const mergeWebVoiceSegments = async (segments: Array<{ audioUrl: string }>) => {
+        if (segments.length <= 1) return segments[0]?.audioUrl ?? null;
+        const blobs = await Promise.all(
+            segments.map(async (segment) => {
+                const res = await fetch(segment.audioUrl);
+                return res.blob();
+            }),
+        );
+        const merged = new Blob(blobs, { type: blobs[0]?.type || 'audio/webm' });
+        return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Could not merge voice segments'));
+            reader.readAsDataURL(merged);
+        });
+    };
+
+    const sendVoiceDraft = async () => {
+        if (!voiceDraft || !user?.handle || (!handle && !groupId)) return;
+        try {
+            const segments = voiceDraft.segments?.length
+                ? voiceDraft.segments
+                : [{ audioUrl: voiceDraft.audioUrl, durationSeconds: voiceDraft.durationSeconds }];
+            const audioUrl = await mergeWebVoiceSegments(segments);
+            if (!audioUrl) {
+                showToast?.('Could not prepare voice message');
+                return;
+            }
+            await appendToThread({ audioUrl });
+            revokeVoiceDraftPreviewUrl();
+            webVoiceSegmentsRef.current = [];
+            setVoiceDraft(null);
+            setVoiceDraftPlaySeconds(0);
+            scrollToBottom();
+        } catch {
+            showToast?.('Could not send voice message in this chat');
+        }
+    };
+
+    const seekVoiceDraftPlayback = (seconds: number) => {
+        if (!voiceDraft?.audioUrl) return;
+        const clamped = Math.max(0, Math.min(voiceDraft.durationSeconds, seconds));
+        setVoiceDraftPlaySeconds(clamped);
+        const audio = voiceDraftAudioRef.current;
+        if (audio) {
+            audio.currentTime = clamped;
+        }
+    };
+
+    const toggleVoiceDraftPlayback = async () => {
+        if (!voiceDraft?.audioUrl) return;
+        if (isPlayingVoiceDraft) {
+            stopVoiceDraftPlayback();
+            return;
+        }
+        try {
+            const segments = voiceDraft.segments?.length
+                ? voiceDraft.segments
+                : [{ audioUrl: voiceDraft.audioUrl, durationSeconds: voiceDraft.durationSeconds }];
+            const playbackUrl =
+                segments.length > 1 ? await mergeWebVoiceSegments(segments) : voiceDraft.audioUrl;
+            if (!playbackUrl) {
+                showToast?.('Could not preview voice message');
+                return;
+            }
+            const audio = new Audio(playbackUrl);
+            voiceDraftAudioRef.current = audio;
+            audio.currentTime = voiceDraftPlaySeconds;
+            audio.onended = () => {
+                stopVoiceDraftPlayback();
+            };
+            audio.ontimeupdate = () => {
+                setVoiceDraftPlaySeconds(Math.floor(audio.currentTime));
+            };
+            await audio.play();
+            setIsPlayingVoiceDraft(true);
+        } catch (error) {
+            console.error('Voice preview playback failed:', error);
+            showToast?.('Could not preview voice message');
+        }
+    };
+
+    const handleMicPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (voiceDraftRef.current) return;
+        const wasRecording = isRecordingRef.current;
+        micPointerStartRef.current = {
+            x: event.clientX,
+            y: event.clientY,
+            at: Date.now(),
+            wasRecording,
+        };
+        setRecordingGestureHint('none');
+        event.currentTarget.setPointerCapture(event.pointerId);
+        if (!wasRecording) {
+            void handleStartRecording();
+        }
+    };
+
+    const handleMicPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (!isRecordingRef.current) return;
+        const dx = event.clientX - micPointerStartRef.current.x;
+        if (dx < -72) {
+            setRecordingGestureHint('cancel');
+        } else {
+            setRecordingGestureHint('none');
+        }
+    };
+
+    const handleMicPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        const { at, wasRecording } = micPointerStartRef.current;
+        const heldMs = Date.now() - at;
+        const hint = recordingGestureHintRef.current;
+        if (hint === 'cancel') {
+            handleCancelRecording();
+            setRecordingGestureHint('none');
+            return;
+        }
+        if (!isRecordingRef.current) {
+            setRecordingGestureHint('none');
+            return;
+        }
+        if (heldMs >= 400) {
+            handleFinishRecording();
+        } else if (wasRecording) {
+            handleFinishRecording();
+        }
+        setRecordingGestureHint('none');
+    };
+
+    React.useEffect(() => {
+        return () => {
+            clearRecordingTimer();
+            stopRecordingStream();
+            stopVoiceDraftPlayback();
+            revokeVoiceDraftPreviewUrl();
+        };
+    }, [stopVoiceDraftPlayback]);
 
     const scrollToBottom = React.useCallback(() => {
         const el = listRef.current;
@@ -2479,7 +2927,7 @@ export default function MessagesPage() {
                                 <FiMapPin className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                             </button>
                         )}
-                        {isGroupThread && groupId ? (
+                        {isGroupThread && groupId && isGroupAdmin ? (
                             <button
                                 type="button"
                                 className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors text-violet-300`}
@@ -2516,6 +2964,10 @@ export default function MessagesPage() {
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
                             (msg.timestamp - messages[idx - 1].timestamp) > 60000; // gap > 1 minute
+                        const prevMsg = idx > 0 ? messages[idx - 1] : undefined;
+                        const showSenderMeta =
+                            !msg.isFromMe &&
+                            (!prevMsg || !sameDmHandle(prevMsg.senderHandle, msg.senderHandle));
                         const isLastMessage = idx === messages.length - 1;
                         const isStoryReplyContext =
                             !!msg.isSystemMessage &&
@@ -2708,7 +3160,7 @@ export default function MessagesPage() {
                                                                     isMediaOnlyMessage
                                                                         ? 'bg-transparent p-0 shadow-none'
                                                                         : `${sentBubbleBg} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
-                                                                }`}
+                                                                }${highlightedMessageId === msg.id ? ' ring-2 ring-white/30' : ''}${msg.replyTo ? ' min-w-[min(17.5rem,55vw)]' : ''}`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
                                                                 maxWidth: '100%',
@@ -2733,27 +3185,15 @@ export default function MessagesPage() {
                                                         >
                                                             {/* Reply Preview - screenshot when replying to shared post (MP4/image) */}
                                                             {msg.replyTo && (
-                                                                <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
-                                                                    <div className="flex items-start gap-2">
-                                                                        {msg.replyTo.imageUrl && (
-                                                                            <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
-                                                                                <DmImageOrVideoAttachment
-                                                                                    url={msg.replyTo.imageUrl}
-                                                                                    alt="Reply preview"
-                                                                                    className="w-full h-full object-cover"
-                                                                                />
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
-                                                                            <div className="text-xs text-white/60 truncate">
-                                                                                {msg.replyTo.imageUrl
-                                                                                    ? (isLikelyImageUrl(msg.replyTo.imageUrl) ? 'Photo' : 'Video')
-                                                                                    : (msg.replyTo.text || 'Message')}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
+                                                                <DmReplyQuoteCard
+                                                                    replyTo={msg.replyTo}
+                                                                    quotedFromMe={sameDmHandle(
+                                                                        msg.replyTo.senderHandle,
+                                                                        user?.handle,
+                                                                    )}
+                                                                    sentBubbleBg={sentBubbleBg}
+                                                                    onJump={() => jumpToQuotedMessage(msg.replyTo)}
+                                                                />
                                                             )}
                                                             {msg.imageUrl && (
                                                                 <div className={`relative overflow-hidden ${
@@ -3137,13 +3577,19 @@ export default function MessagesPage() {
                                                 const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
                                                     <div className={`flex items-end gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
-                                                        {msg.senderAvatar && (
+                                                        {showSenderMeta ? (
+                                                            msg.senderAvatar ? (
                                                             <Avatar
                                                                 src={msg.senderAvatar}
                                                                 name={msg.senderHandle}
                                                                 size="sm"
                                                                 className="flex-shrink-0"
                                                             />
+                                                            ) : (
+                                                                <div className="w-8 h-8 flex-shrink-0" />
+                                                            )
+                                                        ) : (
+                                                            <div className="w-8 h-8 flex-shrink-0" />
                                                         )}
                                                         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
                                                             <IMessageDmBubbleShell
@@ -3153,7 +3599,7 @@ export default function MessagesPage() {
                                                                     isMediaOnlyMessage
                                                                         ? 'bg-transparent p-0 shadow-none'
                                                                         : `${DM_RECEIVED_BG} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
-                                                                }`}
+                                                                }${highlightedMessageId === msg.id ? ' ring-2 ring-white/30' : ''}${msg.replyTo ? ' min-w-[min(17.5rem,55vw)]' : ''}`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
                                                                     maxWidth: '100%',
@@ -3176,29 +3622,25 @@ export default function MessagesPage() {
                                                                     }
                                                                 }}
                                                             >
+                                                                {showSenderMeta ? (
+                                                                    <div
+                                                                        className="text-[13px] font-bold leading-tight mb-1"
+                                                                        style={{ color: dmSenderNameColor(msg.senderHandle) }}
+                                                                    >
+                                                                        {dmShortName(msg.senderHandle)}
+                                                                    </div>
+                                                                ) : null}
                                                                 {/* Reply Preview - Instagram style */}
                                                                 {msg.replyTo && (
-                                                                    <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
-                                                                        <div className="flex items-start gap-2">
-                                                                            {msg.replyTo.imageUrl && (
-                                                                                <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
-                                                                                    <DmImageOrVideoAttachment
-                                                                                        url={msg.replyTo.imageUrl}
-                                                                                        alt="Reply preview"
-                                                                                        className="w-full h-full object-cover"
-                                                                                    />
-                                                                                </div>
-                                                                            )}
-                                                                            <div className="flex-1 min-w-0">
-                                                                                <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
-                                                                                <div className="text-xs text-white/60 truncate">
-                                                                                    {msg.replyTo.imageUrl
-                                                                                        ? (isLikelyImageUrl(msg.replyTo.imageUrl) ? 'Photo' : 'Video')
-                                                                                        : (msg.replyTo.text || 'Message')}
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
+                                                                    <DmReplyQuoteCard
+                                                                        replyTo={msg.replyTo}
+                                                                        quotedFromMe={sameDmHandle(
+                                                                            msg.replyTo.senderHandle,
+                                                                            user?.handle,
+                                                                        )}
+                                                                        sentBubbleBg={sentBubbleBg}
+                                                                        onJump={() => jumpToQuotedMessage(msg.replyTo)}
+                                                                    />
                                                                 )}
                                                                 {msg.imageUrl && (
                                                                     <div className={`relative overflow-hidden ${
@@ -3345,12 +3787,18 @@ export default function MessagesPage() {
                     const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
                     const isVideoReply = replyPost?.mediaType === 'video' || isLikelyVideoUrl(replyThumbUrl);
                     return (
-                        <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-black`}>
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <div className="w-px h-11 rounded-full flex-shrink-0 bg-white/25" />
+                        <div className={`${compactPhone ? 'px-2.5 pt-2 pb-1.5' : 'px-4 pt-2 pb-1.5'} border-t border-white/10 bg-black`}>
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                    <div
+                                        className={`w-0.5 h-9 rounded-full flex-shrink-0 ${
+                                            sameDmHandle(replyingTo.senderHandle, user?.handle)
+                                                ? sentBubbleBg
+                                                : 'bg-[#262626]'
+                                        }`}
+                                    />
                                     {replyThumbUrl && (
-                                        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-white/15 bg-zinc-950">
+                                        <div className="w-8 h-8 rounded-md overflow-hidden flex-shrink-0 bg-zinc-950">
                                             <DmImageOrVideoAttachment
                                                 url={replyThumbUrl}
                                                 alt="Reply preview"
@@ -3359,8 +3807,12 @@ export default function MessagesPage() {
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-[11px] uppercase tracking-wide text-neutral-500 mb-0.5">Replying to {replyingTo.senderHandle}</div>
-                                        <div className="text-sm text-neutral-200 truncate">
+                                        <div className="text-[13px] font-semibold text-white">
+                                            {(replyingTo.senderHandle || '').trim().toLowerCase() === (user?.handle || '').trim().toLowerCase()
+                                                ? 'Replying to you'
+                                                : `Replying to ${dmShortName(replyingTo.senderHandle)}`}
+                                        </div>
+                                        <div className="text-[13px] text-[#8E8E93] truncate">
                                             {replyThumbUrl ? (isVideoReply ? 'Video' : 'Photo') : (replyingTo.text || 'Message')}
                                         </div>
                                     </div>
@@ -3431,55 +3883,148 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 )}
-                <div className={`flex items-end ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
-                    <div className="flex-1 flex items-center gap-2 min-w-0 pb-px">
-                        <div className="relative flex-1 min-w-0">
+                {ENABLE_VOICE_NOTES && voiceDraft ? (
+                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
+                        <p className="text-[11px] font-semibold text-neutral-500 mb-2 ml-1">Review before sending</p>
+                        <div className="flex items-center gap-2 min-h-[44px] px-2.5 py-2 rounded-[24px] border-2 border-white bg-[#09090b]">
                             <button
                                 type="button"
-                                onClick={handleImageClick}
-                                className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center text-white/90 hover:text-white transition-colors"
-                                aria-label="Add photo"
+                                onClick={discardVoiceDraft}
+                                className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
+                                aria-label="Delete voice note"
                             >
-                                <FiPlus className="w-5 h-5" />
+                                <FiTrash2 className="w-5 h-5" />
                             </button>
-                            <input
-                                type="text"
-                                value={messageText}
-                                onChange={(e) => {
-                                    setMessageText(e.target.value);
-                                    // Simulate typing indicator (in real app, this would be sent to server)
-                                    // For now, we'll just show it when user is typing
+                            <button
+                                type="button"
+                                onClick={toggleVoiceDraftPlayback}
+                                className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-gray-300 via-yellow-500 to-gray-500 text-white flex items-center justify-center border border-yellow-300"
+                                aria-label={isPlayingVoiceDraft ? 'Pause preview' : 'Play preview'}
+                            >
+                                {isPlayingVoiceDraft ? <FiPause className="w-4 h-4" /> : <FiPlay className="w-4 h-4 ml-0.5" />}
+                            </button>
+                            <button
+                                type="button"
+                                className="flex-1 min-w-0 flex flex-col gap-1 py-0.5"
+                                onClick={(event) => {
+                                    const rect = event.currentTarget.getBoundingClientRect();
+                                    const ratio = (event.clientX - rect.left) / rect.width;
+                                    seekVoiceDraftPlayback(Math.floor(ratio * voiceDraft.durationSeconds));
                                 }}
-                                onKeyPress={(e) => {
-                                    if (e.key === 'Enter') {
-                                        handleSend();
-                                    }
-                                }}
-                                placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
-                                className={`w-full min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border-2 border-white shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white ${
-                                    compactPhone ? 'pl-11 pr-4 py-2.5 text-[15px]' : 'pl-12 pr-5 py-3 text-[15px] sm:text-base'
-                                }`}
-                            />
+                                aria-label="Seek voice preview"
+                            >
+                                <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                                    <div
+                                        className="h-full rounded-full bg-yellow-500 transition-[width] duration-150"
+                                        style={{
+                                            width: voiceDraft.durationSeconds
+                                                ? `${Math.min(100, (voiceDraftPlaySeconds / voiceDraft.durationSeconds) * 100)}%`
+                                                : '0%',
+                                        }}
+                                    />
+                                </div>
+                                <span className="text-[11px] font-semibold text-neutral-400 tabular-nums text-right">
+                                    {formatVoiceDuration(
+                                        isPlayingVoiceDraft ? voiceDraftPlaySeconds : voiceDraft.durationSeconds,
+                                    )}
+                                </span>
+                            </button>
+                            {voiceDraft.canContinue ? (
+                                <button
+                                    type="button"
+                                    onClick={continueVoiceRecording}
+                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full border border-yellow-500/40 bg-yellow-950/25 text-yellow-200 text-sm font-semibold hover:bg-yellow-950/40 transition-colors"
+                                >
+                                    <FiMic className="w-4 h-4" />
+                                    Record
+                                </button>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={() => { void sendVoiceDraft(); }}
+                                className="flex-shrink-0 rounded-full bg-white p-2.5 text-black hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-sm"
+                                aria-label="Send voice note"
+                            >
+                                <FiSend className="w-5 h-5" />
+                            </button>
                         </div>
+                    </div>
+                ) : null}
+                {!ENABLE_VOICE_NOTES || !voiceDraft ? (
+                <div className={`flex flex-col ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
+                    <div className="flex items-end gap-2 min-w-0 pb-px">
+                        {ENABLE_VOICE_NOTES && isRecording ? (
+                            <div className="flex-1 flex items-center min-h-[44px] px-3 rounded-[24px] border-2 border-white bg-[#09090b] gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelRecording}
+                                    className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center border border-white/20 text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
+                                    aria-label="Discard recording"
+                                >
+                                    <FiTrash2 className="w-4 h-4" />
+                                </button>
+                                <div className="flex flex-col items-center flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                                        <span className="text-base font-extrabold text-white tabular-nums">
+                                            {formatVoiceDuration(recordingTime)}
+                                        </span>
+                                    </div>
+                                    <span className="text-[11px] font-bold text-yellow-500/90">
+                                        {recordingGestureHint === 'cancel' ? 'Release to cancel' : 'Tap ■ to stop'}
+                                    </span>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <Avatar
+                                    src={user?.avatarUrl || (user?.handle ? getAvatarForHandle(user.handle) : undefined)}
+                                    name={user?.name || user?.handle || 'You'}
+                                    size="sm"
+                                    className="h-8 w-8 shrink-0"
+                                />
+                                <div className="flex min-h-10 flex-1 min-w-0 items-center rounded-full bg-[#16181C] px-3.5">
+                                    <input
+                                        type="text"
+                                        value={messageText}
+                                        onChange={(e) => {
+                                            setMessageText(e.target.value);
+                                        }}
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter') {
+                                                handleSend();
+                                            }
+                                        }}
+                                        placeholder={editingMessage ? 'Edit message…' : 'Message…'}
+                                        className="min-w-0 flex-1 bg-transparent py-2.5 text-[15px] text-white placeholder:text-[#8B98A5] focus:outline-none"
+                                    />
+                                </div>
+                            </>
+                        )}
+                        {ENABLE_VOICE_NOTES ? (
                         <button
+                            ref={micCaptureRef}
                             type="button"
-                            onClick={isRecording ? handleStopRecording : handleStartRecording}
-                            className={`flex-shrink-0 rounded-full p-2.5 transition-all shadow-sm border ${
+                            onPointerDown={handleMicPointerDown}
+                            onPointerMove={handleMicPointerMove}
+                            onPointerUp={handleMicPointerUp}
+                            onPointerCancel={handleMicPointerUp}
+                            className={`flex-shrink-0 rounded-full p-2.5 transition-all shadow-sm border touch-none select-none ${
                                 isRecording
-                                    ? 'bg-red-600 text-white border-red-400'
+                                    ? 'bg-yellow-500 text-black border-white'
                                     : 'bg-gradient-to-br from-gray-300 via-yellow-500 to-gray-500 text-white border-yellow-300'
                             }`}
-                            aria-label={isRecording ? 'Stop voice recording' : 'Start voice recording'}
-                            title={isRecording ? 'Stop voice recording' : 'Start voice recording'}
+                            aria-label={isRecording ? 'Stop recording' : 'Record voice message'}
+                            title={isRecording ? 'Tap to stop' : 'Tap to record'}
                         >
-                            <FiMic className="w-5 h-5 sm:w-6 sm:h-6" />
+                            {isRecording ? (
+                                <FiSquare className="w-5 h-5 sm:w-6 sm:h-6" />
+                            ) : (
+                                <FiMic className="w-5 h-5 sm:w-6 sm:h-6" />
+                            )}
                         </button>
-                        {isRecording && (
-                            <div className="flex-shrink-0 rounded-full border border-red-400 bg-red-600/20 px-2 py-1 text-[11px] font-semibold text-red-300">
-                                REC {recordingTime}s
-                            </div>
-                        )}
-                        {messageText.trim() && (
+                        ) : null}
+                        {messageText.trim() && !(ENABLE_VOICE_NOTES && isRecording) && (
                             <button
                                 type="button"
                                 onClick={handleSend}
@@ -3498,6 +4043,7 @@ export default function MessagesPage() {
                         className="hidden"
                     />
                 </div>
+                ) : null}
             </div>
 
             {/* Context Menu - position above tap when near bottom so full card is visible */}
@@ -3874,10 +4420,11 @@ export default function MessagesPage() {
                     onClick={() => setShowChatInfo(false)}
                 >
                     <div
-                        className="bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[80vh] overflow-y-auto"
+                        className="relative w-full max-w-md max-h-[80vh] overflow-hidden rounded-t-3xl border border-white/10 border-b-0 bg-[#060d16]"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                        <DiscoverAmbientCanvas fixed={false} variant="passport" />
+                        <div className="relative z-[2] sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between bg-[#060d16]/70 backdrop-blur-sm">
                             <h3 className="text-white font-semibold">Chat Info</h3>
                             <button
                                 onClick={() => setShowChatInfo(false)}
@@ -3887,20 +4434,29 @@ export default function MessagesPage() {
                             </button>
                         </div>
 
-                        <div className="p-4">
+                        <div className="relative z-[2] p-4 overflow-y-auto max-h-[calc(80vh-3.5rem)] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                             {isGroupThread && groupId ? (
                                 <>
                                     <div className="flex items-center gap-4 mb-6">
                                         <Avatar name={groupDisplayName} size="lg" />
                                         <div className="flex-1">
                                             <h4 className="text-white font-semibold text-lg">{groupDisplayName}</h4>
-                                            <p className="text-gray-400 text-sm">Group chat</p>
+                                            <p className="text-gray-400 text-sm">
+                                                {isGroupAdmin ? 'Community · you are admin' : 'Community'}
+                                            </p>
                                         </div>
                                     </div>
                                     <div className="space-y-2">
                                         <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                                            To add people, use the <span className="text-cyan-400">+</span> button in the chat header, or
-                                            open their profile and choose <span className="text-cyan-400">Invite to group</span>.
+                                            {isGroupAdmin ? (
+                                                <>
+                                                    Only you can invite people. Use the <span className="text-cyan-400">+</span> button
+                                                    in the chat header, or open their profile and choose{' '}
+                                                    <span className="text-cyan-400">Invite to group</span>.
+                                                </>
+                                            ) : (
+                                                <>Only the admin who created this community can invite people.</>
+                                            )}
                                         </p>
                                         <button
                                             onClick={async () => {
@@ -4067,7 +4623,7 @@ export default function MessagesPage() {
                 </div>
             )}
 
-            {isGroupThread && groupId ? (
+            {isGroupThread && groupId && isGroupAdmin ? (
                 <InviteMemberToGroupModal
                     isOpen={inviteMemberOpen}
                     onClose={() => setInviteMemberOpen(false)}

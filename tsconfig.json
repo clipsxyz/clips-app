@@ -9,19 +9,16 @@
     ],
     "module": "ESNext",
     "skipLibCheck": true,
-    /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    /* React Native */
     "types": [
       "react-native",
       "nativewind/types"
     ],
-    /* Linting */
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": true,
@@ -30,6 +27,7 @@
   "include": [
     "src/**/*",
     "App.tsx",
+    "App.native.tsx",
     "index.js",
     "nativewind-env.d.ts"
   ],
@@ -41,5 +39,6 @@
     {
       "path": "./tsconfig.node.json"
     }
-  ]
+  ],
+  "extends": "expo/tsconfig.base"
 }

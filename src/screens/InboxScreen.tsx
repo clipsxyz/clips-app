@@ -1,19 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     View,
     Text,
     StyleSheet,
-    FlatList,
     TouchableOpacity,
-    ActivityIndicator,
     Alert,
-    TextInput,
     RefreshControl,
     Image,
+    ScrollView,
 } from 'react-native';
+import { FlatList } from 'react-native-gesture-handler';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface, gazetteerHeader, gazetteerTabActiveBorder } from '../theme/gazetteerAmbientNative';
+import InboxConversationRow, { inboxConversationRowId } from '../components/InboxConversationRow.native';
+import InboxChatInfoSheet from '../components/InboxChatInfoSheet.native';
+import InboxLoadingSkeleton from '../components/InboxLoadingSkeleton.native';
 import { useAuth } from '../context/Auth';
 import {
     getNotifications,
@@ -22,11 +26,13 @@ import {
     markAllNotificationsRead,
     deleteNotification,
 } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle } from '../api/stories';
+import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle, fetchFollowedUsersStoryGroups } from '../api/stories';
+import type { StoryGroup } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { fetchUserProfile } from '../api/client';
 import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as denyFollowRequestApi } from '../api/client';
+import { getFollowedUsers } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import {
@@ -42,7 +48,17 @@ import {
     acceptMessageRequest,
     type ConversationSummary,
 } from '../api/messages';
-import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import { getNotificationPreferences, isInAppNotificationChannelEnabled } from '../services/notifications';
+import { leaveChatGroup } from '../api/client';
+import { acceptChatGroupInvite, declineChatGroupInvite } from '../api/chatGroups';
+import { ox } from '../constants/nativeOpticalScale';
+import { rootNavigationRef } from '../navigation/rootNavigationRef';
+
+const insightsSeenKey = (handle: string) =>
+    `clips:insights-seen:${String(handle || '').trim().toLowerCase()}`;
+
+type MessageFilter = 'all' | 'groups' | 'unread' | 'requests' | 'pinned';
+type InboxTab = 'messages' | 'groups' | 'notifications' | 'insights';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -81,13 +97,16 @@ export default function InboxScreen({ navigation, route }: any) {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unavailableStoryIds, setUnavailableStoryIds] = useState<Set<string>>(new Set());
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+    const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
-    const [messageFilter, setMessageFilter] = useState<'all' | 'unread' | 'requests' | 'pinned'>('all');
-    const [conversationQuery, setConversationQuery] = useState('');
+    const [activeTab, setActiveTab] = useState<InboxTab>('messages');
+    const [messageFilter, setMessageFilter] = useState<MessageFilter>('all');
     const [refreshing, setRefreshing] = useState(false);
     const [insightAvatarMap, setInsightAvatarMap] = useState<Record<string, string>>({});
     const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
+    const [seenInsightIds, setSeenInsightIds] = useState<Set<string>>(new Set());
+    const [openSwipeHandle, setOpenSwipeHandle] = useState<string | null>(null);
+    const [inboxChatInfo, setInboxChatInfo] = useState<ConversationSummary | null>(null);
     const avatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
     const resolveInsightAvatar = React.useCallback((handle?: string): string => {
         const raw = (handle || '').trim();
@@ -108,14 +127,79 @@ export default function InboxScreen({ navigation, route }: any) {
                 (item) =>
                     (item.views || 0) > 0 ||
                     (item.likes > 0 && Array.isArray(item.likers) && item.likers.length > 0) ||
+                    (Array.isArray(item.reactions) && item.reactions.length > 0) ||
+                    (Array.isArray(item.replies) && item.replies.length > 0) ||
                     ((item.question?.responseCount || 0) > 0)
             ),
         [insights]
     );
 
+    const loadSeenInsights = useCallback(async (handle: string) => {
+        try {
+            const raw = await AsyncStorage.getItem(insightsSeenKey(handle));
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(parsed)) {
+                setSeenInsightIds(new Set());
+                return;
+            }
+            setSeenInsightIds(new Set(parsed.filter((v) => typeof v === 'string' && v.trim().length > 0)));
+        } catch {
+            setSeenInsightIds(new Set());
+        }
+    }, []);
+
+    const persistSeenInsights = useCallback(async (handle: string, ids: Set<string>) => {
+        try {
+            await AsyncStorage.setItem(insightsSeenKey(handle), JSON.stringify(Array.from(ids)));
+        } catch {
+            /* ignore */
+        }
+    }, []);
+
+    const markInsightSeen = useCallback(
+        (storyId?: string) => {
+            if (!user?.handle || !storyId) return;
+            setSeenInsightIds((prev) => {
+                if (prev.has(storyId)) return prev;
+                const next = new Set(prev);
+                next.add(storyId);
+                void persistSeenInsights(user.handle, next);
+                return next;
+            });
+        },
+        [user?.handle, persistSeenInsights]
+    );
+
+    const markAllInsightsSeen = useCallback(() => {
+        if (!user?.handle || insights.length === 0) return;
+        const next = new Set(seenInsightIds);
+        insights.forEach((insight) => {
+            if (insight.storyId) next.add(insight.storyId);
+        });
+        setSeenInsightIds(next);
+        void persistSeenInsights(user.handle, next);
+    }, [user?.handle, insights, seenInsightIds, persistSeenInsights]);
+
+    const unseenInsightsCount = useMemo(
+        () => insights.filter((insight) => insight.storyId && !seenInsightIds.has(insight.storyId)).length,
+        [insights, seenInsightIds]
+    );
+
     useEffect(() => {
         loadData();
+        if (user?.handle) {
+            void loadSeenInsights(user.handle);
+        }
     }, [user?.handle]);
+
+    // Refresh when returning to Inbox (e.g. after sending a feed DM to Ava).
+    // Keep existing rows visible — full skeleton only on first load.
+    useFocusEffect(
+        useCallback(() => {
+            if (!user?.handle) return;
+            void loadData({ silent: true });
+        }, [user?.handle])
+    );
 
     useEffect(() => {
         const requestedTab = route?.params?.initialTab;
@@ -123,6 +207,14 @@ export default function InboxScreen({ navigation, route }: any) {
             setActiveTab(requestedTab);
         }
     }, [route?.params?.initialTab]);
+
+    useEffect(() => {
+        if (activeTab !== 'messages') {
+            setMessageFilter('all');
+        }
+        setOpenSwipeHandle(null);
+        setInboxChatInfo(null);
+    }, [activeTab]);
 
     useEffect(() => {
         if (user?.handle && user?.avatarUrl) {
@@ -196,9 +288,15 @@ export default function InboxScreen({ navigation, route }: any) {
         });
     }, [notifications, conversations, dmAvatarMap, user?.id]);
 
-    const loadData = async () => {
-        if (!user?.handle) return;
-        setLoading(true);
+    const loadData = async (opts?: { silent?: boolean }) => {
+        if (!user?.handle) {
+            setLoading(false);
+            return;
+        }
+        const silent = opts?.silent === true;
+        if (!silent) {
+            setLoading(true);
+        }
         try {
             const [notifs, storyInsights] = await Promise.all([
                 getNotifications(user.handle),
@@ -235,6 +333,29 @@ export default function InboxScreen({ navigation, route }: any) {
             setInsights(storyInsights);
             const convs = await listConversations(user.handle);
             setConversations(convs);
+
+            if (user?.id) {
+                try {
+                    const followed = await getFollowedUsers(user.id).catch(() => [] as string[]);
+                    const groups = await fetchFollowedUsersStoryGroups(user.id, followed);
+                    setStoryGroups(
+                        groups.map((group) => {
+                            if (group.userId === user.id && user.avatarUrl) {
+                                return { ...group, avatarUrl: user.avatarUrl };
+                            }
+                            return {
+                                ...group,
+                                avatarUrl: group.avatarUrl || getAvatarForHandle(group.userHandle),
+                            };
+                        })
+                    );
+                } catch (e) {
+                    console.warn('Failed to load inbox story groups:', e);
+                    setStoryGroups([]);
+                }
+            } else {
+                setStoryGroups([]);
+            }
         } catch (error) {
             console.error('Error loading inbox:', error);
         } finally {
@@ -245,7 +366,7 @@ export default function InboxScreen({ navigation, route }: any) {
     const refreshData = async () => {
         setRefreshing(true);
         try {
-            await loadData();
+            await loadData({ silent: true });
         } finally {
             setRefreshing(false);
         }
@@ -253,12 +374,17 @@ export default function InboxScreen({ navigation, route }: any) {
 
     const openLikersList = (likers: string[]) => {
         if (!Array.isArray(likers) || likers.length === 0) return;
-        const options = likers.slice(0, 8).map((handle) => ({
-            text: handle,
-            onPress: () => navigation.navigate('ViewProfile', { handle }),
+        const options = likers.slice(0, 8).map((label) => ({
+            text: label,
+            onPress: () => {
+                // Labels may be "😍 handle" from reaction rows.
+                const parts = label.trim().split(/\s+/);
+                const maybeHandle = parts[parts.length - 1] || label;
+                navigation.navigate('ViewProfile', { handle: maybeHandle });
+            },
         }));
         options.push({ text: 'Cancel', onPress: () => {} });
-        Alert.alert('Story likes', 'View profile', options);
+        Alert.alert('Story reactions', 'Who interacted', options);
     };
 
     const openViewersList = (viewers: string[]) => {
@@ -271,6 +397,51 @@ export default function InboxScreen({ navigation, route }: any) {
         Alert.alert('Story views', 'View profile', options);
     };
 
+    /** Same Stories 24 open format as the feed rail (hold screen + rail swipe chain). */
+    const openFollowedStoryFromRail = useCallback(
+        (group: StoryGroup) => {
+            const railHandles = storyGroups
+                .map((g) => g.userHandle)
+                .filter((h): h is string => typeof h === 'string' && h.trim().length > 0);
+            const latest = [...(group.stories || [])].sort(
+                (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+            )[0];
+            const mediaUrl = latest?.mediaUrl;
+            const isVideo =
+                latest?.mediaType === 'video' ||
+                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+            const params = {
+                openUserHandle: group.userHandle,
+                fromStories24Rail: true,
+                skipStories24RailReturn: true,
+                railHandles,
+                previewThumb:
+                    (!isVideo && mediaUrl) ||
+                    group.avatarUrl ||
+                    getAvatarForHandle(group.userHandle) ||
+                    undefined,
+                previewVideoUrl: isVideo && mediaUrl ? mediaUrl : undefined,
+                forceRefreshAt: Date.now(),
+            };
+            // Stories lives on the root stack — Inbox is nested under MainTabs.
+            if (rootNavigationRef.isReady()) {
+                (rootNavigationRef as any).navigate('Stories', params);
+                return;
+            }
+            navigation.navigate('Stories', params);
+        },
+        [navigation, storyGroups],
+    );
+
+    const navigateToMessages = (params: { handle?: string; chatGroupId?: string; kind?: string }) => {
+        if (rootNavigationRef.isReady()) {
+            // Messages lives on the root stack — Inbox is nested under MainTabs.
+            (rootNavigationRef as any).navigate('Messages', params);
+            return;
+        }
+        navigation.navigate('Messages', params);
+    };
+
     const handleNotificationPress = async (notif: Notification) => {
         const isSyntheticConvNotif = notif.id.startsWith('conv-notif-');
         if (!notif.read && user?.handle && !isSyntheticConvNotif) {
@@ -278,9 +449,34 @@ export default function InboxScreen({ navigation, route }: any) {
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
         }
 
+        // Instagram-style: comment / comment-reply → open post comments (not Messages).
+        if (
+            (notif.type === 'comment' || notif.type === 'reply') &&
+            notif.postId &&
+            !notif.storyId
+        ) {
+            if (rootNavigationRef.isReady()) {
+                (rootNavigationRef as any).navigate('PostDetail', {
+                    postId: notif.postId,
+                    openComments: true,
+                    focusCommentId: notif.commentId,
+                });
+            } else {
+                navigation.navigate('PostDetail', {
+                    postId: notif.postId,
+                    openComments: true,
+                    focusCommentId: notif.commentId,
+                });
+            }
+            return;
+        }
+
+        if (notif.type === 'group_invite') {
+            return;
+        }
         if (notif.chatGroupId && user?.handle) {
             await markGroupConversationReadById(notif.chatGroupId, user.handle);
-            navigation.navigate('Messages', { chatGroupId: notif.chatGroupId, kind: 'group' });
+            navigateToMessages({ chatGroupId: notif.chatGroupId, kind: 'group' });
             return;
         }
         if (notif.storyId && !unavailableStoryIds.has(notif.storyId)) {
@@ -295,7 +491,7 @@ export default function InboxScreen({ navigation, route }: any) {
             return;
         }
         if (notif.type === 'sticker' || notif.type === 'reply' || notif.type === 'dm') {
-            navigation.navigate('Messages', { handle: notif.fromHandle });
+            navigateToMessages({ handle: notif.fromHandle });
         }
     };
 
@@ -390,15 +586,64 @@ export default function InboxScreen({ navigation, route }: any) {
         }
     };
 
+    const handleAcceptGroupInvite = async (notif: Notification) => {
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId) {
+            Alert.alert('Invite unavailable', 'This community invite can no longer be accepted.');
+            return;
+        }
+        try {
+            await acceptChatGroupInvite(inviteId);
+            if (user?.handle) {
+                await deleteNotification(notif.id, user.handle);
+            }
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+            if (notif.chatGroupId) {
+                navigateToMessages({
+                    chatGroupId: notif.chatGroupId,
+                    kind: 'group',
+                });
+            } else {
+                await loadData();
+            }
+        } catch (error) {
+            console.error('Failed to accept community invite:', error);
+            Alert.alert('Error', 'Could not join this community right now.');
+        }
+    };
+
+    const handleDeclineGroupInvite = async (notif: Notification) => {
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId) return;
+        try {
+            await declineChatGroupInvite(inviteId);
+            if (user?.handle) {
+                await deleteNotification(notif.id, user.handle);
+            }
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+        } catch (error) {
+            console.error('Failed to decline community invite:', error);
+            Alert.alert('Error', 'Could not decline this invite right now.');
+        }
+    };
+
     const openConversation = async (conv: ConversationSummary) => {
         if (!user?.handle) return;
         try {
             if (conv.kind === 'group' && conv.chatGroupId) {
-                await markGroupConversationReadById(conv.chatGroupId, user.handle);
-                navigation.navigate('Messages', { chatGroupId: conv.chatGroupId, kind: 'group' });
+                try {
+                    await markGroupConversationReadById(conv.chatGroupId, user.handle);
+                } catch (e) {
+                    console.warn('mark group read failed', e);
+                }
+                navigateToMessages({ chatGroupId: conv.chatGroupId, kind: 'group' });
             } else {
-                await markConversationRead(user.handle, conv.otherHandle);
-                navigation.navigate('Messages', { handle: conv.otherHandle });
+                try {
+                    await markConversationRead(user.handle, conv.otherHandle);
+                } catch (e) {
+                    console.warn('mark dm read failed', e);
+                }
+                navigateToMessages({ handle: conv.otherHandle });
             }
             setConversations((prev) =>
                 prev.map((c) =>
@@ -410,32 +655,49 @@ export default function InboxScreen({ navigation, route }: any) {
             );
         } catch (error) {
             console.error('Failed to open conversation:', error);
+            // Still attempt navigation so the row isn't a dead end.
+            if (conv.kind === 'group' && conv.chatGroupId) {
+                navigateToMessages({ chatGroupId: conv.chatGroupId, kind: 'group' });
+            } else if (conv.otherHandle) {
+                navigateToMessages({ handle: conv.otherHandle });
+            }
         }
     };
 
     const formatNotificationMessage = (notif: Notification): string => {
         if (notif.storyId) {
+            const ownerSuffix = notif.storyContextOwner ? ` from @${notif.storyContextOwner}` : '';
+            const contextSuffix = notif.storyContextText ? ` - "${notif.storyContextText}"` : '';
             if (unavailableStoryIds.has(notif.storyId)) {
-                const ownerLabel = notif.storyContextOwner ? `@${notif.storyContextOwner}` : 'story';
-                return `Story unavailable (${ownerLabel})`;
+                return `Story unavailable${ownerSuffix}${contextSuffix}`;
             }
-            const ownerLabel = notif.storyContextOwner ? `@${notif.storyContextOwner}` : 'a story';
-            const snippet = (notif.storyContextText || '').trim();
-            const replyBody = (notif.message || '').trim();
-            if (snippet && replyBody) return `Reply to ${ownerLabel}: "${snippet}" - ${replyBody}`;
-            if (snippet) return `Reply to ${ownerLabel}: "${snippet}"`;
-            if (replyBody) return `Reply to ${ownerLabel}: ${replyBody}`;
-            return `Reply to ${ownerLabel}`;
+            const replyPreview = (notif.message || '').trim();
+            return replyPreview
+                ? `Replied to your 24hr story${ownerSuffix}: ${replyPreview}${contextSuffix}`
+                : `Replied to your 24hr story${ownerSuffix}${contextSuffix}`;
+        }
+        // Post comment activity (Instagram Activity-style — not DMs)
+        if (notif.type === 'comment' && notif.postId) {
+            const preview = (notif.message || '').trim();
+            return preview ? `Commented: ${preview}` : 'Commented on your post';
+        }
+        if (notif.type === 'reply' && notif.postId) {
+            const preview = (notif.message || '').trim();
+            return preview ? `Replied to your comment: ${preview}` : 'Replied to your comment';
         }
         switch (notif.type) {
             case 'sticker':
                 return `Sent you a sticker: ${notif.message || ''}`;
             case 'reply':
                 return notif.message || 'Replied to your post';
+            case 'comment':
+                return notif.message || 'Commented on your post';
             case 'dm':
                 return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
+            case 'group_invite':
+                return notif.message || `invited you to join ${notif.groupName || 'a community'}`;
             case 'new_post':
                 return notif.message || 'posted a new clip';
             default:
@@ -449,10 +711,14 @@ export default function InboxScreen({ navigation, route }: any) {
                 return 'happy';
             case 'reply':
                 return 'arrow-undo';
+            case 'comment':
+                return 'chatbubble-ellipses';
             case 'dm':
                 return 'chatbubble';
             case 'follow_request':
                 return 'person-add';
+            case 'group_invite':
+                return 'people';
             default:
                 return 'notifications';
         }
@@ -464,12 +730,12 @@ export default function InboxScreen({ navigation, route }: any) {
             .filter((conv) => {
                 if (!conv.lastMessage || !conv.unread) return false;
                 if (conv.kind === 'group' && conv.chatGroupId) {
-                    return isNotificationTypeEnabled(notificationPrefs, 'group_chat');
+                    return isInAppNotificationChannelEnabled(notificationPrefs, 'group_chat');
                 }
                 if (!conv.otherHandle) return false;
                 const ownMessage = conv.lastMessage.senderHandle === user?.handle;
                 if (ownMessage) return false;
-                return isNotificationTypeEnabled(notificationPrefs, 'dm');
+                return isInAppNotificationChannelEnabled(notificationPrefs, 'dm');
             })
             .map((conv) => {
                 const lastMsg = conv.lastMessage!;
@@ -503,23 +769,28 @@ export default function InboxScreen({ navigation, route }: any) {
     const groupMessages = sortedConversations.filter((c) => c.kind === 'group');
     const unreadMessages = directMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
     const unreadGroups = groupMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
-    const filteredDirectMessages = directMessages.filter((c) => {
-        if (messageFilter === 'unread') return (c.unread || 0) > 0;
-        if (messageFilter === 'requests') return !!c.isRequest;
-        if (messageFilter === 'pinned') return !!c.isPinned;
-        return true;
-    });
-    const queryLower = conversationQuery.trim().toLowerCase();
-    const searchedDirectMessages = filteredDirectMessages.filter((c) =>
-        !queryLower ||
-        c.otherHandle.toLowerCase().includes(queryLower) ||
-        (c.lastMessage?.text || '').toLowerCase().includes(queryLower)
-    );
-    const searchedGroupMessages = groupMessages.filter((c) =>
-        !queryLower ||
-        (c.groupName || '').toLowerCase().includes(queryLower) ||
-        (c.lastMessage?.text || '').toLowerCase().includes(queryLower)
-    );
+    const unreadMessagesTotal = unreadMessages + unreadGroups;
+
+    const filterConversationList = (list: ConversationSummary[]) => {
+        if (messageFilter === 'groups') return list.filter((c) => c.kind === 'group');
+        if (messageFilter === 'unread') return list.filter((c) => (c.unread || 0) > 0);
+        if (messageFilter === 'requests') return list.filter((c) => c.kind !== 'group' && !!c.isRequest);
+        if (messageFilter === 'pinned') return list.filter((c) => !!c.isPinned);
+        return list;
+    };
+
+    const queriedItems = sortedConversations;
+    const queriedGroupItems = queriedItems.filter((c) => c.kind === 'group');
+    const queriedUnreadItems = queriedItems.filter((c) => (c.unread || 0) > 0);
+    const queriedRequestItems = queriedItems.filter((c) => c.kind !== 'group' && !!c.isRequest);
+    const queriedPinnedItems = queriedItems.filter((c) => !!c.isPinned);
+
+    const messagesTabItems = filterConversationList(sortedConversations);
+
+    const pinnedSection = messagesTabItems.filter((c) => !!c.isPinned && !c.isRequest);
+    const requestSection = messagesTabItems.filter((c) => c.kind !== 'group' && !!c.isRequest);
+    const regularSection = messagesTabItems.filter((c) => !c.isPinned && !(c.kind !== 'group' && c.isRequest));
+    const showMessageSections = activeTab === 'messages' && messageFilter === 'all';
 
     const updateConversationRow = (target: ConversationSummary, updater: (row: ConversationSummary) => ConversationSummary) => {
         setConversations((prev) =>
@@ -532,56 +803,203 @@ export default function InboxScreen({ navigation, route }: any) {
         );
     };
 
+    const removeConversationRow = (target: ConversationSummary) => {
+        setConversations((prev) =>
+            prev.filter((row) => {
+                if (row.kind === 'group' || target.kind === 'group') {
+                    return !(row.kind === 'group' && target.kind === 'group' && row.chatGroupId === target.chatGroupId);
+                }
+                return row.otherHandle !== target.otherHandle;
+            })
+        );
+    };
+
+    const handleTogglePin = async (item: ConversationSummary) => {
+        if (!user?.handle || item.kind === 'group') return;
+        if (item.isPinned) {
+            await unpinConversation(user.handle, item.otherHandle);
+            updateConversationRow(item, (r) => ({ ...r, isPinned: false }));
+        } else {
+            await pinConversation(user.handle, item.otherHandle);
+            updateConversationRow(item, (r) => ({ ...r, isPinned: true }));
+        }
+    };
+
+    const handleToggleMute = async (item: ConversationSummary) => {
+        if (!user?.handle || item.kind === 'group') return;
+        if (item.isMuted) {
+            await unmuteConversation(user.handle, item.otherHandle);
+            updateConversationRow(item, (r) => ({ ...r, isMuted: false }));
+        } else {
+            await muteConversation(user.handle, item.otherHandle);
+            updateConversationRow(item, (r) => ({ ...r, isMuted: true }));
+        }
+    };
+
+    const handleMarkRead = async (item: ConversationSummary) => {
+        if (!user?.handle) return;
+        if (item.kind === 'group' && item.chatGroupId) {
+            await markGroupConversationReadById(item.chatGroupId, user.handle);
+        } else {
+            await markConversationRead(user.handle, item.otherHandle);
+        }
+        updateConversationRow(item, (r) => ({ ...r, unread: 0 }));
+    };
+
+    const handleMarkUnread = async (item: ConversationSummary) => {
+        if (!user?.handle || item.kind === 'group') return;
+        await markConversationUnread(user.handle, item.otherHandle);
+        updateConversationRow(item, (r) => ({ ...r, unread: Math.max(1, r.unread || 1) }));
+    };
+
+    const handleAcceptRequest = async (item: ConversationSummary) => {
+        if (!user?.handle || item.kind === 'group') return;
+        await acceptMessageRequest(user.handle, item.otherHandle);
+        updateConversationRow(item, (r) => ({ ...r, isRequest: false }));
+    };
+
+    const handleDeleteOrLeave = (item: ConversationSummary) => {
+        if (!user?.handle) return;
+        const isGroup = item.kind === 'group' && !!item.chatGroupId;
+        Alert.alert(
+            isGroup ? 'Leave group?' : 'Delete conversation?',
+            isGroup
+                ? `You will leave "${item.groupName || 'this group'}". You can be invited again later.`
+                : `This will remove your chat with ${item.otherHandle}.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: isGroup ? 'Leave' : 'Delete',
+                    style: 'destructive',
+                    onPress: () => {
+                        void (async () => {
+                            try {
+                                if (isGroup && item.chatGroupId) {
+                                    await leaveChatGroup(item.chatGroupId);
+                                } else {
+                                    await deleteConversation(user.handle, item.otherHandle);
+                                }
+                                removeConversationRow(item);
+                            } catch (e) {
+                                console.error('Failed to delete/leave conversation', e);
+                                Alert.alert('Error', isGroup ? 'Failed to leave group' : 'Failed to delete conversation');
+                            }
+                        })();
+                    },
+                },
+            ]
+        );
+    };
+
+    const openInboxChatInfo = (item: ConversationSummary) => {
+        setOpenSwipeHandle(null);
+        setInboxChatInfo(item);
+    };
+
+    const renderConversationRow = (item: ConversationSummary) => {
+        const isGroup = item.kind === 'group';
+        const rowId = inboxConversationRowId(item);
+        return (
+            <InboxConversationRow
+                conv={item}
+                viewerHandle={user?.handle}
+                avatarSrc={
+                    isGroup
+                        ? item.groupAvatarUrl || undefined
+                        : dmAvatarMap[item.otherHandle] || getAvatarForHandle(item.otherHandle)
+                }
+                isSwipeOpen={openSwipeHandle === rowId}
+                onSwipeOpenChange={setOpenSwipeHandle}
+                onPress={() => { void openConversation(item); }}
+                onOpenChatInfo={() => openInboxChatInfo(item)}
+                onAvatarPress={() => {
+                    if (!isGroup && item.hasUnviewedStories) {
+                        navigation.navigate('Stories', { openUserHandle: item.otherHandle });
+                        return;
+                    }
+                    void openConversation(item);
+                }}
+                onPin={isGroup ? undefined : () => { void handleTogglePin(item); }}
+                onMarkRead={() => { void handleMarkRead(item); }}
+                onMarkUnread={isGroup ? undefined : () => { void handleMarkUnread(item); }}
+                onToggleMute={isGroup ? undefined : () => { void handleToggleMute(item); }}
+                onDelete={() => handleDeleteOrLeave(item)}
+            />
+        );
+    };
+
     if (loading) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell ambient={false} style={styles.pageShell} contentStyle={styles.loadingShell}>
+                <View style={styles.header}>
+                    <Text style={styles.headerTitle}>Notifications</Text>
+                </View>
+                <InboxLoadingSkeleton />
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambient={false} style={styles.pageShell}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Inbox</Text>
-                {activeTab === 'notifications' && unreadNotifications > 0 && (
-                    <TouchableOpacity onPress={handleMarkAllRead}>
-                        <Text style={styles.headerActionText}>Mark all read</Text>
-                    </TouchableOpacity>
-                )}
+                <Text style={styles.headerTitle}>Notifications</Text>
             </View>
 
-            {/* Tabs */}
+            {/* Web order: stories → tabs → content */}
+            {storyGroups.length > 0 ? (
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.storiesRailScroll}
+                    contentContainerStyle={styles.storiesRail}
+                >
+                    {storyGroups.map((group) => {
+                        const hasUnviewed = (group.stories || []).some((s) => !s.hasViewed);
+                        const ring = (
+                            <View style={styles.storyRingInner}>
+                                <Avatar
+                                    src={group.avatarUrl || getAvatarForHandle(group.userHandle)}
+                                    name={group.userHandle}
+                                    size={ox(48)}
+                                />
+                            </View>
+                        );
+                        return (
+                            <TouchableOpacity
+                                key={group.userId || group.userHandle}
+                                style={styles.storyRailItem}
+                                onPress={() => openFollowedStoryFromRail(group)}
+                            >
+                                {hasUnviewed ? (
+                                    <LinearGradient
+                                        colors={['#2DD4BF', '#0EA5E9', '#D946EF']}
+                                        start={{ x: 0, y: 1 }}
+                                        end={{ x: 1, y: 0 }}
+                                        style={styles.storyRing}
+                                    >
+                                        {ring}
+                                    </LinearGradient>
+                                ) : (
+                                    <View style={[styles.storyRing, styles.storyRingSeen]}>{ring}</View>
+                                )}
+                                <Text style={styles.storyRailLabel} numberOfLines={1}>
+                                    {group.userHandle}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+            ) : null}
+
             <View style={styles.tabs}>
-                <TouchableOpacity
-                    onPress={() => setActiveTab('notifications')}
-                    style={[styles.tab, activeTab === 'notifications' && styles.tabActive]}
-                >
-                    <Text style={[styles.tabText, activeTab === 'notifications' && styles.tabTextActive]}>
-                        Notifications
-                    </Text>
-                    {unreadNotifications > 0 && (
-                        <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadNotifications}</Text>
-                        </View>
-                    )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={() => setActiveTab('insights')}
-                    style={[styles.tab, activeTab === 'insights' && styles.tabActive]}
-                >
-                    <Text style={[styles.tabText, activeTab === 'insights' && styles.tabTextActive]}>
-                        Insights
-                    </Text>
-                </TouchableOpacity>
                 <TouchableOpacity
                     onPress={() => setActiveTab('messages')}
                     style={[styles.tab, activeTab === 'messages' && styles.tabActive]}
                 >
                     <Text style={[styles.tabText, activeTab === 'messages' && styles.tabTextActive]}>Messages</Text>
-                    {unreadMessages > 0 && (
+                    {unreadMessagesTotal > 0 && (
                         <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
+                            <Text style={styles.badgeText}>{unreadMessagesTotal > 9 ? '9+' : unreadMessagesTotal}</Text>
                         </View>
                     )}
                 </TouchableOpacity>
@@ -592,7 +1010,29 @@ export default function InboxScreen({ navigation, route }: any) {
                     <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>Groups</Text>
                     {unreadGroups > 0 && (
                         <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadGroups > 99 ? '99+' : unreadGroups}</Text>
+                            <Text style={styles.badgeText}>{unreadGroups > 9 ? '9+' : unreadGroups}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setActiveTab('notifications')}
+                    style={[styles.tab, activeTab === 'notifications' && styles.tabActive]}
+                >
+                    <Text style={[styles.tabText, activeTab === 'notifications' && styles.tabTextActive]}>Notifs</Text>
+                    {unreadNotifications > 0 && (
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{unreadNotifications > 9 ? '9+' : unreadNotifications}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setActiveTab('insights')}
+                    style={[styles.tab, activeTab === 'insights' && styles.tabActive]}
+                >
+                    <Text style={[styles.tabText, activeTab === 'insights' && styles.tabTextActive]}>Insights</Text>
+                    {unseenInsightsCount > 0 && (
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{unseenInsightsCount > 9 ? '9+' : unseenInsightsCount}</Text>
                         </View>
                     )}
                 </TouchableOpacity>
@@ -601,8 +1041,18 @@ export default function InboxScreen({ navigation, route }: any) {
             {/* Content */}
             {activeTab === 'notifications' ? (
                 <FlatList
+                    key="notifications"
                     data={allNotifications}
                     keyExtractor={(item) => item.id}
+                    ListHeaderComponent={
+                        unreadNotifications > 0 ? (
+                            <View style={styles.listActionRow}>
+                                <TouchableOpacity onPress={handleMarkAllRead}>
+                                    <Text style={styles.headerActionText}>Mark all as read</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null
+                    }
                     renderItem={({ item }) => (
                         <TouchableOpacity
                             onPress={() => handleNotificationPress(item)}
@@ -613,19 +1063,34 @@ export default function InboxScreen({ navigation, route }: any) {
                                     <Avatar
                                         src={dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
                                         name={item.fromHandle}
-                                        size={40}
+                                        size={ox(40)}
                                     />
                                     <View style={styles.notificationTypeBadge}>
                                         <Icon
                                             name={getNotificationIcon(item.type)}
-                                            size={10}
+                                            size={ox(10)}
                                             color="#111827"
                                         />
                                     </View>
                                 </View>
                             </View>
                             <View style={styles.itemContent}>
-                                <Text style={styles.itemTitle}>{item.fromHandle}</Text>
+                                <View style={styles.itemHeader}>
+                                    <Text style={styles.itemTitle} numberOfLines={1}>
+                                        {item.groupName || item.fromHandle}
+                                    </Text>
+                                    <View style={styles.notifKindChip}>
+                                        <Text style={styles.notifKindChipText}>
+                                            {item.type === 'group_invite'
+                                                ? 'Community'
+                                                : item.chatGroupId
+                                                ? 'Group'
+                                                : item.postId && (item.type === 'comment' || item.type === 'reply') && !item.storyId
+                                                    ? 'Comment'
+                                                    : 'DM'}
+                                        </Text>
+                                    </View>
+                                </View>
                                 <Text style={styles.itemMessage}>{formatNotificationMessage(item)}</Text>
                                 {!!item.storyId && unavailableStoryIds.has(item.storyId) && (
                                     <View style={styles.storyUnavailableChip}>
@@ -649,6 +1114,22 @@ export default function InboxScreen({ navigation, route }: any) {
                                         </TouchableOpacity>
                                     </View>
                                 )}
+                                {item.type === 'group_invite' && (
+                                    <View style={styles.followRequestActions}>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
+                                            onPress={() => { void handleAcceptGroupInvite(item); }}
+                                        >
+                                            <Text style={styles.followRequestAcceptText}>Join</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
+                                            onPress={() => { void handleDeclineGroupInvite(item); }}
+                                        >
+                                            <Text style={styles.followRequestDenyText}>Decline</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
                             </View>
                             {!!item.storyId && !unavailableStoryIds.has(item.storyId) && !!item.imageUrl && (
                                 <TouchableOpacity
@@ -662,7 +1143,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                         <Image source={{ uri: item.imageUrl }} style={styles.storyThumbImage} resizeMode="cover" />
                                     ) : (
                                         <View style={styles.storyThumbFallback}>
-                                            <Icon name="play" size={14} color="#E5E7EB" />
+                                            <Icon name="play" size={ox(14)} color="#E5E7EB" />
                                         </View>
                                     )}
                                 </TouchableOpacity>
@@ -677,7 +1158,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                     }
                                     style={styles.rowActionIcon}
                                 >
-                                    <Icon name="trash-outline" size={18} color="#6B7280" />
+                                    <Icon name="trash-outline" size={ox(18)} color="#6B7280" />
                                 </TouchableOpacity>
                             )}
                             {!item.read && <View style={styles.unreadDot} />}
@@ -685,128 +1166,203 @@ export default function InboxScreen({ navigation, route }: any) {
                     )}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>No notifications</Text>
+                            <Text style={styles.emptyText}>No notifications yet.</Text>
                         </View>
                     }
                 />
             ) : activeTab === 'insights' ? (
                 <FlatList
+                    key="insights"
                     data={actionableInsights}
                     keyExtractor={(item) => item.storyId}
+                    ListHeaderComponent={
+                        unseenInsightsCount > 0 ? (
+                            <View style={styles.listActionRow}>
+                                <TouchableOpacity onPress={markAllInsightsSeen}>
+                                    <Text style={styles.headerActionText}>Mark all seen</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null
+                    }
                     renderItem={({ item }) => {
-                        const primaryLiker = item.likers?.[0];
+                        const topReaction = item.reactions?.[0];
+                        const primaryLiker = item.likers?.[0] || topReaction?.userHandle;
+                        const primaryReply = item.replies?.[0];
                         const primaryViewer = item.viewers?.[0];
-                        const primaryHandle = primaryLiker || primaryViewer;
+                        const primaryHandle =
+                            primaryReply?.userHandle || primaryLiker || primaryViewer;
+                        const storyLabel = item.text?.trim()
+                            ? item.text.length > 36
+                                ? `${item.text.slice(0, 36)}…`
+                                : item.text
+                            : item.mediaType === 'video'
+                              ? 'Video story'
+                              : item.mediaUrl
+                                ? 'Photo story'
+                                : 'Your story';
+                        const answerCount = item.question?.responseCount || 0;
+                        const reactionCount = item.reactions?.length || 0;
+                        const replyCount = item.replies?.length || 0;
+
+                        let activityLine: React.ReactNode = 'New story activity';
+                        if (answerCount > 0) {
+                            activityLine =
+                                answerCount === 1 ? '1 answer on your question' : `${answerCount} answers on your question`;
+                        } else if (replyCount > 0 && primaryReply) {
+                            activityLine = (
+                                <>
+                                    <Text style={styles.itemMessageStrong}>{primaryReply.userHandle}</Text>
+                                    {replyCount > 1 ? ` and ${replyCount - 1} others replied` : ' replied to your story'}
+                                    {primaryReply.text ? `: “${primaryReply.text.slice(0, 40)}${primaryReply.text.length > 40 ? '…' : ''}”` : ''}
+                                </>
+                            );
+                        } else if (reactionCount > 0 && topReaction) {
+                            activityLine = (
+                                <>
+                                    <Text style={styles.itemMessageStrong}>{topReaction.userHandle}</Text>
+                                    {reactionCount > 1
+                                        ? ` and ${reactionCount - 1} others reacted ${topReaction.emoji}`
+                                        : ` reacted ${topReaction.emoji} to your story`}
+                                </>
+                            );
+                        } else if (item.likes > 0 && primaryLiker) {
+                            activityLine = (
+                                <>
+                                    <Text style={styles.itemMessageStrong}>{primaryLiker}</Text>
+                                    {item.likes > 1 ? ` and ${item.likes - 1} others liked your story` : ' liked your story'}
+                                </>
+                            );
+                        } else if (item.views > 0) {
+                            activityLine = (
+                                <>
+                                    Viewed by{' '}
+                                    <Text style={styles.itemMessageStrong}>{primaryViewer || 'people'}</Text>
+                                    {item.views > 1 ? ` and ${item.views - 1} others` : ''}
+                                </>
+                            );
+                        }
+
                         return (
                         <TouchableOpacity
                             onPress={() => {
-                                if (primaryHandle) {
-                                    navigation.navigate('ViewProfile', { handle: primaryHandle });
-                                }
+                                markInsightSeen(item.storyId);
+                                // Instagram: open the story that got the activity.
+                                navigation.navigate('Stories', {
+                                    openUserHandle: user?.handle,
+                                    openStoryId: item.storyId,
+                                });
                             }}
-                            style={styles.item}
+                            style={[
+                                styles.item,
+                                item.storyId && !seenInsightIds.has(item.storyId) ? styles.itemUnread : null,
+                            ]}
                         >
-                            {primaryHandle ? (
-                                <Avatar
-                                    src={resolveInsightAvatar(primaryHandle)}
-                                    name={primaryHandle}
-                                    size={48}
-                                />
+                            {item.mediaUrl && item.mediaType !== 'video' ? (
+                                <Image source={{ uri: item.mediaUrl }} style={styles.insightThumb} />
+                            ) : item.text?.trim() ? (
+                                <View style={styles.insightThumbText}>
+                                    <Text style={styles.insightThumbTextInner} numberOfLines={3}>
+                                        {item.text.trim()}
+                                    </Text>
+                                </View>
                             ) : (
-                                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#374151' }} />
+                                <View style={styles.insightThumbFallback}>
+                                    <Icon name="images-outline" size={ox(18)} color="#9CA3AF" />
+                                </View>
                             )}
                             <View style={styles.itemContent}>
                                 <View style={styles.itemHeader}>
-                                    <Text style={styles.itemTitle}>
-                                        {item.text ? (item.text.length > 40 ? item.text.slice(0, 40) + '…' : item.text) : 'Story'}
+                                    <Text style={styles.itemTitle} numberOfLines={1}>{storyLabel}</Text>
+                                    <Text style={styles.itemTime}>
+                                        {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </Text>
-                                    <Text style={styles.itemTime}>{timeAgo(item.createdAt)}</Text>
                                 </View>
-                                <Text style={styles.itemMessage} numberOfLines={1}>
-                                    {item.likes > 0 && primaryLiker ? (
-                                        <>
-                                            Liked by{' '}
-                                            <Text
-                                                style={styles.itemMessageLink}
-                                                onPress={() => {
-                                                    navigation.navigate('ViewProfile', { handle: primaryLiker });
-                                                }}
-                                            >
-                                                {primaryLiker}
-                                            </Text>
-                                            {item.likes > 1 ? (
-                                                <Text
-                                                    style={styles.itemMessageLink}
-                                                    onPress={() => openLikersList(item.likers || [])}
-                                                >
-                                                    {` and ${item.likes - 1} others`}
-                                                </Text>
-                                            ) : ''}
-                                            {item.views > 0 ? `  •  ${item.views} views` : ''}
-                                        </>
-                                    ) : item.views > 0 ? (
-                                        <>
-                                            Viewed by{' '}
-                                            <Text
-                                                style={styles.itemMessageLink}
-                                                onPress={() => {
-                                                    if (primaryViewer) navigation.navigate('ViewProfile', { handle: primaryViewer });
-                                                }}
-                                            >
-                                                {primaryViewer || 'people'}
-                                            </Text>
-                                            {item.views > 1 ? (
-                                                <Text
-                                                    style={styles.itemMessageLink}
-                                                    onPress={() => openViewersList(item.viewers || [])}
-                                                >
-                                                    {` and ${item.views - 1} others`}
-                                                </Text>
-                                            ) : ''}
-                                        </>
-                                    ) : (
-                                        'New story activity'
-                                    )}
+                                <Text style={styles.itemMessage} numberOfLines={2}>
+                                    {activityLine}
                                 </Text>
+                                {(reactionCount > 1 || (item.likers?.length || 0) > 1) ? (
+                                    <TouchableOpacity
+                                        onPress={() =>
+                                            openLikersList(
+                                                item.reactions?.length
+                                                    ? item.reactions.map((r) => `${r.emoji} ${r.userHandle}`)
+                                                    : item.likers || [],
+                                            )
+                                        }
+                                        hitSlop={8}
+                                    >
+                                        <Text style={styles.itemMessageLink}>See who reacted</Text>
+                                    </TouchableOpacity>
+                                ) : primaryHandle ? (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            if (replyCount > 0 && primaryReply) {
+                                                navigateToMessages({ handle: primaryReply.userHandle });
+                                                return;
+                                            }
+                                            navigation.navigate('ViewProfile', { handle: primaryHandle });
+                                        }}
+                                        hitSlop={8}
+                                    >
+                                        <Text style={styles.itemMessageLink}>
+                                            {replyCount > 0 ? 'Open reply in Messages' : 'View profile'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ) : null}
                             </View>
                         </TouchableOpacity>
                     );}}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>No story insights yet</Text>
+                            <Text style={styles.emptyText}>No story activity from others yet.</Text>
+                            <Text style={[styles.emptyText, { marginTop: 8, opacity: 0.7, fontSize: ox(12) }]}>
+                                Replies and reactions from other people show in Messages. Insights list which of your stories got activity.
+                            </Text>
+                        </View>
+                    }
+                />
+            ) : activeTab === 'groups' ? (
+                <FlatList
+                    key="groups"
+                    data={groupMessages}
+                    keyExtractor={(item, idx) => `group-${item.chatGroupId || idx}`}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={() => { void refreshData(); }}
+                            tintColor="#FFFFFF"
+                        />
+                    }
+                    renderItem={({ item }) => renderConversationRow(item)}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyText}>
+                                No group chats yet. Use New group on your profile or Create group on your own post (⋯ menu), then invite people from the + button in the group or from their profile.
+                            </Text>
                         </View>
                     }
                 />
             ) : (
                 <>
-                <View style={styles.conversationSearchWrap}>
-                    <Icon name="search" size={16} color="#9CA3AF" />
-                    <TextInput
-                        value={conversationQuery}
-                        onChangeText={setConversationQuery}
-                        placeholder={activeTab === 'groups' ? 'Search groups' : 'Search messages'}
-                        placeholderTextColor="#6B7280"
-                        style={styles.conversationSearchInput}
-                    />
-                    {!!conversationQuery && (
-                        <TouchableOpacity onPress={() => setConversationQuery('')}>
-                            <Icon name="close-circle" size={16} color="#9CA3AF" />
-                        </TouchableOpacity>
-                    )}
-                </View>
-                {activeTab === 'messages' && (
-                    <View style={styles.messageFiltersRow}>
+                {queriedItems.length > 0 ? (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.messageFiltersScroll}
+                        contentContainerStyle={styles.messageFiltersRow}
+                    >
                         {[
-                            { id: 'all', label: 'All' },
-                            { id: 'unread', label: 'Unread' },
-                            { id: 'requests', label: 'Requests' },
-                            { id: 'pinned', label: 'Pinned' },
+                            { id: 'all' as const, label: `All (${queriedItems.length})` },
+                            { id: 'groups' as const, label: `Groups (${queriedGroupItems.length})` },
+                            { id: 'unread' as const, label: `Unread (${queriedUnreadItems.length})` },
+                            { id: 'requests' as const, label: `Requests (${queriedRequestItems.length})` },
+                            { id: 'pinned' as const, label: `Pinned (${queriedPinnedItems.length})` },
                         ].map((item) => {
                             const active = messageFilter === item.id;
                             return (
                                 <TouchableOpacity
                                     key={item.id}
-                                    onPress={() => setMessageFilter(item.id as 'all' | 'unread' | 'requests' | 'pinned')}
+                                    onPress={() => setMessageFilter(item.id)}
                                     style={[styles.messageFilterChip, active && styles.messageFilterChipActive]}
                                 >
                                     <Text style={[styles.messageFilterChipText, active && styles.messageFilterChipTextActive]}>
@@ -815,370 +1371,454 @@ export default function InboxScreen({ navigation, route }: any) {
                                 </TouchableOpacity>
                             );
                         })}
-                    </View>
-                )}
+                    </ScrollView>
+                ) : null}
                 <FlatList
-                    data={activeTab === 'groups' ? searchedGroupMessages : searchedDirectMessages}
-                    keyExtractor={(item, idx) => `${item.kind}-${item.kind === 'group' ? item.chatGroupId || idx : item.otherHandle}`}
+                    key={`messages-${messageFilter}`}
+                    data={
+                        showMessageSections
+                            ? [...pinnedSection, ...requestSection, ...regularSection]
+                            : messagesTabItems
+                    }
+                    keyExtractor={(item, idx) => inboxConversationRowId(item) || String(idx)}
                     refreshControl={
                         <RefreshControl
                             refreshing={refreshing}
                             onRefresh={() => { void refreshData(); }}
-                            tintColor="#8B5CF6"
+                            tintColor="#FFFFFF"
                         />
                     }
-                    renderItem={({ item }) => {
-                        const isGroup = item.kind === 'group';
-                        const title = isGroup ? item.groupName || 'Group chat' : item.otherHandle;
-                        const subtitle = item.lastMessage?.text || (isGroup ? 'Open group' : 'Open conversation');
+                    renderItem={({ item, index }) => {
+                        const showPinnedHeader =
+                            showMessageSections && index === 0 && pinnedSection.length > 0 && item.isPinned;
+                        const showRequestsHeader =
+                            showMessageSections &&
+                            pinnedSection.length === index &&
+                            requestSection.length > 0 &&
+                            !!item.isRequest;
+                        const showRegularHeader =
+                            showMessageSections &&
+                            pinnedSection.length + requestSection.length === index &&
+                            regularSection.length > 0 &&
+                            !item.isPinned &&
+                            !item.isRequest;
+
                         return (
-                            <TouchableOpacity onPress={() => { void openConversation(item); }} style={styles.item}>
-                                <View style={styles.itemIcon}>
-                                    {isGroup ? (
-                                        <Avatar src={item.groupAvatarUrl || undefined} name={title} size={40} />
-                                    ) : (
-                                        <Avatar src={dmAvatarMap[item.otherHandle] || getAvatarForHandle(item.otherHandle)} name={item.otherHandle} size={40} />
-                                    )}
-                                </View>
-                                <View style={styles.itemContent}>
-                                    <Text style={styles.itemTitle}>{title}</Text>
-                                    <Text style={styles.itemMessage} numberOfLines={1}>{subtitle}</Text>
-                                    <Text style={styles.itemTime}>
-                                        {item.lastMessage?.timestamp ? timeAgo(item.lastMessage.timestamp) : ''}
-                                    </Text>
-                                    {!isGroup && item.isRequest && (
-                                        <Text style={styles.requestBadgeText}>Message request</Text>
-                                    )}
-                                </View>
-                                {!isGroup && (
-                                    <View style={styles.conversationActionsCol}>
-                                        <TouchableOpacity
-                                            style={styles.conversationActionBtn}
-                                            onPress={async () => {
-                                                if (!user?.handle) return;
-                                                if (item.isPinned) {
-                                                    await unpinConversation(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, isPinned: false }));
-                                                } else {
-                                                    await pinConversation(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, isPinned: true }));
-                                                }
-                                            }}
-                                        >
-                                            <Text style={styles.conversationActionText}>{item.isPinned ? 'Unpin' : 'Pin'}</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={styles.conversationActionBtn}
-                                            onPress={async () => {
-                                                if (!user?.handle) return;
-                                                if (item.isMuted) {
-                                                    await unmuteConversation(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, isMuted: false }));
-                                                } else {
-                                                    await muteConversation(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, isMuted: true }));
-                                                }
-                                            }}
-                                        >
-                                            <Text style={styles.conversationActionText}>{item.isMuted ? 'Unmute' : 'Mute'}</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={styles.conversationActionBtn}
-                                            onPress={async () => {
-                                                if (!user?.handle) return;
-                                                if ((item.unread || 0) > 0) {
-                                                    await markConversationRead(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, unread: 0 }));
-                                                } else {
-                                                    await markConversationUnread(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, unread: 1 }));
-                                                }
-                                            }}
-                                        >
-                                            <Text style={styles.conversationActionText}>{(item.unread || 0) > 0 ? 'Read' : 'Unread'}</Text>
-                                        </TouchableOpacity>
-                                        {item.isRequest && (
-                                            <TouchableOpacity
-                                                style={styles.conversationActionBtn}
-                                                onPress={async () => {
-                                                    if (!user?.handle) return;
-                                                    await acceptMessageRequest(user.handle, item.otherHandle);
-                                                    updateConversationRow(item, (r) => ({ ...r, isRequest: false }));
-                                                }}
-                                            >
-                                                <Text style={styles.conversationActionText}>Accept</Text>
-                                            </TouchableOpacity>
-                                        )}
-                                        <TouchableOpacity
-                                            style={[styles.conversationActionBtn, styles.conversationDeleteBtn]}
-                                            onPress={() =>
-                                                Alert.alert('Delete conversation', 'Delete this conversation?', [
-                                                    { text: 'Cancel', style: 'cancel' },
-                                                    {
-                                                        text: 'Delete',
-                                                        style: 'destructive',
-                                                        onPress: async () => {
-                                                            if (!user?.handle) return;
-                                                            await deleteConversation(user.handle, item.otherHandle);
-                                                            setConversations((prev) =>
-                                                                prev.filter((r) => !(r.kind === 'dm' && r.otherHandle === item.otherHandle))
-                                                            );
-                                                        },
-                                                    },
-                                                ])
-                                            }
-                                        >
-                                            <Text style={styles.conversationActionText}>Delete</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                )}
-                                {(item.unread || 0) > 0 && (
-                                    <View style={styles.unreadBadge}>
-                                        <Text style={styles.unreadBadgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
-                                    </View>
-                                )}
-                            </TouchableOpacity>
+                            <View>
+                                {showPinnedHeader ? <Text style={styles.sectionHeader}>Pinned</Text> : null}
+                                {showRequestsHeader ? <Text style={styles.sectionHeader}>Message Requests</Text> : null}
+                                {showRegularHeader ? <Text style={styles.sectionHeader}>Messages</Text> : null}
+                                {renderConversationRow(item)}
+                            </View>
                         );
                     }}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>
-                                {activeTab === 'groups' ? 'No private groups yet' : 'No messages yet'}
-                            </Text>
+                            <Text style={styles.emptyText}>No messages yet.</Text>
                         </View>
                     }
                 />
                 </>
             )}
+
+            <InboxChatInfoSheet
+                visible={!!inboxChatInfo}
+                conv={inboxChatInfo}
+                avatarSrc={
+                    inboxChatInfo && inboxChatInfo.kind !== 'group'
+                        ? dmAvatarMap[inboxChatInfo.otherHandle] || getAvatarForHandle(inboxChatInfo.otherHandle)
+                        : undefined
+                }
+                onClose={() => setInboxChatInfo(null)}
+                onOpenChat={() => {
+                    const c = inboxChatInfo;
+                    setInboxChatInfo(null);
+                    if (c) void openConversation(c);
+                }}
+                onViewProfile={
+                    inboxChatInfo && inboxChatInfo.kind !== 'group'
+                        ? () => {
+                              const handle = inboxChatInfo.otherHandle;
+                              setInboxChatInfo(null);
+                              navigation.navigate('ViewProfile', { handle });
+                          }
+                        : undefined
+                }
+                onAcceptRequest={
+                    inboxChatInfo?.isRequest
+                        ? () => {
+                              const c = inboxChatInfo;
+                              setInboxChatInfo(null);
+                              if (c) void handleAcceptRequest(c);
+                          }
+                        : undefined
+                }
+                onMarkRead={
+                    inboxChatInfo && (inboxChatInfo.unread || 0) > 0
+                        ? () => {
+                              const c = inboxChatInfo;
+                              setInboxChatInfo(null);
+                              if (c) void handleMarkRead(c);
+                          }
+                        : undefined
+                }
+                onMarkUnread={
+                    inboxChatInfo && inboxChatInfo.kind !== 'group' && !(inboxChatInfo.unread || 0)
+                        ? () => {
+                              const c = inboxChatInfo;
+                              setInboxChatInfo(null);
+                              if (c) void handleMarkUnread(c);
+                          }
+                        : undefined
+                }
+                onTogglePin={
+                    inboxChatInfo && inboxChatInfo.kind !== 'group'
+                        ? () => {
+                              const c = inboxChatInfo;
+                              setInboxChatInfo(null);
+                              if (c) void handleTogglePin(c);
+                          }
+                        : undefined
+                }
+                onToggleMute={
+                    inboxChatInfo && inboxChatInfo.kind !== 'group'
+                        ? () => {
+                              const c = inboxChatInfo;
+                              setInboxChatInfo(null);
+                              if (c) void handleToggleMute(c);
+                          }
+                        : undefined
+                }
+                onDeleteOrLeave={
+                    inboxChatInfo
+                        ? () => {
+                              const c = inboxChatInfo;
+                              setInboxChatInfo(null);
+                              if (c) handleDeleteOrLeave(c);
+                          }
+                        : undefined
+                }
+            />
         </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
+    pageShell: {
+        backgroundColor: '#070a12',
+    },
     loadingShell: {
-        justifyContent: 'center',
-        alignItems: 'center',
+        flex: 1,
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
     },
     header: {
-        padding: 16,
-        ...gazetteerHeader,
+        paddingHorizontal: ox(12),
+        paddingTop: ox(8),
+        paddingBottom: ox(12),
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
     },
     headerTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
+        fontSize: ox(20),
+        fontWeight: '600',
         color: '#FFFFFF',
     },
     headerActionText: {
-        color: '#F8D26A',
-        fontSize: 12,
-        fontWeight: '700',
+        color: '#FFFFFF',
+        fontSize: ox(12),
+        fontWeight: '500',
+    },
+    listActionRow: {
+        alignItems: 'flex-end',
+        paddingHorizontal: ox(12),
+        paddingBottom: ox(8),
+        paddingTop: ox(4),
+    },
+    storiesRail: {
+        paddingHorizontal: ox(12),
+        paddingBottom: ox(4),
+        gap: ox(12),
+        alignItems: 'flex-start',
+    },
+    storiesRailScroll: {
+        flexGrow: 0,
+        height: ox(84),
+        marginBottom: ox(8),
+    },
+    storyRailItem: {
+        width: ox(72),
+        alignItems: 'center',
+        gap: ox(4),
+    },
+    storyRing: {
+        width: ox(56),
+        height: ox(56),
+        borderRadius: ox(28),
+        padding: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    storyRingSeen: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+    },
+    storyRingInner: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#000',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    storyRailLabel: {
+        maxWidth: ox(72),
+        fontSize: ox(11),
+        color: '#D1D5DB',
     },
     tabs: {
         flexDirection: 'row',
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-        backgroundColor: 'rgba(0, 0, 0, 0.2)',
+        borderBottomColor: '#1F2937',
+        marginBottom: ox(8),
+        backgroundColor: 'transparent',
     },
     tab: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 13,
-        gap: 6,
+        paddingVertical: ox(6),
+        gap: ox(4),
     },
     tabActive: {
         borderBottomWidth: 2,
-        borderBottomColor: gazetteerTabActiveBorder,
+        borderBottomColor: '#FFFFFF',
     },
     tabText: {
-        fontSize: 13,
+        fontSize: ox(12),
         color: '#6B7280',
         fontWeight: '500',
     },
     tabTextActive: {
-        color: gazetteerTabActiveBorder,
+        color: '#FFFFFF',
         fontWeight: '600',
     },
     badge: {
-        backgroundColor: '#EF4444',
-        borderRadius: 10,
-        minWidth: 20,
-        height: 20,
+        backgroundColor: '#FFFFFF',
+        borderRadius: ox(10),
+        minWidth: ox(16),
+        height: ox(16),
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 6,
+        paddingHorizontal: ox(4),
     },
     badgeText: {
-        color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '600',
+        color: '#111827',
+        fontSize: ox(9),
+        fontWeight: '700',
     },
     item: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 11,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
-        gap: 10,
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(12),
+        marginHorizontal: ox(4),
+        borderRadius: ox(8),
+        gap: ox(10),
         position: 'relative',
     },
     itemUnread: {
-        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        borderLeftWidth: 4,
+        borderLeftColor: '#FFFFFF',
     },
-    itemIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
+    insightThumb: {
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(10),
+        backgroundColor: '#1F2937',
     },
-    notificationAvatarWrap: {
-        width: 40,
-        height: 40,
-        position: 'relative',
-    },
-    notificationTypeBadge: {
-        position: 'absolute',
-        right: -1,
-        bottom: -1,
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: '#A78BFA',
-        borderWidth: 1,
-        borderColor: '#111827',
-        alignItems: 'center',
+    insightThumbText: {
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(10),
+        backgroundColor: '#1e3a5f',
+        padding: ox(5),
         justifyContent: 'center',
     },
-    rowActionIcon: {
-        paddingHorizontal: 6,
-        paddingVertical: 4,
-    },
-    conversationSearchWrap: {
-        marginHorizontal: 12,
-        marginTop: 10,
-        marginBottom: 8,
-        borderRadius: 999,
-        ...glassSearch,
-        paddingHorizontal: 12,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    conversationSearchInput: {
-        flex: 1,
-        color: '#FFFFFF',
-        fontSize: 14,
-        paddingVertical: 8,
-    },
-    messageFiltersRow: {
-        flexDirection: 'row',
-        gap: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-    },
-    messageFilterChip: {
-        borderRadius: 999,
-        ...glassSurface,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-    },
-    messageFilterChipActive: {
-        ...chipActiveMagenta,
-    },
-    messageFilterChipText: {
-        color: '#D1D5DB',
-        fontSize: 12,
-        fontWeight: '700',
-    },
-    messageFilterChipTextActive: {
-        ...chipActiveMagentaText,
-    },
-    conversationActionsCol: {
-        alignItems: 'flex-end',
-        gap: 4,
-        marginRight: 8,
-    },
-    conversationActionBtn: {
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#111827',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-    },
-    conversationDeleteBtn: {
-        borderColor: '#7F1D1D',
-        backgroundColor: '#450A0A',
-    },
-    conversationActionText: {
+    insightThumbTextInner: {
         color: '#E5E7EB',
-        fontSize: 10,
+        fontSize: ox(8),
+        lineHeight: ox(10),
+        fontWeight: '600',
+    },
+    insightThumbFallback: {
+        width: ox(48),
+        height: ox(48),
+        borderRadius: ox(10),
+        backgroundColor: '#1F2937',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    itemMessageStrong: {
+        color: '#FFFFFF',
         fontWeight: '700',
+    },
+    conversationRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(10),
+        marginHorizontal: ox(8),
+        marginBottom: ox(2),
+        borderRadius: ox(8),
+        backgroundColor: '#070a12',
+        gap: ox(10),
+    },
+    conversationRowUnread: {
+        backgroundColor: 'rgba(255,255,255,0.04)',
+    },
+    conversationTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+        minWidth: 0,
+    },
+    conversationMetaCol: {
+        alignItems: 'flex-end',
+        gap: ox(4),
+        flexShrink: 0,
+    },
+    moreBtn: {
+        padding: ox(6),
+    },
+    sectionHeader: {
+        color: '#9CA3AF',
+        fontSize: ox(11),
+        fontWeight: '600',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        paddingHorizontal: ox(14),
+        paddingTop: ox(10),
+        paddingBottom: ox(6),
     },
     requestBadgeText: {
-        marginTop: 4,
+        marginTop: ox(4),
         color: '#F8D26A',
-        fontSize: 11,
+        fontSize: ox(11),
         fontWeight: '700',
     },
     itemContent: {
         flex: 1,
+        minWidth: 0,
     },
     itemHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 4,
+        marginBottom: ox(4),
+        gap: ox(8),
     },
     itemTitle: {
-        fontSize: 15,
+        fontSize: ox(13),
         fontWeight: '600',
         color: '#FFFFFF',
+        flexShrink: 1,
     },
     itemMessage: {
-        fontSize: 13,
-        color: '#9CA3AF',
+        fontSize: ox(11),
+        color: '#6B7280',
         marginTop: 1,
     },
     itemMessageLink: {
-        color: '#93C5FD',
+        color: '#7DD3FC',
         textDecorationLine: 'underline',
-        fontWeight: '700',
+        fontWeight: '600',
     },
     itemTime: {
-        fontSize: 12,
-        color: '#6B7280',
+        fontSize: ox(10),
+        color: '#9CA3AF',
+    },
+    itemIcon: {
+        flexShrink: 0,
+    },
+    notifKindChip: {
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(2),
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.2)',
+    },
+    notifKindChipText: {
+        color: 'rgba(255,255,255,0.85)',
+        fontSize: ox(9),
+        fontWeight: '700',
     },
     storyUnavailableChip: {
         alignSelf: 'flex-start',
-        marginTop: 6,
+        marginTop: ox(6),
+        borderRadius: ox(6),
         borderWidth: 1,
-        borderColor: 'rgba(248, 113, 113, 0.45)',
-        backgroundColor: 'rgba(239, 68, 68, 0.15)',
-        borderRadius: 999,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
+        borderColor: 'rgba(239,68,68,0.3)',
+        backgroundColor: 'rgba(239,68,68,0.1)',
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(4),
     },
     storyUnavailableChipText: {
         color: '#FCA5A5',
-        fontSize: 10,
+        fontSize: ox(10),
+    },
+    notificationAvatarWrap: {
+        position: 'relative',
+    },
+    notificationTypeBadge: {
+        position: 'absolute',
+        right: -2,
+        bottom: -2,
+        width: ox(18),
+        height: ox(18),
+        borderRadius: ox(9),
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: '#070a12',
+    },
+    followRequestActions: {
+        flexDirection: 'row',
+        gap: ox(8),
+        marginTop: ox(8),
+    },
+    followRequestBtn: {
+        borderRadius: ox(8),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(6),
+    },
+    followRequestAcceptBtn: {
+        backgroundColor: '#FFFFFF',
+    },
+    followRequestDenyBtn: {
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+    },
+    followRequestAcceptText: {
+        color: '#111827',
+        fontSize: ox(12),
         fontWeight: '700',
     },
+    followRequestDenyText: {
+        color: '#E5E7EB',
+        fontSize: ox(12),
+        fontWeight: '600',
+    },
     storyThumbWrap: {
-        width: 40,
-        height: 40,
-        borderRadius: 9,
+        width: ox(44),
+        height: ox(56),
+        borderRadius: ox(6),
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#374151',
         backgroundColor: '#111827',
     },
     storyThumbImage: {
@@ -1189,69 +1829,79 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#111827',
     },
-    followRequestActions: {
-        marginTop: 8,
+    rowActionIcon: {
+        paddingHorizontal: ox(6),
+        paddingVertical: ox(4),
+    },
+    messageFiltersScroll: {
+        flexGrow: 0,
+        maxHeight: ox(44),
+    },
+    messageFiltersRow: {
         flexDirection: 'row',
-        gap: 8,
+        gap: ox(6),
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
+        alignItems: 'center',
     },
-    followRequestBtn: {
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+    messageFilterChip: {
+        borderRadius: ox(999),
         borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
+        minHeight: ox(32),
+        justifyContent: 'center',
     },
-    followRequestAcceptBtn: {
-        borderColor: '#15803D',
-        backgroundColor: '#14532D',
+    messageFilterChipActive: {
+        backgroundColor: '#FFFFFF',
+        borderColor: '#FFFFFF',
     },
-    followRequestDenyBtn: {
-        borderColor: '#4B5563',
-        backgroundColor: '#1F2937',
+    messageFilterChipText: {
+        color: '#D1D5DB',
+        fontSize: ox(10),
+        fontWeight: '600',
     },
-    followRequestAcceptText: {
-        color: '#DCFCE7',
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    followRequestDenyText: {
-        color: '#E5E7EB',
-        fontSize: 11,
-        fontWeight: '700',
+    messageFilterChipTextActive: {
+        color: '#111827',
     },
     unreadDot: {
         position: 'absolute',
-        right: 6,
-        top: 18,
+        right: ox(10),
+        top: ox(18),
         width: 8,
         height: 8,
-        borderRadius: 4,
-        backgroundColor: '#3B82F6',
+        borderRadius: ox(4),
+        backgroundColor: '#FFFFFF',
     },
     unreadBadge: {
-        backgroundColor: '#3B82F6',
-        borderRadius: 12,
-        minWidth: 24,
-        height: 24,
+        backgroundColor: '#FFFFFF',
+        borderRadius: ox(10),
+        minWidth: ox(18),
+        height: ox(18),
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 8,
+        paddingHorizontal: ox(6),
     },
     unreadBadgeText: {
-        color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '600',
+        color: '#111827',
+        fontSize: ox(10),
+        fontWeight: '700',
     },
     emptyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 40,
+        padding: ox(40),
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: ox(14),
         color: '#6B7280',
+        textAlign: 'center',
+        lineHeight: ox(20),
+        paddingHorizontal: ox(12),
     },
 });
 

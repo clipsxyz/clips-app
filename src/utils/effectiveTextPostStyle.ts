@@ -37,7 +37,7 @@ const FALLBACK_BACKGROUNDS = [
 export function getTextOnlyFallbackBackground(post: Post): string {
   const t = getEffectiveTextStyleForPost(post)?.background;
   if (t) return t;
-  const text = post.text || '';
+  const text = post.text || post.caption || (post as { text_content?: string }).text_content || '';
   return FALLBACK_BACKGROUNDS[text.length % FALLBACK_BACKGROUNDS.length];
 }
 

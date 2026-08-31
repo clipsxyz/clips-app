@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     View,
     Text,
@@ -8,25 +8,21 @@ import {
     ActivityIndicator,
     Alert,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
+import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { chipActiveMagenta, chipActiveMagentaText, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
 import BoostSelectionModal from '../components/BoostSelectionModal.native';
 import BoostPostTile, { boostTileSize } from '../components/BoostPostTile.native';
-import { getActiveBoost, getBoostAnalytics, type BoostAnalytics } from '../api/boost';
+import { getActiveBoost, getAllActiveBoostLabels } from '../api/boost';
 import {
     classifyBoostStatus,
-    getQualityLabel,
-    getQualityReason,
-    estimateReachTeaser,
-    boostStatusLabel,
 } from '../utils/boostPostGrid';
 
-import { buildInstantAnalytics } from '../utils/boostInsightsNative';
 import BoostInsightsSheet from '../components/BoostInsightsSheet.native';
+import { ox } from '../constants/nativeOpticalScale';
 
 const BoostScreen: React.FC = ({ navigation }: any) => {
     const { user } = useAuth();
@@ -36,36 +32,59 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [error, setError] = useState<string | null>(null);
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [showBoostModal, setShowBoostModal] = useState(false);
-    const [analyticsByPostId, setAnalyticsByPostId] = useState<Record<string, BoostAnalytics>>({});
     const [boostFilter, setBoostFilter] = useState<'all' | 'ready' | 'active' | 'ended'>('all');
     const [boostSort, setBoostSort] = useState<'best' | 'recent'>('best');
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
-    const analyticsCacheRef = useRef<Map<string, { data: BoostAnalytics; ts: number }>>(new Map());
 
-    useEffect(() => {
-        loadUserPosts();
-    }, [user?.handle]);
-
-    const loadUserPosts = async () => {
+    const loadUserPosts = useCallback(async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
             setLoading(false);
             return;
         }
-        setLoading(true);
+        if (!opts?.silent) {
+            setLoading(true);
+        }
         setError(null);
         try {
-            const userPosts = await fetchPostsByUser(user.handle, 50);
-            const decorated = userPosts.map(p => decorateForUser(userId, p));
+            const userPosts = await fetchPostsByUser(user.handle, 50, user.id);
+            // One map lookup for all Sponsored flags — avoid N× getActiveBoost (was timing out on API in mock).
+            const boostLabels = await getAllActiveBoostLabels();
+            const decorated = userPosts.map((p) => {
+                const base = decorateForUser(userId, p);
+                const feedType = boostLabels.get(String(p.id));
+                if (!feedType && !base.isBoosted) return base;
+                return {
+                    ...base,
+                    isBoosted: true as const,
+                    boostFeedType: base.boostFeedType ?? feedType ?? 'regional',
+                };
+            });
             setPosts(decorated);
         } catch (err) {
+            const name = err && typeof err === 'object' ? String((err as { name?: string }).name || '') : '';
+            const message = err && typeof err === 'object' ? String((err as { message?: string }).message || '') : '';
+            if (name === 'AbortError' || message === 'Aborted') {
+                return;
+            }
             console.error('Error loading user posts:', err);
             setError('Failed to load your posts');
         } finally {
             setLoading(false);
         }
-    };
+    }, [user?.handle, userId]);
+
+    useEffect(() => {
+        void loadUserPosts();
+    }, [loadUserPosts]);
+
+    // Soft refresh on focus — keep existing tiles visible (no full-screen spinner).
+    useFocusEffect(
+        useCallback(() => {
+            void loadUserPosts({ silent: true });
+        }, [loadUserPosts]),
+    );
 
     const openBoostModal = useCallback(async (post: Post) => {
         setSelectedPost(post);
@@ -102,7 +121,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const filteredPosts = useMemo(() => {
         if (boostFilter === 'all') return posts;
         return posts.filter((p) => classifyBoostStatus(p) === boostFilter);
-    }, [posts, boostFilter, classifyBoostStatus]);
+    }, [posts, boostFilter]);
 
     const sortedPosts = useMemo(() => {
         const next = [...filteredPosts];
@@ -119,40 +138,16 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         const ready = posts.filter((p) => classifyBoostStatus(p) === 'ready').length;
         const ended = posts.filter((p) => classifyBoostStatus(p) === 'ended').length;
         return { active, ready, ended, total: posts.length };
-    }, [posts, classifyBoostStatus]);
-
-    const getInsightsCached = useCallback(async (postId: string) => {
-        const key = `${insightsRange}:${postId}`;
-        const cached = analyticsCacheRef.current.get(key);
-        const ttlMs = 60 * 1000;
-        if (cached && Date.now() - cached.ts < ttlMs) return cached.data;
-        const data = await getBoostAnalytics(postId, insightsRange);
-        analyticsCacheRef.current.set(key, { data, ts: Date.now() });
-        return data;
-    }, [insightsRange]);
-
-    useEffect(() => {
-        sortedPosts.slice(0, 8).forEach((p) => {
-            void getInsightsCached(p.id)
-                .then((analytics) => {
-                    setAnalyticsByPostId((prev) => ({ ...prev, [p.id]: prev[p.id] || analytics }));
-                })
-                .catch(() => {});
-        });
-    }, [sortedPosts, getInsightsCached]);
+    }, [posts]);
 
     const openInsights = (post: Post) => {
         setInsightsPost(post);
         setInsightsVisible(true);
-        setAnalyticsByPostId((prev) => ({
-            ...prev,
-            [post.id]: prev[post.id] || buildInstantAnalytics(post),
-        }));
     };
 
     if (!user) {
         return (
-            <GazetteerScreenShell contentStyle={styles.centeredShell}>
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>Please sign in to view your posts</Text>
             </GazetteerScreenShell>
         );
@@ -160,22 +155,22 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
 
     if (loading) {
         return (
-            <GazetteerScreenShell contentStyle={styles.centeredShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
+                <ActivityIndicator size="large" color="#3d9b8f" />
             </GazetteerScreenShell>
         );
     }
 
     if (error) {
         return (
-            <GazetteerScreenShell contentStyle={styles.centeredShell}>
+            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>{error}</Text>
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell>
+        <GazetteerScreenShell ambientVariant="passport">
             <View style={styles.header}>
                 <Text style={styles.title}>Your Posts</Text>
                 <Text style={styles.subtitle}>Boost your posts to reach more people</Text>
@@ -242,7 +237,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                 <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>{posts.length === 0 ? "You haven't created any posts yet." : 'No posts in this filter.'}</Text>
                     <TouchableOpacity
-                        onPress={() => navigation.navigate('CreateComposer')}
+                        onPress={() => navigation.navigate('InstantCreate')}
                         style={styles.createButton}
                     >
                         <Text style={styles.createButtonText}>Create Your First Post</Text>
@@ -256,60 +251,30 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                     columnWrapperStyle={styles.gridRow}
                     contentContainerStyle={styles.gridContent}
                     renderItem={({ item }) => {
-                        const status = classifyBoostStatus(item);
-                        const quality = getQualityLabel(item);
-                        const qualityToneStyle =
-                            quality.tone === 'emerald'
-                                ? styles.qualityEmerald
-                                : quality.tone === 'sky'
-                                  ? styles.qualitySky
-                                  : styles.qualityAmber;
-                        const statusToneStyle =
-                            status === 'active'
-                                ? styles.statusActive
-                                : status === 'ended'
-                                  ? styles.statusEnded
-                                  : styles.statusReady;
-
                         return (
                             <View style={[styles.gridCell, { width: tileSize }]}>
-                                <View style={styles.tileMetaCard}>
-                                    <View style={styles.tileMetaRow}>
-                                        <Text style={[styles.qualityPill, qualityToneStyle]}>
-                                            {quality.label}
-                                        </Text>
-                                        <Text style={[styles.statusPill, statusToneStyle]}>
-                                            {boostStatusLabel(status)}
+                                <View style={[styles.tileWrap, { width: tileSize, height: tileSize }]}>
+                                    <BoostPostTile
+                                        post={item}
+                                        size={tileSize}
+                                        showBoostIcon
+                                        onPress={() => {
+                                            void openBoostModal(item);
+                                        }}
+                                    />
+                                    <View style={styles.tileOverlayBadges} pointerEvents="none">
+                                        <Text style={styles.tapToBoostPill} numberOfLines={1}>
+                                            Tap to boost
                                         </Text>
                                     </View>
-                                    <Text style={styles.tileMetaReason} numberOfLines={2}>
-                                        {getQualityReason(item)}
-                                    </Text>
-                                    <Text style={styles.tileMetaReach} numberOfLines={1}>
-                                        {estimateReachTeaser(item)} from base EUR 4.99
-                                    </Text>
                                 </View>
                                 <TouchableOpacity
                                     onPress={() => openInsights(item)}
                                     style={styles.insightsBtn}
+                                    hitSlop={6}
                                 >
-                                    <Text style={styles.insightsBtnText}>View insights</Text>
+                                    <Text style={styles.insightsBtnText}>Insights</Text>
                                 </TouchableOpacity>
-                                {analyticsByPostId[item.id]?.hasBoost &&
-                                analyticsByPostId[item.id]?.analytics ? (
-                                    <Text style={styles.tileInsightsHint} numberOfLines={1}>
-                                        {analyticsByPostId[item.id]?.analytics?.impressions ?? 0} imp ·{' '}
-                                        {analyticsByPostId[item.id]?.analytics?.likes ?? 0} likes
-                                    </Text>
-                                ) : null}
-                                <BoostPostTile
-                                    post={item}
-                                    size={tileSize}
-                                    showBoostIcon
-                                    onPress={() => {
-                                        void openBoostModal(item);
-                                    }}
-                                />
                             </View>
                         );
                     }}
@@ -346,49 +311,49 @@ const styles = StyleSheet.create({
     centeredShell: {
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        padding: ox(24),
     },
     header: {
-        padding: 16,
+        padding: ox(16),
         ...gazetteerHeader,
     },
     title: {
-        fontSize: 20,
+        fontSize: ox(20),
         fontWeight: 'bold',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: ox(4),
     },
     subtitle: {
-        fontSize: 14,
+        fontSize: ox(14),
         color: '#9CA3AF',
     },
     summaryRow: {
         flexDirection: 'row',
-        gap: 12,
-        marginTop: 8,
+        gap: ox(12),
+        marginTop: ox(8),
     },
     summaryText: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#94A3B8',
         fontWeight: '600',
     },
     chipsRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 8,
-        marginTop: 8,
+        gap: ox(8),
+        marginTop: ox(8),
     },
     filterChip: {
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(6),
+        borderRadius: ox(999),
         ...glassSurface,
     },
     filterChipActive: {
         ...chipActiveMagenta,
     },
     filterChipText: {
-        fontSize: 11,
+        fontSize: ox(11),
         color: '#CBD5E1',
         fontWeight: '700',
     },
@@ -396,9 +361,9 @@ const styles = StyleSheet.create({
         ...chipActiveMagentaText,
     },
     smallChip: {
-        paddingHorizontal: 9,
-        paddingVertical: 5,
-        borderRadius: 999,
+        paddingHorizontal: ox(9),
+        paddingVertical: ox(5),
+        borderRadius: ox(999),
         ...glassSurface,
     },
     smallChipActive: {
@@ -409,7 +374,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(217, 27, 92, 0.25)',
     },
     smallChipText: {
-        fontSize: 10,
+        fontSize: ox(10),
         color: '#CBD5E1',
         fontWeight: '700',
     },
@@ -420,131 +385,84 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 40,
+        padding: ox(40),
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#9CA3AF',
-        marginBottom: 24,
+        marginBottom: ox(24),
         textAlign: 'center',
     },
     createButton: {
-        paddingHorizontal: 24,
-        paddingVertical: 12,
+        paddingHorizontal: ox(24),
+        paddingVertical: ox(12),
         backgroundColor: '#d91b5c',
-        borderRadius: 8,
+        borderRadius: ox(8),
     },
     createButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: ox(16),
         fontWeight: '600',
     },
     gridContent: {
-        paddingHorizontal: 8,
-        paddingBottom: 24,
+        paddingHorizontal: ox(8),
+        paddingBottom: ox(24),
     },
     gridRow: {
-        gap: 6,
-        marginBottom: 6,
+        gap: ox(6),
+        marginBottom: ox(10),
+        alignItems: 'flex-start',
     },
     gridCell: {
-        marginBottom: 10,
+        marginBottom: ox(4),
     },
-    tileMetaCard: {
-        borderRadius: 10,
-        padding: 8,
-        marginBottom: 6,
-        ...glassPanel,
+    tileWrap: {
+        borderRadius: ox(12),
+        overflow: 'hidden',
+        position: 'relative',
     },
-    tileMetaRow: {
+    tileOverlayBadges: {
+        position: 'absolute',
+        left: ox(6),
+        right: ox(6),
+        bottom: ox(6),
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 4,
-        marginBottom: 4,
+        gap: ox(4),
     },
-    qualityPill: {
-        fontSize: 9,
+    tapToBoostPill: {
+        fontSize: ox(10),
         fontWeight: '700',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 999,
-        borderWidth: 1,
+        paddingHorizontal: ox(8),
+        paddingVertical: ox(4),
+        borderRadius: ox(999),
         overflow: 'hidden',
-    },
-    qualityEmerald: {
-        color: '#6EE7B7',
-        borderColor: 'rgba(52, 211, 153, 0.4)',
-        backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    },
-    qualitySky: {
-        color: '#7DD3FC',
-        borderColor: 'rgba(56, 189, 248, 0.4)',
-        backgroundColor: 'rgba(14, 165, 233, 0.12)',
-    },
-    qualityAmber: {
-        color: '#FCD34D',
-        borderColor: 'rgba(251, 191, 36, 0.4)',
-        backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    },
-    statusPill: {
-        fontSize: 9,
-        fontWeight: '700',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 999,
+        color: '#FFFFFF',
+        backgroundColor: 'rgba(0,0,0,0.72)',
         borderWidth: 1,
-    },
-    statusActive: {
-        color: '#6EE7B7',
-        borderColor: 'rgba(52, 211, 153, 0.4)',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    },
-    statusEnded: {
-        color: '#D1D5DB',
-        borderColor: 'rgba(156, 163, 175, 0.35)',
-        backgroundColor: 'rgba(107, 114, 128, 0.15)',
-    },
-    statusReady: {
-        color: '#7DD3FC',
-        borderColor: 'rgba(56, 189, 248, 0.4)',
-        backgroundColor: 'rgba(14, 165, 233, 0.12)',
-    },
-    tileMetaReason: {
-        fontSize: 9,
-        color: '#6B7280',
-        lineHeight: 12,
-    },
-    tileMetaReach: {
-        fontSize: 9,
-        color: '#9CA3AF',
-        marginTop: 2,
+        borderColor: 'rgba(255,255,255,0.28)',
     },
     insightsBtn: {
-        minHeight: 30,
-        borderRadius: 8,
+        marginTop: ox(6),
+        minHeight: ox(28),
+        borderRadius: ox(8),
         borderWidth: 1,
         borderColor: 'rgba(56, 189, 248, 0.35)',
         backgroundColor: 'rgba(14, 165, 233, 0.12)',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 6,
-        paddingHorizontal: 6,
+        paddingHorizontal: ox(6),
     },
     insightsBtnText: {
-        color: '#BAE6FD',
-        fontSize: 10,
+        color: '#7DD3FC',
+        fontSize: ox(11),
         fontWeight: '700',
     },
-    tileInsightsHint: {
-        fontSize: 9,
-        color: '#94A3B8',
-        marginBottom: 4,
-    },
     errorText: {
-        fontSize: 16,
+        fontSize: ox(16),
         color: '#EF4444',
         textAlign: 'center',
-        marginTop: 40,
+        marginTop: ox(40),
     },
 });
 

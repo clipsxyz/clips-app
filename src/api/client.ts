@@ -1,23 +1,124 @@
 /// <reference types="vite/client" />
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
-import { getApiBaseUrl } from './apiBaseUrl';
+import { clearLaravelUnreachable, getRuntimeEnv, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import { getAuthTokenAsync, getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
+import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
+import { isMockMode } from './apiMode';
 
-const API_BASE_URL = getApiBaseUrl();
+/** Must stay ≥ 10s so local Metro/Laravel profile GETs are not aborted early. */
+const LARAVEL_USERS_GET_TIMEOUT_MS = 12_000;
+
+export function isAbortError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const name = String((error as { name?: string }).name || '');
+    const message = String((error as { message?: string }).message || '');
+    return name === 'AbortError' || name === 'TimeoutError' || message === 'Aborted';
+}
+
+export function isTooManyRequestsError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const status = Number((error as { status?: number }).status);
+    const message = String((error as { message?: string }).message || '');
+    return status === 429 || /too many attempts/i.test(message);
+}
+
+function throwAbortError(): never {
+    const abortError = new Error('Aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+}
+
+function throwMockConnectionRefused(): never {
+    // Mock mode / allowlist miss is not a downed server. Never poison the session
+    // (that made likes/views/comments save only in memory while the feed still loaded from Laravel).
+    const connectionError = new Error('CONNECTION_REFUSED');
+    connectionError.name = 'ConnectionRefused';
+    throw connectionError;
+}
+
+/**
+ * `apiRequest` allowlist. Login / feed / createPost / profile GET use dedicated fetch helpers
+ * that skip this. Anything else must match here or it throws CONNECTION_REFUSED and the caller
+ * falls back to in-memory mock (likes/views/comments looking saved, then resetting on refresh).
+ */
+const LIVE_API_REQUEST_PATHS = new Set<string>([
+    '/posts',
+    '/upload/single',
+    '/locations/search',
+    '/locations/geocode',
+    '/locations/details',
+    '/search',
+    '/search/places',
+    '/search/places/details',
+    '/search/places/summary',
+    '/notifications/fcm-token',
+    '/collections',
+    '/me/collections',
+    '/drafts',
+    '/chat-groups',
+    '/messages/send',
+    '/messages/conversations',
+    '/notifications/unread-count',
+    '/notifications/mark-all-read',
+    '/users/privacy/toggle',
+    '/users/check-follows-me',
+    '/stories',
+    '/link-preview',
+    '/v1/parse-link',
+]);
+
+/** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
+const LIVE_API_PATH_PREFIXES = [
+    '/posts/',
+    '/users/',
+    '/comments/',
+    '/auth/',
+    '/me/',
+    '/messages/',
+    '/notifications/',
+    '/chat-groups/',
+    '/stories/',
+    '/collections/',
+    '/drafts/',
+    '/boost/',
+    '/render-jobs/',
+    '/public/posts/',
+] as const;
+
+function isMigratedApiRequestPath(endpoint: string): boolean {
+    const path = (endpoint.split('?')[0] || '').replace(/\/$/, '') || '/';
+    if (LIVE_API_REQUEST_PATHS.has(path)) return true;
+    return LIVE_API_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
 export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
-    const token = localStorage.getItem('authToken');
+    // Mock mode, or unmigrated endpoint: keep local mock data; do not hit Laravel.
+    if (isMockMode() || !isMigratedApiRequestPath(endpoint)) {
+        throwMockConnectionRefused();
+    }
+
+    const token = (await getAuthTokenAsync())?.trim() || '';
     const { timeoutMs = 8000, ...fetchOptions } = options;
+    const API_BASE_URL = getApiBaseUrl();
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+    const extraHeaders = fetchOptions.headers;
+    const extraHeaderObj =
+        extraHeaders instanceof Headers
+            ? Object.fromEntries(extraHeaders.entries())
+            : extraHeaders && !Array.isArray(extraHeaders)
+              ? (extraHeaders as Record<string, string>)
+              : {};
+
     const config: RequestInit = {
         ...fetchOptions,
         headers: {
+            Accept: 'application/json',
             'Content-Type': 'application/json',
-            ...(token && { Authorization: `Bearer ${token}` }),
-            ...fetchOptions.headers,
+            ...extraHeaderObj,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         signal: controller.signal,
     };
@@ -35,20 +136,32 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
             throw error;
         }
 
-        return response.json();
+        const text = await response.text();
+        clearLaravelUnreachable();
+        if (!text) return null;
+        try {
+            return JSON.parse(text);
+        } catch {
+            const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+            throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
+        }
     } catch (error: any) {
         clearTimeout(timeoutId);
         // Suppress connection refused errors when backend isn't running
         // Check for various connection error patterns
+        const isAbort = error?.name === 'AbortError';
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            error?.name === 'AbortError' ||
             (error?.name === 'TypeError' && error?.message?.includes('fetch'));
 
+        if (isAbort) {
+            throw error;
+        }
         if (isConnectionError) {
             // Re-throw with a specific error type that can be caught and handled gracefully
+            markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
             throw connectionError;
@@ -69,18 +182,404 @@ export async function registerUser(userData: {
     locationNational?: string;
     accountType?: 'personal' | 'business';
     isBusiness?: boolean;
-}) {
-    return apiRequest('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(userData),
-    });
+    inviteHandle?: string;
+}): Promise<{ user: Record<string, unknown>; token: string }> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/register`;
+
+    // Laravel username must be [a-zA-Z0-9_]; never send a raw email.
+    const emailLocal = String(userData.email || '')
+        .split('@')[0]
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .slice(0, 40);
+    const username =
+        String(userData.username || '')
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .slice(0, 50) ||
+        emailLocal ||
+        `user_${Date.now()}`;
+
+    const payload = {
+        username,
+        email: userData.email,
+        password: userData.password,
+        // `confirmed` rule on AuthController::register
+        password_confirmation: userData.password,
+        displayName: userData.displayName,
+        handle: userData.handle,
+        locationLocal: String(userData.locationLocal || '').trim() || undefined,
+        locationRegional: String(userData.locationRegional || '').trim() || undefined,
+        locationNational: String(userData.locationNational || '').trim() || undefined,
+        accountType: userData.accountType,
+        isBusiness: userData.isBusiness,
+        invite: String(userData.inviteHandle || '').replace(/^@/, '').trim() || undefined,
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    try {
+        console.log('[registerUser/client] POST', url, {
+            username,
+            email: userData.email,
+            handle: userData.handle,
+            locationLocal: payload.locationLocal,
+            locationRegional: payload.locationRegional,
+            locationNational: payload.locationNational,
+        });
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const errorData = await response.json().catch(() => ({ error: 'Registration failed' }));
+        if (!response.ok) {
+            const errorMessage =
+                (errorData as any).error ||
+                (errorData as any).message ||
+                ((errorData as any).errors ? JSON.stringify((errorData as any).errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            console.log('[registerUser/client] failed', { status: response.status, errorMessage });
+            throw error;
+        }
+
+        const data = errorData as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Registration succeeded but no API token was returned');
+        }
+        await persistAuthToken(token);
+        console.log('[registerUser/client] ok', {
+            hasToken: true,
+            userId: (data.user as any)?.id,
+            location_local: (data.user as any)?.location_local,
+            location_regional: (data.user as any)?.location_regional,
+            location_national: (data.user as any)?.location_national,
+        });
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error(`CONNECTION_REFUSED registering at ${url}`);
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
-export async function loginUser(email: string, password: string) {
-    return apiRequest('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-    });
+export async function loginUser(email: string, password: string): Promise<{
+    user: Record<string, unknown>;
+    token: string;
+}> {
+    // Keep existing mock login path (UI falls back to local registrations).
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    // Laravel mounts auth under `/api/auth/*`. `getApiBaseUrl()` already includes `/api`.
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/login`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({ email, password }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Login failed' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            throw error;
+        }
+
+        const data = (await response.json()) as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Login succeeded but no API token was returned');
+        }
+
+        await persistAuthToken(token);
+
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
+}
+
+export async function resetLocalPassword(email: string, password: string): Promise<{
+    user: Record<string, unknown>;
+    token: string;
+}> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/password/reset-local`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({
+                email,
+                password,
+                password_confirmation: password,
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Reset failed' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            throw error;
+        }
+
+        const data = (await response.json()) as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Password was reset but no API token was returned');
+        }
+        await persistAuthToken(token);
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
+}
+
+export async function requestPasswordResetCode(email: string): Promise<{
+    ok: boolean;
+    delivery: 'mock' | 'email';
+    expires_in_seconds: number;
+    debug_code?: string;
+}> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/password/forgot`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({ email }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Could not send code' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            throw error;
+        }
+
+        return (await response.json()) as {
+            ok: boolean;
+            delivery: 'mock' | 'email';
+            expires_in_seconds: number;
+            debug_code?: string;
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
+}
+
+export async function resetPasswordWithCode(
+    email: string,
+    code: string,
+    password: string,
+): Promise<{
+    user: Record<string, unknown>;
+    token: string;
+}> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/password/reset`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({
+                email,
+                code,
+                password,
+                password_confirmation: password,
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Reset failed' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            throw error;
+        }
+
+        const data = (await response.json()) as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Password was reset but no API token was returned');
+        }
+        await persistAuthToken(token);
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function getCurrentUser() {
@@ -174,6 +673,96 @@ export async function verifyPhoneVerificationCode(phone: string, code: string): 
     });
 }
 
+export async function removeVerifiedPhone(): Promise<{
+    ok: boolean;
+    phone_number: null;
+    phone_verified_at: null;
+}> {
+    if (!isLaravelApiEnabled()) {
+        return { ok: true, phone_number: null, phone_verified_at: null };
+    }
+    return apiRequest('/auth/phone/remove', {
+        method: 'POST',
+    });
+}
+
+export async function changePassword(payload: {
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+}): Promise<{ ok: boolean }> {
+    if (!isLaravelApiEnabled()) {
+        return { ok: true };
+    }
+    return apiRequest('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+}
+
+export type UserNotificationSettings = {
+    enabled: boolean;
+    directMessages: boolean;
+    groupChats: boolean;
+    likes: boolean;
+    comments: boolean;
+    replies: boolean;
+    follows: boolean;
+    followRequests: boolean;
+    storyInsights: boolean;
+    questions: boolean;
+    shares: boolean;
+    reclips: boolean;
+};
+
+function asUserNotificationSettings(raw: unknown): UserNotificationSettings | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const row = raw as Record<string, unknown>;
+    const bool = (key: string, fallback: boolean): boolean =>
+        typeof row[key] === 'boolean' ? (row[key] as boolean) : fallback;
+    return {
+        enabled: bool('enabled', true),
+        directMessages: bool('directMessages', true),
+        groupChats: bool('groupChats', true),
+        likes: bool('likes', true),
+        comments: bool('comments', true),
+        replies: bool('replies', true),
+        follows: bool('follows', true),
+        followRequests: bool('followRequests', true),
+        storyInsights: bool('storyInsights', true),
+        questions: bool('questions', true),
+        shares: bool('shares', true),
+        reclips: bool('reclips', true),
+    };
+}
+
+export async function fetchNotificationPreferences(): Promise<UserNotificationSettings | null> {
+    if (isMockMode() || !isLaravelApiEnabled()) return null;
+    const data = await apiRequest('/notifications/preferences');
+    return asUserNotificationSettings(data?.preferences);
+}
+
+export async function saveNotificationPreferencesToServer(
+    prefs: UserNotificationSettings,
+): Promise<UserNotificationSettings | null> {
+    if (isMockMode() || !isLaravelApiEnabled()) return null;
+    const data = await apiRequest('/notifications/preferences', {
+        method: 'POST',
+        body: JSON.stringify({ preferences: prefs }),
+    });
+    return asUserNotificationSettings(data?.preferences) ?? prefs;
+}
+
+/** Revoke the current Sanctum token. Call while the token is still in storage. */
+export async function logoutFromServer(): Promise<void> {
+    if (isMockMode() || !isLaravelApiEnabled()) return;
+    try {
+        await apiRequest('/auth/logout', { method: 'POST', timeoutMs: 5000 });
+    } catch {
+        // Local logout still proceeds if the revoke request fails.
+    }
+}
+
 /** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
 export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Record<string, unknown> {
     const pt = apiUser.places_traveled ?? apiUser.placesTraveled;
@@ -182,6 +771,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         rawAccountType === 'business' || rawAccountType === 'personal'
             ? rawAccountType
             : (apiUser.is_business === true ? 'business' : undefined);
+    const rawAvatar = String(apiUser.avatar_url ?? apiUser.avatarUrl ?? '').trim();
     return {
         id: apiUser.id != null ? String(apiUser.id) : undefined,
         name: (apiUser.display_name ?? apiUser.name) as string | undefined,
@@ -192,7 +782,9 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         handle: apiUser.handle as string | undefined,
         bio: apiUser.bio as string | undefined,
         placesTraveled: Array.isArray(pt) ? (pt as string[]).filter((s) => typeof s === 'string') : undefined,
-        avatarUrl: (apiUser.avatar_url ?? apiUser.avatarUrl) as string | undefined,
+        ...(rawAvatar
+            ? { avatarUrl: resolvePublicMediaUrl(rawAvatar) || rawAvatar }
+            : {}),
         profileBackgroundUrl: (apiUser.profile_background_url ?? apiUser.profileBackgroundUrl) as string | undefined,
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
         is_private: apiUser.is_private as boolean | undefined,
@@ -200,11 +792,25 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         is_verified: apiUser.is_verified as boolean | undefined,
         facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
+        followers_count: Number(apiUser.followers_count ?? apiUser.followersCount ?? 0) || 0,
+        following_count: Number(apiUser.following_count ?? apiUser.followingCount ?? 0) || 0,
+        phone_number:
+            apiUser.phone_number != null && String(apiUser.phone_number).trim() !== ''
+                ? String(apiUser.phone_number)
+                : apiUser.phoneNumber != null && String(apiUser.phoneNumber).trim() !== ''
+                  ? String(apiUser.phoneNumber)
+                  : null,
+        phone_verified_at: (() => {
+            const raw = apiUser.phone_verified_at ?? apiUser.phoneVerifiedAt;
+            if (raw == null || raw === '') return null;
+            return String(raw);
+        })(),
     };
 }
 
 export async function updateAuthProfile(data: {
     display_name?: string;
+    handle?: string;
     bio?: string | null;
     places_traveled?: string[];
     location_local?: string | null;
@@ -212,6 +818,7 @@ export async function updateAuthProfile(data: {
     location_national?: string | null;
     social_links?: Record<string, string | undefined>;
     profile_background_url?: string | null;
+    avatar_url?: string | null;
     account_type?: 'personal' | 'business';
     is_business?: boolean;
     is_private?: boolean;
@@ -224,7 +831,26 @@ export async function updateAuthProfile(data: {
 }
 
 // Posts API (6s timeout for faster fallback on slow mobile networks)
-export async function fetchPostsPage(cursor: number | string | null = 0, limit: number = 10, filter: string = 'Dublin', userId?: string) {
+export async function fetchPostsPage(
+    cursor: number | string | null = 0,
+    limit: number = 10,
+    filter: string = 'Dublin',
+    userId?: string,
+) {
+    console.log('[fetchPostsPage/client] IS_MOCK=', isMockMode(), {
+        EXPO_PUBLIC_USE_MOCK: getRuntimeEnv('EXPO_PUBLIC_USE_MOCK'),
+        cursor,
+        limit,
+        filter,
+        userId,
+    });
+
+    // Keep existing mock feed path (posts.ts falls through to local seed data).
+    if (isMockMode()) {
+        console.log('[fetchPostsPage/client] short-circuit: IS_MOCK=true → CONNECTION_REFUSED');
+        throwMockConnectionRefused();
+    }
+
     const params = new URLSearchParams({
         cursor: String(cursor ?? 0),
         limit: limit.toString(),
@@ -232,7 +858,88 @@ export async function fetchPostsPage(cursor: number | string | null = 0, limit: 
         ...(userId && { userId }),
     });
 
-    return apiRequest(`/posts?${params}`, { timeoutMs: 6000 });
+    // Laravel: GET /api/posts (API_BASE_URL already includes `/api`)
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/posts?${params}`;
+    console.log('[fetchPostsPage/client] request URL=', url);
+    const authHeader = await getAuthorizationHeader();
+    console.log('[fetchPostsPage/client] Authorization header present=', Boolean(authHeader.Authorization));
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+        let payload: unknown = text;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[fetchPostsPage/client] response status=', response.status, 'payload=', payload);
+
+        if (!response.ok) {
+            const errorData =
+                payload && typeof payload === 'object'
+                    ? (payload as Record<string, any>)
+                    : { error: 'Network error' };
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            throw error;
+        }
+
+        if (!text) {
+            clearLaravelUnreachable();
+            return { items: [], nextCursor: null };
+        }
+        if (payload && typeof payload === 'object') {
+            clearLaravelUnreachable();
+            return payload;
+        }
+        const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+        throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        console.log('[fetchPostsPage/client] fetch error=', {
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        if (error?.name === 'AbortError') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function fetchPost(postId: string, userId?: string) {
@@ -273,6 +980,10 @@ export async function checkFollowsMe(handle: string): Promise<{ follows_me: bool
 export async function createPost(postData: {
     text?: string;
     location?: string;
+    placeId?: string;
+    place_id?: string;
+    latitude?: number;
+    longitude?: number;
     venue?: string;
     landmark?: string;
     socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
@@ -281,6 +992,14 @@ export async function createPost(postData: {
     videoFrameMode?: 'crop' | 'fit' | 'original';
     videoPosterUrl?: string;
     caption?: string;
+    linkPreview?: {
+        url: string;
+        title?: string;
+        description?: string;
+        imageUrl?: string;
+        siteName?: string;
+        source?: string;
+    };
     imageText?: string;
     bannerText?: string;
     stickers?: any[];
@@ -292,14 +1011,207 @@ export async function createPost(postData: {
     videoCaptionText?: string;
     subtitlesEnabled?: boolean;
     subtitleText?: string;
-    editTimeline?: any; // Edit timeline for hybrid editing pipeline
-    musicTrackId?: number; // Library music track ID
+    editTimeline?: any;
+    musicTrackId?: number;
     templateStyle?: 'default' | 'polaroid' | 'neon' | 'glass' | 'magazine';
 }) {
-    return apiRequest('/posts', {
-        method: 'POST',
-        body: JSON.stringify(postData),
+    if (isMockMode()) {
+        console.log('[createPost/client] IS_MOCK=true → skip Laravel');
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/posts`;
+    const authHeader = await getAuthorizationHeader();
+    if (!authHeader.Authorization) {
+        console.log('[createPost/client] missing Sanctum token → 401');
+        const error = new Error(
+            'Not signed in to the server. Log out and register/log in again so posts can sync.',
+        );
+        (error as any).status = 401;
+        throw error;
+    }
+    console.log('[createPost/client] POST', url, {
+        hasAuth: Boolean(authHeader.Authorization),
+        mediaType: postData.mediaType,
+        hasMediaUrl: Boolean(postData.mediaUrl),
+        mediaUrlPreview:
+            typeof postData.mediaUrl === 'string' ? postData.mediaUrl.slice(0, 80) : undefined,
+        mediaItems: postData.mediaItems?.length ?? 0,
+        location: postData.location,
     });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            body: JSON.stringify(postData),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+        let payload: any = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[createPost/client] response status=', response.status, {
+            id: payload?.id,
+            user_id: payload?.user_id,
+            user_handle: payload?.user_handle || payload?.userHandle,
+            errors: payload?.errors,
+            error: payload?.error,
+        });
+
+        if (!response.ok) {
+            const errorMessage =
+                payload?.error ||
+                payload?.message ||
+                (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = payload;
+            throw error;
+        }
+
+        return payload;
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        console.log('[createPost/client] fetch error=', {
+            url,
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+            cause: error?.cause,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error(
+                `CONNECTION_REFUSED creating post at ${url}: ${error?.message || 'network error'}`,
+            );
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
+}
+
+export async function createStory(storyData: Record<string, unknown>) {
+    if (isMockMode()) {
+        console.log('[createStory/client] IS_MOCK=true → skip Laravel');
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/stories`;
+    const authHeader = await getAuthorizationHeader();
+    if (!authHeader.Authorization) {
+        console.log('[createStory/client] missing Sanctum token → 401');
+        const error = new Error(
+            'Not signed in to the server. Log out and register/log in again so stories can sync.',
+        );
+        (error as any).status = 401;
+        throw error;
+    }
+
+    console.log('[createStory/client] POST', url, {
+        hasAuth: Boolean(authHeader.Authorization),
+        mediaType: storyData.media_type,
+        hasMediaUrl: Boolean(storyData.media_url),
+        hasText: Boolean(storyData.text),
+        stickerCount: Array.isArray(storyData.stickers) ? storyData.stickers.length : 0,
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...authHeader,
+            },
+            body: JSON.stringify(storyData),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const text = await response.text();
+        let payload: any = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        console.log('[createStory/client] response status=', response.status, {
+            id: payload?.id,
+            user_id: payload?.user_id,
+            user_handle: payload?.user_handle,
+            errors: payload?.errors,
+            error: payload?.error,
+        });
+
+        if (!response.ok) {
+            const errorMessage =
+                payload?.error ||
+                payload?.message ||
+                (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = payload;
+            throw error;
+        }
+
+        return payload;
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        console.log('[createStory/client] fetch error=', {
+            url,
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error(
+                `CONNECTION_REFUSED creating story at ${url}: ${error?.message || 'network error'}`,
+            );
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 export async function toggleLike(postId: string) {
@@ -329,6 +1241,37 @@ export async function fetchPostLikes(
     if (params?.limit != null) search.set('limit', String(params.limit));
     const qs = search.toString();
     return apiRequest(`/posts/${postId}/likes${qs ? `?${qs}` : ''}`);
+}
+
+export async function fetchLinkPreview(url: string): Promise<{
+    url: string;
+    title?: string;
+    description?: string;
+    image_url?: string;
+    thumbnail_url?: string;
+    site_name?: string;
+    source?: string;
+    is_direct_video?: boolean;
+    video_url?: string;
+}> {
+    const search = new URLSearchParams({ url });
+    return apiRequest(`/link-preview?${search.toString()}`);
+}
+
+/** Instagram Reels/posts: Meta oEmbed via Laravel, never a client-side scrape. */
+export async function parseLinkPreview(url: string): Promise<{
+    url: string;
+    title?: string;
+    description?: string;
+    image_url?: string;
+    thumbnail_url?: string;
+    site_name?: string;
+    source?: string;
+    is_direct_video?: boolean;
+    video_url?: string;
+}> {
+    const search = new URLSearchParams({ url });
+    return apiRequest(`/v1/parse-link?${search.toString()}`);
 }
 
 export async function updatePost(postId: string, postData: {
@@ -394,7 +1337,7 @@ export async function fetchCommentsPage(
     repliesLimit: number = 5,
 ) {
     const params = new URLSearchParams({
-        paged: 'true',
+        paged: '1',
         limit: String(limit),
         repliesLimit: String(repliesLimit),
     });
@@ -403,17 +1346,35 @@ export async function fetchCommentsPage(
     return apiRequest(`/comments/post/${postId}?${params}`);
 }
 
-export async function addComment(postId: string, text: string) {
+export async function addComment(postId: string, text: string, extras?: {
+    moderation_status?: 'approved' | 'pending_review' | 'hidden';
+    is_hidden?: boolean;
+    flagged_keywords?: string[];
+}) {
     return apiRequest(`/comments/post/${postId}`, {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+            text,
+            ...(extras?.moderation_status ? { moderation_status: extras.moderation_status } : {}),
+            ...(typeof extras?.is_hidden === 'boolean' ? { is_hidden: extras.is_hidden } : {}),
+            ...(extras?.flagged_keywords?.length ? { flagged_keywords: extras.flagged_keywords } : {}),
+        }),
     });
 }
 
-export async function addReply(parentId: string, text: string) {
+export async function addReply(parentId: string, text: string, extras?: {
+    moderation_status?: 'approved' | 'pending_review' | 'hidden';
+    is_hidden?: boolean;
+    flagged_keywords?: string[];
+}) {
     return apiRequest(`/comments/reply/${parentId}`, {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+            text,
+            ...(extras?.moderation_status ? { moderation_status: extras.moderation_status } : {}),
+            ...(typeof extras?.is_hidden === 'boolean' ? { is_hidden: extras.is_hidden } : {}),
+            ...(extras?.flagged_keywords?.length ? { flagged_keywords: extras.flagged_keywords } : {}),
+        }),
     });
 }
 
@@ -423,6 +1384,162 @@ export async function toggleCommentLike(commentId: string) {
     });
 }
 
+export async function hideComment(commentId: string, flaggedKeywords?: string[]) {
+    return apiRequest(`/comments/${commentId}/hide`, {
+        method: 'POST',
+        body: JSON.stringify(
+            flaggedKeywords?.length ? { flagged_keywords: flaggedKeywords } : {},
+        ),
+    });
+}
+
+export async function approveComment(commentId: string) {
+    return apiRequest(`/comments/${commentId}/approve`, {
+        method: 'POST',
+    });
+}
+
+export async function fetchCommentReviewQueue(): Promise<{
+    items: Array<{
+        id: string;
+        postId: string;
+        userHandle: string;
+        text: string;
+        createdAt: number;
+        moderationReason?: string | null;
+        isReply?: boolean;
+        parentId?: string | null;
+        moderation_status?: string;
+        is_hidden?: boolean;
+        flagged_keywords?: string[];
+    }>;
+    matched_count: number;
+}> {
+    return apiRequest('/comments/review-queue');
+}
+
+export async function deleteComment(commentId: string) {
+    return apiRequest(`/comments/${commentId}`, {
+        method: 'DELETE',
+    });
+}
+
+function encodeUserIdentifier(raw: string): string {
+    let value = String(raw || '').trim();
+    try {
+        value = decodeURIComponent(value).trim();
+    } catch {
+        /* already decoded */
+    }
+    return encodeURIComponent(value);
+}
+
+function isProfileUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.trim(),
+    );
+}
+
+async function laravelUsersGet(
+    pathAndQuery: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<any> {
+    if (isMockMode()) {
+        console.log('[laravelUsersGet] IS_MOCK=true → skip Laravel', pathAndQuery);
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}${pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`}`;
+    const token = (await getAuthTokenAsync())?.trim() || '';
+    const headers: Record<string, string> = {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+    };
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    console.log('[laravelUsersGet] GET', url, { hasAuth: Boolean(token) });
+
+    const timeoutMs = Math.max(10_000, options?.timeoutMs ?? LARAVEL_USERS_GET_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const external = options?.signal;
+    const onExternalAbort = () => controller.abort();
+    if (external?.aborted) {
+        clearTimeout(timeoutId);
+        throwAbortError();
+    }
+    external?.addEventListener('abort', onExternalAbort);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers,
+            signal: controller.signal,
+        });
+        const text = await response.text();
+        let payload: any = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = text;
+        }
+        if (!response.ok) {
+            const errorMessage =
+                payload?.error ||
+                payload?.message ||
+                (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            console.error('[laravelUsersGet] API error', {
+                url,
+                status: response.status,
+                error: errorMessage,
+                payload,
+            });
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = payload;
+            if (response.status === 429) {
+                const retryAfter = Number(response.headers.get('Retry-After'));
+                (error as any).retryAfterMs =
+                    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000;
+            }
+            throw error;
+        }
+        return payload;
+    } catch (error: any) {
+        if (isAbortError(error) || controller.signal.aborted || external?.aborted) {
+            console.debug('[laravelUsersGet] aborted', { url });
+            if (isAbortError(error)) throw error;
+            throwAbortError();
+        }
+        console.error('[laravelUsersGet] fetch error', {
+            url,
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+        external?.removeEventListener('abort', onExternalAbort);
+    }
+}
+
 // Users API
 export async function fetchUserProfile(
     handle: string,
@@ -430,40 +1547,215 @@ export async function fetchUserProfile(
     postsCursor?: string | number | null,
     postsLimit?: number,
     sourcePostId?: string,
+    tab: string = 'all',
+    signal?: AbortSignal,
 ) {
     const params = new URLSearchParams();
     if (userId) params.append('userId', userId);
-    if (postsCursor != null) params.append('postsCursor', String(postsCursor));
+    if (postsCursor != null && String(postsCursor) !== '') {
+        params.append('postsCursor', String(postsCursor));
+    }
     if (postsLimit != null) params.append('postsLimit', String(postsLimit));
-    if (sourcePostId) params.append('sourcePostId', sourcePostId);
-    const encoded = encodeURIComponent(handle);
-    return apiRequest(`/users/${encoded}?${params}`);
+    params.append('tab', tab || 'all');
+    if (sourcePostId && isProfileUuid(sourcePostId)) {
+        params.append('sourcePostId', sourcePostId);
+    }
+    const encoded = encodeUserIdentifier(handle);
+    const qs = params.toString();
+    const payload = await laravelUsersGet(`/users/${encoded}${qs ? `?${qs}` : ''}`, { signal });
+    console.log('[fetchUserProfile/client] ok', {
+        handle: payload?.handle,
+        posts_count: payload?.posts_count ?? payload?.postsCount,
+        postsLen: Array.isArray(payload?.posts) ? payload.posts.length : 0,
+    });
+    return payload;
 }
 
-export async function toggleFollow(handle: string) {
-    // Encode the handle for URL (handles special characters like @)
-    const encodedHandle = encodeURIComponent(handle);
+export async function fetchUserPosts(
+    identifier: string,
+    options: {
+        viewerId?: string;
+        postsCursor?: string | number | null;
+        postsLimit?: number;
+        tab?: string;
+        signal?: AbortSignal;
+        timeoutMs?: number;
+    } = {},
+) {
+    const params = new URLSearchParams();
+    if (options.viewerId) params.append('userId', options.viewerId);
+    if (options.postsCursor != null && String(options.postsCursor) !== '') {
+        params.append('postsCursor', String(options.postsCursor));
+    }
+    if (options.postsLimit != null) params.append('postsLimit', String(options.postsLimit));
+    params.append('tab', options.tab || 'all');
+    const encoded = encodeUserIdentifier(identifier);
+    const qs = params.toString();
+    const payload = await laravelUsersGet(`/users/${encoded}/posts${qs ? `?${qs}` : ''}`, {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+    });
+    console.log('[fetchUserPosts/client] ok', {
+        identifier,
+        posts_count: payload?.posts_count ?? payload?.postsCount,
+        postsLen: Array.isArray(payload?.posts) ? payload.posts.length : 0,
+        tab: options.tab || 'all',
+    });
+    return payload;
+}
+
+export async function toggleFollow(handle: string, following?: boolean) {
+    const encodedHandle = encodeUserIdentifier(handle);
     return apiRequest(`/users/${encodedHandle}/follow`, {
         method: 'POST',
+        ...(typeof following === 'boolean' ? { body: JSON.stringify({ following }) } : {}),
     });
 }
 
-export async function fetchFollowers(handle: string, cursor: number | string | null = 0, limit: number = 20) {
+export async function fetchFollowers(
+    handle: string,
+    cursor: number | string | null = 0,
+    limit: number = 20,
+    signal?: AbortSignal,
+) {
     const params = new URLSearchParams({
         cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
-    const encoded = encodeURIComponent(handle);
-    return apiRequest(`/users/${encoded}/followers?${params}`);
+    const encoded = encodeUserIdentifier(handle);
+    return laravelUsersGet(`/users/${encoded}/followers?${params}`, { signal });
 }
 
-export async function fetchFollowing(handle: string, cursor: number | string | null = 0, limit: number = 20) {
+export async function fetchFollowing(
+    handle: string,
+    cursor: number | string | null = 0,
+    limit: number = 20,
+    signal?: AbortSignal,
+) {
     const params = new URLSearchParams({
         cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
-    const encoded = encodeURIComponent(handle);
-    return apiRequest(`/users/${encoded}/following?${params}`);
+    const encoded = encodeUserIdentifier(handle);
+    return laravelUsersGet(`/users/${encoded}/following?${params}`, { signal });
+}
+
+/** Live follow totals from /followers or /following. Prefer `total` when > 0. */
+export function connectionListTotal(res: any): number {
+    const body =
+        res && (res.items != null || res.total != null || res.followers != null || res.following != null)
+            ? res
+            : res?.data ?? res;
+    const list = Array.isArray(body?.items)
+        ? body.items
+        : Array.isArray(body?.data)
+          ? body.data
+          : Array.isArray(body?.followers)
+            ? body.followers
+            : Array.isArray(body?.following)
+              ? body.following
+              : Array.isArray(body)
+                ? body
+                : [];
+    const total = Number(body?.total);
+    if (Number.isFinite(total) && total > 0) return total;
+    if (list.length > 0) return list.length;
+    if (Number.isFinite(total) && total >= 0) return total;
+    return 0;
+}
+
+export function connectionItemsFromResponse(res: any): any[] {
+    const body =
+        res && (res.items != null || res.followers != null || res.following != null)
+            ? res
+            : res?.data ?? res;
+    if (Array.isArray(body?.items)) return body.items;
+    if (Array.isArray(body?.data)) return body.data;
+    if (Array.isArray(body?.followers)) return body.followers;
+    if (Array.isArray(body?.following)) return body.following;
+    if (Array.isArray(body)) return body;
+    return [];
+}
+
+export function profileAudienceFromPayload(payload: any): {
+    followers?: number;
+    following?: number;
+    avatar_url?: string;
+} {
+    const body =
+        payload && (payload.handle != null || payload.id != null || payload.followers_count != null)
+            ? payload
+            : payload?.data ?? payload;
+    const stats = body?.stats && typeof body.stats === 'object' ? body.stats : {};
+    const asCount = (value: unknown): number | undefined => {
+        if (typeof value === 'boolean' || Array.isArray(value) || value == null || value === '') {
+            return undefined;
+        }
+        const n = Number(value);
+        return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
+    return {
+        followers:
+            asCount(body?.followers_count) ??
+            asCount(body?.followersCount) ??
+            asCount(stats.followers) ??
+            asCount(stats.followers_count),
+        following:
+            asCount(body?.following_count) ??
+            asCount(body?.followingCount) ??
+            asCount(stats.following) ??
+            asCount(stats.following_count),
+        avatar_url: (() => {
+            const raw = String(body?.avatar_url ?? body?.avatarUrl ?? '').trim();
+            return raw || undefined;
+        })(),
+    };
+}
+
+/** Live Following / Followers totals for a profile (not the viewer's graph). */
+export async function fetchProfileAudience(
+    handle: string,
+    signal?: AbortSignal,
+): Promise<{
+    followers: number;
+    following: number;
+    is_following?: boolean;
+    handle?: string;
+    avatar_url?: string;
+}> {
+    const identifier = String(handle || '').trim();
+    if (!identifier) return { followers: 0, following: 0 };
+    try {
+        const encoded = encodeUserIdentifier(identifier);
+        const payload = await laravelUsersGet(`/users/${encoded}/audience`, { signal });
+        const parsed = profileAudienceFromPayload(payload);
+        const followers = parsed.followers ?? 0;
+        const following = parsed.following ?? 0;
+        return {
+            followers,
+            following,
+            is_following:
+                typeof payload?.is_following === 'boolean'
+                    ? payload.is_following
+                    : typeof payload?.isFollowing === 'boolean'
+                      ? payload.isFollowing
+                      : undefined,
+            handle: typeof payload?.handle === 'string' ? payload.handle : undefined,
+            avatar_url: parsed.avatar_url,
+        };
+    } catch (error) {
+        if (isAbortError(error) || signal?.aborted) throw error;
+        // 429: extra list fetches make throttling worse and keep View Profile at 0.
+        if (isTooManyRequestsError(error)) throw error;
+        const [followersRes, followingRes] = await Promise.all([
+            fetchFollowers(identifier, 0, 20, signal).catch(() => null),
+            fetchFollowing(identifier, 0, 20, signal).catch(() => null),
+        ]);
+        return {
+            followers: connectionListTotal(followersRes),
+            following: connectionListTotal(followingRes),
+        };
+    }
 }
 
 export async function togglePrivacy() {
@@ -533,7 +1825,19 @@ export async function fetchConversationPage(otherHandle: string, cursor: string 
     return apiRequest(`/messages/conversation/${encoded}/paged?${params}`);
 }
 
-export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string }) {
+export async function sendMessage(recipientHandle: string, payload: {
+    text?: string;
+    image_url?: string;
+    is_system_message?: boolean;
+    source_post_id?: string;
+    reply_to?: {
+        message_id?: string;
+        text?: string;
+        sender_handle?: string;
+        image_url?: string;
+        media_type?: 'image' | 'video';
+    };
+}) {
     return apiRequest('/messages/send', {
         method: 'POST',
         body: JSON.stringify({
@@ -542,6 +1846,7 @@ export async function sendMessage(recipientHandle: string, payload: { text?: str
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
             source_post_id: payload.source_post_id ?? null,
+            reply_to: payload.reply_to ?? null,
         }),
     });
 }
@@ -568,7 +1873,18 @@ export async function fetchGroupConversationPage(groupId: string, cursor: string
 
 export async function sendGroupMessage(
     groupId: string,
-    payload: { text?: string | null; image_url?: string | null; is_system_message?: boolean },
+    payload: {
+        text?: string | null;
+        image_url?: string | null;
+        is_system_message?: boolean;
+        reply_to?: {
+            message_id?: string;
+            text?: string;
+            sender_handle?: string;
+            image_url?: string;
+            media_type?: 'image' | 'video';
+        };
+    },
 ) {
     return apiRequest('/messages/send', {
         method: 'POST',
@@ -577,6 +1893,7 @@ export async function sendGroupMessage(
             text: payload.text ?? null,
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
+            reply_to: payload.reply_to ?? null,
         }),
     });
 }
@@ -616,6 +1933,10 @@ export async function leaveChatGroup(id: string) {
 }
 
 export async function inviteToChatGroup(groupId: string, inviteeHandle: string) {
+    if (!isLaravelApiEnabled()) {
+        const { mockInviteToChatGroup } = await import('./messages');
+        return mockInviteToChatGroup(groupId, inviteeHandle);
+    }
     return apiRequest(`/chat-groups/${encodeURIComponent(groupId)}/invites`, {
         method: 'POST',
         body: JSON.stringify({ invitee_handle: inviteeHandle }),
@@ -639,8 +1960,17 @@ export async function fetchCollections() {
     return apiRequest('/collections');
 }
 
+/** Same payload as GET /collections, for sessions that only have a bearer token (no user id yet). */
+export async function fetchMyCollections() {
+    return apiRequest('/me/collections');
+}
+
 export async function fetchCollection(collectionId: string) {
     return apiRequest(`/collections/${encodeURIComponent(collectionId)}`);
+}
+
+export async function fetchCollectionPosts(collectionId: string) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}/posts`);
 }
 
 export async function createCollectionApi(data: {
@@ -823,18 +2153,26 @@ export async function getBoostAnalyticsApi(postId: string, range: '24h' | '7d' |
 const UPLOAD_TIMEOUT_MS = 60000; // 60s for slow connections
 
 export async function uploadFile(file: File) {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
     const formData = new FormData();
     formData.append('file', file);
 
-    const token = localStorage.getItem('authToken');
+    const authHeader = await getAuthorizationHeader();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const uploadUrl = `${API_BASE_URL}/upload/single`;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/upload/single`, {
+        // Do NOT set Content-Type — browser sets multipart boundary automatically.
+        const response = await fetch(uploadUrl, {
             method: 'POST',
             headers: {
-                ...(token && { Authorization: `Bearer ${token}` }),
+                Accept: 'application/json',
+                ...authHeader,
             },
             body: formData,
             signal: controller.signal,
@@ -851,18 +2189,25 @@ export async function uploadFile(file: File) {
             } catch (e) {
                 errorMessage = `Upload failed: HTTP ${response.status} ${response.statusText}`;
             }
+            console.log('[uploadFile/web] response status=', response.status, errorMessage);
             throw new Error(errorMessage);
         }
 
         return response.json();
     } catch (err: any) {
         clearTimeout(timeoutId);
+        console.log('[uploadFile/web] fetch error=', {
+            url: uploadUrl,
+            name: err?.name,
+            message: err?.message,
+        });
         if (err?.name === 'AbortError') {
             throw new Error('Upload timed out. Check your connection and try again.');
         }
         const msg = err?.message ?? '';
         const isNetwork =
             msg === 'Failed to fetch' ||
+            msg.includes('Network request failed') ||
             msg.includes('NetworkError') ||
             msg.includes('Load failed') ||
             err?.name === 'TypeError';
@@ -871,8 +2216,8 @@ export async function uploadFile(file: File) {
                 window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
             throw new Error(
                 onNetwork
-                    ? "Can't reach the server. Use the same Wi‑Fi as this computer and ensure the backend is running (e.g. http://<this-PC-IP>:8000)."
-                    : 'Network error. Check that the backend is running and try again.'
+                    ? `Can't reach the server at ${uploadUrl}. Use the same Wi‑Fi as this computer and ensure the backend is running.`
+                    : `Network error uploading to ${uploadUrl}. Check that the backend is running and try again.`,
             );
         }
         throw err;
@@ -906,7 +2251,7 @@ export async function processQueue() {
                     processed.push(action.id);
                     break;
                 case 'follow':
-                    await toggleFollow(action.userHandle);
+                    await toggleFollow(action.userHandle, action.following);
                     processed.push(action.id);
                     break;
                 case 'comment':

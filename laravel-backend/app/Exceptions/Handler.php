@@ -4,6 +4,7 @@ namespace App\Exceptions;
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Http\Exceptions\PostTooLargeException;
 use Illuminate\Http\Request;
 use Throwable;
 
@@ -27,6 +28,17 @@ class Handler extends ExceptionHandler
     {
         $this->reportable(function (Throwable $e) {
             //
+        });
+
+        $this->renderable(function (PostTooLargeException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                $max = ini_get('post_max_size') ?: '8M';
+                return response()->json([
+                    'error' => 'File too large',
+                    'message' => "This clip is too large to upload. Try a shorter video (max {$max}).",
+                    'maxSize' => $max,
+                ], 413);
+            }
         });
     }
 
