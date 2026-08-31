@@ -36,6 +36,7 @@ import {
 import { testBrowserNotification, testNotificationTypes, seedInboxTestNotifications, testFirebasePushConnection } from '../utils/testNotifications';
 import { runEndpointHealthCheck } from '../utils/endpointHealth';
 import { getRuntimeEnv } from '../config/runtimeEnv';
+import { getApiBaseUrl } from '../api/apiBaseUrl';
 import {
   getCommentModerationPreferences,
   setCommentModerationPreferences,
@@ -1230,7 +1231,7 @@ export default function ProfilePage() {
   };
 
   const handleInviteByQrOrLink = async () => {
-    const apiUrl = getRuntimeEnv('VITE_API_URL') || `${window.location.origin}/api`;
+    const apiUrl = getApiBaseUrl();
     const apiOrigin = apiUrl.replace(/\/api\/?$/, '');
     const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent((user?.handle || '').replace(/^@/, ''))}`;
     try {
@@ -1269,7 +1270,7 @@ export default function ProfilePage() {
   };
 
   const handleShareInviteToWhatsApp = async () => {
-    const apiUrl = getRuntimeEnv('VITE_API_URL') || `${window.location.origin}/api`;
+    const apiUrl = getApiBaseUrl();
     const apiOrigin = apiUrl.replace(/\/api\/?$/, '');
     const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent((user?.handle || '').replace(/^@/, ''))}`;
     const text = `${user?.handle || 'A friend'} invited you to join Gazetteer\n\n${inviteUrl}`;
@@ -1277,7 +1278,7 @@ export default function ProfilePage() {
   };
 
   const handleShareInviteToMessenger = async () => {
-    const apiUrl = getRuntimeEnv('VITE_API_URL') || `${window.location.origin}/api`;
+    const apiUrl = getApiBaseUrl();
     const apiOrigin = apiUrl.replace(/\/api\/?$/, '');
     const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent((user?.handle || '').replace(/^@/, ''))}`;
     window.open(`https://www.facebook.com/dialog/send?link=${encodeURIComponent(inviteUrl)}&app_id=${encodeURIComponent(getRuntimeEnv('VITE_FACEBOOK_APP_ID') || '')}&redirect_uri=${encodeURIComponent(inviteUrl)}`, '_blank', 'noopener,noreferrer');

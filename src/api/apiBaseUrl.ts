@@ -48,7 +48,8 @@ const FALLBACK_API = 'http://localhost:8000/api';
 /**
  * Resolve Laravel API base URL for web and React Native.
  * Prefers `EXPO_PUBLIC_API_BASE_URL`, then legacy `VITE_API_URL`.
- * Web dev uses `/api` so Vite proxies to Laravel.
+ * Web Vite dev uses `http://<page-hostname>:8000/api` so a phone on Wi-Fi
+ * hits the laptop Laravel, not the phone's own localhost.
  * RN physical devices: keep `http://localhost:8000/api` for `adb reverse tcp:8000`.
  */
 export function getApiBaseUrl(): string {
@@ -86,8 +87,13 @@ export function getApiBaseUrl(): string {
         return FALLBACK_API;
     }
 
+    // Vite dev: always hit Laravel on the same hostname the page was opened with.
+    // Phone browsers cannot reach the laptop via `localhost` (CONNECTION_REFUSED),
+    // and relative `/api` leaves media URLs as http://localhost:8000/... which also fail on device.
     if (isViteDev()) {
-        return '/api';
+        const protocol =
+            typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'https' : 'http';
+        return `${protocol}://${browserHost}:8000/api`;
     }
 
     const hostname = browserHost;

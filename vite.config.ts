@@ -62,7 +62,7 @@ export default defineConfig({
   // Exclude React Native files from being scanned
   server: {
     port: 5173,
-    host: '0.0.0.0', // Allow external connections (accessible from other devices on network)
+    host: true, // Listen on 0.0.0.0 so phones on Wi-Fi can reach Vite
     allowedHosts: true,
     strictPort: false,
     fs: {
