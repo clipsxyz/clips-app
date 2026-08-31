@@ -13,11 +13,13 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UploadController;
 use App\Http\Controllers\Api\LinkPreviewController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\ChatGroupController;
 use App\Http\Controllers\Api\StoryController;
 use App\Http\Controllers\Api\CollectionController;
+use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\MusicController;
 use App\Http\Controllers\Api\MusicLibraryController;
 use App\Http\Controllers\Api\BoostController;
@@ -204,6 +206,8 @@ Route::get('/dev/ava-follows-barry', function () {
     ]);
 });
 
+Route::get('/feed', [PostController::class, 'index']); // Alias of GET /api/posts (native / docs)
+
 // Public posts routes (allow viewing posts without auth)
 Route::prefix('posts')->group(function () {
     Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
@@ -248,6 +252,8 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/contacts/match', [AuthController::class, 'matchContacts']);
         Route::post('/phone/send-code', [AuthController::class, 'sendPhoneCode']);
         Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
+        Route::post('/phone/remove', [AuthController::class, 'removePhone']);
+        Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::post('/logout', [AuthController::class, 'logout']);
     });
 
@@ -294,7 +300,11 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/post/{postId}', [CommentController::class, 'getPostComments']);
         Route::post('/post/{postId}', [CommentController::class, 'store']);
         Route::post('/reply/{parentId}', [CommentController::class, 'reply']);
+        Route::get('/review-queue', [CommentController::class, 'reviewQueue']);
         Route::post('/{id}/like', [CommentController::class, 'toggleLike']);
+        Route::post('/{id}/hide', [CommentController::class, 'hide']);
+        Route::post('/{id}/approve', [CommentController::class, 'approve']);
+        Route::delete('/{id}', [CommentController::class, 'destroy']);
     });
 
     // Users routes (profile GET is public above — follow/privacy still require auth)
@@ -314,8 +324,9 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/mark-all-read', [NotificationController::class, 'markAllRead']);
         // FCM token and preferences routes
         Route::post('/fcm-token', [NotificationController::class, 'saveFCMToken']);
+        Route::get('/preferences', [NotificationController::class, 'getPreferences']);
         Route::post('/preferences', [NotificationController::class, 'savePreferences']);
-        Route::get('/preferences/{userHandle}', [NotificationController::class, 'getPreferences']);
+        Route::get('/preferences/{userHandle}', [NotificationController::class, 'getPreferencesForHandle']);
     });
 
     // Messages routes
@@ -355,6 +366,12 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
 
     // Authenticated "my collections" alias — same as GET /collections
     Route::get('/me/collections', [CollectionController::class, 'index']);
+
+    Route::prefix('drafts')->group(function () {
+        Route::get('/', [DraftController::class, 'index']);
+        Route::post('/', [DraftController::class, 'store']);
+        Route::delete('/{id}', [DraftController::class, 'destroy']);
+    });
 
     // Collections routes
     Route::prefix('collections')->group(function () {

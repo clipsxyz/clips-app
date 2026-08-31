@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { FEED_UI } from '../constants/feedUiTokens';
-import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
+import AnimatedLikeButton from './AnimatedLikeButton.native';
 import FeedMessageSquareIcon from './FeedMessageSquareIcon.native';
 import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import FeedRepeatIcon from './FeedRepeatIcon.native';
@@ -63,7 +63,7 @@ export default function FeedEngagementRow({
     showReclip = true,
     reclipDisabled = false,
     showSave = true,
-    showSaveLabel = true,
+    showSaveLabel: _showSaveLabel = true,
     compact = false,
     likeButtonRef,
     tone = 'feed',
@@ -81,9 +81,17 @@ export default function FeedEngagementRow({
                 collapsable={false}
                 style={[styles.item, compact && styles.itemCompact]}
             >
-                <TouchableOpacity onPress={onLike} disabled={!onLike} activeOpacity={0.7}>
-                    <FeedLikeThumbsIcon size={ACTION_ICON} filled={userLiked} color={iconColor} />
-                </TouchableOpacity>
+                <AnimatedLikeButton
+                    isLiked={userLiked}
+                    onToggleLike={() => onLike?.()}
+                    likeCount={likes}
+                    onCountPress={onLikesPress || onLike}
+                    size={ACTION_ICON}
+                    color={iconColor}
+                    countColor={countColor}
+                    showCount={false}
+                    disabled={!onLike}
+                />
                 <TouchableOpacity
                     onPress={onLikesPress || onLike}
                     disabled={!(onLikesPress || onLike)}

@@ -13,6 +13,7 @@ import {
   getAuthTokenAsync,
   hydrateAuthTokenFromStorage,
 } from '../utils/authTokenBridge';
+import { logoutFromServer } from '../api/client';
 import { isLocalDeviceUri } from '../utils/syncHostedAvatar';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
@@ -54,6 +55,10 @@ function applyLaravelIdentity(local: User, fromApi: Record<string, unknown>): Us
     next.profileBackgroundUrl = undefined;
   }
   for (const [key, val] of Object.entries(fromApi)) {
+    if (key === 'phone_number' || key === 'phone_verified_at') {
+      (next as Record<string, unknown>)[key] = val ?? null;
+      continue;
+    }
     if (val === undefined || val === null) continue;
     if (key === 'placesTraveled' && Array.isArray(val)) {
       next.placesTraveled = val.length > 0 ? (val as string[]) : undefined;
@@ -123,7 +128,7 @@ function setSentryUser(user: { id: string; username?: string } | null) {
 type AuthCtx = {
   user: User | null;
   login: (userData: any) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   sessionReady: boolean;
 };
 const Ctx = React.createContext<AuthCtx | null>(null);
@@ -514,9 +519,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   };
 
-  const logout = () => {
+  const logout = async () => {
     authRefreshGenRef.current += 1;
     const prevId = user?.id;
+    try {
+      const { clearNotificationSession } = await import('../services/notifications');
+      await clearNotificationSession?.();
+    } catch {
+      // FCM cleanup is best-effort and must run while the token still exists.
+    }
+    await logoutFromServer();
     disconnectSocket();
     setUser(null);
     if (prevId) clearUserState(prevId);
@@ -527,14 +539,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSentryUser(null);
     void persistUserToNativeStorage(null);
     void clearAuthToken();
-    void (async () => {
-      try {
-        const { clearNotificationSession } = await import('../services/notifications');
-        await clearNotificationSession?.();
-      } catch {
-        // Token and user are already cleared; FCM is best-effort.
-      }
-    })();
   };
 
   return <Ctx.Provider value={{ user, login, logout, sessionReady }}>{children}</Ctx.Provider>;

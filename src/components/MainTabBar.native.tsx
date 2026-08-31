@@ -150,7 +150,7 @@ export default function MainTabBar({
                     end={{ x: 1, y: 0 }}
                     style={styles.addYoursGradient}
                   >
-                    <Icon name="location" size={12} color="#111827" />
+                    <Icon name="location" size={10} color="#111827" />
                     <Text style={styles.addYoursText}>Add Yours</Text>
                   </LinearGradient>
                   <View style={styles.addYoursTail} />
@@ -249,31 +249,31 @@ const styles = StyleSheet.create({
   },
   addYoursBubble: {
     position: 'absolute',
-    bottom: 40,
+    bottom: 34,
     alignItems: 'center',
     zIndex: 20,
   },
   addYoursGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    borderRadius: 16,
+    gap: 3,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   addYoursText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: '#111827',
   },
   addYoursTail: {
-    width: 8,
-    height: 8,
+    width: 6,
+    height: 6,
     backgroundColor: '#d8dde3',
     transform: [{ rotate: '45deg' }],
-    marginTop: -4,
-    borderRadius: 2,
+    marginTop: -3,
+    borderRadius: 1,
   },
 });

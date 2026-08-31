@@ -82,10 +82,11 @@ export default function PostLinkPreviewCard({ preview, compact = false }: Props)
     const instagramLine = instagramSharePrompt(preview.url);
     const cardTitle = instagramLine || preview.title?.trim() || hostLabel;
     const description = preview.description?.trim();
+    const descriptionText = description ?? '';
     const showDescription =
-        Boolean(description) &&
-        description !== cardTitle &&
-        description.toLowerCase() !== 'view on instagram';
+        Boolean(descriptionText) &&
+        descriptionText !== cardTitle &&
+        descriptionText.toLowerCase() !== 'view on instagram';
 
     if (showAttachmentChip) {
         return (
@@ -141,7 +142,7 @@ export default function PostLinkPreviewCard({ preview, compact = false }: Props)
                 ) : null}
                 {showDescription ? (
                     <div className="mt-1 text-[13px] leading-[18px] text-white/60 line-clamp-2">
-                        {description}
+                        {descriptionText}
                     </div>
                 ) : null}
                 <span className="mt-2.5 inline-flex items-center rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/85">

@@ -32,10 +32,11 @@ class Handler extends ExceptionHandler
 
         $this->renderable(function (PostTooLargeException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
+                $max = ini_get('post_max_size') ?: '8M';
                 return response()->json([
                     'error' => 'File too large',
-                    'message' => 'This clip is too large to upload. Try a shorter or lower-quality video (max 100MB).',
-                    'maxSize' => '100MB',
+                    'message' => "This clip is too large to upload. Try a shorter video (max {$max}).",
+                    'maxSize' => $max,
                 ], 413);
             }
         });

@@ -35,6 +35,8 @@ export type User = {
   has_pending_request?: boolean; // Whether current user has pending follow request
   /** Explicit account classification from signup/profile. */
   accountType?: 'personal' | 'business';
+  phone_number?: string | null;
+  phone_verified_at?: string | null;
 };
 
 export type PostMediaItem = {

@@ -602,7 +602,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                 }),
             );
 
-            let nextGroups = groupsWithAvatars;
+            let nextGroups: StoryGroup[] = groupsWithAvatars;
             if (normalizedOpenUserHandle && railHandles.length === 0) {
                 const want = normalizedOpenUserHandle.trim().toLowerCase().replace(/^@/, '');
                 const only = groupsWithAvatars.filter(
@@ -1454,7 +1454,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                 </View>
 
                 <View style={styles.storyList}>
-                    {storyGroups.map((group, index) => (
+                    {storyGroups.map((group) => (
                         <TouchableOpacity
                             key={group.userId}
                             onPress={() => startViewingStories(group)}
@@ -1888,6 +1888,17 @@ export default function StoriesScreen({ route, navigation }: any) {
                 onClose={() => {
                     setFullscreenSharePost(null);
                     restoreFullscreenFromHold();
+                }}
+                onShareSuccess={(postId: string) => {
+                    const current = fullscreenSharePost || originalPost;
+                    if (!current || current.id !== postId) return;
+                    syncFullscreenPost({
+                        ...current,
+                        stats: {
+                            ...current.stats,
+                            shares: (current.stats?.shares ?? 0) + 1,
+                        },
+                    });
                 }}
             />
 

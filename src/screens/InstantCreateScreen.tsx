@@ -182,6 +182,9 @@ export default function InstantCreateScreen({ navigation, route }: any) {
     const orbitIndexRef = useRef(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0);
     const orbitAnim = useRef(new Animated.Value(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0)).current;
     const didInit = useRef(false);
+    const clipStudioFormatRef = useRef<'youtube_shorts' | 'tiktok' | 'instagram_reels' | undefined>(
+        undefined,
+    );
 
     const setOrbitIndex = useCallback(
         (idx: number) => {
@@ -231,6 +234,8 @@ export default function InstantCreateScreen({ navigation, route }: any) {
     }, [stepOrbitMode]);
 
     const navigateFromAssets = (assets: ImagePicker.Asset[], mode: PickerMode, carousel: boolean) => {
+        const socialFormat = mode === 'feed' ? clipStudioFormatRef.current : undefined;
+        clipStudioFormatRef.current = undefined;
         if (!assets.length) return;
         if (carousel && assets.length >= 2) {
             const items = assets
@@ -256,7 +261,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                     }
                     return slide;
                 });
-            navigation.navigate('GalleryPreview', { carouselItems: items, story24: mode === 'story24' });
+            navigation.navigate('GalleryPreview', { carouselItems: items, story24: mode === 'story24', socialFormat });
             return;
         }
         const asset = assets[0];
@@ -265,6 +270,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
             mediaUrl: asset.uri,
             mediaType: assetIsVideo(asset) ? 'video' : 'image',
             story24: mode === 'story24',
+            socialFormat,
         });
     };
 
@@ -423,22 +429,27 @@ export default function InstantCreateScreen({ navigation, route }: any) {
         navigation.setParams?.({ openStoryPicker: undefined });
     }, [navigation, openMediaSourceMenu, route?.params?.openStoryPicker]);
 
-    const openGallerySourceExplainer = useCallback(() => {
-        setHubAlert({
-            title: 'Upload from your gallery',
-            message:
-                'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
-            showIcon: false,
-            confirmButtonText: 'Proceed',
-            cancelButtonText: 'Not now',
-            showCancelButton: true,
-            onConfirm: () => {
-                setHubAlert(null);
-                // Carousel is gallery-only — never offer Camera here.
-                setTimeout(() => void pickGalleryMedia('feed'), 100);
-            },
-        });
-    }, [pickGalleryMedia]);
+    const openGallerySourceExplainer = useCallback(
+        (sourceKey?: 'tiktok' | 'instagram' | 'capcut' | 'edits') => {
+            const socialFormat =
+                sourceKey === 'tiktok' ? ('tiktok' as const) : sourceKey ? ('instagram_reels' as const) : undefined;
+            setHubAlert({
+                title: 'Upload from your gallery',
+                message:
+                    'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
+                showIcon: false,
+                confirmButtonText: 'Proceed',
+                cancelButtonText: 'Not now',
+                showCancelButton: true,
+                onConfirm: () => {
+                    setHubAlert(null);
+                    clipStudioFormatRef.current = socialFormat;
+                    setTimeout(() => void pickGalleryMedia('feed'), 100);
+                },
+            });
+        },
+        [pickGalleryMedia],
+    );
 
     const handleModePress = (
         item: (typeof CREATE_MODE_ITEMS)[number],

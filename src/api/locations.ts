@@ -39,6 +39,18 @@ export type LocationSuggestion = {
     formatted_address?: string | null;
 };
 
+/** Geo fields to send on POST /api/posts from a Places suggestion. */
+export function geoFieldsFromSuggestion(s: LocationSuggestion): {
+    placeId?: string;
+    latitude?: number;
+    longitude?: number;
+} {
+    const placeId = typeof s.place_id === 'string' && s.place_id.trim() ? s.place_id.trim() : undefined;
+    const latitude = typeof s.latitude === 'number' ? s.latitude : undefined;
+    const longitude = typeof s.longitude === 'number' ? s.longitude : undefined;
+    return { placeId, latitude, longitude };
+}
+
 export type GeocodedLocation = {
     label: string;
     display_name?: string | null;

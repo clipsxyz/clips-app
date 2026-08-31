@@ -40,6 +40,8 @@
 	<string>Gazetteer needs access to your photo library so you can upload photos and videos.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Gazetteer needs camera access so you can capture photos and videos for posts.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Gazetteer uses your contacts to find friends who already have an account.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

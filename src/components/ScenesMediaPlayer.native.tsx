@@ -108,7 +108,6 @@ export default function ScenesMediaPlayer({
 
     const playableSource = (raw: string) => {
         const src = scenesVideoSource(raw);
-        if (typeof src === 'number') return src;
         if (src && isPlayableVideoUri(src.uri)) return src;
         return null;
     };
@@ -119,7 +118,7 @@ export default function ScenesMediaPlayer({
         enabled && onMediaPress ? (
             <Pressable
                 style={styles.tapCapture}
-                onPress={onMediaPress}
+                onPress={(event) => onMediaPress(event as unknown as GestureResponderEvent)}
                 onLongPress={onMediaLongPress}
                 onPressOut={onMediaPressOut}
                 delayLongPress={320}

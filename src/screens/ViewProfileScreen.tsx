@@ -314,7 +314,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                       if (!cancelled()) setLoading(false);
                       return audience;
                   })
-                : Promise.resolve({ followers: 0, following: 0 });
+                : Promise.resolve({ followers: 0, following: 0, is_following: undefined as boolean | undefined });
 
             const followedTask =
                 user?.id && user?.handle
@@ -741,7 +741,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const buildMockConnectionsForTab = async (
         tab: 'followers' | 'following',
         targetHandle: string,
-        followedSet: Set<string>,
+        _followedSet: Set<string>,
     ): Promise<ConnectionRow[]> => {
         const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
         const viewerFollows = await getFollowedUsers(viewerId);
@@ -1888,9 +1888,9 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: ox(12),
         paddingVertical: ox(10),
+        ...gazetteerHeader,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.1)',
-        ...gazetteerHeader,
     },
     headerIconBtn: {
         width: ox(44),

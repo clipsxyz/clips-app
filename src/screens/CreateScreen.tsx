@@ -57,6 +57,10 @@ import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 import { ox } from '../constants/nativeOpticalScale';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import type { LocationSuggestion } from '../api/locations';
+import { geoFieldsFromSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -98,12 +102,17 @@ export default function CreateScreen({ navigation, route }: any) {
         ? carouselItems[carouselActiveIndex]?.type ?? mediaType
         : mediaType;
     const activeCarouselSlide = isCarousel ? carouselItems[carouselActiveIndex] : undefined;
-    const [text, setText] = useState(route.params?.draftCaption || route.params?.draftTextBody || '');
+    const [text, setText] = useState<string>(
+        String(route.params?.draftCaption || route.params?.draftTextBody || ''),
+    );
     const [location, setLocation] = useState(route.params?.draftLocation || '');
     const [venue, setVenue] = useState(route.params?.draftVenue || '');
     const [landmark, setLandmark] = useState(route.params?.draftLandmark || '');
-    const [taggedUsersInput, setTaggedUsersInput] = useState(
-        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : ''
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
+    const [taggedUsersInput, setTaggedUsersInput] = useState<string>(
+        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : '',
     );
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -558,6 +567,9 @@ export default function CreateScreen({ navigation, route }: any) {
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 venue: venue.trim() || undefined,
                 landmark: landmark.trim() || undefined,
+                placeId,
+                latitude: placeLatitude,
+                longitude: placeLongitude,
             });
             showUploadOverlayNative({
                 jobId: tempId,
@@ -1091,39 +1103,64 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Location Input */}
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="location" size={ox(20)} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="location"
                             value={location}
-                            onChangeText={setLocation}
+                            onChange={setLocation}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                const geo = geoFieldsFromSuggestion(s);
+                                setPlaceId(geo.placeId);
+                                setPlaceLatitude(geo.latitude);
+                                setPlaceLongitude(geo.longitude);
+                            }}
                             placeholder="Add location"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="business" size={ox(20)} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="venue"
                             value={venue}
-                            onChangeText={setVenue}
+                            onChange={setVenue}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                if (!placeId) {
+                                    const geo = geoFieldsFromSuggestion(s);
+                                    setPlaceId(geo.placeId);
+                                    setPlaceLatitude(geo.latitude);
+                                    setPlaceLongitude(geo.longitude);
+                                }
+                            }}
                             placeholder="Add venue"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="pin" size={ox(20)} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="landmark"
                             value={landmark}
-                            onChangeText={setLandmark}
+                            onChange={setLandmark}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                if (!placeId) {
+                                    const geo = geoFieldsFromSuggestion(s);
+                                    setPlaceId(geo.placeId);
+                                    setPlaceLatitude(geo.latitude);
+                                    setPlaceLongitude(geo.longitude);
+                                }
+                            }}
                             placeholder="Add landmark"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
@@ -1142,7 +1179,7 @@ export default function CreateScreen({ navigation, route }: any) {
                     </View>
                     {taggedUsers.length > 0 && (
                         <Text style={styles.taggedUsersPreview}>
-                            Tagged: {taggedUsers.map((u) => `@${u}`).join(', ')}
+                            Tagged: {taggedUsers.map((u: string) => `@${u}`).join(', ')}
                         </Text>
                     )}
                 </View>

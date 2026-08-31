@@ -12,7 +12,8 @@ import QRCode from 'qrcode';
 import Flag from '../components/Flag';
 import { getCollectionThumbSource, getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
-import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
+import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, fetchPostsByUser, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
+import { isMockMode } from '../api/apiMode';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { showToast } from '../utils/toast';
@@ -20,13 +21,14 @@ import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
-import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { fetchFollowers, fetchFollowing, fetchUserProfile, profileAudienceFromPayload, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode, removeVerifiedPhone, changePassword, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Comment, Post, User } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { loginWithFacebookWeb } from '../services/facebookAuthWeb';
 import { 
   getNotificationPreferences, 
-  saveNotificationPreferences, 
+  saveNotificationPreferencesAsync,
+  loadNotificationPreferences,
   type NotificationPreferences,
   initializeNotifications,
   resetNotificationPreferences
@@ -39,6 +41,7 @@ import {
   setCommentModerationPreferences,
   type CommentModerationPreferences,
 } from '../utils/commentModeration';
+import { maskPhoneNumber, toE164Phone } from '../utils/maskPhoneNumber';
 import splashLogo from '../assets/gazetteer-splash-logo.png';
 
 // Card image: show illustration from /profile-cards/ when present (.svg or .png), else fall back to icon
@@ -149,6 +152,7 @@ export default function ProfilePage() {
   const [myFeedReplyingTo, setMyFeedReplyingTo] = React.useState<string | null>(null);
   const [myFeedReplyDraft, setMyFeedReplyDraft] = React.useState('');
   const [myFeedRefreshTick, setMyFeedRefreshTick] = React.useState(0);
+  const [liveOwnPosts, setLiveOwnPosts] = React.useState<Post[]>([]);
   const [myFeedEditedPostIds, setMyFeedEditedPostIds] = React.useState<Record<string, true>>({});
   const [myFeedOpeningPostId, setMyFeedOpeningPostId] = React.useState<string | null>(null);
   const myFeedListRef = React.useRef<HTMLDivElement | null>(null);
@@ -173,7 +177,7 @@ export default function ProfilePage() {
   const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
   const [emailDigestEnabled, setEmailDigestEnabled] = React.useState(true);
   const [emailDigestSaving, setEmailDigestSaving] = React.useState(false);
-  const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelApi = !isMockMode();
   const [commentModerationPrefs, setCommentModerationPrefs] = React.useState<CommentModerationPreferences>(getCommentModerationPreferences());
   const [commentWordDraft, setCommentWordDraft] = React.useState('');
   const [hiddenCommentQueue, setHiddenCommentQueue] = React.useState<HiddenCommentReviewItem[]>([]);
@@ -190,10 +194,45 @@ export default function ProfilePage() {
   );
   const myFeedPosts = React.useMemo<Post[]>(() => {
     if (!normalizedOwnHandle) return [];
-    return [...posts]
-      .filter((post) => (post.userHandle || '').replace(/^@/, '').trim().toLowerCase() === normalizedOwnHandle)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }, [normalizedOwnHandle, myFeedRefreshTick]);
+    const fromMemory = [...posts].filter(
+      (post) => (post.userHandle || '').replace(/^@/, '').trim().toLowerCase() === normalizedOwnHandle,
+    );
+    const byId = new Map<string, Post>();
+    for (const p of [...liveOwnPosts, ...fromMemory]) {
+      const id = String(p.id);
+      if (!byId.has(id)) byId.set(id, p);
+    }
+    return [...byId.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [normalizedOwnHandle, myFeedRefreshTick, liveOwnPosts]);
+
+  React.useEffect(() => {
+    if (isMockMode() || !user?.handle) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [items, profile] = await Promise.all([
+          fetchPostsByUser(user.handle, 50, user.id, 'all'),
+          fetchUserProfile(user.handle, user.id, null, 20).catch((error) => {
+            console.error('[Profile] fetchUserProfile failed', error);
+            return null;
+          }),
+        ]);
+        if (cancelled) return;
+        setLiveOwnPosts(items);
+        setMyFeedRefreshTick((t) => t + 1);
+        if (profile) {
+          const audience = profileAudienceFromPayload(profile);
+          if (typeof audience.followers === 'number') setFollowersCount(audience.followers);
+          if (typeof audience.following === 'number') setFollowingCount(audience.following);
+        }
+      } catch (error) {
+        console.error('[Profile] fetchPostsByUser failed', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.handle, user?.id]);
   const filteredHiddenQueue = React.useMemo(() => {
     if (hiddenQueueFilter === 'comments') return hiddenCommentQueue.filter((item) => !item.isReply);
     if (hiddenQueueFilter === 'replies') return hiddenCommentQueue.filter((item) => !!item.isReply);
@@ -213,6 +252,14 @@ export default function ProfilePage() {
         if (!cancelled) setHiddenCommentQueue([]);
       } finally {
         if (!cancelled) setLoadingHiddenCommentQueue(false);
+      }
+    })();
+    void (async () => {
+      try {
+        const prefs = await loadNotificationPreferences();
+        if (!cancelled) setNotificationPrefs(prefs);
+      } catch {
+        if (!cancelled) setNotificationPrefs(getNotificationPreferences());
       }
     })();
     return () => {
@@ -528,7 +575,7 @@ export default function ProfilePage() {
 
   const persistLaravelProfile = React.useCallback(
     async (patch: Parameters<typeof updateAuthProfile>[0]): Promise<boolean> => {
-      const useLaravel = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+      const useLaravel = !isMockMode();
       const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
       if (!useLaravel || !token || !user) return false;
       const apiUser = await updateAuthProfile(patch);
@@ -547,6 +594,16 @@ export default function ProfilePage() {
     },
     [user, login]
   );
+
+  const persistNotificationPrefs = React.useCallback(async (next: NotificationPreferences) => {
+    setNotificationPrefs(next);
+    try {
+      const saved = await saveNotificationPreferencesAsync(next);
+      setNotificationPrefs(saved);
+    } catch (error) {
+      console.warn('Failed to save notification preferences:', error);
+    }
+  }, []);
 
   // Fetch regions when national selection changes or when location card opens
   React.useEffect(() => {
@@ -680,7 +737,7 @@ export default function ProfilePage() {
   // Load followers count (from API when available; mock shows 0)
   React.useEffect(() => {
     if (!user?.handle) return;
-    const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+    const useLaravelApi = !isMockMode();
     if (!useLaravelApi) {
       setFollowersCount(0);
       setFollowersList([]);
@@ -712,7 +769,7 @@ export default function ProfilePage() {
       });
     }
     if (selectedCard === 'followers' && user?.handle) {
-      const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+      const useLaravelApi = !isMockMode();
       if (useLaravelApi) {
         setLoadingFollowers(true);
         fetchFollowers(user.handle, 0, 200)
@@ -866,7 +923,100 @@ export default function ProfilePage() {
     }
   };
 
+  const handleSecurityChangePassword = async () => {
+    const result = await Swal.fire({
+      title: 'Change password',
+      html: `
+        <div style="display:flex; flex-direction:column; gap:8px; text-align:left;">
+          <input id="current-password" type="password" placeholder="Current password" class="swal2-input" style="margin:0; width:100%; box-sizing:border-box;" />
+          <input id="new-password" type="password" placeholder="New password" class="swal2-input" style="margin:0; width:100%; box-sizing:border-box;" />
+          <input id="confirm-password" type="password" placeholder="Confirm new password" class="swal2-input" style="margin:0; width:100%; box-sizing:border-box;" />
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Update password',
+      cancelButtonText: 'Cancel',
+      background: '#111111',
+      color: '#ffffff',
+      customClass: {
+        popup: 'swal-bottom-sheet-popup',
+        confirmButton: 'swal-bottom-sheet-confirm',
+        cancelButton: 'swal-bottom-sheet-cancel',
+      },
+      preConfirm: () => {
+        const current = (document.getElementById('current-password') as HTMLInputElement | null)?.value || '';
+        const next = (document.getElementById('new-password') as HTMLInputElement | null)?.value || '';
+        const confirm = (document.getElementById('confirm-password') as HTMLInputElement | null)?.value || '';
+        if (next.length < 6) {
+          Swal.showValidationMessage('Use at least 6 characters.');
+          return null;
+        }
+        if (next !== confirm) {
+          Swal.showValidationMessage('Passwords do not match.');
+          return null;
+        }
+        return { current, next, confirm };
+      },
+    });
+    if (!result.isConfirmed || !result.value) return;
+    try {
+      await changePassword({
+        current_password: result.value.current,
+        new_password: result.value.next,
+        confirm_password: result.value.confirm,
+      });
+      await Swal.fire(bottomSheet({ title: 'Password updated', icon: 'success' }));
+    } catch (err: any) {
+      await Swal.fire(bottomSheet({
+        title: 'Could not change password',
+        message: err?.message || 'Check your current password and try again.',
+        icon: 'alert',
+      }));
+    }
+  };
+
   const handleSecurityPhoneVerify = async () => {
+    const alreadyVerified = Boolean(user?.phone_verified_at && user?.phone_number);
+    const hub = await Swal.fire({
+      title: alreadyVerified ? 'Phone verified' : 'Security',
+      html: alreadyVerified
+        ? `<p style="margin:0 0 8px;font-size:18px;font-weight:700;letter-spacing:0.4px;">${maskPhoneNumber(String(user?.phone_number || ''))}</p>
+           <p style="margin:0;color:#a1a1aa;font-size:13px;">This number is used for Find contacts and recovery.</p>`
+        : `<p style="margin:0;color:#a1a1aa;font-size:13px;">Add a phone number for recovery, or change your password.</p>`,
+      showDenyButton: alreadyVerified,
+      showCancelButton: true,
+      confirmButtonText: alreadyVerified ? 'Change phone' : 'Add phone',
+      denyButtonText: 'Remove phone',
+      cancelButtonText: 'Change password',
+      background: '#111111',
+      color: '#ffffff',
+      customClass: {
+        popup: 'swal-bottom-sheet-popup',
+        confirmButton: 'swal-bottom-sheet-confirm',
+        cancelButton: 'swal-bottom-sheet-cancel',
+        denyButton: 'swal-bottom-sheet-cancel',
+      },
+    });
+    if (hub.isDenied) {
+      try {
+        await removeVerifiedPhone();
+        if (user) login({ ...user, phone_number: null, phone_verified_at: null });
+        await Swal.fire(bottomSheet({ title: 'Phone removed', icon: 'success' }));
+      } catch (err: any) {
+        await Swal.fire(bottomSheet({
+          title: 'Could not remove phone',
+          message: err?.message || 'Try again.',
+          icon: 'alert',
+        }));
+      }
+      return;
+    }
+    if (hub.dismiss === Swal.DismissReason.cancel) {
+      await handleSecurityChangePassword();
+      return;
+    }
+    if (!hub.isConfirmed) return;
+
     const phoneStep = await Swal.fire({
       title: 'Add phone',
       html: `
@@ -908,12 +1058,13 @@ export default function ProfilePage() {
         const countryEl = document.getElementById('phone-country-code') as HTMLSelectElement | null;
         const phoneEl = document.getElementById('phone-number-input') as HTMLInputElement | null;
         const countryCode = countryEl?.value?.trim() || '+353';
-        const phoneDigits = (phoneEl?.value || '').replace(/\D+/g, '');
+        const rawNational = phoneEl?.value || '';
+        const phoneDigits = rawNational.replace(/\D+/g, '');
         if (phoneDigits.length < 7 || phoneDigits.length > 15) {
           Swal.showValidationMessage('Enter a valid phone number.');
           return null;
         }
-        return `${countryCode}${phoneDigits}`;
+        return toE164Phone(countryCode, rawNational);
       },
     });
     if (!phoneStep.isConfirmed || !phoneStep.value) return;
@@ -959,7 +1110,14 @@ export default function ProfilePage() {
     if (!otpStep.isConfirmed || !otpStep.value) return;
 
     try {
-      await verifyPhoneVerificationCode(phoneNumber, String(otpStep.value));
+      const verified = await verifyPhoneVerificationCode(phoneNumber, String(otpStep.value));
+      if (user) {
+        login({
+          ...user,
+          phone_number: verified.phone_number || phoneNumber,
+          phone_verified_at: verified.phone_verified_at || new Date().toISOString(),
+        });
+      }
       await Swal.fire(bottomSheet({
         title: 'Phone verified',
         message: 'Your account now has an extra verification step.',
@@ -984,7 +1142,7 @@ export default function ProfilePage() {
       const result = await fetchFacebookFriendsMatches(accessToken);
       setInviteMatchedFriends(result.matched || []);
       if (!result.matched_count) {
-        showToast(result.message || 'No matched Facebook friends yet.');
+        showToast(result.message || 'No Facebook friends on Gazetteer yet. Friends must open the app and link the same Facebook account.');
       } else {
         showToast(`Found ${result.matched_count} friend${result.matched_count === 1 ? '' : 's'}.`);
       }
@@ -1059,7 +1217,7 @@ export default function ProfilePage() {
       setInviteMatchedFriends(asFriends);
       showToast(result.matched_count
         ? `Matched ${result.matched_count} contact${result.matched_count === 1 ? '' : 's'}.`
-        : 'No matched contacts yet.');
+        : 'No matched contacts yet. Friends need a phone number saved on their Gazetteer account (Passport → Security).');
     } catch (err: any) {
       Swal.fire(bottomSheet({
         title: 'Contact match failed',
@@ -2437,12 +2595,8 @@ export default function ProfilePage() {
 
         {/* My Feed Modal */}
         {myFeedOpen && (
-          <div className="fixed inset-0 z-[220] bg-[#020617]">
-            <div
-              ref={myFeedListRef}
-              className="h-full overflow-y-auto"
-            >
-              <div className="sticky top-0 z-30 bg-[#020617]/95 backdrop-blur border-b border-white/10 px-4 py-3">
+          <div className="fixed inset-0 z-[220] bg-[#020617] flex flex-col">
+            <div className="flex-shrink-0 z-30 bg-[#020617] border-b border-white/10 px-4 py-3">
                 <div className="mx-auto w-full max-w-2xl flex items-center justify-between gap-3">
                   <div className="inline-flex items-center gap-2">
                     <img src={splashLogo} alt="Gazetteer" className="w-8 h-8 object-contain rounded-lg bg-white/5 p-1" />
@@ -2452,7 +2606,11 @@ export default function ProfilePage() {
                     <FiX className="w-6 h-6 text-black" />
                   </button>
                 </div>
-              </div>
+            </div>
+            <div
+              ref={myFeedListRef}
+              className="flex-1 overflow-y-auto"
+            >
               <div className="mx-auto w-full max-w-2xl p-4 pb-10">
                 {myFeedOpeningPostId && (
                   <div className="mb-3 text-xs font-semibold text-sky-200 bg-sky-500/15 border border-sky-400/30 rounded-lg px-3 py-2">
@@ -2497,7 +2655,7 @@ export default function ProfilePage() {
                             {thumb && isImage ? (
                               <img src={thumb} alt="My post" className="w-full max-h-[520px] object-cover bg-black" />
                             ) : thumb && isVideo ? (
-                              <video src={thumb} className="w-full max-h-[520px] object-cover bg-black" muted playsInline />
+                              <video src={thumb} className="w-full max-h-[520px] object-cover bg-black" controls playsInline />
                             ) : (
                               <div className="p-4 bg-gradient-to-br from-gray-900 to-gray-700">
                                 <p className="text-white text-sm whitespace-pre-wrap">{textPreview || 'No text'}</p>
@@ -2898,7 +3056,7 @@ export default function ProfilePage() {
                 {inviteMatchedFriends.length > 0 && (
                   <div className="pt-2">
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                      Facebook matches ({inviteMatchedFriends.length})
+                      Matches ({inviteMatchedFriends.length})
                     </div>
                     <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                       {inviteMatchedFriends.map((friend) => (
@@ -3124,8 +3282,7 @@ export default function ProfilePage() {
                     <button
                       onClick={async () => {
                         const newPrefs = { ...notificationPrefs, enabled: !notificationPrefs.enabled };
-                        setNotificationPrefs(newPrefs);
-                        saveNotificationPreferences(newPrefs);
+                        await persistNotificationPrefs(newPrefs);
                         
                         if (newPrefs.enabled) {
                           setIsInitializingNotifications(true);
@@ -3170,8 +3327,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.directMessages}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, directMessages: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3180,8 +3336,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.groupChats}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, groupChats: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3190,8 +3345,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.likes}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, likes: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3200,8 +3354,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.comments}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, comments: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3210,8 +3363,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.replies}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, replies: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3220,8 +3372,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.follows}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, follows: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3230,8 +3381,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.followRequests}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, followRequests: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3240,8 +3390,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.storyInsights}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, storyInsights: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3250,8 +3399,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.questions}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, questions: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3260,8 +3408,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.shares}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, shares: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                       <NotificationToggle
@@ -3270,8 +3417,7 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.reclips}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, reclips: enabled };
-                          setNotificationPrefs(newPrefs);
-                          saveNotificationPreferences(newPrefs);
+                          void persistNotificationPrefs(newPrefs);
                         }}
                       />
                     </div>
@@ -3281,8 +3427,8 @@ export default function ProfilePage() {
                 {/* Logout Button */}
                 <div className="pt-4 border-t border-gray-200">
                   <button
-                    onClick={() => {
-                      logout();
+                    onClick={async () => {
+                      await logout();
                       nav('/login');
                     }}
                     className="w-full py-3 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 transition-colors"

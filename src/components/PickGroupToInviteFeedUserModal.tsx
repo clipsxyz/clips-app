@@ -35,7 +35,7 @@ export default function PickGroupToInviteFeedUserModal({
     setLoading(true);
     fetchMyChatGroups(user.handle)
       .then((items) => {
-        if (!cancelled) setGroups(items ?? []);
+        if (!cancelled) setGroups((items ?? []).filter((g) => g.is_admin));
       })
       .catch((e) => {
         console.error(e);
@@ -112,8 +112,7 @@ export default function PickGroupToInviteFeedUserModal({
             </div>
           ) : groups.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-white/55 leading-relaxed">
-              You don&apos;t have any group chats yet. Create one from your profile (New group), then you can invite people from
-              the feed.
+              You can only invite people to communities you created.
             </div>
           ) : (
             <ul className="space-y-0.5">

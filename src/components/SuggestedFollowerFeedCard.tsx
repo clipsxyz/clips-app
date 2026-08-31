@@ -61,7 +61,7 @@ type Props = {
 export default function SuggestedFollowerFeedCard({
   suggestion,
   onFollow,
-  onDismiss,
+  onDismiss: _onDismiss,
   onNotInterested,
 }: Props) {
   const navigate = useNavigate();

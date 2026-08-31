@@ -6,8 +6,10 @@ import {
     FlatList,
     TextInput,
     TouchableOpacity,
+    Pressable,
     Image,
     KeyboardAvoidingView,
+    Dimensions,
     Platform,
     ActivityIndicator,
     Animated,
@@ -43,7 +45,7 @@ import {
     deleteConversation,
     type ChatMessage,
 } from '../api/messages';
-import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
+import { createChatGroup, fetchMyChatGroups, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { getAvatarForHandle } from '../api/users';
@@ -81,9 +83,44 @@ import {
 import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
+import { dmSenderNameColor } from '../utils/dmSenderNameColor';
 
 function sameDmHandle(a?: string | null, b?: string | null): boolean {
     return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
+function dmShortName(handle?: string | null): string {
+    const raw = String(handle || '').trim();
+    if (!raw) return 'them';
+    return raw.split('@')[0] || raw;
+}
+
+function findQuotedMessage(
+    messages: ChatMessage[],
+    replyTo?: { messageId?: string; text?: string; senderHandle?: string } | null,
+): ChatMessage | undefined {
+    if (!replyTo) return undefined;
+    const id = String(replyTo.messageId || '').trim();
+    if (id) {
+        const byId = messages.find((m) => String(m.id) === id);
+        if (byId) return byId;
+    }
+    const text = String(replyTo.text || '').trim();
+    const sender = replyTo.senderHandle;
+    if (!sender && !text) return undefined;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        const textMatch = !text || (m.text || '').trim() === text;
+        const senderMatch = !sender || sameDmHandle(m.senderHandle, sender);
+        if (textMatch && senderMatch) return m;
+    }
+    return undefined;
+}
+
+/** Quoted snippet must not shrink to a one-word reply. Pixel minWidth (not %) so the bubble expands. */
+function dmReplyQuoteMinWidth(replyTo?: { text?: string; imageUrl?: string } | null): number | undefined {
+    if (!replyTo) return undefined;
+    return Math.round(Dimensions.get('window').width * 0.55);
 }
 
 type VoiceDraftSegment = { audioUrl: string; durationSeconds: number };
@@ -150,6 +187,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [inviteBusy, setInviteBusy] = useState(false);
     const [inviteSuggestions, setInviteSuggestions] = useState<Array<{ handle: string; displayName?: string; avatarUrl?: string }>>([]);
     const [inviteSearching, setInviteSearching] = useState(false);
+    const [isGroupAdmin, setIsGroupAdmin] = useState(Boolean(communityCreated));
     const [isMuted, setIsMuted] = useState(false);
     const [isBlocked, setIsBlocked] = useState(false);
     const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string } | null>(null);
@@ -202,8 +240,11 @@ export default function MessagesScreen({ route, navigation }: any) {
     const swipeMessageIdRef = useRef<string | null>(null);
     const [showChatInfo, setShowChatInfo] = useState(false);
     const [leaveGroupBusy, setLeaveGroupBusy] = useState(false);
-    const flatListRef = useRef<FlatList>(null);
+    const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+    const messageYRef = useRef<Record<string, number>>({});
+    const highlightClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldAutoScrollRef = useRef(true);
+    const flatListRef = useRef<FlatList<ChatMessage>>(null);
     const [swipingMessageId, setSwipingMessageId] = useState<string | null>(null);
     const audioRecorderRef = useRef(AudioRecorderPlayer);
     const communityCreatedHandledRef = useRef(false);
@@ -237,7 +278,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             'your community';
         showAlert({
             title: 'Community created',
-            message: `You are in "${name}". Use + in the header to invite members.`,
+            message: `You are the admin of "${name}". Only you can invite people from the + in the header.`,
             icon: 'success',
             confirmButtonText: 'Open chat',
         });
@@ -247,11 +288,75 @@ export default function MessagesScreen({ route, navigation }: any) {
         });
     }, [communityCreated, communityCreatedName, groupName, navigation, showAlert]);
 
+    useEffect(() => {
+        if (!isGroupThread || !chatGroupId || !user?.handle) {
+            setIsGroupAdmin(Boolean(communityCreated));
+            return;
+        }
+        let cancelled = false;
+        void fetchMyChatGroups(user.handle)
+            .then((groups) => {
+                if (cancelled) return;
+                const mine = groups.find((g) => g.id === chatGroupId);
+                setIsGroupAdmin(Boolean(mine?.is_admin) || Boolean(communityCreated));
+            })
+            .catch(() => {
+                if (!cancelled) setIsGroupAdmin(Boolean(communityCreated));
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isGroupThread, chatGroupId, user?.handle, communityCreated]);
+
     const scrollMessagesToBottom = useCallback((animated = true) => {
         requestAnimationFrame(() => {
             flatListRef.current?.scrollToEnd({ animated });
         });
     }, []);
+
+    const jumpToQuotedMessage = useCallback(
+        (replyTo?: { messageId?: string; text?: string; senderHandle?: string } | null) => {
+            const target = findQuotedMessage(messages, replyTo);
+            if (!target) return;
+            const index = messages.findIndex((m) => m.id === target.id);
+            const y = messageYRef.current[target.id];
+            if (index >= 0) {
+                try {
+                    flatListRef.current?.scrollToIndex({
+                        index,
+                        animated: true,
+                        viewPosition: 0.28,
+                    });
+                } catch {
+                    if (typeof y === 'number' && y > 0) {
+                        flatListRef.current?.scrollToOffset({
+                            offset: Math.max(0, y - ox(72)),
+                            animated: true,
+                        });
+                    }
+                }
+            } else if (typeof y === 'number' && y > 0) {
+                flatListRef.current?.scrollToOffset({
+                    offset: Math.max(0, y - ox(72)),
+                    animated: true,
+                });
+            }
+            if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
+            setHighlightedMessageId(target.id);
+            highlightClearRef.current = setTimeout(() => {
+                setHighlightedMessageId((cur) => (cur === target.id ? null : cur));
+                highlightClearRef.current = null;
+            }, 1600);
+        },
+        [messages],
+    );
+
+    useEffect(
+        () => () => {
+            if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
+        },
+        [],
+    );
 
     const composerPlaceholder = editingMessage ? 'Edit message…' : 'Message…';
 
@@ -711,7 +816,14 @@ export default function MessagesScreen({ route, navigation }: any) {
                     hasMore: page.hasMore,
                 });
             }
-            setMessages(page.items);
+            setMessages((prev) => {
+                const priorById = new Map(prev.map((m) => [String(m.id), m]));
+                return page.items.map((item) => {
+                    const prior = priorById.get(String(item.id));
+                    if (!prior?.replyTo || item.replyTo) return item;
+                    return { ...item, replyTo: prior.replyTo };
+                });
+            });
             if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
                 setGroupName(page.groupName);
                 setGroupAvatarUrl((page as any).groupAvatarUrl || undefined);
@@ -793,8 +905,14 @@ export default function MessagesScreen({ route, navigation }: any) {
 
         const replyToPayload = replyingTo
             ? {
-                messageId: replyingTo.id,
-                text: replyingTo.text || '',
+                messageId: String(replyingTo.id),
+                text:
+                    (replyingTo.text || '').trim() ||
+                    (replyingTo.imageUrl
+                        ? isLikelyVideoUrl(replyingTo.imageUrl)
+                            ? 'Video'
+                            : 'Photo'
+                        : ''),
                 senderHandle: replyingTo.senderHandle,
                 imageUrl: replyingTo.imageUrl,
                 mediaType: (isLikelyVideoUrl(replyingTo.imageUrl) ? 'video' : 'image') as 'image' | 'video',
@@ -1235,6 +1353,15 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const handleInviteMember = async () => {
         if (!chatGroupId || inviteBusy) return;
+        if (!isGroupAdmin) {
+            showAlert({
+                title: 'Admin only',
+                message: 'Only the person who created this community can invite people.',
+                icon: 'info',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
         const normalized = inviteHandle.trim().replace(/^@/, '');
         if (!normalized) {
             showAlert({
@@ -1882,8 +2009,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         };
     }, []);
 
-    const renderMessage = ({ item }: { item: ChatMessage }) => {
+    const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
         const isFromMe = sameDmHandle(item.senderHandle, user?.handle);
+        const prevMessage = index > 0 ? messages[index - 1] : undefined;
+        const showSenderMeta =
+            !isFromMe &&
+            (!prevMessage || !sameDmHandle(prevMessage.senderHandle, item.senderHandle));
         const senderAvatar = getAvatarForHandle(item.senderHandle);
         const isStoryInteraction = Boolean(item.storyId);
         const isLegacyStoryContextText =
@@ -2073,9 +2204,13 @@ export default function MessagesScreen({ route, navigation }: any) {
             );
             return (
                 <View
+                    onLayout={(e) => {
+                        messageYRef.current[item.id] = e.nativeEvent.layout.y;
+                    }}
                     style={[
                         styles.messageContainer,
                         isFromMe ? styles.messageFromMe : styles.messageFromOther,
+                        highlightedMessageId === item.id ? styles.messageHighlighted : null,
                     ]}
                 >
                     {!isFromMe ? (
@@ -2128,38 +2263,103 @@ export default function MessagesScreen({ route, navigation }: any) {
         );
         const bubbleFill = isFromMe ? sentBubbleColor : DM_RECEIVED;
 
+        const replyTo = (item as any).replyTo as
+            | {
+                  messageId?: string;
+                  text?: string;
+                  senderHandle?: string;
+                  imageUrl?: string;
+              }
+            | undefined;
+        const quotedFromMe = sameDmHandle(replyTo?.senderHandle, user?.handle);
+        const quoteFill = quotedFromMe ? sentBubbleColor : DM_RECEIVED;
+        const quotedOriginal = findQuotedMessage(messages, replyTo);
+        const quoteImageUrl = replyTo?.imageUrl || quotedOriginal?.imageUrl;
+        const quoteSnippet =
+            quoteImageUrl
+                ? isLikelyVideoUrl(quoteImageUrl)
+                    ? 'Video'
+                    : 'Photo'
+                : (quotedOriginal?.text || replyTo?.text || '').trim() || 'Message';
+        const quoteMinWidth = dmReplyQuoteMinWidth(replyTo || quotedOriginal);
+        const quoteSameAsOuter = Boolean(replyTo) && quotedFromMe === isFromMe;
+        const quoteWash = quoteSameAsOuter ? (
+            <View pointerEvents="none" style={styles.replyQuoteWash} />
+        ) : null;
+        const quoteInner = replyTo ? (
+            <View style={styles.replyQuoteInner}>
+                {quoteImageUrl ? (
+                    <View style={styles.replyPreviewThumb}>
+                        {isLikelyVideoUrl(quoteImageUrl) ? (
+                            <View style={styles.replyPreviewVideoBadge}>
+                                <Icon name="videocam" size={ox(11)} color="#FFFFFF" />
+                            </View>
+                        ) : (
+                            <Image source={{ uri: quoteImageUrl }} style={styles.replyPreviewImage} />
+                        )}
+                    </View>
+                ) : null}
+                <View style={styles.replyPreviewTextWrap}>
+                    <Text
+                        style={[
+                            styles.replyQuoteLabel,
+                            !quotedFromMe
+                                ? { color: dmSenderNameColor(replyTo.senderHandle) }
+                                : null,
+                        ]}
+                        numberOfLines={1}
+                    >
+                        {quotedFromMe ? 'You' : dmShortName(replyTo.senderHandle)}
+                    </Text>
+                    <Text style={styles.replyQuoteSnippet} numberOfLines={2} ellipsizeMode="tail">
+                        {quoteSnippet}
+                    </Text>
+                </View>
+            </View>
+        ) : null;
+
+        const quoteBubbleStyle = [
+            styles.replyQuoteBubble,
+            quoteMinWidth ? { minWidth: quoteMinWidth } : null,
+        ];
         const bubbleContent = (
             <>
-                {(item as any).replyTo ? (
-                    <View style={styles.replyPreviewWrap}>
-                        <View style={styles.replyPreviewBar} />
-                        {((item as any).replyTo?.imageUrl as string | undefined) ? (
-                            <View style={styles.replyPreviewThumb}>
-                                {isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
-                                    <View style={styles.replyPreviewVideoBadge}>
-                                        <Icon name="videocam" size={ox(12)} color="#FFFFFF" />
-                                    </View>
-                                ) : (
-                                    <Image
-                                        source={{ uri: (item as any).replyTo.imageUrl }}
-                                        style={styles.replyPreviewImage}
-                                    />
-                                )}
+                {showSenderMeta ? (
+                    <Text
+                        style={[
+                            styles.groupSenderName,
+                            { color: dmSenderNameColor(item.senderHandle) },
+                        ]}
+                        numberOfLines={1}
+                    >
+                        {dmShortName(item.senderHandle)}
+                    </Text>
+                ) : null}
+                {replyTo ? (
+                    <Pressable
+                        onPress={() => jumpToQuotedMessage(replyTo)}
+                        style={[
+                            styles.replyQuotePress,
+                            quoteMinWidth ? { minWidth: quoteMinWidth } : null,
+                        ]}
+                    >
+                        {quotedFromMe ? (
+                            <LinearGradient
+                                colors={[...sentGradient]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={quoteBubbleStyle}
+                            >
+                                {quoteWash}
+                                {quoteInner}
+                            </LinearGradient>
+                        ) : (
+                            <View style={[quoteBubbleStyle, { backgroundColor: quoteFill }]}>
+                                {quoteWash}
+                                {quoteInner}
                             </View>
-                        ) : null}
-                        <View style={styles.replyPreviewTextWrap}>
-                            <Text style={styles.replyPreviewSender} numberOfLines={1}>
-                                {(item as any).replyTo?.senderHandle || 'Reply'}
-                            </Text>
-                            <Text style={styles.replyPreviewText} numberOfLines={1}>
-                                {(item as any).replyTo?.imageUrl
-                                    ? isLikelyVideoUrl((item as any).replyTo.imageUrl)
-                                        ? 'Video'
-                                        : 'Photo'
-                                    : (item as any).replyTo?.text || 'Message'}
-                            </Text>
-                        </View>
-                    </View>
+                        )}
+                    </Pressable>
                 ) : null}
                 {item.text ? (
                     <Text
@@ -2227,7 +2427,8 @@ export default function MessagesScreen({ route, navigation }: any) {
                 gradientColors={
                     isFromMe && !isMediaOnlyMessage ? [...sentGradient] : undefined
                 }
-                bubbleStyle={
+                bubbleStyle={[
+                    quoteMinWidth ? { minWidth: quoteMinWidth } : null,
                     isMediaOnlyMessage
                         ? {
                               backgroundColor: 'transparent',
@@ -2240,20 +2441,30 @@ export default function MessagesScreen({ route, navigation }: any) {
                           }
                         : messageReactions[item.id]?.length
                           ? { paddingBottom: ox(22) }
-                          : undefined
-                }
+                          : null,
+                ]}
             >
                 {bubbleContent}
             </IMessageDmBubbleShell>
         );
 
         return (
-            <View style={[
+            <View
+                onLayout={(e) => {
+                    messageYRef.current[item.id] = e.nativeEvent.layout.y;
+                }}
+                style={[
                 styles.messageContainer,
                 isFromMe ? styles.messageFromMe : styles.messageFromOther,
+                highlightedMessageId === item.id ? styles.messageHighlighted : null,
+                !showSenderMeta && !isFromMe ? styles.messageClusterFollow : null,
             ]}>
                 {!isFromMe ? (
+                    showSenderMeta ? (
                     <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
+                    ) : (
+                        <View style={styles.senderAvatarSpacer} />
+                    )
                 ) : null}
                 {!isFromMe && swipingMessageId === item.id ? (
                     <Animated.View
@@ -2375,7 +2586,11 @@ export default function MessagesScreen({ route, navigation }: any) {
                             </Text>
                         </TouchableOpacity>
                         <Text style={styles.headerSubtitle}>
-                            {isGroupThread ? 'Group chat' : 'Active now'}
+                            {isGroupThread
+                                ? isGroupAdmin
+                                    ? 'Community · admin'
+                                    : 'Community'
+                                : 'Active now'}
                         </Text>
                     </View>
                 </View>
@@ -2389,7 +2604,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                             <Icon name="location-outline" size={ox(22)} color="#FFFFFF" />
                         </TouchableOpacity>
                     ) : null}
-                    {isGroupThread ? (
+                    {isGroupThread && isGroupAdmin ? (
                         <TouchableOpacity
                             onPress={() => setInviteOpen(true)}
                             style={styles.headerActionButton}
@@ -2413,7 +2628,13 @@ export default function MessagesScreen({ route, navigation }: any) {
                     ref={flatListRef}
                     data={messages}
                     renderItem={renderMessage}
-                    keyExtractor={(item) => item.id}
+                    extraData={{
+                        highlightedMessageId,
+                        dmSentStyle,
+                        swipingMessageId,
+                        messageReactions,
+                        showSenderMeta: true,
+                    }}
                     style={styles.messagesList}
                     contentContainerStyle={[
                         styles.messagesContent,
@@ -2434,7 +2655,15 @@ export default function MessagesScreen({ route, navigation }: any) {
                             loadOlderMessages();
                         }
                     }}
-                    scrollEventThrottle={16}
+                    onScrollToIndexFailed={({ index }) => {
+                        requestAnimationFrame(() => {
+                            flatListRef.current?.scrollToIndex({
+                                index,
+                                animated: true,
+                                viewPosition: 0.4,
+                            });
+                        });
+                    }}
                     ListHeaderComponent={loadingOlder ? (
                         <View style={styles.loadingOlderWrap}>
                             <ActivityIndicator size="small" color="#8B5CF6" />
@@ -2467,7 +2696,21 @@ export default function MessagesScreen({ route, navigation }: any) {
                             },
                         ]}
                     >
-                        <View style={styles.composerContextBar} />
+                        <View
+                            style={[
+                                styles.composerContextBar,
+                                replyingTo
+                                    ? {
+                                          backgroundColor: sameDmHandle(
+                                              replyingTo.senderHandle,
+                                              user?.handle,
+                                          )
+                                              ? dmSentBubbleColor(dmSentStyle)
+                                              : DM_RECEIVED,
+                                      }
+                                    : null,
+                            ]}
+                        />
                         {(() => {
                             if (editingMessage) return null;
                             const replyPostId =
@@ -2501,8 +2744,12 @@ export default function MessagesScreen({ route, navigation }: any) {
                         <View style={styles.composerContextBody}>
                             <Text style={styles.composerContextTitle}>
                                 {editingMessage
-                                    ? 'Editing message'
-                                    : `Replying to ${replyingTo?.senderHandle || ''}`}
+                                    ? 'Edit message'
+                                    : `Replying to ${
+                                          sameDmHandle(replyingTo?.senderHandle, user?.handle)
+                                              ? 'you'
+                                              : dmShortName(replyingTo?.senderHandle)
+                                      }`}
                             </Text>
                             <Text style={styles.composerContextText} numberOfLines={1}>
                                 {editingMessage?.text ||
@@ -2533,10 +2780,12 @@ export default function MessagesScreen({ route, navigation }: any) {
                             onPress={() => {
                                 setReplyingTo(null);
                                 setEditingMessage(null);
-                                setMessageText('');
+                                if (editingMessage) setMessageText('');
                             }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Cancel reply"
                         >
-                            <Icon name="close" size={ox(18)} color="#9CA3AF" />
+                            <Icon name="close" size={ox(18)} color="#8E8E93" />
                         </TouchableOpacity>
                     </Animated.View>
                 )}
@@ -2903,12 +3152,15 @@ export default function MessagesScreen({ route, navigation }: any) {
                                     />
                                     <View style={styles.chatInfoProfileText}>
                                         <Text style={styles.chatInfoName}>{groupName}</Text>
-                                        <Text style={styles.chatInfoSubtitle}>Group chat</Text>
+                                        <Text style={styles.chatInfoSubtitle}>
+                                            {isGroupAdmin ? 'Community · you are admin' : 'Community'}
+                                        </Text>
                                     </View>
                                 </View>
                                 <Text style={styles.chatInfoHint}>
-                                    To add people, use the + button in the chat header, or open someone&apos;s
-                                    profile and choose Invite to group.
+                                    {isGroupAdmin
+                                        ? 'Only you can invite people. Use + in the chat header, or open someone’s profile and choose Invite to group.'
+                                        : 'Only the admin who created this community can invite people.'}
                                 </Text>
                                 <TouchableOpacity
                                     style={styles.leaveGroupBtn}
@@ -3193,11 +3445,29 @@ const styles = StyleSheet.create({
         gap: ox(8),
         paddingHorizontal: ox(4),
     },
+    messageHighlighted: {
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderRadius: ox(22),
+        paddingVertical: ox(4),
+    },
     messageFromMe: {
         justifyContent: 'flex-end',
     },
     messageFromOther: {
         justifyContent: 'flex-start',
+    },
+    messageClusterFollow: {
+        marginBottom: ox(2),
+        marginTop: -ox(2),
+    },
+    senderAvatarSpacer: {
+        width: ox(32),
+        height: ox(32),
+    },
+    groupSenderName: {
+        fontSize: ox(13),
+        fontWeight: '700',
+        marginBottom: ox(4),
     },
     messageColumn: {
         flexShrink: 1,
@@ -3394,25 +3664,23 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: ox(10),
         paddingHorizontal: ox(16),
-        paddingTop: ox(10),
-        paddingBottom: ox(8),
+        paddingTop: ox(8),
+        paddingBottom: ox(6),
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+        borderTopColor: 'rgba(255, 255, 255, 0.12)',
         backgroundColor: '#000000',
     },
     composerContextBar: {
         width: 2,
-        height: ox(44),
-        borderRadius: ox(2),
-        backgroundColor: 'rgba(255,255,255,0.25)',
+        height: ox(36),
+        borderRadius: ox(1),
+        backgroundColor: 'rgba(255,255,255,0.35)',
     },
     composerContextThumbWrap: {
-        width: ox(48),
-        height: ox(48),
-        borderRadius: ox(8),
+        width: ox(32),
+        height: ox(32),
+        borderRadius: ox(6),
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
         backgroundColor: '#09090b',
     },
     composerContextThumb: {
@@ -3430,16 +3698,15 @@ const styles = StyleSheet.create({
         minWidth: 0,
     },
     composerContextTitle: {
-        color: '#737373',
-        fontSize: ox(11),
+        color: '#FFFFFF',
+        fontSize: ox(13),
         fontWeight: '600',
-        textTransform: 'uppercase',
-        letterSpacing: 0.4,
         marginBottom: 1,
     },
     composerContextText: {
-        color: '#E5E7EB',
+        color: '#8E8E93',
         fontSize: ox(13),
+        lineHeight: ox(17),
     },
     inputShell: {
         flex: 1,
@@ -3651,26 +3918,53 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-end',
         marginTop: ox(2),
     },
-    replyPreviewWrap: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    replyQuotePress: {
+        alignSelf: 'stretch',
+        maxWidth: '100%',
+        flexShrink: 0,
         marginBottom: ox(8),
     },
-    replyPreviewBar: {
-        width: 2,
+    replyQuoteBubble: {
+        flexDirection: 'row',
+        alignItems: 'center',
         alignSelf: 'stretch',
-        backgroundColor: 'rgba(255,255,255,0.35)',
-        borderRadius: ox(2),
-        marginRight: 8,
+        width: '100%',
+        borderRadius: ox(12),
+        paddingVertical: ox(8),
+        paddingHorizontal: ox(10),
+        overflow: 'hidden',
+        position: 'relative',
+    },
+    replyQuoteInner: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 1,
+        elevation: 1,
+        minWidth: 0,
+    },
+    replyQuoteWash: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.22)',
+    },
+    replyQuoteLabel: {
+        color: '#FFFFFF',
+        fontSize: ox(12),
+        fontWeight: '700',
+        marginBottom: 1,
+    },
+    replyQuoteSnippet: {
+        color: 'rgba(255,255,255,0.78)',
+        fontSize: ox(13),
+        lineHeight: ox(17),
     },
     replyPreviewThumb: {
-        width: ox(36),
-        height: ox(36),
-        borderRadius: ox(8),
+        width: ox(28),
+        height: ox(28),
+        borderRadius: ox(5),
         overflow: 'hidden',
+        alignSelf: 'center',
         backgroundColor: '#000000',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
         marginRight: 8,
     },
     replyPreviewImage: {
@@ -3686,16 +3980,7 @@ const styles = StyleSheet.create({
     replyPreviewTextWrap: {
         flex: 1,
         minWidth: 0,
-    },
-    replyPreviewSender: {
-        color: 'rgba(255,255,255,0.75)',
-        fontSize: ox(11),
-        marginBottom: ox(2),
-        fontWeight: '600',
-    },
-    replyPreviewText: {
-        color: 'rgba(255,255,255,0.65)',
-        fontSize: ox(12),
+        paddingRight: ox(2),
     },
     swipeReplyCue: {
         width: ox(22),

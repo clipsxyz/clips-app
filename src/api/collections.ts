@@ -129,7 +129,11 @@ function mapApiCollections(payload: any, fallbackUserId?: string): Collection[] 
 }
 
 /** React Native persistence (Metro); absent on web/Vite. */
-function tryAsyncStorage(): { getItem: (k: string) => Promise<string | null>; setItem: (k: string, v: string) => Promise<void> } | null {
+function tryAsyncStorage(): {
+    getItem: (k: string) => Promise<string | null>;
+    setItem: (k: string, v: string) => Promise<void>;
+    removeItem: (k: string) => Promise<void>;
+} | null {
     try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const mod = require('@react-native-async-storage/async-storage');

@@ -30,10 +30,11 @@ export default function PostLinkPreviewCard({ preview, compact = false }: Props)
     const instagramLine = instagramSharePrompt(preview.url);
     const cardTitle = instagramLine || preview.title?.trim() || hostLabel;
     const description = preview.description?.trim();
+    const descriptionText = description ?? '';
     const showDescription =
-        Boolean(description) &&
-        description !== cardTitle &&
-        description.toLowerCase() !== 'view on instagram';
+        Boolean(descriptionText) &&
+        descriptionText !== cardTitle &&
+        descriptionText.toLowerCase() !== 'view on instagram';
 
     const openLink = async () => {
         const withProtocol = /^https?:\/\//i.test(preview.url) ? preview.url : `https://${preview.url}`;
@@ -101,7 +102,7 @@ export default function PostLinkPreviewCard({ preview, compact = false }: Props)
                         ) : null}
                         {showDescription ? (
                             <Text style={styles.description} numberOfLines={2}>
-                                {description}
+                                {descriptionText}
                             </Text>
                         ) : null}
                         <View style={styles.badge}>

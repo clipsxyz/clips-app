@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\InteractionPushService;
+use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -35,6 +37,8 @@ class AuthController extends Controller
             'locationNational' => 'nullable|string|max:100',
             'avatar_url' => 'nullable|string|max:500',
             'avatarUrl' => 'nullable|string|max:500',
+            'invite' => 'nullable|string|max:100',
+            'inviteHandle' => 'nullable|string|max:100',
         ]);
 
         if ($validator->fails()) {
@@ -48,8 +52,12 @@ class AuthController extends Controller
             $request->input('avatar_url') ?? $request->input('avatarUrl')
         );
 
-        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational, $avatarUrl) {
-            $user = User::create([
+        $inviter = $this->resolveInviter(
+            (string) ($request->input('invite') ?: $request->input('inviteHandle') ?: '')
+        );
+
+        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational, $avatarUrl, $inviter) {
+            $attributes = [
                 'username' => $request->username,
                 'email' => strtolower(trim((string) $request->email)),
                 // Hashed cast on User hashes once — do not Hash::make here.
@@ -60,7 +68,16 @@ class AuthController extends Controller
                 'location_regional' => $locationRegional,
                 'location_national' => $locationNational,
                 'avatar_url' => $avatarUrl,
-            ]);
+            ];
+            if ($inviter && Schema::hasColumn('users', 'invited_by_user_id')) {
+                $attributes['invited_by_user_id'] = $inviter->id;
+            }
+
+            $user = User::create($attributes);
+
+            if ($inviter) {
+                $this->followInviterOnSignup($user, $inviter);
+            }
 
             return $user;
         });
@@ -526,6 +543,57 @@ class AuthController extends Controller
     }
 
     /**
+     * Clear the verified phone so the user can add a different number.
+     */
+    public function removePhone(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $user->phone_number = null;
+        $user->phone_verified_at = null;
+        $user->save();
+
+        return response()->json([
+            'ok' => true,
+            'phone_number' => null,
+            'phone_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Authenticated password change (current password required).
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'new_password' => ['required', 'string', Password::min(6), 'different:current_password'],
+            'confirm_password' => 'required|string|same:new_password',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $current = (string) $request->input('current_password');
+        if (! Hash::check($current, $user->password)) {
+            return response()->json(['error' => 'Current password is incorrect'], 422);
+        }
+
+        $user->password = (string) $request->input('new_password');
+        $user->save();
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
      * Link the authenticated account to a Facebook profile ID.
      */
     public function linkFacebook(Request $request): JsonResponse
@@ -678,19 +746,26 @@ class AuthController extends Controller
 
         $validator = Validator::make($request->all(), [
             'phones' => ['required', 'array', 'min:1', 'max:500'],
-            'phones.*' => ['required', 'string', 'max:32'],
+            'phones.*' => ['required', 'string', 'max:40'],
         ]);
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $normalized = collect((array) $request->input('phones', []))
-            ->map(fn ($p) => $this->normalizePhone((string) $p))
-            ->filter(fn ($p) => $p !== null)
+        $candidates = collect((array) $request->input('phones', []))
+            ->flatMap(fn ($p) => $this->phoneMatchCandidates((string) $p))
             ->unique()
             ->values();
 
-        if ($normalized->isEmpty()) {
+        $suffixes = collect((array) $request->input('phones', []))
+            ->map(fn ($p) => $this->phoneDigits((string) $p))
+            ->filter()
+            ->map(fn ($digits) => substr((string) $digits, -8))
+            ->filter(fn ($suffix) => is_string($suffix) && strlen($suffix) === 8)
+            ->unique()
+            ->values();
+
+        if ($candidates->isEmpty() && $suffixes->isEmpty()) {
             return response()->json([
                 'ok' => true,
                 'matched' => [],
@@ -700,12 +775,21 @@ class AuthController extends Controller
         }
 
         $matchedUsers = User::query()
-            ->whereIn('phone_number', $normalized->all())
-            ->whereNotNull('phone_verified_at')
+            ->whereNotNull('phone_number')
+            ->where('phone_number', '!=', '')
             ->where('id', '!=', $user->id)
+            ->where(function ($query) use ($candidates, $suffixes) {
+                if ($candidates->isNotEmpty()) {
+                    $query->whereIn('phone_number', $candidates->all());
+                }
+                foreach ($suffixes as $suffix) {
+                    $query->orWhere('phone_number', 'like', '%' . $suffix);
+                }
+            })
             ->select(['id', 'handle', 'display_name', 'avatar_url', 'phone_number'])
             ->limit(200)
             ->get()
+            ->unique('id')
             ->map(fn (User $matched) => [
                 'id' => (string) $matched->id,
                 'handle' => $matched->handle,
@@ -718,7 +802,7 @@ class AuthController extends Controller
         return response()->json([
             'ok' => true,
             'matched' => $matchedUsers,
-            'submitted_count' => $normalized->count(),
+            'submitted_count' => $candidates->count(),
             'matched_count' => $matchedUsers->count(),
         ]);
     }
@@ -737,17 +821,87 @@ class AuthController extends Controller
         return is_array($payload) ? $payload : [];
     }
 
-    private function normalizePhone(string $raw): ?string
+    private function resolveInviter(string $raw): ?User
     {
-        $trimmed = trim($raw);
-        if ($trimmed === '') return null;
-
-        $digits = preg_replace('/\D+/', '', $trimmed);
-        if (!is_string($digits) || strlen($digits) < 8 || strlen($digits) > 15) {
+        $handle = ltrim(trim($raw), '@');
+        if ($handle === '') {
             return null;
         }
 
-        return '+' . $digits;
+        return User::query()
+            ->where('handle', $handle)
+            ->orWhere('handle', '@' . $handle)
+            ->orWhereRaw('LOWER(handle) = ?', [strtolower($handle)])
+            ->orWhereRaw('LOWER(handle) = ?', ['@' . strtolower($handle)])
+            ->first();
+    }
+
+    private function followInviterOnSignup(User $user, User $inviter): void
+    {
+        if ($user->id === $inviter->id) {
+            return;
+        }
+
+        $exists = DB::table('user_follows')
+            ->where('follower_id', $user->id)
+            ->where('following_id', $inviter->id)
+            ->exists();
+        if ($exists) {
+            return;
+        }
+
+        $status = $inviter->is_private ? 'pending' : 'accepted';
+        DB::table('user_follows')->insert([
+            'follower_id' => $user->id,
+            'following_id' => $inviter->id,
+            'status' => $status,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        if ($status === 'accepted') {
+            $user->increment('following_count');
+            $inviter->increment('followers_count');
+        }
+
+        try {
+            $push = new InteractionPushService();
+            if ($status === 'accepted') {
+                $push->notifyFollow($user, $inviter);
+            } else {
+                $push->notifyFollowRequest($user, $inviter);
+            }
+        } catch (\Throwable $e) {
+            Log::debug('invite follow notify skipped: ' . $e->getMessage());
+        }
+    }
+
+    private function phoneDigits(string $raw): ?string
+    {
+        $digits = preg_replace('/\D+/', '', trim($raw));
+        if (! is_string($digits) || strlen($digits) < 8 || strlen($digits) > 15) {
+            return null;
+        }
+
+        return $digits;
+    }
+
+    /** @return list<string> */
+    private function phoneMatchCandidates(string $raw): array
+    {
+        $digits = $this->phoneDigits($raw);
+        if ($digits === null) {
+            return [];
+        }
+
+        $out = ['+' . $digits, $digits];
+        if (str_starts_with($digits, '0') && strlen($digits) >= 9) {
+            $national = substr($digits, 1);
+            $out[] = '+353' . $national;
+            $out[] = '353' . $national;
+        }
+
+        return array_values(array_unique($out));
     }
 
     private function nullableTrimmedString(mixed $value): ?string
@@ -776,11 +930,14 @@ class AuthController extends Controller
     }
 
     /**
-     * Logout user
+     * Logout user and revoke the current Sanctum access token.
      */
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $token = $request->user()?->currentAccessToken();
+        if ($token instanceof PersonalAccessToken) {
+            $token->delete();
+        }
 
         return response()->json(['message' => 'Successfully logged out']);
     }

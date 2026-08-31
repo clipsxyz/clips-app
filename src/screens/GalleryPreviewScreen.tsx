@@ -17,6 +17,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/Auth';
 import { saveDraft } from '../api/drafts.native';
 import { getKnownUserHandles } from '../api/users';
+import type { LocationSuggestion } from '../api/locations';
+import { geoFieldsFromSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
 import GalleryPreviewComposerPanel, {
     type GalleryPickerTab,
 } from '../components/gallery/GalleryPreviewComposerPanel.native';
@@ -127,6 +130,24 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     const [location, setLocation] = useState('');
     const [venue, setVenue] = useState('');
     const [landmark, setLandmark] = useState('');
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
+    const socialFormat = route.params?.socialFormat as
+        | 'youtube_shorts'
+        | 'tiktok'
+        | 'instagram_reels'
+        | undefined;
+
+    const applyLocationGeo = (suggestion: LocationSuggestion, asPrimary = true) => {
+        warmPlaceGeocode(suggestion);
+        const geo = geoFieldsFromSuggestion(suggestion);
+        if (asPrimary || !placeId) {
+            setPlaceId(geo.placeId);
+            setPlaceLatitude(geo.latitude);
+            setPlaceLongitude(geo.longitude);
+        }
+    };
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showTagUserModal, setShowTagUserModal] = useState(false);
     const [imageFilterName, setImageFilterName] = useState<InstantFilterName>('None');
@@ -431,6 +452,10 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
             venue: venue.trim() || undefined,
             landmark: landmark.trim() || undefined,
+            socialFormat: socialFormat || undefined,
+            placeId,
+            latitude: placeLatitude,
+            longitude: placeLongitude,
         });
         showUploadOverlayNative({
             jobId: tempId,
@@ -613,6 +638,9 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 onLocationChange={setLocation}
                 onVenueChange={setVenue}
                 onLandmarkChange={setLandmark}
+                onSelectLocation={(s) => applyLocationGeo(s, true)}
+                onSelectVenue={(s) => applyLocationGeo(s, false)}
+                onSelectLandmark={(s) => applyLocationGeo(s, false)}
                 taggedUsers={taggedUsers}
                 onOpenTagModal={() => setShowTagUserModal(true)}
                 imageFilterName={imageFilterName}

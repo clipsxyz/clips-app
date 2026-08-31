@@ -84,6 +84,16 @@ export const FEED_CARD_CAPTION_PADDING = {
     paddingVertical: 10,
 } as const;
 
+export const FEED_CARD_CAPTION_ROW = {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+};
+
+export const FEED_CARD_CAPTION_TEXT_SLOT = {
+    flex: 1,
+    minWidth: 0,
+} as const;
+
 /** Web EngagementBar shell: `px-3 pt-2 pb-2.5 border-t` with borderColor #030712. */
 export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
     paddingHorizontal: 12,

@@ -48,8 +48,9 @@ import {
     acceptMessageRequest,
     type ConversationSummary,
 } from '../api/messages';
-import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import { getNotificationPreferences, isInAppNotificationChannelEnabled } from '../services/notifications';
 import { leaveChatGroup } from '../api/client';
+import { acceptChatGroupInvite, declineChatGroupInvite } from '../api/chatGroups';
 import { ox } from '../constants/nativeOpticalScale';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
 
@@ -470,6 +471,9 @@ export default function InboxScreen({ navigation, route }: any) {
             return;
         }
 
+        if (notif.type === 'group_invite') {
+            return;
+        }
         if (notif.chatGroupId && user?.handle) {
             await markGroupConversationReadById(notif.chatGroupId, user.handle);
             navigateToMessages({ chatGroupId: notif.chatGroupId, kind: 'group' });
@@ -582,6 +586,47 @@ export default function InboxScreen({ navigation, route }: any) {
         }
     };
 
+    const handleAcceptGroupInvite = async (notif: Notification) => {
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId) {
+            Alert.alert('Invite unavailable', 'This community invite can no longer be accepted.');
+            return;
+        }
+        try {
+            await acceptChatGroupInvite(inviteId);
+            if (user?.handle) {
+                await deleteNotification(notif.id, user.handle);
+            }
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+            if (notif.chatGroupId) {
+                navigateToMessages({
+                    chatGroupId: notif.chatGroupId,
+                    kind: 'group',
+                });
+            } else {
+                await loadData();
+            }
+        } catch (error) {
+            console.error('Failed to accept community invite:', error);
+            Alert.alert('Error', 'Could not join this community right now.');
+        }
+    };
+
+    const handleDeclineGroupInvite = async (notif: Notification) => {
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId) return;
+        try {
+            await declineChatGroupInvite(inviteId);
+            if (user?.handle) {
+                await deleteNotification(notif.id, user.handle);
+            }
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+        } catch (error) {
+            console.error('Failed to decline community invite:', error);
+            Alert.alert('Error', 'Could not decline this invite right now.');
+        }
+    };
+
     const openConversation = async (conv: ConversationSummary) => {
         if (!user?.handle) return;
         try {
@@ -651,6 +696,8 @@ export default function InboxScreen({ navigation, route }: any) {
                 return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
+            case 'group_invite':
+                return notif.message || `invited you to join ${notif.groupName || 'a community'}`;
             case 'new_post':
                 return notif.message || 'posted a new clip';
             default:
@@ -670,6 +717,8 @@ export default function InboxScreen({ navigation, route }: any) {
                 return 'chatbubble';
             case 'follow_request':
                 return 'person-add';
+            case 'group_invite':
+                return 'people';
             default:
                 return 'notifications';
         }
@@ -681,12 +730,12 @@ export default function InboxScreen({ navigation, route }: any) {
             .filter((conv) => {
                 if (!conv.lastMessage || !conv.unread) return false;
                 if (conv.kind === 'group' && conv.chatGroupId) {
-                    return isNotificationTypeEnabled(notificationPrefs, 'group_chat');
+                    return isInAppNotificationChannelEnabled(notificationPrefs, 'group_chat');
                 }
                 if (!conv.otherHandle) return false;
                 const ownMessage = conv.lastMessage.senderHandle === user?.handle;
                 if (ownMessage) return false;
-                return isNotificationTypeEnabled(notificationPrefs, 'dm');
+                return isInAppNotificationChannelEnabled(notificationPrefs, 'dm');
             })
             .map((conv) => {
                 const lastMsg = conv.lastMessage!;
@@ -1032,7 +1081,9 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </Text>
                                     <View style={styles.notifKindChip}>
                                         <Text style={styles.notifKindChipText}>
-                                            {item.chatGroupId
+                                            {item.type === 'group_invite'
+                                                ? 'Community'
+                                                : item.chatGroupId
                                                 ? 'Group'
                                                 : item.postId && (item.type === 'comment' || item.type === 'reply') && !item.storyId
                                                     ? 'Comment'
@@ -1060,6 +1111,22 @@ export default function InboxScreen({ navigation, route }: any) {
                                             onPress={() => { void handleDenyFollowRequest(item); }}
                                         >
                                             <Text style={styles.followRequestDenyText}>Deny</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                                {item.type === 'group_invite' && (
+                                    <View style={styles.followRequestActions}>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
+                                            onPress={() => { void handleAcceptGroupInvite(item); }}
+                                        >
+                                            <Text style={styles.followRequestAcceptText}>Join</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
+                                            onPress={() => { void handleDeclineGroupInvite(item); }}
+                                        >
+                                            <Text style={styles.followRequestDenyText}>Decline</Text>
                                         </TouchableOpacity>
                                     </View>
                                 )}

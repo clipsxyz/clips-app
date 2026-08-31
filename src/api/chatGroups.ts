@@ -56,7 +56,14 @@ export async function createChatGroup(
 export async function inviteUserToChatGroup(groupId: string, inviteeHandle: string): Promise<unknown> {
   if (!isLaravelApiEnabled()) {
     const { mockInviteToChatGroup } = await import('./messages');
-    return mockInviteToChatGroup(groupId, inviteeHandle);
+    let inviterHandle: string | undefined;
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
+      inviterHandle = raw ? JSON.parse(raw)?.handle : undefined;
+    } catch {
+      inviterHandle = undefined;
+    }
+    return mockInviteToChatGroup(groupId, inviteeHandle, inviterHandle);
   }
   return client.inviteToChatGroup(groupId, inviteeHandle);
 }

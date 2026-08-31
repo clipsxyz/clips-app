@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Notification;
 use App\Models\User;
+use App\Models\UserNotificationSetting;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -167,6 +168,15 @@ class InteractionPushService
 
     private function prefAllows(User $recipient, string $prefKey): bool
     {
+        if (Schema::hasTable('user_notification_settings')) {
+            $row = UserNotificationSetting::query()->where('user_id', $recipient->id)->first();
+            if ($row) {
+                return $row->allows($prefKey);
+            }
+
+            return true;
+        }
+
         if (! Schema::hasTable('notification_preferences')) {
             return true;
         }

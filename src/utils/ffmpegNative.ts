@@ -1,10 +1,21 @@
-type FfmpegModule = typeof import('ffmpeg-kit-react-native-alt');
+type FfmpegModule = {
+    FFmpegKit: {
+        execute: (command: string) => Promise<{
+            getReturnCode: () => Promise<unknown>;
+            getAllLogsAsString: () => Promise<string>;
+        }>;
+    };
+    ReturnCode: {
+        isSuccess: (code: unknown) => boolean;
+    };
+};
 
 let ffmpegModulePromise: Promise<FfmpegModule> | null = null;
 
 export async function loadFfmpeg(): Promise<FfmpegModule> {
     if (!ffmpegModulePromise) {
-        ffmpegModulePromise = import('ffmpeg-kit-react-native-alt');
+        const specifier = 'ffmpeg-kit-react-native-alt';
+        ffmpegModulePromise = import(specifier) as Promise<FfmpegModule>;
     }
     return ffmpegModulePromise;
 }

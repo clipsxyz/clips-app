@@ -91,7 +91,7 @@ function audienceInnerBg(audience: StoryAudience): string {
 function RailIcon({
     action,
     centered,
-    audience,
+    audience: _audience,
 }: {
     action: RailAction;
     centered: boolean;

@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
-import { BottomSheetFlatList, BottomSheetView } from '@gorhom/bottom-sheet';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { unifiedSearch } from '../api/search';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_NAVY } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, {
+    GAZETTEER_SHEET_PASSPORT,
+} from './GazetteerBottomSheetModal.native';
+import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 type TaggedUser = {
     handle: string;
@@ -20,6 +24,14 @@ type Props = {
     onVisitProfile?: (handle: string) => void;
 };
 
+const P = {
+    text: '#e8eef2',
+    muted: 'rgba(232, 238, 242, 0.62)',
+    border: 'rgba(255,255,255,0.12)',
+    chipBg: 'rgba(15, 36, 48, 0.72)',
+    accent: PASSPORT_PALETTE.wavePrimary,
+};
+
 export default function TaggedUsersBottomSheet({
     visible,
     onClose,
@@ -32,6 +44,7 @@ export default function TaggedUsersBottomSheet({
     useEffect(() => {
         if (!visible || taggedUserHandles.length === 0) {
             setUsers([]);
+            setLoading(false);
             return;
         }
 
@@ -86,151 +99,224 @@ export default function TaggedUsersBottomSheet({
         };
     }, [visible, taggedUserHandles.join(',')]);
 
-    const renderItem = useCallback(
-        ({ item }: { item: TaggedUser }) => (
-            <TouchableOpacity
-                style={styles.row}
-                onPress={() => {
-                    onClose();
-                    onVisitProfile?.(item.handle);
-                }}
-                disabled={!onVisitProfile}
-            >
-                <Avatar
-                    src={item.avatar_url}
-                    name={item.display_name || item.handle.split('@')[0]}
-                    size={40}
-                />
-                <View style={styles.rowText}>
-                    <Text style={styles.name} numberOfLines={1}>
-                        {item.display_name || item.handle}
-                    </Text>
-                    <Text style={styles.handle} numberOfLines={1}>
-                        {item.handle}
-                    </Text>
-                </View>
-            </TouchableOpacity>
-        ),
+    const openProfile = useCallback(
+        (handle: string) => {
+            onClose();
+            onVisitProfile?.(handle);
+        },
         [onClose, onVisitProfile],
+    );
+
+    const listHeader = useMemo(
+        () => (
+            <View style={styles.sheetChrome}>
+                <View style={styles.header}>
+                    <View style={styles.headerText}>
+                        <Text style={styles.kicker}>Gazetteer</Text>
+                        <Text style={styles.title}>Tagged people</Text>
+                    </View>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        style={styles.closeBtn}
+                        hitSlop={8}
+                        accessibilityLabel="Close"
+                    >
+                        <Icon name="close" size={16} color={P.muted} />
+                    </TouchableOpacity>
+                </View>
+                <Text style={styles.subtitle}>
+                    {taggedUserHandles.length}{' '}
+                    {taggedUserHandles.length === 1 ? 'person' : 'people'} in this clip
+                </Text>
+                <View style={styles.listDivider} />
+            </View>
+        ),
+        [onClose, taggedUserHandles.length],
+    );
+
+    const renderItem = useCallback(
+        ({ item }: { item: TaggedUser }) => {
+            const displayName = item.display_name || item.handle.split('@')[0];
+            return (
+                <View style={styles.row}>
+                    <TouchableOpacity
+                        style={styles.rowLeft}
+                        onPress={() => openProfile(item.handle)}
+                        disabled={!onVisitProfile}
+                        activeOpacity={0.8}
+                    >
+                        <Avatar
+                            src={item.avatar_url}
+                            name={displayName}
+                            handle={item.handle}
+                            size="sm"
+                        />
+                        <View style={styles.nameCol}>
+                            <Text style={styles.displayName} numberOfLines={1}>
+                                {displayName}
+                            </Text>
+                            <Text style={styles.subHandle} numberOfLines={1}>
+                                {item.handle}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                    {onVisitProfile ? (
+                        <TouchableOpacity
+                            style={styles.viewBtn}
+                            onPress={() => openProfile(item.handle)}
+                            accessibilityLabel={`View ${displayName}'s profile`}
+                        >
+                            <Text style={styles.viewBtnText}>View profile</Text>
+                        </TouchableOpacity>
+                    ) : null}
+                </View>
+            );
+        },
+        [onVisitProfile, openProfile],
     );
 
     return (
         <GazetteerBottomSheetModal
             visible={visible}
             onDismiss={onClose}
-            snapPoints={['80%']}
-            backgroundStyle={GAZETTEER_SHEET_NAVY.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_NAVY.handle}
+            snapPoints={['70%']}
+            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
         >
-            <BottomSheetView style={styles.headerBlock}>
-                <View style={styles.header}>
-                    <View style={styles.headerLeft}>
-                        <View style={styles.headerIcon}>
-                            <Icon name="people" size={20} color="#E5E7EB" />
-                        </View>
-                        <View>
-                            <Text style={styles.title}>Tagged people</Text>
-                            <Text style={styles.subtitle}>
-                                {taggedUserHandles.length}{' '}
-                                {taggedUserHandles.length === 1 ? 'person' : 'people'}
+            <PassportSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+                <View style={styles.body}>
+                    {listHeader}
+                    <BottomSheetFlatList
+                        style={styles.listFlex}
+                        data={loading ? [] : users}
+                        keyExtractor={(item) => item.handle}
+                        renderItem={renderItem}
+                        contentContainerStyle={styles.list}
+                        showsVerticalScrollIndicator={false}
+                        ListEmptyComponent={
+                            <Text style={styles.empty}>
+                                {loading ? 'Loading…' : 'No tagged people yet.'}
                             </Text>
-                        </View>
-                    </View>
-                    <TouchableOpacity onPress={onClose} hitSlop={8}>
-                        <Icon name="close" size={24} color="#9CA3AF" />
-                    </TouchableOpacity>
+                        }
+                    />
                 </View>
-            </BottomSheetView>
-
-            {loading ? (
-                <BottomSheetView>
-                    <ActivityIndicator color="#7A8AF0" style={styles.loader} />
-                </BottomSheetView>
-            ) : (
-                <BottomSheetFlatList
-                    data={users}
-                    keyExtractor={(item) => item.handle}
-                    renderItem={renderItem}
-                    contentContainerStyle={styles.list}
-                    ListEmptyComponent={
-                        <Text style={styles.empty}>No tagged users found</Text>
-                    }
-                />
-            )}
+            </PassportSheetCanvas>
         </GazetteerBottomSheetModal>
     );
 }
 
 const styles = StyleSheet.create({
-    headerBlock: {
+    canvas: {
+        flex: 1,
+    },
+    canvasContent: {
+        flex: 1,
+    },
+    body: {
+        flex: 1,
+    },
+    sheetChrome: {
+        zIndex: 2,
         paddingHorizontal: 16,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.1)',
+        paddingTop: 4,
+        paddingBottom: 4,
+        backgroundColor: 'rgba(6, 13, 22, 0.94)',
     },
     header: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
-        paddingBottom: 12,
+        marginBottom: 6,
     },
-    headerLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
+    headerText: {
+        flex: 1,
+        minWidth: 0,
+        paddingRight: 12,
     },
-    headerIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        alignItems: 'center',
-        justifyContent: 'center',
+    kicker: {
+        fontSize: 11,
+        fontWeight: '600',
+        letterSpacing: 1.4,
+        textTransform: 'uppercase',
+        color: P.accent,
+        marginBottom: 4,
     },
     title: {
-        fontSize: 17,
+        fontSize: 18,
         fontWeight: '700',
         color: '#FFFFFF',
     },
     subtitle: {
         fontSize: 12,
-        color: '#9CA3AF',
-        marginTop: 2,
+        color: P.muted,
+        marginBottom: 12,
     },
-    loader: {
-        paddingVertical: 32,
+    closeBtn: {
+        padding: 6,
+        borderRadius: 999,
+    },
+    listDivider: {
+        marginHorizontal: -16,
+        marginBottom: 4,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: P.border,
+    },
+    listFlex: {
+        flex: 1,
     },
     list: {
         paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 16,
+        paddingBottom: 24,
+        paddingTop: 4,
     },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        justifyContent: 'space-between',
         paddingVertical: 10,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.04)',
-        paddingHorizontal: 10,
-        marginBottom: 8,
+        gap: 12,
     },
-    rowText: {
+    rowLeft: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        minWidth: 0,
+    },
+    nameCol: {
         flex: 1,
         minWidth: 0,
     },
-    name: {
-        fontSize: 15,
+    displayName: {
+        fontSize: 14,
         fontWeight: '600',
-        color: '#F3F4F6',
+        color: P.text,
     },
-    handle: {
-        fontSize: 13,
-        color: '#9CA3AF',
+    subHandle: {
+        fontSize: 12,
+        color: P.muted,
         marginTop: 2,
+    },
+    viewBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: 'rgba(61,155,143,0.35)',
+        borderWidth: 1,
+        borderColor: 'rgba(61,155,143,0.55)',
+        flexShrink: 0,
+    },
+    viewBtnText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: P.text,
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
     },
     empty: {
         textAlign: 'center',
-        color: '#6B7280',
-        paddingVertical: 24,
+        fontSize: 12,
+        color: P.muted,
+        paddingVertical: 32,
     },
 });

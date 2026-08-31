@@ -13,6 +13,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import PlaceAutocompleteField from '../PlaceAutocompleteField.native';
+import type { LocationSuggestion } from '../../api/locations';
 import { INSTANT_FILTER_NAMES, getFilterOverlayStyle, type InstantFilterName } from '../../utils/instantFiltersNative';
 import type { LocalCarouselItem } from '../../utils/prepareCarouselMediaForPostNative';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../../constants';
@@ -62,6 +63,9 @@ type Props = {
     onLocationChange: (v: string) => void;
     onVenueChange: (v: string) => void;
     onLandmarkChange: (v: string) => void;
+    onSelectLocation?: (suggestion: LocationSuggestion) => void;
+    onSelectVenue?: (suggestion: LocationSuggestion) => void;
+    onSelectLandmark?: (suggestion: LocationSuggestion) => void;
     taggedUsers: string[];
     onOpenTagModal: () => void;
     imageFilterName: InstantFilterName;
@@ -97,6 +101,9 @@ export default function GalleryPreviewComposerPanel({
     onLocationChange,
     onVenueChange,
     onLandmarkChange,
+    onSelectLocation,
+    onSelectVenue,
+    onSelectLandmark,
     taggedUsers,
     onOpenTagModal,
     imageFilterName,
@@ -267,6 +274,7 @@ export default function GalleryPreviewComposerPanel({
                                     mode="location"
                                     value={location}
                                     onChange={onLocationChange}
+                                    onSelectSuggestion={onSelectLocation}
                                     placeholder="Add story location"
                                 />
                             </GradientField>
@@ -277,6 +285,7 @@ export default function GalleryPreviewComposerPanel({
                                     mode="venue"
                                     value={venue}
                                     onChange={onVenueChange}
+                                    onSelectSuggestion={onSelectVenue}
                                     placeholder="Add venue"
                                 />
                             </GradientField>
@@ -287,6 +296,7 @@ export default function GalleryPreviewComposerPanel({
                                     mode="landmark"
                                     value={landmark}
                                     onChange={onLandmarkChange}
+                                    onSelectSuggestion={onSelectLandmark}
                                     placeholder="Add landmark (optional)"
                                 />
                             </GradientField>

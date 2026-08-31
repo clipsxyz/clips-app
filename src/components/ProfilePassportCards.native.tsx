@@ -414,10 +414,10 @@ export default function ProfilePassportCards({
 
     useEffect(() => {
         if (typeof user?.followers_count === 'number' && user.followers_count > 0) {
-            setFollowersCount((prev) => Math.max(prev, user.followers_count));
+            setFollowersCount((prev) => Math.max(prev, user.followers_count ?? 0));
         }
         if (typeof user?.following_count === 'number' && user.following_count > 0) {
-            setFollowingCount((prev) => Math.max(prev, user.following_count));
+            setFollowingCount((prev) => Math.max(prev, user.following_count ?? 0));
         }
     }, [user?.followers_count, user?.following_count]);
 

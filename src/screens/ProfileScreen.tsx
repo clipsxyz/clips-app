@@ -17,9 +17,11 @@ import {
     Platform,
     DeviceEventEmitter,
     useWindowDimensions,
+    StatusBar,
+    PermissionsAndroid,
     type ViewToken,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
@@ -37,7 +39,6 @@ import {
     profilePassportChipBorder,
     profilePassportScrollInset,
 } from '../theme/gazetteerAmbientNative';
-import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -55,7 +56,7 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones, getCurrentUser, mapLaravelUserToAppFields, fetchFollowers, fetchFollowing, connectionListTotal, isAbortError } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, removeVerifiedPhone, changePassword, linkFacebookAccount, fetchFacebookFriendsMatches, type FacebookMatchedFriend, matchContactPhones, getCurrentUser, mapLaravelUserToAppFields, fetchFollowers, fetchFollowing, connectionListTotal, isAbortError } from '../api/client';
 import { isMockMode } from '../api/apiMode';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
@@ -68,6 +69,7 @@ import QRCodeModal from '../components/QRCodeModal.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import FeedShareModal from '../components/FeedShareModal';
+import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import {
     incrementViews,
     deletePost,
@@ -89,16 +91,23 @@ import CommentSafetyModal from '../components/CommentSafetyModal.native';
 import {
     getNotificationPreferences,
     loadNotificationPreferences,
-    saveNotificationPreferences,
     saveNotificationPreferencesAsync,
     resetNotificationPreferences,
     type NotificationPreferences,
 } from '../services/notifications';
 import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
+import { ensureContactsPermission } from '../utils/contactsPermissionNative';
+import { buildInviteShareUrl } from '../utils/profileShareUrl';
+import { maskPhoneNumber, toE164Phone } from '../utils/maskPhoneNumber';
+import ProfileQRCodeModal from '../components/ProfileQRCodeModal.native';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import {
+    setGlobalVideoMutedNative,
+    subscribeGlobalVideoMuted,
+} from '../utils/globalVideoMuteNative';
 import { userHasStoriesByHandle } from '../api/stories';
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 
@@ -109,12 +118,13 @@ type ProfileAlertConfig = {
     confirmButtonText?: string;
     cancelButtonText?: string;
     showCancelButton?: boolean;
-    onConfirm?: () => void;
+    onConfirm?: () => void | Promise<void>;
     onDismiss?: () => void;
 };
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { height: windowHeight } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const { user, logout, login } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
@@ -128,6 +138,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
     const [myFeedOpen, setMyFeedOpen] = useState(false);
     const [myFeedActiveVideoPostId, setMyFeedActiveVideoPostId] = useState<string | null>(null);
+    const [myFeedVideoMuted, setMyFeedVideoMuted] = useState(false);
     const [myFeedOverflowPost, setMyFeedOverflowPost] = useState<Post | null>(null);
     const [myFeedOverflowVisible, setMyFeedOverflowVisible] = useState(false);
     const [myFeedOverflowSaved, setMyFeedOverflowSaved] = useState(false);
@@ -136,6 +147,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [myFeedEditPost, setMyFeedEditPost] = useState<Post | null>(null);
     const [myFeedQrPost, setMyFeedQrPost] = useState<Post | null>(null);
     const [myFeedSharePost, setMyFeedSharePost] = useState<Post | null>(null);
+    const [myFeedShareToStoriesPost, setMyFeedShareToStoriesPost] = useState<Post | null>(null);
     const [myFeedCreateGroupOpen, setMyFeedCreateGroupOpen] = useState(false);
     const [myFeedCommentsOpen, setMyFeedCommentsOpen] = useState(false);
     const [myFeedCommentsPost, setMyFeedCommentsPost] = useState<Post | null>(null);
@@ -164,6 +176,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     }, []);
     const [unreadCount, setUnreadCount] = useState(0);
     const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(getNotificationPreferences());
+    const [emailDigestEnabled, setEmailDigestEnabled] = useState(user?.emailDigestEnabled !== false);
+    const [emailDigestSaving, setEmailDigestSaving] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
     const [isPrivate, setIsPrivate] = useState(() =>
         getEffectiveProfilePrivate(user?.handle, user?.is_private)
     );
@@ -172,15 +187,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         following: user?.following_count ?? 0,
     });
     const [securityModalOpen, setSecurityModalOpen] = useState(false);
-    const [securityStep, setSecurityStep] = useState<'phone' | 'code'>('phone');
+    const [securityStep, setSecurityStep] = useState<'hub' | 'code'>('hub');
     const [securityBusy, setSecurityBusy] = useState(false);
     const [phoneCountryCode, setPhoneCountryCode] = useState('+353');
     const [phoneInput, setPhoneInput] = useState('');
     const [otpInput, setOtpInput] = useState('');
     const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
+    const [changingPhone, setChangingPhone] = useState(false);
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
     const [inviteSyncing, setInviteSyncing] = useState(false);
     const [inviteMatchedFriends, setInviteMatchedFriends] = useState<FacebookMatchedFriend[]>([]);
     const [contactsSyncing, setContactsSyncing] = useState(false);
+    const contactsSyncingRef = useRef(false);
+    const [showInviteQR, setShowInviteQR] = useState(false);
     const [showTabsHint, setShowTabsHint] = useState(true);
     const tabsHintAnim = React.useRef(new Animated.Value(0)).current;
     const tabsScrollRef = React.useRef<ScrollView | null>(null);
@@ -233,6 +256,20 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         const firstVideo = posts.find((p) => postHasVideoMedia(p));
         activateMyFeedVideo(firstVideo ? String(firstVideo.id) : null);
     }, [activateMyFeedVideo, myFeedOpen, posts]);
+
+    useEffect(() => {
+        if (!myFeedOpen) return;
+        let cancelled = false;
+        void (async () => {
+            await setGlobalVideoMutedNative(false);
+            if (!cancelled) setMyFeedVideoMuted(false);
+        })();
+        const unsub = subscribeGlobalVideoMuted(setMyFeedVideoMuted);
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [myFeedOpen]);
 
     const myFeedViewabilityConfig = useRef({
         itemVisiblePercentThreshold: 60,
@@ -288,6 +325,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     }, [user?.handle, user?.is_private]);
 
     useEffect(() => {
+        setEmailDigestEnabled(user?.emailDigestEnabled !== false);
+    }, [user?.emailDigestEnabled]);
+
+    useEffect(() => {
+        if (!settingsOpen) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                const prefs = await loadNotificationPreferences();
+                if (!cancelled) setNotificationPrefs(prefs);
+            } catch {
+                if (!cancelled) setNotificationPrefs(getNotificationPreferences());
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [settingsOpen]);
+
+    useEffect(() => {
         const loop = Animated.loop(
             Animated.sequence([
                 Animated.timing(tabsHintAnim, {
@@ -332,12 +389,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     const closeSecurityModal = React.useCallback(() => {
         setSecurityModalOpen(false);
-        setSecurityStep('phone');
+        setSecurityStep('hub');
         setSecurityBusy(false);
+        setChangingPhone(false);
         setPhoneCountryCode('+353');
         setPhoneInput('');
         setOtpInput('');
         setPendingPhoneNumber('');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
     }, []);
 
     const loadData = useCallback(async () => {
@@ -452,12 +513,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         React.useCallback(() => {
             void loadData();
             setSecurityModalOpen(false);
-            setSecurityStep('phone');
+            setSecurityStep('hub');
             setSecurityBusy(false);
+            setChangingPhone(false);
             setPhoneCountryCode('+353');
             setPhoneInput('');
             setOtpInput('');
             setPendingPhoneNumber('');
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
         }, [loadData])
     );
 
@@ -643,6 +708,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const handleLogout = () => {
+        if (loggingOut) return;
         showProfileAlert({
             title: 'Logout',
             message: 'Are you sure you want to logout?',
@@ -650,10 +716,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             showCancelButton: true,
             confirmButtonText: 'Logout',
             cancelButtonText: 'Cancel',
-            onConfirm: () => {
+            onConfirm: async () => {
                 setProfileAlert(null);
-                logout();
-                resetRootToScreen('Login', { mode: 'login' });
+                setLoggingOut(true);
+                try {
+                    await logout();
+                    resetRootToScreen('Login', { mode: 'login' });
+                } finally {
+                    setLoggingOut(false);
+                }
             },
         });
     };
@@ -689,6 +760,34 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const persistEmailDigest = async (enabled: boolean) => {
+        if (emailDigestSaving || !user) return;
+        const previous = emailDigestEnabled;
+        setEmailDigestEnabled(enabled);
+        setEmailDigestSaving(true);
+        try {
+            if (isLaravelApiEnabled()) {
+                const apiUser = await updateAuthProfile({ email_digest_enabled: enabled });
+                const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+                login({
+                    ...user,
+                    emailDigestEnabled: fromApi.emailDigestEnabled ?? enabled,
+                });
+            } else {
+                login({ ...user, emailDigestEnabled: enabled });
+            }
+        } catch {
+            setEmailDigestEnabled(previous);
+            showProfileAlert({
+                title: 'Error',
+                message: 'Failed to update email preference.',
+                icon: 'alert',
+            });
+        } finally {
+            setEmailDigestSaving(false);
+        }
+    };
+
     const handleTogglePrivacy = () => {
         if (isTogglingPrivacy || !user) return;
 
@@ -721,7 +820,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             showProfileAlert({ title: 'Invalid number', message: 'Enter a valid phone number.', icon: 'alert' });
             return;
         }
-        const fullPhone = `${phoneCountryCode}${digits}`;
+        const fullPhone = toE164Phone(phoneCountryCode, phoneInput);
         setSecurityBusy(true);
         try {
             const res = await sendPhoneVerificationCode(fullPhone);
@@ -757,13 +856,90 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
         setSecurityBusy(true);
         try {
-            await verifyPhoneVerificationCode(pendingPhoneNumber, code);
-            setSecurityModalOpen(false);
+            const verified = await verifyPhoneVerificationCode(pendingPhoneNumber, code);
+            if (user) {
+                login({
+                    ...user,
+                    phone_number: verified.phone_number || pendingPhoneNumber,
+                    phone_verified_at: verified.phone_verified_at || new Date().toISOString(),
+                });
+            }
+            setChangingPhone(false);
+            setPhoneInput('');
+            setOtpInput('');
+            setSecurityStep('hub');
             showProfileAlert({ title: 'Verified', message: 'Phone verification complete.', icon: 'success' });
         } catch (error: any) {
             showProfileAlert({
                 title: 'Verification failed',
                 message: error?.message || 'Incorrect code. Try again.',
+                icon: 'alert',
+            });
+        } finally {
+            setSecurityBusy(false);
+        }
+    };
+
+    const handleRemoveVerifiedPhone = () => {
+        showProfileAlert({
+            title: 'Remove phone number?',
+            message: 'Find contacts will no longer match this number until you verify a new one.',
+            icon: 'alert',
+            showCancelButton: true,
+            confirmButtonText: 'Remove',
+            cancelButtonText: 'Keep',
+            onConfirm: async () => {
+                dismissProfileAlert();
+                setSecurityBusy(true);
+                try {
+                    await removeVerifiedPhone();
+                    if (user) {
+                        login({
+                            ...user,
+                            phone_number: null,
+                            phone_verified_at: null,
+                        });
+                    }
+                    setChangingPhone(false);
+                    showProfileAlert({ title: 'Phone removed', icon: 'success' });
+                } catch (error: any) {
+                    showProfileAlert({
+                        title: 'Could not remove phone',
+                        message: error?.message || 'Try again.',
+                        icon: 'alert',
+                    });
+                } finally {
+                    setSecurityBusy(false);
+                }
+            },
+        });
+    };
+
+    const handleChangePassword = async () => {
+        if (securityBusy) return;
+        if (newPassword.length < 6) {
+            showProfileAlert({ title: 'Password too short', message: 'Use at least 6 characters.', icon: 'alert' });
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            showProfileAlert({ title: 'Passwords do not match', icon: 'alert' });
+            return;
+        }
+        setSecurityBusy(true);
+        try {
+            await changePassword({
+                current_password: currentPassword,
+                new_password: newPassword,
+                confirm_password: confirmPassword,
+            });
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            showProfileAlert({ title: 'Password updated', icon: 'success' });
+        } catch (error: any) {
+            showProfileAlert({
+                title: 'Could not change password',
+                message: error?.message || 'Check your current password and try again.',
                 icon: 'alert',
             });
         } finally {
@@ -801,7 +977,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 title: 'Facebook synced',
                 message: matches.matched_count
                     ? `Found ${matches.matched_count} friend${matches.matched_count === 1 ? '' : 's'}.`
-                    : (matches.message || 'No matched Facebook friends yet.'),
+                    : (matches.message || 'No Facebook friends on Gazetteer yet. Friends must open the app and link the same Facebook account.'),
                 icon: 'success',
             });
         } catch (error: any) {
@@ -815,26 +991,102 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const inviteShareUrl = useMemo(() => {
+        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        return buildInviteShareUrl(String(user?.handle || ''), apiBase);
+    }, [user?.handle]);
+
     const handleMatchContacts = async () => {
+        if (contactsSyncingRef.current) return;
+        contactsSyncingRef.current = true;
         setContactsSyncing(true);
+
+        const shouldReopenInvite = inviteFriendsOpen;
+        const safetyTimer = setTimeout(() => {
+            contactsSyncingRef.current = false;
+            setContactsSyncing(false);
+        }, 30000);
+
+        const reopenInvite = () => {
+            if (shouldReopenInvite) setInviteFriendsOpen(true);
+        };
+
         try {
-            const ContactsModule = await import('react-native-contacts');
-            const Contacts = ContactsModule.default;
-            let permission = await Contacts.checkPermission();
-            if (permission === 'undefined') {
-                permission = await Contacts.requestPermission();
-            }
-            if (permission !== 'authorized') {
-                showProfileAlert({
-                    title: 'Permission needed',
-                    message: 'Allow contacts permission to sync your contacts.',
-                    icon: 'alert',
-                });
-                return;
+            if (Platform.OS === 'android') {
+                setInviteFriendsOpen(false);
+                await new Promise((resolve) => setTimeout(resolve, 600));
+
+                let perm = await ensureContactsPermission();
+                if (!perm.granted) {
+                    const grantedAfter = await PermissionsAndroid.check(
+                        PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
+                    );
+                    if (grantedAfter) {
+                        perm = { granted: true, neverAskAgain: false };
+                    }
+                }
+                if (!perm.granted) {
+                    reopenInvite();
+                    showProfileAlert({
+                        title: 'Allow contacts',
+                        message: perm.neverAskAgain
+                            ? 'Contacts access is turned off. Open Android Settings → Apps → Gazetteer → Permissions and enable Contacts, then tap Find contacts again.'
+                            : 'Gazetteer needs Contacts to find friends on this phone. Tap Allow on the next prompt. If no prompt appears, reinstall the debug APK so Contacts permission is included.',
+                        icon: 'alert',
+                        confirmButtonText: 'Open Settings',
+                        cancelButtonText: 'Not now',
+                        showCancelButton: true,
+                        onConfirm: () => {
+                            dismissProfileAlert();
+                            void Linking.openSettings();
+                        },
+                    });
+                    return;
+                }
+                const stillGranted = await PermissionsAndroid.check(
+                    PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
+                );
+                if (!stillGranted) {
+                    reopenInvite();
+                    showProfileAlert({
+                        title: 'Allow contacts',
+                        message: 'Contacts permission is still off. Allow it before Gazetteer can read your address book.',
+                        icon: 'alert',
+                    });
+                    return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                reopenInvite();
             }
 
-            const deviceContacts = await Contacts.getAll();
-            const phones = deviceContacts
+            const ContactsModule = await import('react-native-contacts');
+            const Contacts = ContactsModule.default;
+            if (Platform.OS === 'ios') {
+                let permission = await Contacts.checkPermission();
+                if (permission !== 'authorized') {
+                    permission = await Contacts.requestPermission();
+                }
+                if (permission !== 'authorized') {
+                    showProfileAlert({
+                        title: 'Permission needed',
+                        message: 'Allow contacts permission to sync your contacts.',
+                        icon: 'alert',
+                    });
+                    return;
+                }
+            }
+
+            const loadContacts =
+                typeof Contacts.getAllWithoutPhotos === 'function'
+                    ? Contacts.getAllWithoutPhotos()
+                    : Contacts.getAll();
+            const deviceContacts = await Promise.race([
+                loadContacts,
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Reading contacts timed out. Try Find contacts again.')), 20000),
+                ),
+            ]);
+            const phones = (Array.isArray(deviceContacts) ? deviceContacts : [])
                 .flatMap((c: any) => Array.isArray(c.phoneNumbers) ? c.phoneNumbers : [])
                 .map((p: any) => String(p?.number || '').trim())
                 .filter(Boolean);
@@ -856,49 +1108,34 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 facebook_id: null,
             }));
             setInviteMatchedFriends(asFriends);
+            if (shouldReopenInvite) setInviteFriendsOpen(true);
             showProfileAlert({
                 title: 'Contacts matched',
                 message: result.matched_count
                     ? `Matched ${result.matched_count} contact${result.matched_count === 1 ? '' : 's'}.`
-                    : 'No matched contacts yet.',
+                    : 'No matched contacts yet. Friends need a phone number saved on their Gazetteer account (Passport → Security).',
                 icon: 'success',
             });
         } catch (error: any) {
+            if (shouldReopenInvite) setInviteFriendsOpen(true);
             showProfileAlert({
                 title: 'Match failed',
                 message: error?.message || 'Could not match contacts right now.',
                 icon: 'alert',
             });
         } finally {
+            clearTimeout(safetyTimer);
+            contactsSyncingRef.current = false;
             setContactsSyncing(false);
         }
     };
 
-    const handleInviteByQrOrLink = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
-        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
-        const profileUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
-        try {
-            await Share.share({
-                message: `Join me on Clips: ${profileUrl}`,
-                url: profileUrl,
-                title: 'Invite by link',
-            });
-        } catch {
-            // ignore share cancel
-        }
-        Clipboard.setString(profileUrl);
-        showProfileAlert({
-            title: 'Invite link copied',
-            message: 'Your profile link was copied to clipboard.',
-            icon: 'success',
-        });
+    const handleInviteByQrOrLink = () => {
+        setShowInviteQR(true);
     };
 
     const handleShareInviteToWhatsApp = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
-        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
-        const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        const inviteUrl = inviteShareUrl;
         const text = `${user?.handle || 'A friend'} invited you to join Gazetteer\n\n${inviteUrl}`;
         const link = `whatsapp://send?text=${encodeURIComponent(text)}`;
         const can = await Linking.canOpenURL(link);
@@ -910,9 +1147,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     };
 
     const handleShareInviteToMessenger = async () => {
-        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
-        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
-        const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        const inviteUrl = inviteShareUrl;
         const appId = getRuntimeEnv('VITE_FACEBOOK_APP_ID') || '';
         const messengerLink = `fb-messenger://share/?link=${encodeURIComponent(inviteUrl)}${appId ? `&app_id=${encodeURIComponent(appId)}` : ''}`;
         const can = await Linking.canOpenURL(messengerLink);
@@ -1051,7 +1286,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
                 <TouchableOpacity
                     style={[styles.tab, styles.tabChip]}
-                    onPress={() => setDraftsOpen(true)}
+                    onPress={() => {
+                        setDraftsOpen(true);
+                        void getDrafts()
+                            .then(setDrafts)
+                            .catch((err) => console.error('Error loading drafts:', err));
+                    }}
                 >
                     <Icon name="document-text" size={ox(20)} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Drafts</Text>
@@ -1098,7 +1338,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     onPress={() => {
                         setSettingsOpen(false);
                         setCommentSafetyOpen(false);
-                        setSecurityStep('phone');
+                        setSecurityStep('hub');
                         setSecurityModalOpen(true);
                     }}
                 >
@@ -1339,49 +1579,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Icon name="close" size={ox(22)} color="#9CA3AF" />
                             </TouchableOpacity>
                         </View>
-                        {securityStep === 'phone' ? (
-                            <>
-                                <Text style={styles.securityTitle}>Add phone</Text>
-                                <View style={styles.securityWhatsAppBadge}>
-                                    <Icon name="logo-whatsapp" size={ox(14)} color="#DCFCE7" />
-                                    <Text style={styles.securityWhatsAppBadgeText}>We will text your verification code on WhatsApp</Text>
-                                </View>
-                                <Text style={styles.securityBody}>
-                                    Add your phone number for extra security and easier account recovery.
-                                </Text>
-                                <View style={styles.securityPhoneRow}>
-                                    <TextInput
-                                        value={phoneCountryCode}
-                                        onChangeText={setPhoneCountryCode}
-                                        placeholder="+353"
-                                        placeholderTextColor="#9CA3AF"
-                                        style={styles.securityCountryInput}
-                                    />
-                                    <TextInput
-                                        value={phoneInput}
-                                        onChangeText={setPhoneInput}
-                                        placeholder="Phone number"
-                                        placeholderTextColor="#9CA3AF"
-                                        keyboardType="phone-pad"
-                                        style={styles.securityPhoneInput}
-                                    />
-                                </View>
-                                <TouchableOpacity
-                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
-                                    onPress={handleSendSecurityCode}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Sending...' : 'Continue'}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.securitySecondaryButton}
-                                    onPress={closeSecurityModal}
-                                    disabled={securityBusy}
-                                >
-                                    <Text style={styles.securitySecondaryButtonText}>Not now</Text>
-                                </TouchableOpacity>
-                            </>
-                        ) : (
+                        {securityStep === 'code' ? (
                             <>
                                 <Text style={styles.securityTitle}>Enter 6-digit code</Text>
                                 <Text style={styles.securityBody}>Your WhatsApp code was sent to {pendingPhoneNumber}</Text>
@@ -1403,12 +1601,159 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={styles.securitySecondaryButton}
-                                    onPress={closeSecurityModal}
+                                    onPress={() => {
+                                        setSecurityStep('hub');
+                                        setOtpInput('');
+                                    }}
                                     disabled={securityBusy}
                                 >
-                                    <Text style={styles.securitySecondaryButtonText}>Cancel</Text>
+                                    <Text style={styles.securitySecondaryButtonText}>Back</Text>
                                 </TouchableOpacity>
                             </>
+                        ) : (
+                            <ScrollView
+                                keyboardShouldPersistTaps="handled"
+                                showsVerticalScrollIndicator={false}
+                                contentContainerStyle={styles.securityHubContent}
+                            >
+                                <Text style={styles.securityTitle}>Security</Text>
+
+                                {user?.phone_verified_at && user?.phone_number && !changingPhone ? (
+                                    <View style={styles.securityVerifiedBox}>
+                                        <View style={styles.securityVerifiedHeader}>
+                                            <Icon name="checkmark-circle" size={ox(18)} color="#86EFAC" />
+                                            <Text style={styles.securityVerifiedTitle}>Phone verified</Text>
+                                        </View>
+                                        <Text style={styles.securityMaskedPhone}>
+                                            {maskPhoneNumber(user.phone_number)}
+                                        </Text>
+                                        <View style={styles.securityVerifiedActions}>
+                                            <TouchableOpacity
+                                                style={styles.securityGhostButton}
+                                                onPress={() => {
+                                                    setChangingPhone(true);
+                                                    setPhoneInput('');
+                                                }}
+                                                disabled={securityBusy}
+                                            >
+                                                <Text style={styles.securityGhostButtonText}>Change phone number</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.securityGhostButtonDanger}
+                                                onPress={handleRemoveVerifiedPhone}
+                                                disabled={securityBusy}
+                                            >
+                                                <Text style={styles.securityGhostButtonDangerText}>Remove phone number</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <>
+                                        <Text style={styles.securitySectionLabel}>
+                                            {changingPhone ? 'Change phone number' : 'Add phone'}
+                                        </Text>
+                                        <View style={styles.securityWhatsAppBadge}>
+                                            <Icon name="logo-whatsapp" size={ox(14)} color="#DCFCE7" />
+                                            <Text style={styles.securityWhatsAppBadgeText}>
+                                                We will text your verification code on WhatsApp
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.securityBody}>
+                                            Add your phone number for extra security and easier account recovery.
+                                        </Text>
+                                        <View style={styles.securityPhoneRow}>
+                                            <TextInput
+                                                value={phoneCountryCode}
+                                                onChangeText={setPhoneCountryCode}
+                                                placeholder="+353"
+                                                placeholderTextColor="#9CA3AF"
+                                                style={styles.securityCountryInput}
+                                            />
+                                            <TextInput
+                                                value={phoneInput}
+                                                onChangeText={setPhoneInput}
+                                                placeholder="Phone number"
+                                                placeholderTextColor="#9CA3AF"
+                                                keyboardType="phone-pad"
+                                                style={styles.securityPhoneInput}
+                                            />
+                                        </View>
+                                        <TouchableOpacity
+                                            style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                            onPress={handleSendSecurityCode}
+                                            disabled={securityBusy}
+                                        >
+                                            <Text style={styles.securityPrimaryButtonText}>
+                                                {securityBusy ? 'Sending...' : 'Continue'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        {changingPhone ? (
+                                            <TouchableOpacity
+                                                style={styles.securitySecondaryButton}
+                                                onPress={() => setChangingPhone(false)}
+                                                disabled={securityBusy}
+                                            >
+                                                <Text style={styles.securitySecondaryButtonText}>Cancel</Text>
+                                            </TouchableOpacity>
+                                        ) : null}
+                                    </>
+                                )}
+
+                                <View style={styles.securityDivider} />
+                                <Text style={styles.securitySectionLabel}>Change password</Text>
+                                <TextInput
+                                    value={currentPassword}
+                                    onChangeText={setCurrentPassword}
+                                    placeholder="Current password"
+                                    placeholderTextColor="#9CA3AF"
+                                    secureTextEntry={!showCurrentPassword}
+                                    autoCapitalize="none"
+                                    style={styles.securityPasswordInput}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => setShowCurrentPassword((v) => !v)}
+                                    style={styles.securityShowPassword}
+                                >
+                                    <Text style={styles.securityShowPasswordText}>
+                                        {showCurrentPassword ? 'Hide' : 'Show'} current
+                                    </Text>
+                                </TouchableOpacity>
+                                <TextInput
+                                    value={newPassword}
+                                    onChangeText={setNewPassword}
+                                    placeholder="New password"
+                                    placeholderTextColor="#9CA3AF"
+                                    secureTextEntry={!showNewPassword}
+                                    autoCapitalize="none"
+                                    style={styles.securityPasswordInput}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => setShowNewPassword((v) => !v)}
+                                    style={styles.securityShowPassword}
+                                >
+                                    <Text style={styles.securityShowPasswordText}>
+                                        {showNewPassword ? 'Hide' : 'Show'} new
+                                    </Text>
+                                </TouchableOpacity>
+                                <TextInput
+                                    value={confirmPassword}
+                                    onChangeText={setConfirmPassword}
+                                    placeholder="Confirm new password"
+                                    placeholderTextColor="#9CA3AF"
+                                    secureTextEntry={!showNewPassword}
+                                    autoCapitalize="none"
+                                    style={styles.securityPasswordInput}
+                                />
+                                <TouchableOpacity
+                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                    onPress={handleChangePassword}
+                                    disabled={securityBusy}
+                                >
+                                    <Text style={styles.securityPrimaryButtonText}>
+                                        {securityBusy ? 'Saving...' : 'Update password'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </ScrollView>
                         )}
                     </View>
                 </View>
@@ -1479,7 +1824,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         </TouchableOpacity>
                         {inviteMatchedFriends.length > 0 && (
                             <View style={styles.inviteMatchesWrap}>
-                                <Text style={styles.inviteMatchesLabel}>Facebook matches ({inviteMatchedFriends.length})</Text>
+                                <Text style={styles.inviteMatchesLabel}>Matches ({inviteMatchedFriends.length})</Text>
                                 {inviteMatchedFriends.map((friend) => (
                                     <View key={friend.id} style={styles.inviteMatchRow}>
                                         <View style={{ flex: 1 }}>
@@ -1534,6 +1879,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     </View>
                 </View>
             </Modal>
+
+            <ProfileQRCodeModal
+                visible={showInviteQR}
+                onClose={() => setShowInviteQR(false)}
+                handle={String(user?.handle || '')}
+                name={String(user?.name || user?.handle || '')}
+                url={inviteShareUrl}
+                subtitle="Scan to join Gazetteer"
+            />
 
             {/* Drafts Modal */}
             <Modal
@@ -1704,41 +2058,39 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
-            {/* My Feed Modal */}
+            {/* My Feed Modal — Invite Friends | My feed */}
             <Modal
                 visible={myFeedOpen}
                 animationType="slide"
                 transparent={false}
+                statusBarTranslucent
                 onRequestClose={() => {
                     activateMyFeedVideo(null);
                     setMyFeedOpen(false);
                 }}
             >
-                <SafeAreaView style={styles.myFeedScreen}>
-                    <View style={styles.myFeedHeader}>
-                        <View style={styles.myFeedHeaderLeft}>
-                            <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
-                            <Text style={styles.myFeedTitle}>My feed</Text>
-                        </View>
-                        <TouchableOpacity
-                            onPress={() => {
-                                activateMyFeedVideo(null);
-                                setMyFeedOpen(false);
-                            }}
-                            style={styles.myFeedCloseButton}
-                        >
-                            <Icon name="close" size={ox(22)} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
-
+                <View style={styles.myFeedScreen}>
+                    <View style={styles.myFeedListClip}>
                     <FlatList
                         data={posts}
                         keyExtractor={(item) => item.id}
-                        contentContainerStyle={styles.myFeedListContent}
-                        extraData={myFeedActiveVideoPostId}
+                        style={styles.myFeedList}
+                        contentContainerStyle={[
+                            styles.myFeedListContent,
+                            {
+                                paddingTop:
+                                    Math.max(
+                                        insets.top,
+                                        Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0,
+                                    ) + ox(56),
+                            },
+                        ]}
+                        extraData={`${myFeedActiveVideoPostId}:${myFeedVideoMuted ? '1' : '0'}`}
                         viewabilityConfig={myFeedViewabilityConfig}
                         onViewableItemsChanged={onMyFeedViewableItemsChanged}
+                        removeClippedSubviews={false}
                         renderItem={({ item }) => (
+                            <View style={styles.myFeedCardClip}>
                             <FeedCard
                                 post={item}
                                 isCurrentUser
@@ -1748,6 +2100,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     postHasVideoMedia(item) &&
                                     String(myFeedActiveVideoPostId) === String(item.id)
                                 }
+                                feedVideoMuted={myFeedVideoMuted}
                                 onLike={async () => {
                                     if (!user?.id) return;
                                     const updated = await toggleLike(user.id, item.id, item);
@@ -1778,7 +2131,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 onPostPress={() =>
                                     navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
                                 }
-                                onShareToStoriesSuccess={(postId) => {
+                                onShareToStories={() => setMyFeedShareToStoriesPost(item)}
+                                onShareToStoriesSuccess={(postId: string) => {
                                     setPosts((prev) =>
                                         prev.map((p) =>
                                             p.id === postId
@@ -1794,6 +2148,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     );
                                 }}
                             />
+                            </View>
                         )}
                         ListEmptyComponent={
                             <View style={styles.emptyContainer}>
@@ -1801,7 +2156,53 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </View>
                         }
                     />
-                </SafeAreaView>
+                    </View>
+                    <View
+                        pointerEvents="box-none"
+                        style={[
+                            styles.myFeedHeaderOverlay,
+                            {
+                                paddingTop: Math.max(
+                                    insets.top,
+                                    Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0,
+                                ),
+                            },
+                        ]}
+                    >
+                        <View style={styles.myFeedHeader} collapsable={false}>
+                            <View style={styles.myFeedHeaderLeft}>
+                                <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
+                                <Text style={styles.myFeedTitle}>My feed</Text>
+                            </View>
+                            <View style={styles.myFeedHeaderActions}>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        const nextMuted = !myFeedVideoMuted;
+                                        setMyFeedVideoMuted(nextMuted);
+                                        void setGlobalVideoMutedNative(nextMuted);
+                                    }}
+                                    style={styles.myFeedCloseButton}
+                                    accessibilityLabel={myFeedVideoMuted ? 'Unmute videos' : 'Mute videos'}
+                                >
+                                    <Icon
+                                        name={myFeedVideoMuted ? 'volume-mute' : 'volume-high'}
+                                        size={ox(20)}
+                                        color="#FFFFFF"
+                                    />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        activateMyFeedVideo(null);
+                                        setMyFeedOpen(false);
+                                    }}
+                                    style={styles.myFeedCloseButton}
+                                >
+                                    <Icon name="close" size={ox(22)} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
             </Modal>
 
             <PostOverflowMenuModal
@@ -1966,10 +2367,31 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             />
 
             <FeedShareModal
-                post={myFeedSharePost || ({} as Post)}
+                post={myFeedSharePost}
                 isOpen={!!myFeedSharePost}
                 onClose={() => setMyFeedSharePost(null)}
-                onShareSuccess={(postId) => {
+                onShareSuccess={(postId: string) => {
+                    setPosts((prev) =>
+                        prev.map((p) =>
+                            p.id === postId
+                                ? {
+                                      ...p,
+                                      stats: {
+                                          ...p.stats,
+                                          shares: (p.stats?.shares ?? 0) + 1,
+                                      },
+                                  }
+                                : p,
+                        ),
+                    );
+                }}
+            />
+
+            <ShareToStoriesModal
+                visible={myFeedShareToStoriesPost != null}
+                post={myFeedShareToStoriesPost}
+                onClose={() => setMyFeedShareToStoriesPost(null)}
+                onShareSuccess={(postId: string) => {
                     setPosts((prev) =>
                         prev.map((p) =>
                             p.id === postId
@@ -2181,6 +2603,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </View>
 
                             <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Email</Text>
+                                <View style={styles.toggleRow}>
+                                    <View style={styles.toggleInfo}>
+                                        <Text style={styles.toggleLabel}>Missed activity emails</Text>
+                                        <Text style={styles.toggleDescription}>
+                                            Get a summary when you've been away and posts pile up in your area
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.toggleTrack, emailDigestEnabled && styles.toggleTrackActive]}
+                                        onPress={() => {
+                                            if (emailDigestSaving) return;
+                                            void persistEmailDigest(!emailDigestEnabled);
+                                        }}
+                                        disabled={emailDigestSaving}
+                                    >
+                                        <View style={[styles.toggleThumb, emailDigestEnabled && styles.toggleThumbActive]} />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            <View style={styles.safetySection}>
                                 <View style={styles.safetySectionHeader}>
                                     <Text style={styles.safetySectionTitle}>Push Notifications</Text>
                                     <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -2232,7 +2676,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <View style={styles.toggleRow}>
                                     <View style={styles.toggleInfo}>
                                         <Text style={styles.toggleLabel}>Enable notifications</Text>
-                                        <Text style={styles.toggleDescription}>Master switch for alerts on this device</Text>
+                                        <Text style={styles.toggleDescription}>Master switch for push alerts on this account</Text>
                                     </View>
                                     <TouchableOpacity
                                         style={[styles.toggleTrack, notificationPrefs.enabled && styles.toggleTrackActive]}
@@ -2291,10 +2735,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </View>
 
                             <TouchableOpacity
-                                style={styles.logoutButton}
+                                style={[styles.logoutButton, loggingOut && { opacity: 0.6 }]}
                                 onPress={handleLogout}
+                                disabled={loggingOut}
                             >
-                                <Text style={styles.logoutButtonText}>Logout</Text>
+                                <Text style={styles.logoutButtonText}>{loggingOut ? 'Logging out…' : 'Logout'}</Text>
                             </TouchableOpacity>
                         </ScrollView>
                     </View>
@@ -2319,7 +2764,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 showCancelButton={profileAlert?.showCancelButton ?? false}
                 onConfirm={() => {
                     if (profileAlert?.onConfirm) {
-                        profileAlert.onConfirm();
+                        void profileAlert.onConfirm();
                         return;
                     }
                     dismissProfileAlert();
@@ -2720,13 +3165,29 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: GAZETTEER_ABYSS,
     },
+    myFeedHeaderOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        elevation: 24,
+        backgroundColor: GAZETTEER_ABYSS,
+    },
     myFeedHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: ox(14),
         paddingVertical: ox(10),
-        ...gazetteerHeader,
+        backgroundColor: GAZETTEER_ABYSS,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.12)',
+    },
+    myFeedHeaderActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(8),
     },
     myFeedHeaderLeft: {
         flexDirection: 'row',
@@ -2747,6 +3208,18 @@ const styles = StyleSheet.create({
         borderRadius: ox(999),
         padding: ox(8),
         ...glassSurface,
+    },
+    myFeedListClip: {
+        flex: 1,
+        overflow: 'hidden',
+        backgroundColor: GAZETTEER_ABYSS,
+        zIndex: 0,
+    },
+    myFeedList: {
+        flex: 1,
+    },
+    myFeedCardClip: {
+        overflow: 'hidden',
     },
     myFeedListContent: {
         padding: ox(12),
@@ -3280,7 +3753,92 @@ const styles = StyleSheet.create({
     securityCard: {
         borderRadius: ox(16),
         padding: ox(16),
+        maxHeight: '86%',
         ...glassPanel,
+    },
+    securityHubContent: {
+        paddingBottom: ox(8),
+    },
+    securitySectionLabel: {
+        color: '#FFFFFF',
+        fontSize: ox(14),
+        fontWeight: '700',
+        marginBottom: ox(8),
+    },
+    securityVerifiedBox: {
+        borderRadius: ox(12),
+        borderWidth: 1,
+        borderColor: 'rgba(134, 239, 172, 0.35)',
+        backgroundColor: 'rgba(5, 46, 22, 0.55)',
+        padding: ox(12),
+        marginBottom: ox(8),
+    },
+    securityVerifiedHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: ox(6),
+        marginBottom: ox(6),
+    },
+    securityVerifiedTitle: {
+        color: '#86EFAC',
+        fontSize: ox(14),
+        fontWeight: '700',
+    },
+    securityMaskedPhone: {
+        color: '#FFFFFF',
+        fontSize: ox(16),
+        fontWeight: '600',
+        letterSpacing: ox(0.4),
+        marginBottom: ox(10),
+    },
+    securityVerifiedActions: {
+        gap: ox(8),
+    },
+    securityGhostButton: {
+        borderRadius: ox(10),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        paddingVertical: ox(8),
+        alignItems: 'center',
+    },
+    securityGhostButtonText: {
+        color: '#E5E7EB',
+        fontSize: ox(13),
+        fontWeight: '600',
+    },
+    securityGhostButtonDanger: {
+        borderRadius: ox(10),
+        borderWidth: 1,
+        borderColor: 'rgba(252, 165, 165, 0.45)',
+        paddingVertical: ox(8),
+        alignItems: 'center',
+    },
+    securityGhostButtonDangerText: {
+        color: '#FCA5A5',
+        fontSize: ox(13),
+        fontWeight: '600',
+    },
+    securityDivider: {
+        height: 1,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        marginVertical: ox(16),
+    },
+    securityPasswordInput: {
+        borderRadius: ox(10),
+        color: '#FFFFFF',
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
+        marginBottom: ox(6),
+        ...glassSearch,
+    },
+    securityShowPassword: {
+        alignSelf: 'flex-end',
+        marginBottom: ox(8),
+    },
+    securityShowPasswordText: {
+        color: '#9CA3AF',
+        fontSize: ox(11),
+        fontWeight: '600',
     },
     securityCardHeader: {
         flexDirection: 'row',

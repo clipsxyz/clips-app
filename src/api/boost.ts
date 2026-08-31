@@ -272,13 +272,18 @@ export async function getAllActiveBoostLabels(): Promise<Map<string, BoostFeedTy
     }
     const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
     if (useLaravel) {
-        for (const feedType of ['local', 'regional', 'national'] as BoostFeedType[]) {
-            try {
-                const ids = await apiClient.getActiveBoostedPostIdsApi(feedType);
-                for (const id of ids) map.set(String(id), feedType);
-            } catch {
-                // ignore per-type failures
-            }
+        const feedTypes = ['local', 'regional', 'national'] as BoostFeedType[];
+        const results = await Promise.all(
+            feedTypes.map(async (feedType) => {
+                try {
+                    return { feedType, ids: await apiClient.getActiveBoostedPostIdsApi(feedType) };
+                } catch {
+                    return { feedType, ids: [] as string[] };
+                }
+            }),
+        );
+        for (const { feedType, ids } of results) {
+            for (const id of ids) map.set(String(id), feedType);
         }
     }
     return map;

@@ -6,12 +6,14 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post, User } from '../types';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedPostMedia from './FeedPostMedia.native';
 import FeedTextOnlyFeedLayout from './FeedTextOnlyFeedLayout.native';
 import FeedCaptionText from './FeedCaptionText.native';
+import FeedTaggedMediaBadge from './FeedTaggedMediaBadge.native';
 import PostLinkPreviewCard from './PostLinkPreviewCard.native';
 import FeedEngagementRow from './FeedEngagementRow';
 import FeedEngagementRightActions from './FeedEngagementRightActions.native';
@@ -53,6 +55,7 @@ export default function MyFeedPostCard({
     onReclipPress,
     onShareToStoriesSuccess,
 }: Props) {
+    const navigation = useNavigation<any>();
     const screenWidth = Dimensions.get('window').width;
     const cardWidth = screenWidth - 24;
     const cardMediaWidth = cardWidth - 24;
@@ -69,11 +72,14 @@ export default function MyFeedPostCard({
     const hasFeedMedia = Boolean(
         post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0),
     );
+    const hasTaggedUsers = Boolean(post.taggedUsers && post.taggedUsers.length > 0);
     const displayCaption = useMemo(() => getPostDisplayCaption(post), [post]);
     const captionWithoutLink = useMemo(
         () => getPostCaptionWithoutLink(post, displayCaption),
         [post, displayCaption],
     );
+    const showCaptionRow =
+        !textOnlyPost && hasFeedMedia && (captionWithoutLink.length > 0 || hasTaggedUsers);
     const carouselThumbItems = useMemo(
         () =>
             (post.mediaItems || []).filter(
@@ -142,9 +148,23 @@ export default function MyFeedPostCard({
                 </View>
             )}
 
-            {!textOnlyPost && captionWithoutLink.length > 0 && hasFeedMedia ? (
+            {showCaptionRow ? (
                 <View style={styles.captionWrap}>
-                    <FeedCaptionText caption={captionWithoutLink} />
+                    <View style={styles.captionRow}>
+                        {captionWithoutLink.length > 0 ? (
+                            <View style={styles.captionTextSlot}>
+                                <FeedCaptionText caption={captionWithoutLink} />
+                            </View>
+                        ) : (
+                            <View style={styles.captionTextSlot} />
+                        )}
+                        {hasTaggedUsers ? (
+                            <FeedTaggedMediaBadge
+                                count={post.taggedUsers!.length}
+                                onPress={() => setTaggedSheetVisible(true)}
+                            />
+                        ) : null}
+                    </View>
                 </View>
             ) : null}
             {!textOnlyPost && post.linkPreview ? (
@@ -217,6 +237,9 @@ export default function MyFeedPostCard({
                     visible={taggedSheetVisible}
                     taggedUserHandles={post.taggedUsers}
                     onClose={() => setTaggedSheetVisible(false)}
+                    onVisitProfile={(handle) =>
+                        navigation.navigate('ViewProfile', { handle })
+                    }
                 />
             ) : null}
 
@@ -265,6 +288,14 @@ const styles = StyleSheet.create({
     captionWrap: {
         paddingHorizontal: 12,
         paddingVertical: 10,
+    },
+    captionRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    captionTextSlot: {
+        flex: 1,
+        minWidth: 0,
     },
     engagementBar: {
         flexDirection: 'row',

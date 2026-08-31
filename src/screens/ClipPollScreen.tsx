@@ -37,7 +37,7 @@ export default function ClipPollScreen({ navigation }: any) {
 
     const pickBackground = () => {
         ImagePicker.launchImageLibrary(
-            { mediaType: 'photo', quality: 0.85 },
+            { mediaType: 'photo', quality: 0.8 },
             (response) => {
                 if (response.didCancel) return;
                 const uri = response.assets?.[0]?.uri;

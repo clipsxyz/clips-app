@@ -8,7 +8,8 @@ import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
 import Flag from '../components/Flag';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, setReclipState, posts as allPosts, toggleLike, reclipPost, incrementViews, deletePost, transformLaravelPost } from '../api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, setReclipState, posts as allPosts, toggleLike, reclipPost, incrementViews, deletePost, mapLaravelProfilePosts } from '../api/posts';
+import { isMockMode } from '../api/apiMode';
 import { enqueue } from '../utils/mutationQueue';
 import { useOnline } from '../hooks/useOnline';
 import { FeedCard } from '../App';
@@ -302,8 +303,7 @@ export default function ViewProfilePage() {
         setProfilePostsLoadingMore(true);
         try {
             const userProfileData = await fetchUserProfile(decodedHandle, user?.id, profilePostsCursor, 20, sourcePostId);
-            const rawItems = Array.isArray((userProfileData as any)?.posts) ? (userProfileData as any).posts : [];
-            const nextItems: Post[] = rawItems.map((p: any) => transformLaravelPost(p));
+            const nextItems: Post[] = mapLaravelProfilePosts((userProfileData as any)?.posts);
             if (DEBUG_PROFILE_GRID_PAGING) {
                 console.info('[ProfileGrid][older-page]', {
                     handle: decodedHandle,
@@ -914,7 +914,7 @@ export default function ViewProfilePage() {
             const followedUsers = await getFollowedUsers(viewerId);
             const followedSet = new Set((Array.isArray(followedUsers) ? followedUsers : []).map((entry) => normalizeHandleKey(String(entry))));
             setViewerFollowedSet(followedSet);
-            const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+            const useLaravelApi = !isMockMode();
             if (!useLaravelApi) {
                 const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
                 const followMapPatch: Record<string, boolean> = {};
@@ -1211,7 +1211,7 @@ export default function ViewProfilePage() {
         if (connectionActionLoadingMap[key]) return;
         const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
         const targetHandle = String(row.handleNoAt).trim();
-        const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+        const useLaravelApi = !isMockMode();
 
         setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: true }));
         const rowPrivate = !!row?.isPrivate;
@@ -1310,7 +1310,7 @@ export default function ViewProfilePage() {
 
         // Use same key as Stories/Scenes (user.id) so follow state is shared; fallback to getStableUserId when id missing
         const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
-        const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+        const useLaravelApi = !isMockMode();
 
         // Mock-only: update state immediately and return (no API, no await) – same pattern as Stories so Follow always works
         if (!useLaravelApi) {
@@ -1686,29 +1686,33 @@ export default function ViewProfilePage() {
                     }
                 }
 
-                // Fetch posts by userHandle - check posts array first (instant, no API calls)
-                // This is much faster than fetching from multiple tabs
+                // Live mode: same Laravel profile grid as native (GET /users/{handle}/posts).
+                // Do not rely on the in-memory mock `allPosts` array — live mode leaves it empty.
                 let userPosts: Post[] = [];
-                
-                // First, check the exported posts array directly (instant, no delays)
-                if (allPosts && allPosts.length > 0) {
-                    userPosts = allPosts.filter(post => post.userHandle === decodedHandle);
+                const handleKey = decodedHandle.replace(/^@/, '').trim().toLowerCase();
+                const handleMatches = (h?: string) =>
+                    String(h || '').replace(/^@/, '').trim().toLowerCase() === handleKey;
+
+                if (!isMockMode()) {
+                    try {
+                        userPosts = await fetchPostsByUser(decodedHandle, 50, user?.id, 'all');
+                    } catch (error) {
+                        console.error('[ViewProfile] fetchPostsByUser failed', error);
+                    }
+                } else if (allPosts && allPosts.length > 0) {
+                    userPosts = allPosts.filter((post) => handleMatches(post.userHandle));
                 }
-                
-                // If we found posts, we're done. Otherwise, try fetching from tabs as fallback
-                // (This should rarely be needed since posts array should have all posts)
-                if (userPosts.length === 0) {
+
+                if (userPosts.length === 0 && isMockMode()) {
                     const allTabs = ['finglas', 'dublin', 'ireland'];
-                    // Fetch from tabs in parallel for better performance
                     const tabPromises = allTabs.map(async (tab) => {
                         try {
                             const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '', '');
-                            return page.items.filter(post => post.userHandle === decodedHandle);
-                        } catch (error) {
+                            return page.items.filter((post) => handleMatches(post.userHandle));
+                        } catch {
                             return [];
                         }
                     });
-                    
                     const tabResults = await Promise.all(tabPromises);
                     userPosts = tabResults.flat();
                 }
@@ -1728,7 +1732,7 @@ export default function ViewProfilePage() {
                 }
 
                 // Mock profile picture for Sarah@Artane
-                if (decodedHandle === 'Sarah@Artane') {
+                if (isMockMode() && decodedHandle === 'Sarah@Artane') {
                     avatarUrl = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop';
                 }
 
@@ -1747,7 +1751,7 @@ export default function ViewProfilePage() {
                 }
 
                 // Mock data for test user Sarah@Artane
-                if (decodedHandle === 'Sarah@Artane') {
+                if (isMockMode() && decodedHandle === 'Sarah@Artane') {
                     bio = '📍 Living in Artane, Dublin! Love exploring Ireland, sharing local spots, and connecting with the community. Food enthusiast 🍳 Travel lover 🌍 Always up for an adventure!';
                     socialLinks = {
                         website: 'https://sarah-artane.com',
@@ -1760,7 +1764,7 @@ export default function ViewProfilePage() {
                 }
 
                 // Mock data for test user Bob@Ireland
-                if (decodedHandle === 'Bob@Ireland') {
+                if (isMockMode() && decodedHandle === 'Bob@Ireland') {
                     bio = 'Based in Ireland. Love hiking and photography. Traveled to Cork, Galway, Belfast, London, Paris.';
                     placesTraveled = ['Cork', 'Galway', 'Belfast', 'London', 'Paris'];
                 }
@@ -1785,7 +1789,7 @@ export default function ViewProfilePage() {
                 let followingCount = 0;
                 let followersCount = 0;
                 let apiProfileData: any = null;
-                const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+                const useLaravelApi = !isMockMode();
                 if (useLaravelApi) {
                     try {
                         const userProfileData = await fetchUserProfile(decodedHandle, user?.id, null, 20, sourcePostId);
@@ -1903,25 +1907,28 @@ export default function ViewProfilePage() {
                         })
                         .catch(() => undefined);
                 }
-                const apiPostsRaw = Array.isArray(apiProfileData?.posts) ? apiProfileData.posts : [];
-                if (apiPostsRaw.length > 0) {
-                    const transformedApiPosts = apiPostsRaw.map((p: any) => transformLaravelPost(p));
-                    if (DEBUG_PROFILE_GRID_PAGING) {
-                        console.info('[ProfileGrid][initial-page]', {
-                            handle: decodedHandle,
-                            count: transformedApiPosts.length,
-                            nextCursor: apiProfileData?.postsNextCursor ?? null,
-                            hasMore: !!apiProfileData?.postsHasMore,
-                        });
-                    }
-                    setPosts(transformedApiPosts);
-                    setProfilePostsCursor(apiProfileData?.postsNextCursor ?? null);
-                    setProfilePostsHasMore(!!apiProfileData?.postsHasMore);
-                } else {
-                    setPosts(uniquePosts);
-                    setProfilePostsCursor(null);
-                    setProfilePostsHasMore(false);
+                const transformedApiPosts = mapLaravelProfilePosts(apiProfileData?.posts);
+                const gridById = new Map<string, Post>();
+                for (const p of [...uniquePosts, ...transformedApiPosts]) {
+                    const id = String(p.id);
+                    if (!gridById.has(id)) gridById.set(id, p);
                 }
+                const gridPosts = [...gridById.values()].sort(
+                    (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+                );
+                if (DEBUG_PROFILE_GRID_PAGING) {
+                    console.info('[ProfileGrid][initial-page]', {
+                        handle: decodedHandle,
+                        count: gridPosts.length,
+                        fromUserPostsEndpoint: uniquePosts.length,
+                        fromProfilePayload: transformedApiPosts.length,
+                        nextCursor: apiProfileData?.postsNextCursor ?? null,
+                        hasMore: !!apiProfileData?.postsHasMore,
+                    });
+                }
+                setPosts(gridPosts);
+                setProfilePostsCursor(apiProfileData?.postsNextCursor ?? null);
+                setProfilePostsHasMore(!!apiProfileData?.postsHasMore);
 
             } catch (error) {
                 console.error('Error loading profile:', error);

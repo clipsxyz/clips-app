@@ -42,7 +42,7 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
         setLoading(true);
         void fetchMyChatGroups(user.handle)
             .then((items) => {
-                if (!cancelled) setGroups(items ?? []);
+                if (!cancelled) setGroups((items ?? []).filter((g) => g.is_admin));
             })
             .catch(() => {
                 if (!cancelled) {
@@ -139,7 +139,7 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
             ) : groups.length === 0 ? (
                 <BottomSheetView>
                     <Text style={styles.empty}>
-                        No groups yet. Create one from post options first.
+                        You can only invite people to communities you created.
                     </Text>
                 </BottomSheetView>
             ) : (

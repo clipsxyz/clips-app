@@ -87,7 +87,7 @@ export async function fetchVisibleFeedPage(
         };
     } catch (err) {
         console.error('fetchVisibleFeedPage failed:', err);
-        return { items: [], nextCursor: null };
+        throw err;
     }
 }
 

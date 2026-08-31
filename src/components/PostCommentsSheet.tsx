@@ -820,7 +820,10 @@ export default function PostCommentsSheet({
         }
         const nextState = action === 'hide' ? 'hidden_by_filter' : 'visible';
         const ok = await setCommentModerationState(commentId, nextState, 'creator_moderation');
-        if (!ok) return;
+        if (!ok) {
+            Alert.alert('Could not update comment', 'The server did not save that change. Try again.');
+            return;
+        }
         setComments((prev) =>
             prev.map((comment) => {
                 if (comment.id === commentId) {
@@ -1222,7 +1225,7 @@ export default function PostCommentsSheet({
         >
             <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
                 <BottomSheetFlatList
-                    {...(loading
+                    {...((loading
                         ? {
                               data: [] as Comment[],
                               renderItem: () => null,
@@ -1236,9 +1239,19 @@ export default function PostCommentsSheet({
                               ),
                           }
                         : {
-                              ...commentsListProps,
+                              data: commentsListProps.data,
+                              keyExtractor: commentsListProps.keyExtractor,
+                              renderItem: commentsListProps.renderItem,
+                              ListHeaderComponent: commentsListProps.ListHeaderComponent,
+                              ListEmptyComponent: commentsListProps.ListEmptyComponent,
+                              ListFooterComponent: commentsListProps.ListFooterComponent,
+                              contentContainerStyle: commentsListProps.contentContainerStyle,
+                              onScroll: commentsListProps.onScroll,
+                              scrollEventThrottle: commentsListProps.scrollEventThrottle,
+                              keyboardShouldPersistTaps: commentsListProps.keyboardShouldPersistTaps,
+                              keyboardDismissMode: commentsListProps.keyboardDismissMode,
                               automaticallyAdjustKeyboardInsets: true,
-                          })}
+                          }) as any)}
                     style={[styles.commentsList, styles.sheet]}
                 />
             </PassportSheetCanvas>

@@ -18,7 +18,7 @@ import {
     setFollowState,
 } from '../api/posts';
 import { toggleFollow } from '../api/client';
-import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
+import { isMockMode } from '../api/apiMode';
 import { enqueue } from '../utils/mutationQueue';
 import Avatar from './Avatar';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
@@ -495,9 +495,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         if (!user?.id || !post || user.handle === post.userHandle) return;
         setFollowBusy(true);
         const authorHandle = post.userHandle;
-        /** Match FeedCard: real API unless mock-only dev mode. */
-        const useLaravelFollow =
-            isLaravelApiEnabled() && !isViteDevMode();
+        const useLaravelFollow = !isMockMode();
 
         try {
             let newFollowing: boolean;

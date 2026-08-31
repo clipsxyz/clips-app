@@ -8,6 +8,7 @@ use App\Models\ChatGroupInvite;
 use App\Models\ChatGroupMember;
 use App\Models\Notification;
 use App\Models\User;
+use App\Services\FirebaseNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -140,7 +141,7 @@ class ChatGroupController extends Controller
     public function invite(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'invitee_handle' => 'required|string|exists:users,handle',
+            'invitee_handle' => 'required|string|max:120',
         ]);
 
         if ($validator->fails()) {
@@ -154,11 +155,17 @@ class ChatGroupController extends Controller
             return response()->json(['error' => 'Group not found'], 404);
         }
 
-        if (! $group->hasActiveMember($user)) {
-            return response()->json(['error' => 'You are not a member of this group'], 403);
+        if (! $group->isAdmin($user)) {
+            return response()->json([
+                'error' => 'Only the admin can invite',
+                'message' => 'Only the person who created this community can invite people.',
+            ], 403);
         }
 
-        $invitee = User::where('handle', $request->invitee_handle)->firstOrFail();
+        $invitee = $this->resolveInvitee((string) $request->invitee_handle);
+        if (! $invitee) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
 
         if ($invitee->id === $user->id) {
             return response()->json(['error' => 'Cannot invite yourself'], 400);
@@ -201,6 +208,24 @@ class ChatGroupController extends Controller
 
             return $invite->load(['chatGroup', 'inviter', 'invitee']);
         });
+
+        try {
+            (new FirebaseNotificationService)->sendToUser(
+                (string) $invitee->id,
+                'Community invite',
+                $user->handle.' invited you to join '.$group->name,
+                [
+                    'type' => 'group_invite',
+                    'chatGroupInviteId' => (string) $invite->id,
+                    'chatGroupId' => (string) $group->id,
+                    'fromHandle' => (string) $user->handle,
+                ]
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Failed to dispatch group invite FCM', [
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json($invite, 201);
     }
@@ -298,5 +323,36 @@ class ChatGroupController extends Controller
             ->update(['read' => true]);
 
         return response()->json(['success' => true]);
+    }
+
+    private function resolveInvitee(string $rawHandle): ?User
+    {
+        $raw = trim($rawHandle);
+        if ($raw === '') {
+            return null;
+        }
+
+        $withoutAt = ltrim($raw, '@');
+        $candidates = array_values(array_unique(array_filter([$raw, $withoutAt, '@'.$withoutAt])));
+
+        foreach ($candidates as $handle) {
+            $user = User::whereRaw('LOWER(handle) = ?', [mb_strtolower($handle)])->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        if (! str_contains($withoutAt, '@')) {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($withoutAt));
+            $matches = User::query()
+                ->whereRaw('LOWER(handle) LIKE ? ESCAPE \'\\\'', [$escaped.'@%'])
+                ->limit(2)
+                ->get();
+            if ($matches->count() === 1) {
+                return $matches->first();
+            }
+        }
+
+        return null;
     }
 }

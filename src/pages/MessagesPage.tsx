@@ -32,6 +32,7 @@ import { getPostById, getFollowedUsers, getState, toggleLike, incrementShares } 
 import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
 import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
+import { fetchMyChatGroups } from '../api/chatGroups';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import type { Post } from '../types';
 import VerifiedBadge from '../components/VerifiedBadge';
@@ -50,6 +51,7 @@ import {
     setDmSentBubblePreference,
     dmSentBubbleBgClass,
 } from '../constants/dmImessageTheme';
+import { dmSenderNameColor } from '../utils/dmSenderNameColor';
 
 const DEBUG_MESSAGE_PAGING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_MESSAGE_PAGING === 'true';
 
@@ -75,6 +77,38 @@ function isLikelyVideoUrl(url: string | undefined): boolean {
     if (!url) return false;
     const trimmed = url.trim();
     return /^data:video\//i.test(trimmed) || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(trimmed);
+}
+
+function dmShortName(handle?: string | null): string {
+    const raw = String(handle || '').trim();
+    if (!raw) return 'them';
+    return raw.split('@')[0] || raw;
+}
+
+function sameDmHandle(a?: string | null, b?: string | null): boolean {
+    return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
+function findQuotedMessage(
+    messages: MessageUI[],
+    replyTo?: { messageId?: string; text?: string; senderHandle?: string } | null,
+): MessageUI | undefined {
+    if (!replyTo) return undefined;
+    const id = String(replyTo.messageId || '').trim();
+    if (id) {
+        const byId = messages.find((m) => String(m.id) === id);
+        if (byId) return byId;
+    }
+    const text = String(replyTo.text || '').trim();
+    const sender = replyTo.senderHandle;
+    if (!sender && !text) return undefined;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        const textMatch = !text || (m.text || '').trim() === text;
+        const senderMatch = !sender || sameDmHandle(m.senderHandle, sender);
+        if (textMatch && senderMatch) return m;
+    }
+    return undefined;
 }
 
 /** Story-reply media can be mp4 URL without extension; try video first unless clearly image. */
@@ -103,6 +137,59 @@ function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: s
         return <div className={`${className || ''} flex items-center justify-center text-[10px] font-semibold text-white/85 bg-black/50`}>Preview</div>;
     }
     return <img src={url} alt={alt} className={className} onError={() => setImageFailed(true)} />;
+}
+
+function DmReplyQuoteCard({
+    replyTo,
+    quotedFromMe,
+    sentBubbleBg,
+    onJump,
+}: {
+    replyTo: NonNullable<MessageUI['replyTo']>;
+    quotedFromMe: boolean;
+    sentBubbleBg: string;
+    onJump: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onJump();
+            }}
+            className={`mb-2 min-w-[min(17.5rem,55vw)] w-max max-w-full text-left rounded-xl overflow-hidden px-2.5 py-2 ring-1 ring-inset ring-black/20 ${
+                quotedFromMe ? sentBubbleBg : 'bg-[#262626]'
+            }`}
+        >
+            <div className="flex items-center gap-2 min-w-0">
+                {replyTo.imageUrl ? (
+                    <div className="w-7 h-7 rounded overflow-hidden flex-shrink-0 bg-black">
+                        <DmImageOrVideoAttachment
+                            url={replyTo.imageUrl}
+                            alt="Reply preview"
+                            className="w-full h-full object-cover"
+                        />
+                    </div>
+                ) : null}
+                <div className="flex-1 min-w-0">
+                <div
+                    className="text-[12px] font-bold leading-tight"
+                    style={quotedFromMe ? undefined : { color: dmSenderNameColor(replyTo.senderHandle) }}
+                >
+                    {quotedFromMe ? 'You' : dmShortName(replyTo.senderHandle)}
+                </div>
+                    <div className="text-[13px] text-white/75 truncate">
+                        {replyTo.imageUrl
+                            ? isLikelyImageUrl(replyTo.imageUrl)
+                                ? 'Photo'
+                                : 'Video'
+                            : replyTo.text || 'Message'}
+                    </div>
+                </div>
+            </div>
+        </button>
+    );
 }
 
 // Helper function to parse question messages
@@ -653,6 +740,34 @@ export default function MessagesPage() {
     /** Sent bubble: iMessage blue vs SMS green (persisted). */
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>(() => getDmSentBubblePreference());
     const sentBubbleBg = dmSentBubbleBgClass(dmSentStyle);
+    const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+    const highlightClearRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const jumpToQuotedMessage = React.useCallback(
+        (replyTo?: MessageUI['replyTo'] | null) => {
+            const target = findQuotedMessage(messages, replyTo);
+            if (!target) return;
+            const el = document.querySelector(
+                `[data-message-bubble-id="${CSS.escape(String(target.id))}"]`,
+            ) as HTMLElement | null;
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (el) {
+                const prevShadow = el.style.boxShadow;
+                el.style.transition = 'box-shadow 160ms ease';
+                el.style.boxShadow = '0 0 0 4px rgba(255,255,255,0.22)';
+                window.setTimeout(() => {
+                    el.style.boxShadow = prevShadow;
+                }, 1600);
+            }
+            if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
+            setHighlightedMessageId(target.id);
+            highlightClearRef.current = setTimeout(() => {
+                setHighlightedMessageId((cur) => (cur === target.id ? null : cur));
+                highlightClearRef.current = null;
+            }, 1600);
+        },
+        [messages],
+    );
     
     // Edit state
     const [editingMessage, setEditingMessage] = useState<MessageUI | null>(null);
@@ -664,7 +779,12 @@ export default function MessagesPage() {
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
     const [recordingGestureHint, setRecordingGestureHint] = useState<'none' | 'cancel'>('none');
-    const [voiceDraft, setVoiceDraft] = useState<{ audioUrl: string; durationSeconds: number; canContinue?: boolean } | null>(null);
+    const [voiceDraft, setVoiceDraft] = useState<{
+        audioUrl: string;
+        durationSeconds: number;
+        canContinue?: boolean;
+        segments?: { audioUrl: string; durationSeconds: number }[];
+    } | null>(null);
     const [isPlayingVoiceDraft, setIsPlayingVoiceDraft] = useState(false);
     const [voiceDraftPlaySeconds, setVoiceDraftPlaySeconds] = useState(0);
     const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -694,6 +814,7 @@ export default function MessagesPage() {
     const [scenesOpen, setScenesOpen] = useState(false);
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
     const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
+    const [isGroupAdmin, setIsGroupAdmin] = useState(false);
     const [compactPhone, setCompactPhone] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
     const threadCardMaxWidth = compactPhone ? '86vw' : '448px';
     const [groupDisplayName, setGroupDisplayName] = useState<string>('Group');
@@ -714,6 +835,26 @@ export default function MessagesPage() {
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
     }, []);
+
+    useEffect(() => {
+        if (!isGroupThread || !groupId || !user?.handle) {
+            setIsGroupAdmin(false);
+            return;
+        }
+        let cancelled = false;
+        void fetchMyChatGroups(user.handle)
+            .then((groups) => {
+                if (cancelled) return;
+                const mine = groups.find((g) => g.id === groupId);
+                setIsGroupAdmin(Boolean(mine?.is_admin));
+            })
+            .catch(() => {
+                if (!cancelled) setIsGroupAdmin(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isGroupThread, groupId, user?.handle]);
 
     const openScenesForPost = (post: Post) => {
         setSelectedPostForScenes(post);
@@ -2786,7 +2927,7 @@ export default function MessagesPage() {
                                 <FiMapPin className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                             </button>
                         )}
-                        {isGroupThread && groupId ? (
+                        {isGroupThread && groupId && isGroupAdmin ? (
                             <button
                                 type="button"
                                 className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors text-violet-300`}
@@ -2823,6 +2964,10 @@ export default function MessagesPage() {
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
                             (msg.timestamp - messages[idx - 1].timestamp) > 60000; // gap > 1 minute
+                        const prevMsg = idx > 0 ? messages[idx - 1] : undefined;
+                        const showSenderMeta =
+                            !msg.isFromMe &&
+                            (!prevMsg || !sameDmHandle(prevMsg.senderHandle, msg.senderHandle));
                         const isLastMessage = idx === messages.length - 1;
                         const isStoryReplyContext =
                             !!msg.isSystemMessage &&
@@ -3015,7 +3160,7 @@ export default function MessagesPage() {
                                                                     isMediaOnlyMessage
                                                                         ? 'bg-transparent p-0 shadow-none'
                                                                         : `${sentBubbleBg} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
-                                                                }`}
+                                                                }${highlightedMessageId === msg.id ? ' ring-2 ring-white/30' : ''}${msg.replyTo ? ' min-w-[min(17.5rem,55vw)]' : ''}`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
                                                                 maxWidth: '100%',
@@ -3040,27 +3185,15 @@ export default function MessagesPage() {
                                                         >
                                                             {/* Reply Preview - screenshot when replying to shared post (MP4/image) */}
                                                             {msg.replyTo && (
-                                                                <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
-                                                                    <div className="flex items-start gap-2">
-                                                                        {msg.replyTo.imageUrl && (
-                                                                            <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
-                                                                                <DmImageOrVideoAttachment
-                                                                                    url={msg.replyTo.imageUrl}
-                                                                                    alt="Reply preview"
-                                                                                    className="w-full h-full object-cover"
-                                                                                />
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
-                                                                            <div className="text-xs text-white/60 truncate">
-                                                                                {msg.replyTo.imageUrl
-                                                                                    ? (isLikelyImageUrl(msg.replyTo.imageUrl) ? 'Photo' : 'Video')
-                                                                                    : (msg.replyTo.text || 'Message')}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
+                                                                <DmReplyQuoteCard
+                                                                    replyTo={msg.replyTo}
+                                                                    quotedFromMe={sameDmHandle(
+                                                                        msg.replyTo.senderHandle,
+                                                                        user?.handle,
+                                                                    )}
+                                                                    sentBubbleBg={sentBubbleBg}
+                                                                    onJump={() => jumpToQuotedMessage(msg.replyTo)}
+                                                                />
                                                             )}
                                                             {msg.imageUrl && (
                                                                 <div className={`relative overflow-hidden ${
@@ -3444,13 +3577,19 @@ export default function MessagesPage() {
                                                 const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
                                                     <div className={`flex items-end gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
-                                                        {msg.senderAvatar && (
+                                                        {showSenderMeta ? (
+                                                            msg.senderAvatar ? (
                                                             <Avatar
                                                                 src={msg.senderAvatar}
                                                                 name={msg.senderHandle}
                                                                 size="sm"
                                                                 className="flex-shrink-0"
                                                             />
+                                                            ) : (
+                                                                <div className="w-8 h-8 flex-shrink-0" />
+                                                            )
+                                                        ) : (
+                                                            <div className="w-8 h-8 flex-shrink-0" />
                                                         )}
                                                         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
                                                             <IMessageDmBubbleShell
@@ -3460,7 +3599,7 @@ export default function MessagesPage() {
                                                                     isMediaOnlyMessage
                                                                         ? 'bg-transparent p-0 shadow-none'
                                                                         : `${DM_RECEIVED_BG} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
-                                                                }`}
+                                                                }${highlightedMessageId === msg.id ? ' ring-2 ring-white/30' : ''}${msg.replyTo ? ' min-w-[min(17.5rem,55vw)]' : ''}`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
                                                                     maxWidth: '100%',
@@ -3483,29 +3622,25 @@ export default function MessagesPage() {
                                                                     }
                                                                 }}
                                                             >
+                                                                {showSenderMeta ? (
+                                                                    <div
+                                                                        className="text-[13px] font-bold leading-tight mb-1"
+                                                                        style={{ color: dmSenderNameColor(msg.senderHandle) }}
+                                                                    >
+                                                                        {dmShortName(msg.senderHandle)}
+                                                                    </div>
+                                                                ) : null}
                                                                 {/* Reply Preview - Instagram style */}
                                                                 {msg.replyTo && (
-                                                                    <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
-                                                                        <div className="flex items-start gap-2">
-                                                                            {msg.replyTo.imageUrl && (
-                                                                                <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
-                                                                                    <DmImageOrVideoAttachment
-                                                                                        url={msg.replyTo.imageUrl}
-                                                                                        alt="Reply preview"
-                                                                                        className="w-full h-full object-cover"
-                                                                                    />
-                                                                                </div>
-                                                                            )}
-                                                                            <div className="flex-1 min-w-0">
-                                                                                <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
-                                                                                <div className="text-xs text-white/60 truncate">
-                                                                                    {msg.replyTo.imageUrl
-                                                                                        ? (isLikelyImageUrl(msg.replyTo.imageUrl) ? 'Photo' : 'Video')
-                                                                                        : (msg.replyTo.text || 'Message')}
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
+                                                                    <DmReplyQuoteCard
+                                                                        replyTo={msg.replyTo}
+                                                                        quotedFromMe={sameDmHandle(
+                                                                            msg.replyTo.senderHandle,
+                                                                            user?.handle,
+                                                                        )}
+                                                                        sentBubbleBg={sentBubbleBg}
+                                                                        onJump={() => jumpToQuotedMessage(msg.replyTo)}
+                                                                    />
                                                                 )}
                                                                 {msg.imageUrl && (
                                                                     <div className={`relative overflow-hidden ${
@@ -3652,12 +3787,18 @@ export default function MessagesPage() {
                     const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
                     const isVideoReply = replyPost?.mediaType === 'video' || isLikelyVideoUrl(replyThumbUrl);
                     return (
-                        <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-black`}>
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <div className="w-px h-11 rounded-full flex-shrink-0 bg-white/25" />
+                        <div className={`${compactPhone ? 'px-2.5 pt-2 pb-1.5' : 'px-4 pt-2 pb-1.5'} border-t border-white/10 bg-black`}>
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                    <div
+                                        className={`w-0.5 h-9 rounded-full flex-shrink-0 ${
+                                            sameDmHandle(replyingTo.senderHandle, user?.handle)
+                                                ? sentBubbleBg
+                                                : 'bg-[#262626]'
+                                        }`}
+                                    />
                                     {replyThumbUrl && (
-                                        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-white/15 bg-zinc-950">
+                                        <div className="w-8 h-8 rounded-md overflow-hidden flex-shrink-0 bg-zinc-950">
                                             <DmImageOrVideoAttachment
                                                 url={replyThumbUrl}
                                                 alt="Reply preview"
@@ -3666,8 +3807,12 @@ export default function MessagesPage() {
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-[11px] uppercase tracking-wide text-neutral-500 mb-0.5">Replying to {replyingTo.senderHandle}</div>
-                                        <div className="text-sm text-neutral-200 truncate">
+                                        <div className="text-[13px] font-semibold text-white">
+                                            {(replyingTo.senderHandle || '').trim().toLowerCase() === (user?.handle || '').trim().toLowerCase()
+                                                ? 'Replying to you'
+                                                : `Replying to ${dmShortName(replyingTo.senderHandle)}`}
+                                        </div>
+                                        <div className="text-[13px] text-[#8E8E93] truncate">
                                             {replyThumbUrl ? (isVideoReply ? 'Video' : 'Photo') : (replyingTo.text || 'Message')}
                                         </div>
                                     </div>
@@ -4296,13 +4441,22 @@ export default function MessagesPage() {
                                         <Avatar name={groupDisplayName} size="lg" />
                                         <div className="flex-1">
                                             <h4 className="text-white font-semibold text-lg">{groupDisplayName}</h4>
-                                            <p className="text-gray-400 text-sm">Group chat</p>
+                                            <p className="text-gray-400 text-sm">
+                                                {isGroupAdmin ? 'Community · you are admin' : 'Community'}
+                                            </p>
                                         </div>
                                     </div>
                                     <div className="space-y-2">
                                         <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                                            To add people, use the <span className="text-cyan-400">+</span> button in the chat header, or
-                                            open their profile and choose <span className="text-cyan-400">Invite to group</span>.
+                                            {isGroupAdmin ? (
+                                                <>
+                                                    Only you can invite people. Use the <span className="text-cyan-400">+</span> button
+                                                    in the chat header, or open their profile and choose{' '}
+                                                    <span className="text-cyan-400">Invite to group</span>.
+                                                </>
+                                            ) : (
+                                                <>Only the admin who created this community can invite people.</>
+                                            )}
                                         </p>
                                         <button
                                             onClick={async () => {
@@ -4469,7 +4623,7 @@ export default function MessagesPage() {
                 </div>
             )}
 
-            {isGroupThread && groupId ? (
+            {isGroupThread && groupId && isGroupAdmin ? (
                 <InviteMemberToGroupModal
                     isOpen={inviteMemberOpen}
                     onClose={() => setInviteMemberOpen(false)}

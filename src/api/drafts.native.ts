@@ -1,32 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { StickerOverlay } from '../types';
-import type { InstantFilterName } from '../utils/instantFiltersNative';
+import {
+  canUseDraftsApi,
+  deleteRemoteDraft,
+  fetchRemoteDrafts,
+  isPersistedDraftId,
+  mergeDraftLists,
+  newLocalDraftId,
+  upsertRemoteDraft,
+  type Draft,
+} from './draftsShared';
 
-export interface Draft {
-  id: string;
-  videoUrl: string;
-  videoDuration: number;
-  createdAt: number;
-  updatedAt: number;
-  caption?: string;
-  location?: string;
-  tags?: string[];
-  trimStart?: number;
-  trimEnd?: number;
-  mediaType?: 'image' | 'video';
-  videoPosterUrl?: string;
-  videoCoverTime?: number;
-  filterActive?: InstantFilterName;
-  filterBaked?: boolean;
-  stickers?: StickerOverlay[];
-  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
-  isTextOnly?: boolean;
-  textBody?: string;
-  venue?: string;
-  landmark?: string;
-  taggedUsers?: string[];
-  textTemplateId?: string;
-}
+export type { Draft } from './draftsShared';
 
 const DRAFTS_KEY = 'user_drafts';
 
@@ -47,37 +31,84 @@ async function writeDrafts(drafts: Draft[]): Promise<void> {
 }
 
 export async function getDrafts(): Promise<Draft[]> {
-  return readDrafts();
+  const local = await readDrafts();
+  if (!canUseDraftsApi()) return local;
+  try {
+    const remote = await fetchRemoteDrafts();
+    const merged = mergeDraftLists(remote, local);
+    await writeDrafts(merged);
+    return merged;
+  } catch (error) {
+    console.warn('Failed to load drafts from backend, using cache:', error);
+    return local;
+  }
 }
 
 export async function saveDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt'>): Promise<Draft> {
-  const drafts = await readDrafts();
-  const newDraft: Draft = {
+  const now = Date.now();
+  const local: Draft = {
     ...draft,
-    id: `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    id: newLocalDraftId(),
+    createdAt: now,
+    updatedAt: now,
   };
-  drafts.push(newDraft);
+  const drafts = await readDrafts();
+  drafts.unshift(local);
   await writeDrafts(drafts);
-  return newDraft;
+
+  if (!canUseDraftsApi()) return local;
+  try {
+    const saved = await upsertRemoteDraft(local);
+    const current = await readDrafts();
+    const withoutTemp = current.filter((row) => row.id !== local.id);
+    if (!withoutTemp.some((row) => row.id === saved.id)) {
+      withoutTemp.unshift(saved);
+    }
+    await writeDrafts(withoutTemp);
+    return saved;
+  } catch (error) {
+    console.warn('Failed to sync draft to backend, kept locally:', error);
+    return local;
+  }
 }
 
 export async function deleteDraft(draftId: string): Promise<void> {
   const drafts = await readDrafts();
   await writeDrafts(drafts.filter((d) => d.id !== draftId));
+  if (!canUseDraftsApi() || !isPersistedDraftId(draftId)) return;
+  try {
+    await deleteRemoteDraft(draftId);
+  } catch (error) {
+    console.warn('Failed to delete draft on backend:', error);
+    throw error;
+  }
 }
 
 export async function updateDraft(draftId: string, updates: Partial<Draft>): Promise<Draft | null> {
   const drafts = await readDrafts();
   const index = drafts.findIndex((d) => d.id === draftId);
   if (index === -1) return null;
-  drafts[index] = { ...drafts[index], ...updates, updatedAt: Date.now() };
+  const next: Draft = { ...drafts[index], ...updates, id: draftId, updatedAt: Date.now() };
+  drafts[index] = next;
   await writeDrafts(drafts);
-  return drafts[index];
+
+  if (!canUseDraftsApi()) return next;
+  try {
+    const saved = await upsertRemoteDraft(next);
+    const latest = await readDrafts();
+    const i = latest.findIndex((d) => d.id === draftId || d.id === saved.id);
+    if (i >= 0) latest[i] = saved;
+    else latest.unshift(saved);
+    const cleaned = isPersistedDraftId(draftId) ? latest : latest.filter((d) => d.id !== draftId);
+    await writeDrafts(cleaned);
+    return saved;
+  } catch (error) {
+    console.warn('Failed to update draft on backend, kept locally:', error);
+    return next;
+  }
 }
 
 export async function getDraft(draftId: string): Promise<Draft | null> {
-  const drafts = await readDrafts();
+  const drafts = await getDrafts();
   return drafts.find((d) => d.id === draftId) || null;
 }

@@ -44,7 +44,8 @@ import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
 import { searchLocations, type LocationSuggestion } from './api/locations';
 import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, isDevMockFeedVideoPost, isMockFeedPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost, clearLocalFeedPostsStorage } from './api/posts';
+import { isMockMode } from './api/apiMode';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
@@ -6607,7 +6608,7 @@ function FeedPageWrapper() {
   }, [routerLocation.search]);
   const previewSuggestedCards = React.useMemo(() => {
     const irelandFeed = !customLocation && active.trim().toLowerCase() === 'ireland';
-    return previewSuggestedCardsFromQuery || irelandFeed;
+    return previewSuggestedCardsFromQuery || (isMockMode() && irelandFeed);
   }, [previewSuggestedCardsFromQuery, customLocation, active]);
   const [suggestedCardsV2LocalOverride, setSuggestedCardsV2LocalOverride] = React.useState<boolean | null>(() => {
     try {
@@ -6712,8 +6713,7 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     let cancelled = false;
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
-    const useLaravel =
-      typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false' && !!token;
+    const useLaravel = !isMockMode() && !!token;
 
     if (!useLaravel || !user || customLocation) {
       setServerPlaceSuggestions(undefined);
@@ -7195,6 +7195,12 @@ function FeedPageWrapper() {
     requestTokenRef.current++;
   }, [currentFilter]);
 
+  // Live mode: drop leftover Sarah/Bob/Ava seed posts from localStorage (native FeedScreen does this too).
+  React.useEffect(() => {
+    if (isMockMode()) return;
+    void clearLocalFeedPostsStorage();
+  }, []);
+
   // Cache-first for location feeds; Following (discover) always fetches fresh so we never show wrong posts
   React.useEffect(() => {
     const params = new URLSearchParams(routerLocation.search);
@@ -7212,16 +7218,19 @@ function FeedPageWrapper() {
     (async () => {
       try {
         // In mock mode, skip cache and always fetch fresh so new posts appear immediately
-        const useMock = (import.meta as any).env?.VITE_USE_LARAVEL_API === 'false';
+        const useMock = isMockMode();
         if (useMock) {
           await clearFeed(userId, currentFilter).catch(() => {});
         }
         const cached = useMock ? null : await loadFeed(userId, currentFilter);
         if (cancelled) return;
-        const hasCache = cached && cached.length > 0;
+        const liveCached = (cached || [])
+          .map((page) => page.filter((p) => !isMockFeedPost(p)))
+          .filter((page) => page.length > 0);
+        const hasCache = liveCached.length > 0;
         if (hasCache) {
           pagesLoadedForFilterRef.current = currentFilter;
-          setPages(cached);
+          setPages(liveCached);
           loadMore(true);
         } else {
           loadMore(false);
@@ -7368,7 +7377,8 @@ function FeedPageWrapper() {
             })
           : [];
         const mergedFirst = recentInjected.length > 0 ? [...recentInjected, ...dedupedChunk] : dedupedChunk;
-        const next = isFirstPageCursor ? [mergedFirst] : [...prev, dedupedChunk];
+        const liveSafeFirst = isMockMode() ? mergedFirst : mergedFirst.filter((p) => !isMockFeedPost(p));
+        const next = isFirstPageCursor ? [liveSafeFirst] : [...prev, dedupedChunk.filter((p) => isMockMode() || !isMockFeedPost(p))];
         if (isFirstPageCursor) {
           pagesLoadedForFilterRef.current = filterForRequest;
           if (!page.fromMock) saveFeed(userId, currentFilter, next).catch(() => {});
@@ -7850,9 +7860,9 @@ function FeedPageWrapper() {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
-    // Dev / explicit flag: optional layout QA tile â€” only for feeds where Ava's author location matches (e.g. Ireland/Galway), never London/Paris/Following.
+    // Explicit flag only — never inject Ava mock cards in live Vite dev.
     const showAvaFeedDemo =
-      import.meta.env.DEV || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
+      isMockMode() || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
     const avaDemoId = 'ava-normal-ireland-demo';
     const avaDemoPost = getAvaNormalPost();
     const withAvaDemo =
@@ -7879,7 +7889,9 @@ function FeedPageWrapper() {
     }).map((p) => bestByKey.get(idKey(p))!);
 
     // Apply current follow/like/bookmark state so UI is correct after cache or tab switch
-    const decoratedPosts = uniquePosts.map(p => decorateForUser(userId, p));
+    const decoratedPosts = uniquePosts
+      .filter((p) => isMockMode() || !isMockFeedPost(p))
+      .map(p => decorateForUser(userId, p));
     const visiblePosts = excludeLinkShareFeedPosts(
       filterPostsByContentPrefs(decoratedPosts, feedContentPrefsRef.current, {
         isProtectedDevMockVideo: isDevMockFeedVideoPost,
@@ -8544,10 +8556,7 @@ function FeedPageWrapper() {
               }
 
               // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
-              const useLaravelApi =
-                typeof import.meta !== 'undefined' &&
-                import.meta.env?.VITE_USE_LARAVEL_API !== 'false' &&
-                import.meta.env?.VITE_DEV_MODE !== 'true';
+              const useLaravelApi = !isMockMode();
               if (!useLaravelApi) {
                 const newFollowing = !wasFollowing;
                 setFollowState(userId, p.userHandle, newFollowing);
@@ -9641,7 +9650,7 @@ function FeedPageWrapper() {
               }
 
               // PUBLIC PROFILES â€“ in mock-only mode skip API and use local follow state
-              const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+              const useLaravelApi = !isMockMode();
               if (!useLaravelApi) {
                 const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                 updateOne(p.id, post => ({ ...post, isFollowing: updated.isFollowing }));

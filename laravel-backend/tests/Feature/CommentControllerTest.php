@@ -125,4 +125,100 @@ class CommentControllerTest extends TestCase
         $response->assertStatus(400)
             ->assertJsonStructure(['errors']);
     }
+
+    public function test_owner_can_hide_comment_and_other_viewers_do_not_see_it(): void
+    {
+        $owner = User::factory()->create();
+        $commenter = User::factory()->create();
+        $post = Post::factory()->create(['user_id' => $owner->id, 'user_handle' => $owner->handle]);
+        $comment = Comment::create([
+            'post_id' => $post->id,
+            'user_id' => $commenter->id,
+            'user_handle' => $commenter->handle,
+            'text_content' => 'Please hide me',
+            'parent_id' => null,
+        ]);
+
+        $this->actingAs($commenter, 'sanctum')
+            ->postJson("/api/comments/{$comment->id}/hide")
+            ->assertStatus(403);
+
+        $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/comments/{$comment->id}/hide")
+            ->assertOk()
+            ->assertJsonPath('is_hidden', true)
+            ->assertJsonPath('moderation_status', 'hidden');
+
+        $this->actingAs($commenter, 'sanctum')
+            ->getJson("/api/comments/post/{$post->id}")
+            ->assertOk()
+            ->assertJson([]);
+
+        $ownerList = $this->actingAs($owner, 'sanctum')
+            ->getJson("/api/comments/post/{$post->id}");
+        $ownerList->assertOk();
+        $this->assertSame('Please hide me', $ownerList->json('0.text_content'));
+    }
+
+    public function test_owner_can_approve_hidden_comment_and_it_returns_to_listing(): void
+    {
+        $owner = User::factory()->create();
+        $commenter = User::factory()->create();
+        $post = Post::factory()->create(['user_id' => $owner->id, 'user_handle' => $owner->handle]);
+        $comment = Comment::create([
+            'post_id' => $post->id,
+            'user_id' => $commenter->id,
+            'user_handle' => $commenter->handle,
+            'text_content' => 'Held for review',
+            'parent_id' => null,
+            'moderation_status' => 'pending_review',
+            'is_hidden' => true,
+            'flagged_keywords' => ['insult'],
+        ]);
+
+        $queue = $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/comments/review-queue');
+        $queue->assertOk()
+            ->assertJsonPath('matched_count', 1)
+            ->assertJsonPath('items.0.id', $comment->id);
+
+        $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/comments/{$comment->id}/approve")
+            ->assertOk()
+            ->assertJsonPath('moderation_status', 'approved')
+            ->assertJsonPath('is_hidden', false);
+
+        $this->actingAs($commenter, 'sanctum')
+            ->getJson("/api/comments/post/{$post->id}")
+            ->assertOk()
+            ->assertJsonPath('0.text_content', 'Held for review');
+
+        $this->actingAs($owner, 'sanctum')
+            ->getJson('/api/comments/review-queue')
+            ->assertOk()
+            ->assertJsonPath('matched_count', 0);
+    }
+
+    public function test_creating_comment_can_persist_pending_review(): void
+    {
+        $owner = User::factory()->create();
+        $commenter = User::factory()->create();
+        $post = Post::factory()->create(['user_id' => $owner->id, 'user_handle' => $owner->handle]);
+
+        $this->actingAs($commenter, 'sanctum')
+            ->postJson("/api/comments/post/{$post->id}", [
+                'text' => 'you are an idiot',
+                'moderation_status' => 'pending_review',
+                'is_hidden' => true,
+                'flagged_keywords' => ['insult'],
+            ])
+            ->assertStatus(201)
+            ->assertJsonPath('moderation_status', 'pending_review')
+            ->assertJsonPath('is_hidden', true);
+
+        $this->actingAs($commenter, 'sanctum')
+            ->getJson("/api/comments/post/{$post->id}")
+            ->assertOk()
+            ->assertJson([]);
+    }
 }

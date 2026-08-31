@@ -154,6 +154,6 @@ export function isMockDemoVideoPath(url: string | undefined | null): boolean {
     return url.startsWith('/demo-videos/') || NATIVE_REMOTE_BY_DEMO_PATH[url] != null;
 }
 
-export function mockFeedVideoSource(url: string | undefined): number | { uri: string } {
+export function mockFeedVideoSource(url: string | undefined): { uri: string } {
     return { uri: resolveMockFeedVideoUrl(url) };
 }

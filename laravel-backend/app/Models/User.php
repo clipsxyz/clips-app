@@ -31,6 +31,7 @@ class User extends Authenticatable
         'email',
         'phone_number',
         'facebook_id',
+        'invited_by_user_id',
         'password',
         'display_name',
         'handle',
@@ -76,6 +77,16 @@ class User extends Authenticatable
     public function posts()
     {
         return $this->hasMany(Post::class);
+    }
+
+    public function notificationSetting()
+    {
+        return $this->hasOne(UserNotificationSetting::class);
+    }
+
+    public function drafts()
+    {
+        return $this->hasMany(Draft::class);
     }
 
     public function comments()

@@ -28,8 +28,8 @@ export default function ContentPreferencesScreen({ navigation }: any) {
     setPreferredLocations(user?.placesTraveled ?? []);
   }, [user?.placesTraveled]);
 
-  const addPreferredLocation = (suggestion: LocationSuggestion) => {
-    const label = (suggestion.name || suggestion.fullName || '').trim();
+    const addPreferredLocation = (suggestion: LocationSuggestion) => {
+    const label = (suggestion.display_name || suggestion.name || '').trim();
     if (!label) return;
     setPreferredLocations((prev) => {
       if (prev.some((p) => p.toLowerCase() === label.toLowerCase())) return prev;
@@ -144,20 +144,19 @@ export default function ContentPreferencesScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferred Locations</Text>
-          <Text style={styles.sectionSubtext}>Add places you like or traveled to (comma separated).</Text>
-          <TextInput
-            style={styles.textArea}
-            multiline
-            value={locationsInput}
-            onChangeText={setLocationsInput}
+          <Text style={styles.sectionSubtext}>Add places you like or traveled to.</Text>
+          <PlaceAutocompleteField
+            value={preferredLocationQuery}
+            onChange={setPreferredLocationQuery}
+            onSelectSuggestion={addPreferredLocation}
             placeholder="Dublin, Barcelona, New York"
-            placeholderTextColor="#6B7280"
+            showFeedLevels
           />
           <View style={styles.chipWrap}>
-            {parsedLocations.map((place) => (
-              <View key={place} style={styles.chipStatic}>
-                <Text style={styles.chipStaticText}>{place}</Text>
-              </View>
+            {preferredLocations.map((place) => (
+              <TouchableOpacity key={place} style={styles.chip} onPress={() => removePreferredLocation(place)}>
+                <Text style={styles.chipText}>{place} ×</Text>
+              </TouchableOpacity>
             ))}
           </View>
           <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>

@@ -25,7 +25,7 @@ function messageForUploadError(err: unknown): string {
         /file too large/i.test(raw) ||
         /too large to upload/i.test(raw)
     ) {
-        return 'This clip is too large to upload. Try a shorter or lower-quality video (max 100MB).';
+        return 'This clip is too large to upload. Try a shorter video.';
     }
     if (raw) return raw;
     return 'Failed to create post. Please try again.';
@@ -69,6 +69,12 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             undefined,
             job.venue,
             job.landmark,
+            job.socialFormat,
+            undefined,
+            undefined,
+            job.placeId,
+            job.latitude,
+            job.longitude,
         );
         completePendingFeedUpload(job.tempId, createdPost);
         getUploadOverlayForJob(job.tempId)?.success();
@@ -102,7 +108,11 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             if (prepared.items.length === 0) {
                 throw new Error('Carousel upload returned no items.');
             }
-            uploaded = prepared.items;
+            uploaded = prepared.items.map((item) => ({
+                url: item.url,
+                type: item.type,
+                duration: item.duration,
+            }));
             carouselVideoPoster =
                 prepared.videoPosterUrl ||
                 prepared.items.find((item) => item.type === 'video' && item.posterUrl)?.posterUrl;
@@ -142,9 +152,12 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             undefined,
             job.venue,
             job.landmark,
-            undefined,
+            job.socialFormat,
             undefined,
             carouselVideoPoster,
+            job.placeId,
+            job.latitude,
+            job.longitude,
         );
         completePendingFeedUpload(job.tempId, createdPost);
         getUploadOverlayForJob(job.tempId)?.success();
@@ -213,9 +226,12 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         undefined,
         job.venue,
         job.landmark,
-        undefined,
+        job.socialFormat,
         undefined,
         videoPosterUrl,
+        job.placeId,
+        job.latitude,
+        job.longitude,
     );
 
     completePendingFeedUpload(job.tempId, createdPost);

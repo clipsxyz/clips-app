@@ -22,6 +22,9 @@ import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galle
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import { prepareMediaForPost, prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import { geoFieldsFromSuggestion, type LocationSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
+import { isMockMode } from '../api/apiMode';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -189,6 +192,9 @@ export default function GalleryPreviewPage() {
     const [storyLocation, setStoryLocation] = useState(isFromDraft ? (state.draftLocation ?? '') : '');
     const [venue, setVenue] = useState(isFromDraft ? (state.draftVenue ?? '') : '');
     const [landmark, setLandmark] = useState(isFromDraft ? (state.draftLandmark ?? '') : '');
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showTagUserModal, setShowTagUserModal] = useState(false);
     const [selectedFilter, setSelectedFilter] = useState('None');
@@ -606,8 +612,8 @@ export default function GalleryPreviewPage() {
             showToast('Please log in to post.');
             return;
         }
-        const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
-        if (mediaType === 'video' && !useBackend) {
+        const liveUpload = !isMockMode();
+        if (mediaType === 'video' && !liveUpload) {
             await Swal.fire(bottomSheet({
                 title: 'Cannot post video in mock mode',
                 message: 'To post videos from your gallery, the Gazetteer backend needs to be running. In mock mode you can post photos and text, but videos will not upload.',
@@ -629,7 +635,6 @@ export default function GalleryPreviewPage() {
         try {
             let persistentMediaUrl = mediaUrl;
             let videoPosterUrl: string | undefined;
-            const isVideo = mediaType === 'video';
             let mediaItemsForPost: Array<{ url: string; type: 'image' | 'video'; duration?: number }> | undefined;
 
             // Preserve all carousel items when posting to newsfeed.
@@ -651,16 +656,18 @@ export default function GalleryPreviewPage() {
                 }
             }
 
-            if (mediaUrl.startsWith('blob:')) {
-                const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
+            const needsUpload = /^blob:|^data:|^file:/i.test(mediaUrl) || (!/^https?:\/\//i.test(mediaUrl) && liveUpload);
+            if (needsUpload) {
                 const prepared = await prepareMediaForPost({
                     mediaUrl,
                     mediaType,
-                    useBackendUpload: isVideo ? useBackend : false,
+                    useBackendUpload: liveUpload,
                     appOrigin: window.location.origin,
                 });
                 persistentMediaUrl = prepared.mediaUrl;
-                videoPosterUrl = prepared.videoPosterUrl;
+                if (prepared.videoPosterUrl) {
+                    videoPosterUrl = prepared.videoPosterUrl;
+                }
             }
             const typedCaption = caption.trim();
             if (story24) {
@@ -724,7 +731,10 @@ export default function GalleryPreviewPage() {
                 landmark.trim() || undefined,
                 socialUploadTarget,
                 undefined, // videoFrameMode
-                videoPosterUrl
+                videoPosterUrl,
+                placeId,
+                placeLatitude,
+                placeLongitude,
             );
             const newPost = {
                 ...createdPost,
@@ -756,7 +766,7 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget, story24, storyAudience]);
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget, story24, storyAudience, placeId, placeLatitude, placeLongitude]);
 
     const content = (
         <div
@@ -1203,7 +1213,21 @@ export default function GalleryPreviewPage() {
                                         <PlaceAutocompleteField
                                             mode="location"
                                             value={storyLocation}
-                                            onChange={setStoryLocation}
+                                            onChange={(value) => {
+                                                setStoryLocation(value);
+                                                if (!value.trim()) {
+                                                    setPlaceId(undefined);
+                                                    setPlaceLatitude(undefined);
+                                                    setPlaceLongitude(undefined);
+                                                }
+                                            }}
+                                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                                warmPlaceGeocode(s);
+                                                const geo = geoFieldsFromSuggestion(s);
+                                                setPlaceId(geo.placeId);
+                                                setPlaceLatitude(geo.latitude);
+                                                setPlaceLongitude(geo.longitude);
+                                            }}
                                             placeholder="Add story location"
                                             inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                         />
@@ -1223,6 +1247,15 @@ export default function GalleryPreviewPage() {
                                             mode="venue"
                                             value={venue}
                                             onChange={setVenue}
+                                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                                warmPlaceGeocode(s);
+                                                if (!placeId) {
+                                                    const geo = geoFieldsFromSuggestion(s);
+                                                    setPlaceId(geo.placeId);
+                                                    setPlaceLatitude(geo.latitude);
+                                                    setPlaceLongitude(geo.longitude);
+                                                }
+                                            }}
                                             placeholder="Add venue"
                                             inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                         />
@@ -1242,6 +1275,15 @@ export default function GalleryPreviewPage() {
                                             mode="landmark"
                                             value={landmark}
                                             onChange={setLandmark}
+                                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                                warmPlaceGeocode(s);
+                                                if (!placeId) {
+                                                    const geo = geoFieldsFromSuggestion(s);
+                                                    setPlaceId(geo.placeId);
+                                                    setPlaceLatitude(geo.latitude);
+                                                    setPlaceLongitude(geo.longitude);
+                                                }
+                                            }}
                                             placeholder="Add landmark (optional)"
                                             inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                         />

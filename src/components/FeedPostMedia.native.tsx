@@ -187,7 +187,7 @@ function resolveFeedVideoPosterUri(
     item: PostMediaItem | undefined,
     post: Post,
 ): string | undefined {
-    const extra = item as { thumbnailUrl?: string; thumbnail_url?: string } | undefined;
+    const extra = item as { posterUrl?: string; thumbnailUrl?: string; thumbnail_url?: string } | undefined;
     const postExtra = post as { thumbnailUrl?: string; thumbnail_url?: string };
     return firstMediaUri(
         extra?.posterUrl,
@@ -255,12 +255,12 @@ const FeedPostMedia = React.memo(
         height,
         onPress,
         onDoubleLike,
-        onLikeBurst,
+        onLikeBurst: _onLikeBurst,
         onSingleTap,
         stickers,
         onMediaLoad,
         mode = 'feed',
-        isActive = false,
+        isActive: _isActive = false,
         suspendNativeVideo = false,
         muted = true,
         style,
@@ -502,6 +502,17 @@ const FeedPostMedia = React.memo(
         }, 900);
     }, []);
 
+    const lastTapAtRef = useRef(0);
+    const pendingMuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const cancelPendingMediaTap = useCallback(() => {
+        if (pendingMuteTimerRef.current) {
+            clearTimeout(pendingMuteTimerRef.current);
+            pendingMuteTimerRef.current = null;
+        }
+        lastTapAtRef.current = 0;
+    }, []);
+
     useImperativeHandle(
         ref,
         () => ({
@@ -650,17 +661,6 @@ const FeedPostMedia = React.memo(
 
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
     const mediaPointerEvents = feedTapCapture ? ('none' as const) : undefined;
-
-    const lastTapAtRef = useRef(0);
-    const pendingMuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const cancelPendingMediaTap = useCallback(() => {
-        if (pendingMuteTimerRef.current) {
-            clearTimeout(pendingMuteTimerRef.current);
-            pendingMuteTimerRef.current = null;
-        }
-        lastTapAtRef.current = 0;
-    }, []);
 
     const handleFullscreen = useCallback(() => {
         if (onPress && !onDoubleLike && !onSingleTap) {

@@ -27,6 +27,7 @@
   "include": [
     "src/**/*",
     "App.tsx",
+    "App.native.tsx",
     "index.js",
     "nativewind-env.d.ts"
   ],

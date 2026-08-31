@@ -22,15 +22,47 @@ export interface ChatMessage {
 type ConversationId = string; // sorted `${a}|${b}`
 
 /** Map Laravel API message to frontend ChatMessage */
-function laravelMsgToChatMessage(m: { id: string; sender_handle: string; text?: string | null; image_url?: string | null; created_at?: string; is_system_message?: boolean }): ChatMessage {
-    return {
-        id: m.id,
-        senderHandle: m.sender_handle,
-        text: m.text ?? undefined,
-        imageUrl: m.image_url ?? undefined,
-        timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-        isSystemMessage: !!m.is_system_message,
-    };
+function mapLaravelReplyTo(raw: unknown): ChatMessage['replyTo'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const nested = (r.reply_to ?? r.replyTo ?? r) as Record<string, unknown> | null;
+  if (!nested || typeof nested !== 'object') return undefined;
+  const messageId = String(nested.message_id ?? nested.messageId ?? '').trim();
+  const text = String(nested.text ?? '');
+  const senderHandle = String(nested.sender_handle ?? nested.senderHandle ?? '').trim();
+  const imageUrlRaw = nested.image_url ?? nested.imageUrl;
+  const imageUrl = typeof imageUrlRaw === 'string' && imageUrlRaw.trim() ? imageUrlRaw : undefined;
+  const mediaTypeRaw = nested.media_type ?? nested.mediaType;
+  const mediaType = mediaTypeRaw === 'video' || mediaTypeRaw === 'image' ? mediaTypeRaw : undefined;
+  if (!messageId && !text.trim() && !senderHandle && !imageUrl) return undefined;
+  return {
+    messageId,
+    text,
+    senderHandle,
+    imageUrl,
+    mediaType,
+  };
+}
+
+function laravelMsgToChatMessage(m: {
+  id: string;
+  sender_handle: string;
+  text?: string | null;
+  image_url?: string | null;
+  created_at?: string;
+  is_system_message?: boolean;
+  reply_to?: unknown;
+  replyTo?: unknown;
+}): ChatMessage {
+  return {
+    id: m.id,
+    senderHandle: m.sender_handle,
+    text: m.text ?? undefined,
+    imageUrl: m.image_url ?? undefined,
+    timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+    isSystemMessage: !!m.is_system_message,
+    replyTo: mapLaravelReplyTo(m.reply_to ?? m.replyTo),
+  };
 }
 
 const conversations = new Map<ConversationId, ChatMessage[]>();
@@ -146,10 +178,14 @@ export function createMockChatGroup(
 export function mockInviteToChatGroup(
     groupId: string,
     inviteeHandleRaw: string,
+    inviterHandle?: string | null,
 ): { ok: true; inviteeHandle: string; groupName: string } {
     const meta = mockChatGroups.get(groupId);
     if (!meta) {
         throw new Error('Group not found');
+    }
+    if (inviterHandle && !sameHandle(inviterHandle, meta.creatorHandle)) {
+        throw new Error('Only the group admin can invite people');
     }
     let invitee = normalizeInviteHandle(inviteeHandleRaw);
     if (!invitee) {
@@ -338,8 +374,21 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
                 source_post_id: message.sourcePostId ?? undefined,
+                reply_to: message.replyTo
+                    ? {
+                          message_id: message.replyTo.messageId,
+                          text: message.replyTo.text,
+                          sender_handle: message.replyTo.senderHandle,
+                          image_url: message.replyTo.imageUrl,
+                          media_type: message.replyTo.mediaType,
+                      }
+                    : undefined,
             });
-            return laravelMsgToChatMessage(raw);
+            const mapped = laravelMsgToChatMessage(raw);
+            return {
+                ...mapped,
+                replyTo: mapped.replyTo || message.replyTo,
+            };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             // Rethrow so caller (e.g. direct share) can show error and put link in input; don't fall through to mock
@@ -651,8 +700,21 @@ export async function appendGroupChatMessage(
                 text: message.text ?? undefined,
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
+                reply_to: message.replyTo
+                    ? {
+                          message_id: message.replyTo.messageId,
+                          text: message.replyTo.text,
+                          sender_handle: message.replyTo.senderHandle,
+                          image_url: message.replyTo.imageUrl,
+                          media_type: message.replyTo.mediaType,
+                      }
+                    : undefined,
             });
-            return laravelMsgToChatMessage(raw);
+            const mapped = laravelMsgToChatMessage(raw);
+            return {
+                ...mapped,
+                replyTo: mapped.replyTo || message.replyTo,
+            };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             throw e;

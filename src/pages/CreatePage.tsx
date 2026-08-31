@@ -3,6 +3,8 @@ import { useAuth } from '../context/Auth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import { geoFieldsFromSuggestion, type LocationSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
 import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit, FiLoader, FiHome, FiSliders, FiType, FiCircle, FiUser } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import type { Post, StickerOverlay, Sticker } from '../types';
@@ -88,6 +90,9 @@ export default function CreatePage() {
     const [location, setLocation] = useState('');
     const [venue, setVenue] = useState('');
     const [landmark, setLandmark] = useState('');
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
     const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
     const [imageText, setImageText] = useState(''); // Text overlay for images
@@ -754,7 +759,10 @@ export default function CreatePage() {
                 landmark.trim() || undefined, // Named landmark for carousel + landmark feeds
                 undefined, // socialFormat
                 undefined, // videoFrameMode
-                videoPosterUrl
+                videoPosterUrl,
+                placeId,
+                placeLatitude,
+                placeLongitude,
             );
 
             // Dispatch event to refresh feed with render job info if available
@@ -820,6 +828,9 @@ export default function CreatePage() {
                 setLocation('');
                 setVenue('');
                 setLandmark('');
+                setPlaceId(undefined);
+                setPlaceLatitude(undefined);
+                setPlaceLongitude(undefined);
                 setSelectedMedia(null);
                 setMediaType(null);
                 setImageText('');
@@ -1472,7 +1483,21 @@ export default function CreatePage() {
                                 <PlaceAutocompleteField
                                     mode="location"
                                     value={location}
-                                    onChange={setLocation}
+                                    onChange={(value) => {
+                                        setLocation(value);
+                                        if (!value.trim()) {
+                                            setPlaceId(undefined);
+                                            setPlaceLatitude(undefined);
+                                            setPlaceLongitude(undefined);
+                                        }
+                                    }}
+                                    onSelectSuggestion={(s: LocationSuggestion) => {
+                                        warmPlaceGeocode(s);
+                                        const geo = geoFieldsFromSuggestion(s);
+                                        setPlaceId(geo.placeId);
+                                        setPlaceLatitude(geo.latitude);
+                                        setPlaceLongitude(geo.longitude);
+                                    }}
                                     placeholder="Add location (city, region, country)"
                                     inputClassName="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
@@ -1483,6 +1508,15 @@ export default function CreatePage() {
                                     mode="venue"
                                     value={venue}
                                     onChange={setVenue}
+                                    onSelectSuggestion={(s: LocationSuggestion) => {
+                                        warmPlaceGeocode(s);
+                                        if (!placeId) {
+                                            const geo = geoFieldsFromSuggestion(s);
+                                            setPlaceId(geo.placeId);
+                                            setPlaceLatitude(geo.latitude);
+                                            setPlaceLongitude(geo.longitude);
+                                        }
+                                    }}
                                     placeholder="Add venue (e.g. café, stadium)"
                                     inputClassName="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
@@ -1493,6 +1527,15 @@ export default function CreatePage() {
                                     mode="landmark"
                                     value={landmark}
                                     onChange={setLandmark}
+                                    onSelectSuggestion={(s: LocationSuggestion) => {
+                                        warmPlaceGeocode(s);
+                                        if (!placeId) {
+                                            const geo = geoFieldsFromSuggestion(s);
+                                            setPlaceId(geo.placeId);
+                                            setPlaceLatitude(geo.latitude);
+                                            setPlaceLongitude(geo.longitude);
+                                        }
+                                    }}
                                     placeholder="Add landmark (e.g. Phoenix Park, river)"
                                     inputClassName="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />

@@ -79,7 +79,7 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
     const applyAvatar = async (
         uri: string,
         mimeType?: string,
-        fileName?: string,
+        _fileName?: string,
         base64?: string,
     ) => {
         if (!user) return;

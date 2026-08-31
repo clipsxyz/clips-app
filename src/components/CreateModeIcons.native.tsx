@@ -20,7 +20,7 @@ const ICON_SCALE: Record<CreateModeIconId, number> = {
 
 function IconCanvas({
     size,
-    color,
+    color: _color,
     children,
     viewBox = '0 0 24 24',
 }: {

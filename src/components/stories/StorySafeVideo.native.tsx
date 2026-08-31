@@ -11,7 +11,7 @@ import {
 import Video, { ViewType, type OnProgressData, type VideoRef } from 'react-native-video';
 
 type Props = {
-    source: number | { uri: string };
+    source: { uri: string };
     posterSource?: ImageSourcePropType | null;
     style?: StyleProp<ViewStyle>;
     muted?: boolean;
@@ -45,7 +45,7 @@ export default function StorySafeVideo({
     const [failed, setFailed] = useState(false);
     const [ready, setReady] = useState(false);
     const notifiedReadyRef = React.useRef(false);
-    const sourceKey = typeof source === 'number' ? `n:${source}` : source?.uri || '';
+    const sourceKey = source.uri || '';
 
     useEffect(() => {
         setFailed(false);

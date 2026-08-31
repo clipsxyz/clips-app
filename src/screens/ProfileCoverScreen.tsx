@@ -255,9 +255,9 @@ const styles = StyleSheet.create({
     previewCard: {
         borderRadius: ox(16),
         overflow: 'hidden',
+        ...glassPanel,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
-        ...glassPanel,
     },
     previewImage: {
         width: '100%',

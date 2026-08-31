@@ -99,22 +99,55 @@ class NotificationControllerTest extends TestCase
                 'success' => true,
             ]);
 
-        $this->assertDatabaseHas('notification_preferences', [
+        $this->assertDatabaseHas('user_notification_settings', [
             'user_id' => $user->id,
-            'user_handle' => $user->handle,
+            'likes' => 1,
+            'comments' => 0,
         ]);
 
         $getResponse = $this->actingAs($user, 'sanctum')
-            ->getJson('/api/notifications/preferences/' . $user->handle);
+            ->getJson('/api/notifications/preferences');
 
         $getResponse->assertStatus(200)
-            ->assertJson([
-                'success' => true,
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('preferences.likes', true)
+            ->assertJsonPath('preferences.comments', false);
+    }
+
+    public function test_get_own_preferences_returns_defaults_when_none_saved(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/notifications/preferences')
+            ->assertStatus(200)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('preferences.enabled', true)
+            ->assertJsonPath('preferences.directMessages', true)
+            ->assertJsonPath('preferences.likes', true);
+    }
+
+    public function test_save_preferences_uses_authenticated_user_not_payload_ids(): void
+    {
+        $user = User::factory()->create();
+        $other = User::factory()->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/notifications/preferences', [
+                'userId' => $other->id,
+                'userHandle' => $other->handle,
                 'preferences' => [
-                    'likes' => true,
-                    'comments' => false,
+                    'likes' => false,
                 ],
-            ]);
+            ])
+            ->assertStatus(200);
+
+        $this->assertDatabaseHas('user_notification_settings', [
+            'user_id' => $user->id,
+            'likes' => 0,
+        ]);
+        $this->assertDatabaseMissing('user_notification_settings', [
+            'user_id' => $other->id,
+        ]);
     }
 
     public function test_get_preferences_returns_null_when_none_exist(): void

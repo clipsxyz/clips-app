@@ -193,4 +193,36 @@ describe('locationFeedGuard', () => {
         expect(postMatchesLocationTab(dublinInCork, 'dublin')).toBe(false);
         expect(postMatchesLocationTab(dublinInCork, 'cork')).toBe(true);
     });
+
+    it('keeps a New York State author on Switch-feed New York / Places labels', () => {
+        const nyOnly = post({
+            id: 'ny-switch-feed',
+            userHandle: 'Donny@NewYorkState',
+            locationLabel: 'New York State',
+            userLocal: 'New York State',
+            userRegional: 'New York State',
+            userNational: 'USA',
+        });
+        expect(postMatchesLocationTab(nyOnly, 'new york')).toBe(true);
+        expect(postMatchesLocationTab(nyOnly, 'New York, NY, USA')).toBe(true);
+        expect(postMatchesLocationTab(nyOnly, 'united states')).toBe(true);
+        expect(postMatchesLocationTab(nyOnly, 'United States of America')).toBe(true);
+        expect(filterPostsForLocationFeed([nyOnly], 'New York')).toHaveLength(1);
+        expect(filterPostsForLocationFeed([nyOnly], 'dublin')).toHaveLength(0);
+    });
+
+    it('keeps a County Cork author on Ireland and Cork feeds', () => {
+        const countyCork = post({
+            id: 'paris-county-cork',
+            userHandle: 'Paris@CountyCork',
+            locationLabel: 'County Cork',
+            userLocal: 'County Cork',
+            userRegional: 'County Cork',
+            userNational: 'Ireland',
+        });
+        expect(postMatchesLocationTab(countyCork, 'ireland')).toBe(true);
+        expect(postMatchesLocationTab(countyCork, 'cork')).toBe(true);
+        expect(postMatchesLocationTab(countyCork, 'county cork')).toBe(true);
+        expect(postMatchesLocationTab(countyCork, 'dublin')).toBe(false);
+    });
 });

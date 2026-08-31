@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Notification;
+use App\Models\User;
+use App\Models\UserNotificationSetting;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -47,15 +50,25 @@ class NotificationController extends Controller
             });
         }
 
-        $items = $query->limit($limit)->get();
+        $items = $query->with(['chatGroupInvite.chatGroup'])->limit($limit)->get();
         $last = $items->last();
         $nextCursor = null;
         if ($items->count() === $limit && $last) {
             $nextCursor = $this->encodeCursor($last->created_at->format('Y-m-d H:i:s'), (string) $last->id);
         }
 
+        $payload = $items->map(function (Notification $n) {
+            $group = $n->chatGroupInvite?->chatGroup;
+            $row = $n->toArray();
+            $row['chat_group_invite_id'] = $n->chat_group_invite_id;
+            $row['chat_group_id'] = $group?->id;
+            $row['group_name'] = $group?->name;
+
+            return $row;
+        });
+
         return response()->json([
-            'items' => $items,
+            'items' => $payload,
             'nextCursor' => $nextCursor,
             'hasMore' => $nextCursor !== null,
         ]);
@@ -204,14 +217,26 @@ class NotificationController extends Controller
     }
 
     /**
-     * Save notification preferences for a user
+     * Save notification preferences for the authenticated user.
      */
     public function savePreferences(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'userId' => 'required|string',
-            'userHandle' => 'required|string',
+            'userId' => 'nullable|string',
+            'userHandle' => 'nullable|string',
             'preferences' => 'required|array',
+            'preferences.enabled' => 'sometimes|boolean',
+            'preferences.directMessages' => 'sometimes|boolean',
+            'preferences.groupChats' => 'sometimes|boolean',
+            'preferences.likes' => 'sometimes|boolean',
+            'preferences.comments' => 'sometimes|boolean',
+            'preferences.replies' => 'sometimes|boolean',
+            'preferences.follows' => 'sometimes|boolean',
+            'preferences.followRequests' => 'sometimes|boolean',
+            'preferences.storyInsights' => 'sometimes|boolean',
+            'preferences.questions' => 'sometimes|boolean',
+            'preferences.shares' => 'sometimes|boolean',
+            'preferences.reclips' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -221,24 +246,46 @@ class NotificationController extends Controller
             ], 422);
         }
 
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated',
+            ], 401);
+        }
+
         try {
-            // Store notification preferences in database
-            // You can create a migration for this table: notification_preferences
-            DB::table('notification_preferences')->updateOrInsert(
-                [
-                    'user_id' => $request->userId,
-                    'user_handle' => $request->userHandle,
-                ],
-                [
-                    'preferences' => json_encode($request->preferences),
-                    'updated_at' => now(),
-                    'created_at' => now(),
-                ]
+            $incoming = UserNotificationSetting::sanitizeClientPreferences(
+                (array) $request->input('preferences', [])
             );
+            $setting = UserNotificationSetting::query()->firstOrNew(['user_id' => $user->id]);
+            $merged = array_merge(
+                UserNotificationSetting::defaultClientPreferences(),
+                $setting->exists ? $setting->toClientPreferences() : [],
+                $incoming
+            );
+            $setting->user_id = $user->id;
+            $setting->fillFromClient($merged);
+            $setting->save();
+
+            if (Schema::hasTable('notification_preferences')) {
+                DB::table('notification_preferences')->updateOrInsert(
+                    [
+                        'user_id' => (string) $user->id,
+                        'user_handle' => (string) $user->handle,
+                    ],
+                    [
+                        'preferences' => json_encode($merged),
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
+            }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Notification preferences saved successfully'
+                'message' => 'Notification preferences saved successfully',
+                'preferences' => $setting->toClientPreferences(),
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -249,32 +296,59 @@ class NotificationController extends Controller
     }
 
     /**
-     * Get notification preferences for a user
+     * Get notification preferences for the authenticated user.
      */
-    public function getPreferences(Request $request, $userHandle)
+    public function getPreferences(Request $request)
     {
-        try {
-            $prefs = DB::table('notification_preferences')
-                ->where('user_handle', $userHandle)
-                ->first();
-
-            if ($prefs) {
-                return response()->json([
-                    'success' => true,
-                    'preferences' => json_decode($prefs->preferences, true)
-                ]);
-            }
-
-            return response()->json([
-                'success' => true,
-                'preferences' => null
-            ]);
-        } catch (\Exception $e) {
+        $user = Auth::user();
+        if (! $user instanceof User) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error fetching preferences: ' . $e->getMessage()
-            ], 500);
+                'message' => 'Unauthenticated',
+            ], 401);
         }
+
+        return response()->json($this->preferencesPayloadForUser($user));
+    }
+
+    /**
+     * Get notification preferences for a handle (own handle only; others return null).
+     */
+    public function getPreferencesForHandle(Request $request, $userHandle)
+    {
+        $authUser = Auth::user();
+        if (! $authUser instanceof User) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated',
+            ], 401);
+        }
+
+        $normalized = strtolower(ltrim(trim((string) $userHandle), '@'));
+        $own = strtolower(ltrim(trim((string) $authUser->handle), '@'));
+        if ($normalized === '' || $normalized !== $own) {
+            return response()->json([
+                'success' => true,
+                'preferences' => null,
+            ]);
+        }
+
+        return response()->json($this->preferencesPayloadForUser($authUser));
+    }
+
+    /**
+     * @return array{success: true, preferences: array<string, bool>}
+     */
+    private function preferencesPayloadForUser(User $user): array
+    {
+        $setting = UserNotificationSetting::query()->where('user_id', $user->id)->first();
+
+        return [
+            'success' => true,
+            'preferences' => $setting
+                ? $setting->toClientPreferences()
+                : UserNotificationSetting::defaultClientPreferences(),
+        ];
     }
 
     private function decodeCursor(?string $cursor): array

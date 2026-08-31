@@ -36,7 +36,7 @@ import { setAvatarForHandle } from '../api/users';
 import { useResolvedAuthorAvatar } from '../hooks/useResolvedAuthorAvatar';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
-import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
+import AnimatedLikeButton from './AnimatedLikeButton.native';
 import FeedShareModal from './FeedShareModal';
 import PostCommentsSheet from './PostCommentsSheet';
 import PostOverflowMenuModal from './PostOverflowMenuModal';
@@ -1344,18 +1344,18 @@ export default function ScenesViewer({
                         ) : null}
                     </View>
                     <View style={[styles.actionRail, { backgroundColor: 'transparent' }]} pointerEvents="box-none" collapsable={false}>
-                        <View ref={likeButtonRef} collapsable={false}>
-                            <ScenesRailAction
-                                count={likesCount}
-                                label={isLiked ? 'Unlike' : 'Like'}
-                                onPress={() => void handleLike()}
-                            >
-                                <FeedLikeThumbsIcon
+                        <View ref={likeButtonRef} collapsable={false} style={styles.actionCol}>
+                            <View style={styles.chromeCircle}>
+                                <AnimatedLikeButton
+                                    isLiked={isLiked}
+                                    onToggleLike={() => void handleLike()}
+                                    likeCount={likesCount}
                                     size={22}
                                     color="#FFFFFF"
-                                    filled={isLiked}
+                                    showCount={false}
                                 />
-                            </ScenesRailAction>
+                            </View>
+                            <Text style={styles.actionCount}>{likesCount}</Text>
                         </View>
                         <ScenesRailAction
                             count={commentsCount}

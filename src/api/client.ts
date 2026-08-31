@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { clearLaravelUnreachable, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import { clearLaravelUnreachable, getRuntimeEnv, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
 import { getAuthTokenAsync, getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { isMockMode } from './apiMode';
@@ -53,6 +53,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/notifications/fcm-token',
     '/collections',
     '/me/collections',
+    '/drafts',
     '/chat-groups',
     '/messages/send',
     '/messages/conversations',
@@ -77,6 +78,7 @@ const LIVE_API_PATH_PREFIXES = [
     '/chat-groups/',
     '/stories/',
     '/collections/',
+    '/drafts/',
     '/boost/',
     '/render-jobs/',
     '/public/posts/',
@@ -180,6 +182,7 @@ export async function registerUser(userData: {
     locationNational?: string;
     accountType?: 'personal' | 'business';
     isBusiness?: boolean;
+    inviteHandle?: string;
 }): Promise<{ user: Record<string, unknown>; token: string }> {
     if (isMockMode()) {
         throwMockConnectionRefused();
@@ -213,6 +216,7 @@ export async function registerUser(userData: {
         locationNational: String(userData.locationNational || '').trim() || undefined,
         accountType: userData.accountType,
         isBusiness: userData.isBusiness,
+        invite: String(userData.inviteHandle || '').replace(/^@/, '').trim() || undefined,
     };
 
     const controller = new AbortController();
@@ -669,6 +673,96 @@ export async function verifyPhoneVerificationCode(phone: string, code: string): 
     });
 }
 
+export async function removeVerifiedPhone(): Promise<{
+    ok: boolean;
+    phone_number: null;
+    phone_verified_at: null;
+}> {
+    if (!isLaravelApiEnabled()) {
+        return { ok: true, phone_number: null, phone_verified_at: null };
+    }
+    return apiRequest('/auth/phone/remove', {
+        method: 'POST',
+    });
+}
+
+export async function changePassword(payload: {
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+}): Promise<{ ok: boolean }> {
+    if (!isLaravelApiEnabled()) {
+        return { ok: true };
+    }
+    return apiRequest('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+}
+
+export type UserNotificationSettings = {
+    enabled: boolean;
+    directMessages: boolean;
+    groupChats: boolean;
+    likes: boolean;
+    comments: boolean;
+    replies: boolean;
+    follows: boolean;
+    followRequests: boolean;
+    storyInsights: boolean;
+    questions: boolean;
+    shares: boolean;
+    reclips: boolean;
+};
+
+function asUserNotificationSettings(raw: unknown): UserNotificationSettings | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const row = raw as Record<string, unknown>;
+    const bool = (key: string, fallback: boolean): boolean =>
+        typeof row[key] === 'boolean' ? (row[key] as boolean) : fallback;
+    return {
+        enabled: bool('enabled', true),
+        directMessages: bool('directMessages', true),
+        groupChats: bool('groupChats', true),
+        likes: bool('likes', true),
+        comments: bool('comments', true),
+        replies: bool('replies', true),
+        follows: bool('follows', true),
+        followRequests: bool('followRequests', true),
+        storyInsights: bool('storyInsights', true),
+        questions: bool('questions', true),
+        shares: bool('shares', true),
+        reclips: bool('reclips', true),
+    };
+}
+
+export async function fetchNotificationPreferences(): Promise<UserNotificationSettings | null> {
+    if (isMockMode() || !isLaravelApiEnabled()) return null;
+    const data = await apiRequest('/notifications/preferences');
+    return asUserNotificationSettings(data?.preferences);
+}
+
+export async function saveNotificationPreferencesToServer(
+    prefs: UserNotificationSettings,
+): Promise<UserNotificationSettings | null> {
+    if (isMockMode() || !isLaravelApiEnabled()) return null;
+    const data = await apiRequest('/notifications/preferences', {
+        method: 'POST',
+        body: JSON.stringify({ preferences: prefs }),
+    });
+    return asUserNotificationSettings(data?.preferences) ?? prefs;
+}
+
+/** Revoke the current Sanctum token. Call while the token is still in storage. */
+export async function logoutFromServer(): Promise<void> {
+    if (isMockMode() || !isLaravelApiEnabled()) return;
+    try {
+        await apiRequest('/auth/logout', { method: 'POST', timeoutMs: 5000 });
+    } catch {
+        // Local logout still proceeds if the revoke request fails.
+    }
+}
+
 /** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
 export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Record<string, unknown> {
     const pt = apiUser.places_traveled ?? apiUser.placesTraveled;
@@ -700,6 +794,17 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         accountType,
         followers_count: Number(apiUser.followers_count ?? apiUser.followersCount ?? 0) || 0,
         following_count: Number(apiUser.following_count ?? apiUser.followingCount ?? 0) || 0,
+        phone_number:
+            apiUser.phone_number != null && String(apiUser.phone_number).trim() !== ''
+                ? String(apiUser.phone_number)
+                : apiUser.phoneNumber != null && String(apiUser.phoneNumber).trim() !== ''
+                  ? String(apiUser.phoneNumber)
+                  : null,
+        phone_verified_at: (() => {
+            const raw = apiUser.phone_verified_at ?? apiUser.phoneVerifiedAt;
+            if (raw == null || raw === '') return null;
+            return String(raw);
+        })(),
     };
 }
 
@@ -733,7 +838,7 @@ export async function fetchPostsPage(
     userId?: string,
 ) {
     console.log('[fetchPostsPage/client] IS_MOCK=', isMockMode(), {
-        EXPO_PUBLIC_USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK,
+        EXPO_PUBLIC_USE_MOCK: getRuntimeEnv('EXPO_PUBLIC_USE_MOCK'),
         cursor,
         limit,
         filter,
@@ -1241,23 +1346,81 @@ export async function fetchCommentsPage(
     return apiRequest(`/comments/post/${postId}?${params}`);
 }
 
-export async function addComment(postId: string, text: string) {
+export async function addComment(postId: string, text: string, extras?: {
+    moderation_status?: 'approved' | 'pending_review' | 'hidden';
+    is_hidden?: boolean;
+    flagged_keywords?: string[];
+}) {
     return apiRequest(`/comments/post/${postId}`, {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+            text,
+            ...(extras?.moderation_status ? { moderation_status: extras.moderation_status } : {}),
+            ...(typeof extras?.is_hidden === 'boolean' ? { is_hidden: extras.is_hidden } : {}),
+            ...(extras?.flagged_keywords?.length ? { flagged_keywords: extras.flagged_keywords } : {}),
+        }),
     });
 }
 
-export async function addReply(parentId: string, text: string) {
+export async function addReply(parentId: string, text: string, extras?: {
+    moderation_status?: 'approved' | 'pending_review' | 'hidden';
+    is_hidden?: boolean;
+    flagged_keywords?: string[];
+}) {
     return apiRequest(`/comments/reply/${parentId}`, {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+            text,
+            ...(extras?.moderation_status ? { moderation_status: extras.moderation_status } : {}),
+            ...(typeof extras?.is_hidden === 'boolean' ? { is_hidden: extras.is_hidden } : {}),
+            ...(extras?.flagged_keywords?.length ? { flagged_keywords: extras.flagged_keywords } : {}),
+        }),
     });
 }
 
 export async function toggleCommentLike(commentId: string) {
     return apiRequest(`/comments/${commentId}/like`, {
         method: 'POST',
+    });
+}
+
+export async function hideComment(commentId: string, flaggedKeywords?: string[]) {
+    return apiRequest(`/comments/${commentId}/hide`, {
+        method: 'POST',
+        body: JSON.stringify(
+            flaggedKeywords?.length ? { flagged_keywords: flaggedKeywords } : {},
+        ),
+    });
+}
+
+export async function approveComment(commentId: string) {
+    return apiRequest(`/comments/${commentId}/approve`, {
+        method: 'POST',
+    });
+}
+
+export async function fetchCommentReviewQueue(): Promise<{
+    items: Array<{
+        id: string;
+        postId: string;
+        userHandle: string;
+        text: string;
+        createdAt: number;
+        moderationReason?: string | null;
+        isReply?: boolean;
+        parentId?: string | null;
+        moderation_status?: string;
+        is_hidden?: boolean;
+        flagged_keywords?: string[];
+    }>;
+    matched_count: number;
+}> {
+    return apiRequest('/comments/review-queue');
+}
+
+export async function deleteComment(commentId: string) {
+    return apiRequest(`/comments/${commentId}`, {
+        method: 'DELETE',
     });
 }
 
@@ -1662,7 +1825,19 @@ export async function fetchConversationPage(otherHandle: string, cursor: string 
     return apiRequest(`/messages/conversation/${encoded}/paged?${params}`);
 }
 
-export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string }) {
+export async function sendMessage(recipientHandle: string, payload: {
+    text?: string;
+    image_url?: string;
+    is_system_message?: boolean;
+    source_post_id?: string;
+    reply_to?: {
+        message_id?: string;
+        text?: string;
+        sender_handle?: string;
+        image_url?: string;
+        media_type?: 'image' | 'video';
+    };
+}) {
     return apiRequest('/messages/send', {
         method: 'POST',
         body: JSON.stringify({
@@ -1671,6 +1846,7 @@ export async function sendMessage(recipientHandle: string, payload: { text?: str
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
             source_post_id: payload.source_post_id ?? null,
+            reply_to: payload.reply_to ?? null,
         }),
     });
 }
@@ -1697,7 +1873,18 @@ export async function fetchGroupConversationPage(groupId: string, cursor: string
 
 export async function sendGroupMessage(
     groupId: string,
-    payload: { text?: string | null; image_url?: string | null; is_system_message?: boolean },
+    payload: {
+        text?: string | null;
+        image_url?: string | null;
+        is_system_message?: boolean;
+        reply_to?: {
+            message_id?: string;
+            text?: string;
+            sender_handle?: string;
+            image_url?: string;
+            media_type?: 'image' | 'video';
+        };
+    },
 ) {
     return apiRequest('/messages/send', {
         method: 'POST',
@@ -1706,6 +1893,7 @@ export async function sendGroupMessage(
             text: payload.text ?? null,
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
+            reply_to: payload.reply_to ?? null,
         }),
     });
 }

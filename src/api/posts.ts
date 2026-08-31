@@ -2,9 +2,9 @@ import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import { evaluateCommentModeration } from '../utils/commentModeration';
 import {
+  getRuntimeEnv,
   isLaravelApiEnabled,
   isLaravelUnreachableThisSession,
-  isViteDevMode,
   markLaravelUnreachable,
 } from '../config/runtimeEnv';
 import * as apiClient from './client';
@@ -76,6 +76,7 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
     ballymun: { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' },
     dublin: { local: 'Dublin', regional: 'Dublin', national: 'Ireland' },
     cork: { local: 'Cork', regional: 'Cork', national: 'Ireland' },
+    countycork: { local: 'Cork', regional: 'Cork', national: 'Ireland' },
     galway: { local: 'Galway', regional: 'Galway', national: 'Ireland' },
     limerick: { local: 'Limerick', regional: 'Limerick', national: 'Ireland' },
     waterford: { local: 'Waterford', regional: 'Waterford', national: 'Ireland' },
@@ -103,7 +104,7 @@ const LOCATION_COUNTRIES = new Set([
   'ireland', 'uk', 'united kingdom', 'england', 'scotland', 'wales', 'france', 'spain', 'portugal', 'germany',
   'netherlands', 'belgium', 'italy', 'switzerland', 'austria', 'poland', 'czech republic', 'hungary', 'greece',
   'romania', 'sweden', 'norway', 'denmark', 'finland', 'russia', 'turkey', 'japan', 'china', 'south korea',
-  'australia', 'new zealand', 'usa', 'united states', 'canada', 'mexico', 'brazil', 'argentina', 'chile',
+  'australia', 'new zealand', 'usa', 'united states', 'united states of america', 'canada', 'mexico', 'brazil', 'argentina', 'chile',
   'colombia', 'india', 'indonesia', 'thailand', 'vietnam', 'malaysia', 'singapore', 'philippines', 'south africa',
   'egypt', 'nigeria', 'morocco', 'israel', 'uae', 'saudi arabia'
 ]);
@@ -136,6 +137,8 @@ const IRELAND_AUTHOR_PLACES = new Set([
   'ireland',
   'dublin',
   'cork',
+  'county cork',
+  'co cork',
   'galway',
   'limerick',
   'waterford',
@@ -148,11 +151,24 @@ const USA_AUTHOR_PLACES = new Set([
   'usa',
   'us',
   'united states',
+  'united states of america',
   'new york',
   'new york state',
   'ny',
   'nyc',
 ]);
+
+function isUsaNationalName(value: string): boolean {
+  return value === 'usa' || value === 'us' || value === 'united states' || value === 'united states of america';
+}
+
+function isNewYorkPlaceName(value: string): boolean {
+  return value === 'new york' || value === 'new york state' || value === 'ny' || value === 'nyc';
+}
+
+function isCorkPlaceName(value: string): boolean {
+  return value === 'cork' || value === 'county cork' || value === 'co cork' || value === 'co. cork';
+}
 
 function toLocationLabelCase(value?: string): string {
   const trimmed = (value || '').trim();
@@ -235,11 +251,12 @@ export function isFrontendOnlyPostId(id: string): boolean {
 }
 
 function shouldUseLivePostApi(id: string): boolean {
-  // Match the feed: live mode is EXPO_PUBLIC_USE_MOCK=false. Do not use
+  // Live mode is EXPO_PUBLIC_USE_MOCK=false for web and native. Do not use
   // isLaravelApiEnabled() here — a single timeout used to flip that off for
   // the whole session, so likes/comments/shares stayed in memory while Home
-  // reloaded zeros from Laravel.
-  return !isMockMode() && !isViteDevMode() && !isFrontendOnlyPostId(String(id));
+  // reloaded zeros from Laravel. Do not skip Laravel just because Vite is
+  // serving the web app (VITE_DEV_MODE).
+  return !isMockMode() && !isFrontendOnlyPostId(String(id));
 }
 
 function bumpLocalPostCommentCount(postId: string, nextCount?: number, delta = 1): number {
@@ -292,10 +309,21 @@ function isMockPostId(id: string): boolean {
     s.startsWith('post-') ||           // JSON seed posts (post-1-..., post-2-...)
     s.startsWith('artane-post-') ||
     s.startsWith('bob-post-') ||
+    s.startsWith('finglas-post-') ||
+    s.startsWith('venue-3arena-demo-') ||
     s.startsWith('ava-boosted-demo-') ||
+    s.startsWith('ava-boosted-discover-demo') ||
     s.startsWith('ava-normal-') ||      // ava-normal-ireland-demo + ava-normal-*-galway
     s.startsWith('mock-scenes-')
   );
+}
+
+/** Mock/seed cards that must not appear in a live Laravel feed. */
+export function isMockFeedPost(post: { id?: string; userHandle?: string } | null | undefined): boolean {
+  if (!post) return true;
+  if (isMockPostId(String(post.id || ''))) return true;
+  if (isMockDirectoryHandle(post.userHandle)) return true;
+  return false;
 }
 
 // Get posts from localStorage
@@ -312,7 +340,7 @@ function getPostsFromStorage(): Post[] {
 
 // Save posts to localStorage — only user-created posts (exclude all mock/seed posts to avoid unbounded growth and duplicates on reload)
 function savePostsToStorage(postsToSave: Post[]): void {
-  const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
+  const userCreatedPosts = postsToSave.filter(p => !isMockFeedPost(p));
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
@@ -342,9 +370,7 @@ export async function clearLocalFeedPostsStorage(): Promise<void> {
     /* ignore */
   }
   if (!isMockMode()) {
-    posts = posts.filter(
-      (p) => !isMockPostId(p.id) && !isMockDirectoryHandle(p.userHandle),
-    );
+    posts = posts.filter((p) => !isMockFeedPost(p));
   }
 }
 
@@ -510,7 +536,7 @@ if (!postsInitialized) {
 
   // Load user-created posts from localStorage (only non-mock posts should be stored; old saves may have contained mock data)
   // and normalize any legacy location fields so feed matching is consistent.
-  const storedUserCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+  const storedUserCreatedPosts = getPostsFromStorage().filter(p => !isMockFeedPost(p));
   const userCreatedPosts = storedUserCreatedPosts.map((p) => ({
     ...p,
     ...resolveAuthorLocations({
@@ -537,9 +563,7 @@ if (!postsInitialized) {
   // Merge: user-created posts first (newest), then JSON posts — mock posts are never loaded from storage
   // Live mode: never seed Sarah/Bob/Ava/json demos into memory (they leak into feeds).
   if (!isMockMode()) {
-    posts = [...userCreatedPosts].filter(
-      (p) => !isMockPostId(p.id) && !isMockDirectoryHandle(p.userHandle),
-    );
+    posts = [...userCreatedPosts].filter((p) => !isMockFeedPost(p));
     postsInitialized = true;
     console.log('[posts] live mode — skipped mock seed posts, kept', posts.length, 'local posts');
   } else {
@@ -1984,7 +2008,9 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
       // National news: Cork/Galway/Dublin-area authors, not Dublin-only.
       if (
         IRELAND_AUTHOR_PLACES.has(userLocalLower) ||
-        IRELAND_AUTHOR_PLACES.has(userRegionalLower)
+        IRELAND_AUTHOR_PLACES.has(userRegionalLower) ||
+        isCorkPlaceName(userLocalLower) ||
+        isCorkPlaceName(userRegionalLower)
       ) {
         return true;
       }
@@ -1992,7 +2018,8 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
     }
     return false;
   }
-  const query = t.trim().toLowerCase();
+  // Switch-feed / Places often send "New York, NY, USA" — match the primary place token.
+  const query = primaryTag(t) || t.trim().toLowerCase();
   if (!query) return false;
   const local = normalize(p.userLocal);
   const regional = normalize(p.userRegional);
@@ -2001,15 +2028,17 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
 
   // Author tiers are exact — never substring-match "rome" inside unrelated labels.
   if (local === query || regional === query || national === query) return true;
-  if (LOCATION_COUNTRIES.has(query)) {
+  if (isNewYorkPlaceName(query) && (isNewYorkPlaceName(local) || isNewYorkPlaceName(regional))) return true;
+  if (isCorkPlaceName(query) && (isCorkPlaceName(local) || isCorkPlaceName(regional))) return true;
+  if (LOCATION_COUNTRIES.has(query) || isUsaNationalName(query)) {
     if (query === 'uk' && (national === 'united kingdom' || national === 'uk')) return true;
-    if (query === 'usa' || query === 'united states') {
-      if (national === 'usa' || national === 'united states' || national === 'us') return true;
+    if (isUsaNationalName(query)) {
+      if (isUsaNationalName(national)) return true;
       // National news: New York State authors belong even if national was left blank.
       if (USA_AUTHOR_PLACES.has(local) || USA_AUTHOR_PLACES.has(regional)) return true;
       return false;
     }
-    return national === query;
+    return national === query || (query === 'united kingdom' && national === 'uk');
   }
   if (LOCATION_CITIES.has(query)) {
     return regional === query || local === query;
@@ -2035,7 +2064,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
   const useLaravelAPI = !mockMode;
   console.log('[fetchPostsPage/posts]', {
     IS_MOCK: mockMode,
-    EXPO_PUBLIC_USE_MOCK: process.env.EXPO_PUBLIC_USE_MOCK,
+    EXPO_PUBLIC_USE_MOCK: getRuntimeEnv('EXPO_PUBLIC_USE_MOCK'),
     tab,
     t,
     useLaravelAPI,
@@ -2126,16 +2155,10 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const viewerHandle = String(_currentUserHandle || '').trim().toLowerCase();
       const recentLocal = getPostsFromStorage().filter((p) => {
-        if (isMockPostId(p.id) || isDevMockFeedVideoPost(p)) return false;
+        if (isMockFeedPost(p) || isDevMockFeedVideoPost(p)) return false;
         if (!uuidRe.test(String(p.id))) return false;
         const h = String(p.userHandle || '').trim().toLowerCase();
-        if (
-          h === 'sarah@artane' ||
-          h === 'bob@ireland' ||
-          h === 'ava@galway' ||
-          h === 'alice@cork' ||
-          h === 'gazetteer@dublin'
-        ) {
+        if (h === 'gazetteer@dublin') {
           return false;
         }
         // Following: only optimistic posts you authored. Never other users' cached Dublin feed.
@@ -2149,7 +2172,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       items = [...dedupedLocal, ...items];
 
       // Mark ANY actively boosted post as Sponsored (legal disclosure) — not only the current tab's boost tier.
-      const allBoostLabels = await getAllActiveBoostLabels();
+      let allBoostLabels = new Map<string, BoostFeedType>();
+      try {
+        allBoostLabels = await getAllActiveBoostLabels();
+      } catch {
+        allBoostLabels = new Map();
+      }
       for (const id of boostedSetApi) allBoostLabels.set(String(id), (feedTypeApi ?? 'regional') as any);
       if (allBoostLabels.size > 0) {
         items = items.map((p) => {
@@ -2183,16 +2211,14 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
               : undefined,
       };
     } catch (error: any) {
-      console.log('[fetchPostsPage/posts] live feed failed — returning empty (no mock fallback)', {
+      console.log('[fetchPostsPage/posts] live feed failed — throwing (do not fake an empty feed)', {
         name: error?.name,
         message: error?.message,
         status: error?.status,
       });
-      // Live mode: never fall back to mock seed posts on empty/error responses.
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed (live mode, no mock fallback):', error);
-      }
-      return { items: [], nextCursor: null, fromMock: false };
+      // Live mode: never fall back to mock seed posts. Also never return [] on
+      // timeout/network/429 — that looks like "You're early to this feed".
+      throw error;
     }
   } else {
     console.log('[fetchPostsPage/posts] using mock feed path (IS_MOCK=true)', {
@@ -3344,24 +3370,52 @@ export type HiddenCommentReviewItem = {
   parentId?: string;
 };
 
+function mapLaravelModeration(raw: any): {
+  moderationState: 'visible' | 'hidden_by_filter';
+  moderationReason?: string;
+} {
+  const status = String(raw?.moderation_status || 'approved');
+  const hidden =
+    raw?.is_hidden === true ||
+    raw?.is_hidden === 1 ||
+    raw?.is_hidden === '1' ||
+    status === 'hidden' ||
+    status === 'pending_review';
+  const keywords = Array.isArray(raw?.flagged_keywords) ? raw.flagged_keywords.map((w: unknown) => String(w || '')) : [];
+  const reason =
+    keywords[0] ||
+    (typeof raw?.moderationReason === 'string' ? raw.moderationReason : undefined) ||
+    (hidden ? (status === 'pending_review' ? 'pending_review' : 'creator_moderation') : undefined);
+  return {
+    moderationState: hidden ? 'hidden_by_filter' : 'visible',
+    moderationReason: reason,
+  };
+}
+
 function mapLaravelCommentToComment(raw: any): Comment {
   const mappedReplies: Comment[] = Array.isArray(raw?.replies)
-    ? raw.replies.map((r: any) => ({
-        id: r.id,
-        postId: r.post_id || r.postId || raw.post_id || raw.postId || '',
-        userHandle: r.user_handle || r.userHandle || r.user?.handle || '',
-        text: r.text_content || r.text || '',
-        createdAt: (() => {
-          const ts = r.created_at || r.createdAt;
-          const val = ts ? new Date(ts).getTime() : Date.now();
-          return Number.isFinite(val) ? val : Date.now();
-        })(),
-        likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
-        userLiked: !!(r.user_liked ?? r.userLiked),
-        parentId: r.parent_id || r.parentId || raw.id,
-      }))
+    ? raw.replies.map((r: any) => {
+        const replyModeration = mapLaravelModeration(r);
+        return {
+          id: r.id,
+          postId: r.post_id || r.postId || raw.post_id || raw.postId || '',
+          userHandle: r.user_handle || r.userHandle || r.user?.handle || '',
+          text: r.text_content || r.text || '',
+          createdAt: (() => {
+            const ts = r.created_at || r.createdAt;
+            const val = ts ? new Date(ts).getTime() : Date.now();
+            return Number.isFinite(val) ? val : Date.now();
+          })(),
+          likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
+          userLiked: !!(r.user_liked ?? r.userLiked),
+          parentId: r.parent_id || r.parentId || raw.id,
+          moderationState: replyModeration.moderationState,
+          moderationReason: replyModeration.moderationReason,
+        };
+      })
     : [];
 
+  const moderation = mapLaravelModeration(raw);
   return {
     id: raw.id,
     postId: raw.post_id || raw.postId || '',
@@ -3376,6 +3430,8 @@ function mapLaravelCommentToComment(raw: any): Comment {
     userLiked: !!(raw.user_liked ?? raw.userLiked),
     replies: mappedReplies,
     replyCount: Number(raw.replies_count ?? raw.replyCount ?? mappedReplies.length) || 0,
+    moderationState: moderation.moderationState,
+    moderationReason: moderation.moderationReason,
   };
 }
 
@@ -3531,7 +3587,12 @@ export async function addComment(postId: string, userHandle: string, text: strin
   const resolvedPostId = resolveCommentsPostId(postId);
 
   if (shouldUseLivePostApi(resolvedPostId)) {
-    const response = await apiClient.addComment(postId, text);
+    const moderation = evaluateCommentModeration(text);
+    const response = await apiClient.addComment(postId, text, {
+      moderation_status: moderation.level === 'hide' ? 'pending_review' : 'approved',
+      is_hidden: moderation.level === 'hide',
+      flagged_keywords: moderation.matched,
+    });
     const parsedCount = Number(response?.comments_count ?? response?.commentsCount);
     if (Number.isFinite(parsedCount)) {
       bumpLocalPostCommentCount(postId, parsedCount);
@@ -3544,13 +3605,10 @@ export async function addComment(postId: string, userHandle: string, text: strin
       text_content: response.text_content || response.text || text,
       post_id: response.post_id || response.postId || postId,
     });
-    const moderation = evaluateCommentModeration(mapped.text || text);
     return {
       ...mapped,
       userHandle: mapped.userHandle || userHandle,
       text: mapped.text || text,
-      moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
-      moderationReason: moderation.matched[0],
     };
   }
 
@@ -3670,7 +3728,12 @@ export async function toggleReplyLike(parentCommentId: string, replyId: string):
 
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {
   if (shouldUseLivePostApi(postId)) {
-    const response = await apiClient.addReply(parentId, text);
+    const moderation = evaluateCommentModeration(text);
+    const response = await apiClient.addReply(parentId, text, {
+      moderation_status: moderation.level === 'hide' ? 'pending_review' : 'approved',
+      is_hidden: moderation.level === 'hide',
+      flagged_keywords: moderation.matched,
+    });
     const parsedCount = Number(response?.comments_count ?? response?.commentsCount);
     if (Number.isFinite(parsedCount)) {
       bumpLocalPostCommentCount(postId, parsedCount);
@@ -3684,14 +3747,11 @@ export async function addReply(postId: string, parentId: string, userHandle: str
       post_id: response.post_id || response.postId || postId,
       parent_id: response.parent_id || response.parentId || parentId,
     });
-    const moderation = evaluateCommentModeration(mapped.text || text);
     return {
       ...mapped,
       userHandle: mapped.userHandle || userHandle,
       text: mapped.text || text,
       parentId: mapped.parentId || parentId,
-      moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
-      moderationReason: moderation.matched[0],
     };
   }
 
@@ -3742,6 +3802,26 @@ export async function addReply(postId: string, parentId: string, userHandle: str
 }
 
 export async function fetchHiddenCommentsForOwner(ownerHandle: string): Promise<HiddenCommentReviewItem[]> {
+  if (!isMockMode()) {
+    try {
+      const payload = await apiClient.fetchCommentReviewQueue();
+      const rows = Array.isArray(payload?.items) ? payload.items : [];
+      return rows.map((item) => ({
+        id: String(item.id),
+        postId: String(item.postId || ''),
+        userHandle: String(item.userHandle || ''),
+        text: String(item.text || ''),
+        createdAt: Number(item.createdAt) || Date.now(),
+        moderationReason: item.moderationReason || undefined,
+        isReply: !!item.isReply,
+        parentId: item.parentId || undefined,
+      }));
+    } catch (error) {
+      console.error('fetchHiddenCommentsForOwner live failed:', error);
+      return [];
+    }
+  }
+
   await delay(80);
   const normalizedOwner = String(ownerHandle || '').trim().toLowerCase();
   if (!normalizedOwner) return [];
@@ -3785,6 +3865,16 @@ export async function fetchHiddenCommentsForOwner(ownerHandle: string): Promise<
 }
 
 export async function approveHiddenComment(commentId: string): Promise<boolean> {
+  if (!isMockMode()) {
+    try {
+      await apiClient.approveComment(commentId);
+      return true;
+    } catch (error) {
+      console.error('approveHiddenComment live failed:', error);
+      return false;
+    }
+  }
+
   await delay(80);
   const target = String(commentId || '').trim();
   if (!target) return false;
@@ -3807,6 +3897,16 @@ export async function approveHiddenComment(commentId: string): Promise<boolean> 
 }
 
 export async function deleteHiddenComment(commentId: string): Promise<boolean> {
+  if (!isMockMode()) {
+    try {
+      await apiClient.deleteComment(commentId);
+      return true;
+    } catch (error) {
+      console.error('deleteHiddenComment live failed:', error);
+      return false;
+    }
+  }
+
   await delay(80);
   const target = String(commentId || '').trim();
   if (!target) return false;
@@ -3840,6 +3940,20 @@ export async function setCommentModerationState(
   state: 'visible' | 'hidden_by_filter',
   reason?: string
 ): Promise<boolean> {
+  if (!isMockMode()) {
+    try {
+      if (state === 'hidden_by_filter') {
+        await apiClient.hideComment(commentId, reason ? [reason] : ['creator_moderation']);
+      } else {
+        await apiClient.approveComment(commentId);
+      }
+      return true;
+    } catch (error) {
+      console.error('setCommentModerationState live failed:', error);
+      return false;
+    }
+  }
+
   await delay(80);
   const target = String(commentId || '').trim();
   if (!target) return false;

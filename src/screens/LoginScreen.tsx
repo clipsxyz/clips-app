@@ -10,6 +10,7 @@ import {
     Modal,
     Keyboard,
     Platform,
+    Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -41,6 +42,27 @@ function resolveAuthMode(raw: unknown): AuthMode {
     return raw === 'login' ? 'login' : 'signup';
 }
 
+const INVITE_HANDLE_KEY = 'clips:inviteHandle';
+
+function parseInviteFromUrl(url: string | null | undefined): string {
+    if (!url) return '';
+    try {
+        const queryIndex = url.indexOf('?');
+        if (queryIndex >= 0) {
+            const params = new URLSearchParams(url.slice(queryIndex + 1));
+            const fromQuery = String(params.get('invite') || '').replace(/^@/, '').trim();
+            if (fromQuery) return fromQuery;
+        }
+        const pathMatch = url.match(/\/invite\/([^/?#]+)/);
+        if (pathMatch?.[1]) {
+            return decodeURIComponent(pathMatch[1]).replace(/^@/, '').trim();
+        }
+    } catch {
+        return '';
+    }
+    return '';
+}
+
 const MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
@@ -63,6 +85,9 @@ export default function LoginScreen({ navigation, route }: any) {
     const [acceptedTerms, setAcceptedTerms] = useState(false);
     const [acceptedGuidelines, setAcceptedGuidelines] = useState(false);
     const [keyboardOpen, setKeyboardOpen] = useState(false);
+    const [inviteHandle, setInviteHandle] = useState(() =>
+        String(route?.params?.invite || '').replace(/^@/, '').trim()
+    );
     const [forgotOpen, setForgotOpen] = useState(false);
     const [forgotStep, setForgotStep] = useState<1 | 2>(1);
     const [forgotEmail, setForgotEmail] = useState('');
@@ -106,6 +131,31 @@ export default function LoginScreen({ navigation, route }: any) {
         setErrorText('');
         setFieldErrors({});
     }, [route?.params?.mode]);
+
+    useEffect(() => {
+        const fromRoute = String(route?.params?.invite || '').replace(/^@/, '').trim();
+        if (fromRoute) {
+            setInviteHandle(fromRoute);
+            void AsyncStorage.setItem(INVITE_HANDLE_KEY, fromRoute);
+            return;
+        }
+        let cancelled = false;
+        const apply = (value: string) => {
+            const next = String(value || '').replace(/^@/, '').trim();
+            if (!next || cancelled) return;
+            setInviteHandle(next);
+            void AsyncStorage.setItem(INVITE_HANDLE_KEY, next);
+        };
+        void AsyncStorage.getItem(INVITE_HANDLE_KEY).then((stored) => {
+            if (stored) apply(stored);
+        });
+        void Linking.getInitialURL().then((url) => apply(parseInviteFromUrl(url)));
+        const sub = Linking.addEventListener('url', ({ url }) => apply(parseInviteFromUrl(url)));
+        return () => {
+            cancelled = true;
+            sub.remove();
+        };
+    }, [route?.params?.invite]);
 
     // Hide sticky Terms block while keyboard is open so it doesn't cover signup fields.
     useEffect(() => {
@@ -590,9 +640,13 @@ export default function LoginScreen({ navigation, route }: any) {
                 locationNational: String(national || '').trim(),
                 accountType: accountType as 'personal' | 'business',
                 isBusiness: accountType === 'business',
+                inviteHandle: inviteHandle || undefined,
             });
             if (apiResponse?.token) {
                 await persistAuthToken(apiResponse.token);
+            }
+            if (inviteHandle) {
+                void AsyncStorage.removeItem(INVITE_HANDLE_KEY);
             }
             const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
             const photoUri = profilePicture;

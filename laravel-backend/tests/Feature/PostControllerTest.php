@@ -503,5 +503,160 @@ class PostControllerTest extends TestCase
         $this->assertTrue((bool) $row['user_reclipped']);
         $this->assertSame(1, (int) $row['reclips_count']);
     }
+
+    public function test_feed_alias_matches_posts_index(): void
+    {
+        $user = User::factory()->create();
+        Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'location_label' => 'Dublin',
+        ]);
+
+        $posts = $this->getJson('/api/posts?filter=Dublin&limit=10');
+        $feed = $this->getJson('/api/feed?filter=Dublin&limit=10');
+
+        $posts->assertOk();
+        $feed->assertOk();
+        $this->assertSame($posts->json('items.0.id'), $feed->json('items.0.id'));
+        $this->assertArrayHasKey('nextCursor', $feed->json());
+        $this->assertArrayHasKey('hasMore', $feed->json());
+    }
+
+    public function test_feed_paginates_with_encoded_cursor(): void
+    {
+        $user = User::factory()->create();
+        Post::factory()->count(3)->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'location_label' => 'Dublin',
+        ]);
+
+        $first = $this->getJson('/api/posts?filter=Dublin&limit=2');
+        $first->assertOk();
+        $this->assertCount(2, $first->json('items'));
+        $this->assertTrue($first->json('hasMore'));
+        $cursor = $first->json('nextCursor');
+        $this->assertIsString($cursor);
+        $this->assertNotSame('0', $cursor);
+
+        $second = $this->getJson('/api/posts?filter=Dublin&limit=2&cursor=' . urlencode($cursor));
+        $second->assertOk();
+        $this->assertGreaterThanOrEqual(1, count($second->json('items')));
+        $this->assertNotEquals($first->json('items.0.id'), $second->json('items.0.id'));
+    }
+
+    public function test_feed_filters_by_location_and_venue(): void
+    {
+        $dublinAuthor = User::factory()->create([
+            'location_local' => 'Finglas',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $corkAuthor = User::factory()->create([
+            'location_local' => 'Cork city',
+            'location_regional' => 'Cork',
+            'location_national' => 'Ireland',
+        ]);
+        $dublinPost = Post::factory()->create([
+            'user_id' => $dublinAuthor->id,
+            'user_handle' => $dublinAuthor->handle,
+            'location_label' => 'Dublin',
+            'venue' => null,
+        ]);
+        $corkPost = Post::factory()->create([
+            'user_id' => $corkAuthor->id,
+            'user_handle' => $corkAuthor->handle,
+            'location_label' => 'Cork',
+            'venue' => 'English Market',
+        ]);
+
+        $dublinFeed = $this->getJson('/api/posts?filter=Dublin&limit=20');
+        $dublinFeed->assertOk();
+        $dublinIds = collect($dublinFeed->json('items'))->pluck('id')->all();
+        $this->assertContains($dublinPost->id, $dublinIds);
+        $this->assertNotContains($corkPost->id, $dublinIds);
+
+        $venueFeed = $this->getJson('/api/posts?filter=' . urlencode('venue:English Market') . '&limit=20');
+        $venueFeed->assertOk();
+        $venueIds = collect($venueFeed->json('items'))->pluck('id')->all();
+        $this->assertContains($corkPost->id, $venueIds);
+        $this->assertNotContains($dublinPost->id, $venueIds);
+    }
+
+    public function test_create_rejects_local_device_media_url(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/posts', [
+                'text' => 'Imported clip',
+                'location' => 'Dublin',
+                'mediaUrl' => 'file:///data/user/0/clip.mp4',
+                'mediaType' => 'video',
+            ])
+            ->assertStatus(400)
+            ->assertJsonPath('error', 'Invalid media URL');
+    }
+
+    public function test_create_stores_media_location_tags_and_imported_clip_format(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/posts', [
+                'text' => 'CapCut edit from gallery',
+                'location' => 'Temple Bar',
+                'placeId' => 'ChIJtestdublinplace',
+                'latitude' => 53.3456,
+                'longitude' => -6.2675,
+                'venue' => 'The Temple Bar Pub',
+                'landmark' => 'Ha\'penny Bridge',
+                'mediaUrl' => 'https://cdn.example.com/imports/capcut.mp4',
+                'mediaType' => 'video',
+                'videoPosterUrl' => 'https://cdn.example.com/imports/capcut.jpg',
+                'socialFormat' => 'instagram_reels',
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('location_label', 'Temple Bar')
+            ->assertJsonPath('place_id', 'ChIJtestdublinplace')
+            ->assertJsonPath('venue', 'The Temple Bar Pub')
+            ->assertJsonPath('landmark', 'Ha\'penny Bridge')
+            ->assertJsonPath('social_format', 'instagram_reels')
+            ->assertJsonPath('media_url', 'https://cdn.example.com/imports/capcut.mp4');
+
+        $this->assertEqualsWithDelta(53.3456, (float) $response->json('latitude'), 0.0001);
+        $this->assertEqualsWithDelta(-6.2675, (float) $response->json('longitude'), 0.0001);
+    }
+
+    public function test_suggested_by_places_uses_preferred_travel_list(): void
+    {
+        $viewer = User::factory()->create([
+            'location_local' => 'Finglas',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+            'places_traveled' => ['Galway'],
+            'bio' => null,
+        ]);
+        $author = User::factory()->create([
+            'location_local' => 'Salthill',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
+        ]);
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'location_label' => 'Galway',
+            'venue' => 'Latin Quarter',
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts/suggested-by-places?limit=12');
+
+        $response->assertOk();
+        $ids = collect($response->json('suggestions'))->pluck('post.id')->all();
+        $this->assertContains($post->id, $ids);
+    }
 }
 

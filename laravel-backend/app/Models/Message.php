@@ -31,6 +31,7 @@ class Message extends Model
         'image_url',
         'is_system_message',
         'read_at',
+        'reply_to',
     ];
 
     protected $casts = [
@@ -38,6 +39,7 @@ class Message extends Model
         'read_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'reply_to' => 'array',
     ];
 
     // Relationships

@@ -171,7 +171,7 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: TAB_BAR_STYLE,
-        sceneContainerStyle: { backgroundColor: GAZETTEER_ABYSS },
+        sceneStyle: { backgroundColor: GAZETTEER_ABYSS },
         lazy: true,
       }}
       tabBar={(props) => (

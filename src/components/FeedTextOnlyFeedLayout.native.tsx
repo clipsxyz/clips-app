@@ -13,7 +13,7 @@ import Avatar from './Avatar';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
 import PostLinkPreviewCard from './PostLinkPreviewCard.native';
-import TaggedAvatars from './TaggedAvatars.native';
+import FeedTaggedMediaBadge from './FeedTaggedMediaBadge.native';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { getPostCaptionWithoutLink } from '../utils/linkPreview';
 const AVATAR_COLUMN_WIDTH = FEED_UI.icon.avatar + 8;
@@ -172,9 +172,9 @@ export default function FeedTextOnlyFeedLayout({
 
             {post.taggedUsers && post.taggedUsers.length > 0 ? (
                 <View style={styles.taggedFooter}>
-                    <TaggedAvatars
-                        taggedUserHandles={post.taggedUsers}
-                        onShowTaggedUsers={onShowTaggedUsers ?? (() => {})}
+                    <FeedTaggedMediaBadge
+                        count={post.taggedUsers.length}
+                        onPress={onShowTaggedUsers ?? (() => {})}
                     />
                 </View>
             ) : null}
@@ -183,10 +183,6 @@ export default function FeedTextOnlyFeedLayout({
 }
 
 const styles = StyleSheet.create({
-    root: {
-        paddingHorizontal: 16,
-        paddingBottom: 12,
-    },
     root: {
         paddingHorizontal: 16,
         paddingBottom: 12,

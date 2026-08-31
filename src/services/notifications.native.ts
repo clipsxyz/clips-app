@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
-import { apiRequest } from '../api/client';
+import { apiRequest, fetchNotificationPreferences, saveNotificationPreferencesToServer } from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
 
@@ -164,9 +165,20 @@ async function hydratePreferencesOnce(): Promise<void> {
 
 void hydratePreferencesOnce();
 
-/** Await AsyncStorage hydrate so Settings toggles match last session (mock + production). */
+/** Await AsyncStorage hydrate and Laravel prefs so Settings matches the account. */
 export async function loadNotificationPreferences(): Promise<NotificationPreferences> {
   await hydratePreferencesOnce();
+  if (isLaravelApiEnabled()) {
+    try {
+      const remote = await fetchNotificationPreferences();
+      if (remote) {
+        inMemoryNotificationPrefs = { ...defaultPreferences, ...remote };
+        await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+      }
+    } catch (error) {
+      console.warn('Failed to load notification preferences from backend:', error);
+    }
+  }
   return getNotificationPreferences();
 }
 
@@ -208,22 +220,47 @@ export function isNotificationTypeEnabled(
   }
 }
 
+/** In-app inbox is not gated on the push master switch. */
+export function isInAppNotificationChannelEnabled(
+  prefs: NotificationPreferences,
+  channel: NotificationPreferenceChannel
+): boolean {
+  return isNotificationTypeEnabled({ ...prefs, enabled: true }, channel);
+}
+
 export function saveNotificationPreferences(prefs: NotificationPreferences): void {
   inMemoryNotificationPrefs = { ...defaultPreferences, ...prefs };
   void AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs)).catch((error) => {
     console.error('Error saving notification preferences:', error);
   });
+  if (isLaravelApiEnabled()) {
+    void saveNotificationPreferencesToServer(inMemoryNotificationPrefs).catch((error) => {
+      console.warn('Failed to sync notification preferences to backend:', error);
+    });
+  }
 }
 
-/** Awaitable save for Settings UI (ensures toggle state is on disk before next cold start). */
+/** Awaitable save for Settings UI (disk + Laravel). */
 export async function saveNotificationPreferencesAsync(
   prefs: NotificationPreferences,
+  options?: { syncRemote?: boolean },
 ): Promise<NotificationPreferences> {
   inMemoryNotificationPrefs = { ...defaultPreferences, ...prefs };
   try {
     await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
   } catch (error) {
     console.error('Error saving notification preferences:', error);
+  }
+  if (options?.syncRemote !== false && isLaravelApiEnabled()) {
+    try {
+      const saved = await saveNotificationPreferencesToServer(inMemoryNotificationPrefs);
+      if (saved) {
+        inMemoryNotificationPrefs = { ...defaultPreferences, ...saved };
+        await AsyncStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(inMemoryNotificationPrefs));
+      }
+    } catch (error) {
+      console.warn('Failed to sync notification preferences to backend:', error);
+    }
   }
   return getNotificationPreferences();
 }

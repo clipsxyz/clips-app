@@ -2654,7 +2654,7 @@ export default function ScenesModal({
                                         <div className="mb-2 flex items-center justify-between gap-2">
                                             <p className="text-xs text-gray-500 truncate">
                                                 Replying to{' '}
-                                                {comments.find((c) => c.id === replyingToCommentId)?.userHandle ||
+                                                {commentsList.find((c) => c.id === replyingToCommentId)?.userHandle ||
                                                     'comment'}
                                             </p>
                                             <button

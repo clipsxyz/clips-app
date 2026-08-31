@@ -112,6 +112,8 @@ import {
 import FeedPageLayout, {
     FEED_CARD_BODY,
     FEED_CARD_CAPTION_PADDING,
+    FEED_CARD_CAPTION_ROW,
+    FEED_CARD_CAPTION_TEXT_SLOT,
     FEED_CARD_ENGAGEMENT_BAR,
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
     FEED_CARD_ENGAGEMENT_LEFT,
@@ -733,7 +735,7 @@ function PillTabs({
                             >
                                 <View style={styles.feedSwitchBadgeCaret} />
                                 <View style={styles.feedSwitchBadgeInner}>
-                                    <Icon name="location" size={ox(14)} color="#FFFFFF" />
+                                    <Icon name="location" size={11} color="#FFFFFF" />
                                     <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
                                 </View>
                             </Animated.View>
@@ -1017,6 +1019,7 @@ const FeedCard = React.memo(function FeedCard({
     onOpenTaggedSheet,
     onLikeBurst,
     onShareToStories,
+    onShareToStoriesSuccess,
     scenesExpanding = false,
     scenesExpandProgress,
     scenesExpandOrigin,
@@ -1057,6 +1060,7 @@ const FeedCard = React.memo(function FeedCard({
     onLikeBurst?: (windowX: number, windowY: number) => void;
     /** Parent-owned share modal — per-card Modal show/hide jumps FlatList on Android. */
     onShareToStories?: () => void;
+    onShareToStoriesSuccess?: (postId: string) => void;
     scenesExpanding?: boolean;
     scenesExpandProgress?: import('react-native-reanimated').SharedValue<number>;
     scenesExpandOrigin?: FeedScenesOrigin | null;
@@ -1099,7 +1103,6 @@ const FeedCard = React.memo(function FeedCard({
     const textOnlyPost = isTextOnlyPost(post);
     const hasFeedMedia = !textOnlyPost && Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
     const hasTaggedUsers = Boolean(post.taggedUsers && post.taggedUsers.length > 0);
-    const showVideoMuteOnMedia = hasFeedMedia && postHasVideoMedia(post);
     const carouselThumbItems = React.useMemo(
         () =>
             (post.mediaItems || []).filter(
@@ -1112,6 +1115,8 @@ const FeedCard = React.memo(function FeedCard({
         () => getPostCaptionWithoutLink(post, displayCaption),
         [post, displayCaption],
     );
+    const showCaptionRow =
+        !textOnlyPost && hasFeedMedia && (captionWithoutLink.length > 0 || hasTaggedUsers);
     const { profileHandle } = getReclipDisplay(post, viewerHandle);
     const isRequested = Boolean(
         !isCurrentUser &&
@@ -1329,13 +1334,6 @@ const FeedCard = React.memo(function FeedCard({
                                     </Text>
                                 </View>
                             ) : null}
-                            {hasTaggedUsers ? (
-                                <FeedTaggedMediaBadge
-                                    count={post.taggedUsers!.length}
-                                    aboveMuteControl={showVideoMuteOnMedia}
-                                    onPress={() => onOpenTaggedSheet?.()}
-                                />
-                            ) : null}
                         </View>
                         </FeedScenesMediaExpand>
                     ) : null}
@@ -1351,22 +1349,36 @@ const FeedCard = React.memo(function FeedCard({
                 </View>
             )}
 
-            {!textOnlyPost && captionWithoutLink.length > 0 && hasFeedMedia ? (
-                <Pressable
-                    style={FEED_CARD_CAPTION_PADDING}
-                    onPress={onPostPress}
-                    disabled={!onPostPress}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open post"
-                >
-                    <FeedCaptionText
-                        caption={captionWithoutLink}
-                        onHandlePress={(handle) => {
-                            if (onVisitHandle) onVisitHandle(handle);
-                            else onVisitProfile?.();
-                        }}
-                    />
-                </Pressable>
+            {showCaptionRow ? (
+                <View style={FEED_CARD_CAPTION_PADDING}>
+                    <View style={FEED_CARD_CAPTION_ROW}>
+                        {captionWithoutLink.length > 0 ? (
+                            <Pressable
+                                style={FEED_CARD_CAPTION_TEXT_SLOT}
+                                onPress={onPostPress}
+                                disabled={!onPostPress}
+                                accessibilityRole="button"
+                                accessibilityLabel="Open post"
+                            >
+                                <FeedCaptionText
+                                    caption={captionWithoutLink}
+                                    onHandlePress={(handle) => {
+                                        if (onVisitHandle) onVisitHandle(handle);
+                                        else onVisitProfile?.();
+                                    }}
+                                />
+                            </Pressable>
+                        ) : (
+                            <View style={FEED_CARD_CAPTION_TEXT_SLOT} />
+                        )}
+                        {hasTaggedUsers ? (
+                            <FeedTaggedMediaBadge
+                                count={post.taggedUsers!.length}
+                                onPress={() => onOpenTaggedSheet?.()}
+                            />
+                        ) : null}
+                    </View>
+                </View>
             ) : null}
 
             <View
@@ -1474,6 +1486,7 @@ const FeedCard = React.memo(function FeedCard({
         prev.suspendNativeVideo === next.suspendNativeVideo &&
         prev.scenesExpanding === next.scenesExpanding &&
         prev.viewerHandle === next.viewerHandle &&
+        prev.onShareToStoriesSuccess === next.onShareToStoriesSuccess &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
         a.clientLocalMediaUri === b.clientLocalMediaUri &&
@@ -3073,8 +3086,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                       ? `Failed to load feed (${msg.slice(0, 100)})`
                       : 'Failed to load feed',
             );
-            // Keep just-created posts visible even when the feed fetch fails/times out.
-            applyFeedPageResult([], null, undefined, requestedFilter);
+            // Keep whatever cards we already have. Applying [] here used to look like
+            // "You're early to this feed" after a timeout or dropped adb reverse.
+            if (pagesRef.current.flat().length === 0) {
+                setEnd(true);
+            }
         } finally {
             firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
@@ -5327,29 +5343,29 @@ const styles = StyleSheet.create({
     feedSwitchBadgeInner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: ox(6),
-        paddingHorizontal: ox(16),
-        paddingVertical: ox(7),
-        borderRadius: ox(18),
-        borderWidth: 1.5,
+        gap: 3,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 12,
+        borderWidth: 1,
         borderColor: '#FFFFFF',
         backgroundColor: '#000000',
     },
     feedSwitchBadgeText: {
         color: '#FFFFFF',
-        fontSize: ox(13),
+        fontSize: 10,
         fontWeight: '700',
     },
     feedSwitchBadgeCaret: {
-        width: 10,
-        height: 10,
-        marginBottom: ox(-5),
+        width: 7,
+        height: 7,
+        marginBottom: -3.5,
         backgroundColor: '#000000',
-        borderLeftWidth: 1.5,
-        borderTopWidth: 1.5,
+        borderLeftWidth: 1,
+        borderTopWidth: 1,
         borderColor: '#FFFFFF',
         transform: [{ rotate: '45deg' }],
-        borderRadius: ox(2),
+        borderRadius: 1,
         zIndex: 1,
     },
     feedSwitchSheetOverlay: {

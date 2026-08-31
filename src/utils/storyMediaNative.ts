@@ -87,24 +87,24 @@ export function resolveStoryVideoPlaybackUrl(url?: string | null): string | unde
     return resolveMockFeedVideoUrl(resolved);
 }
 
-const STORY_VIDEO_SOURCE_CACHE = new Map<string, number | { uri: string }>();
+const STORY_VIDEO_SOURCE_CACHE = new Map<string, { uri: string }>();
 
 /**
  * Preferred react-native-video `source` for story playback.
  * Same URI → same object so progress ticks don't remount ExoPlayer.
  */
-export function storyVideoSource(url?: string | null): number | { uri: string } | null {
+export function storyVideoSource(url?: string | null): { uri: string } | null {
     const raw = (url || '').trim();
     if (!raw) return null;
     const cached = STORY_VIDEO_SOURCE_CACHE.get(raw);
     if (cached) return cached;
 
     const demoPath = demoVideoPathFromUrl(raw);
-    let source: number | { uri: string } | null = null;
+    let source: { uri: string } | null = null;
     if (demoPath || isMockDemoVideoPath(raw)) {
-        source = mockFeedVideoSource(demoPath || raw) as number | { uri: string };
+        source = mockFeedVideoSource(demoPath || raw);
     } else if (/big_buck_bunny|mov_bbb|bbb\.mp4|mediaelement-files/i.test(raw)) {
-        source = mockFeedVideoSource(undefined) as number | { uri: string };
+        source = mockFeedVideoSource(undefined);
     } else {
         const playback = resolveStoryVideoPlaybackUrl(raw);
         source = playback ? { uri: playback } : null;

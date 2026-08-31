@@ -191,7 +191,7 @@ export function resolveMockFeedVideoUrl(url: string | undefined): string {
  * Preferred Video `source` for feed/scenes/stories.
  * Demo slots use distinct HTTPS URIs — never the bundled BBB rainbow clip.
  */
-export function mockFeedVideoSource(url: string | undefined): number | { uri: string } {
+export function mockFeedVideoSource(url: string | undefined): { uri: string } {
     if (url && NATIVE_URI_BY_DEMO_PATH[url]) {
         return { uri: NATIVE_URI_BY_DEMO_PATH[url] };
     }

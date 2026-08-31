@@ -58,9 +58,7 @@ export async function resolveFeedAutoplayAllowed(pref: FeedAutoplayPref): Promis
         if (state.isConnected === false) return false;
         const type = state.type;
         if (type === 'wifi' || type === 'ethernet') return true;
-        if (type === 'cellular') return false;
-        // Unknown / other: allow when not explicitly cellular (offline handled above).
-        return type !== 'cellular';
+        return false;
     } catch {
         return false;
     }

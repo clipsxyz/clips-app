@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiUsers, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -19,8 +19,9 @@ import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/cli
 import { fetchUserProfile } from '../api/client';
 import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
+import { acceptChatGroupInvite, declineChatGroupInvite } from '../api/chatGroups';
 import { markGroupConversationReadById } from '../api/messages';
-import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import { getNotificationPreferences, isInAppNotificationChannelEnabled } from '../services/notifications';
 
 function extractAvatarUrl(profile: any): string {
     const candidate =
@@ -652,7 +653,7 @@ export default function InboxPage() {
                     // 3. Doesn't already have a notification for this handle
                     if (conv.kind === 'group') {
                         // Group conversation activity can surface in Notifs when Group Chat notifications are enabled.
-                        if (!isNotificationTypeEnabled(prefs, 'group_chat')) return false;
+                        if (!isInAppNotificationChannelEnabled(prefs, 'group_chat')) return false;
                         if (!conv.chatGroupId || !conv.lastMessage) return false;
                         if (conv.lastMessage.senderHandle === user.handle) return false;
                         if (conv.unread === 0) return false;
@@ -661,7 +662,7 @@ export default function InboxPage() {
                     if (!conv.lastMessage) return false;
                     if (conv.lastMessage.senderHandle === user.handle) return false; // User sent it, don't create notification
                     if (existingNotifHandles.has(conv.otherHandle)) return false; // Already has notification
-                    if (!isNotificationTypeEnabled(prefs, 'dm')) return false;
+                    if (!isInAppNotificationChannelEnabled(prefs, 'dm')) return false;
                     return true;
                 })
                 .map(conv => {
@@ -1064,6 +1065,8 @@ export default function InboxPage() {
             navigate(`/post/${encodeURIComponent(notif.postId)}`, {
                 state: { openComments: true, focusCommentId: notif.commentId },
             });
+        } else if (notif.type === 'group_invite') {
+            return;
         } else if (notif.type === 'sticker' || notif.type === 'reply') {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'dm') {
@@ -1106,6 +1109,8 @@ export default function InboxPage() {
                 return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
+            case 'group_invite':
+                return notif.message || `invited you to join ${notif.groupName || 'a community'}`;
             case 'new_post':
                 return notif.message || 'posted a new clip';
             default:
@@ -1124,6 +1129,8 @@ export default function InboxPage() {
                 return <FiMessageCircle className={cls} />;
             case 'follow_request':
                 return <FiUserPlus className={cls} />;
+            case 'group_invite':
+                return <FiUsers className={cls} />;
             case 'new_post':
                 return <FiBell className={cls} />;
             default:
@@ -1226,6 +1233,39 @@ export default function InboxPage() {
         } catch (error) {
             console.error('Error denying follow request:', error);
             Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to deny follow request', icon: 'alert' }));
+        }
+    };
+
+    const handleAcceptGroupInvite = async (notif: Notification, e: React.MouseEvent) => {
+        e.stopPropagation();
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId || !user?.handle) return;
+        try {
+            await acceptChatGroupInvite(inviteId);
+            await deleteNotification(notif.id, user.handle);
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+            if (notif.chatGroupId) {
+                navigate(`/messages/group/${encodeURIComponent(notif.chatGroupId)}`);
+            } else {
+                await loadData();
+            }
+        } catch (error) {
+            console.error('Error accepting community invite:', error);
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Could not join this community right now', icon: 'alert' }));
+        }
+    };
+
+    const handleDeclineGroupInvite = async (notif: Notification, e: React.MouseEvent) => {
+        e.stopPropagation();
+        const inviteId = notif.chatGroupInviteId;
+        if (!inviteId || !user?.handle) return;
+        try {
+            await declineChatGroupInvite(inviteId);
+            await deleteNotification(notif.id, user.handle);
+            setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+        } catch (error) {
+            console.error('Error declining community invite:', error);
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Could not decline this invite right now', icon: 'alert' }));
         }
     };
 
@@ -1847,6 +1887,22 @@ export default function InboxPage() {
                                             className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
                                         >
                                             Deny
+                                        </button>
+                                    </div>
+                                )}
+                                {notif.type === 'group_invite' && (
+                                    <div className="flex gap-2 flex-shrink-0">
+                                        <button
+                                            onClick={(e) => handleAcceptGroupInvite(notif, e)}
+                                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                        >
+                                            Join
+                                        </button>
+                                        <button
+                                            onClick={(e) => handleDeclineGroupInvite(notif, e)}
+                                            className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                        >
+                                            Decline
                                         </button>
                                     </div>
                                 )}

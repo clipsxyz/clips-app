@@ -97,6 +97,14 @@ export default function LoginPage() {
     if (modeParam === 'login' || modeParam === 'signup') {
       setMode(modeParam);
     }
+    const inviteParam = (searchParams.get('invite') || '').replace(/^@/, '').trim();
+    if (inviteParam) {
+      try {
+        sessionStorage.setItem('clips:inviteHandle', inviteParam);
+      } catch {
+        // ignore storage failures
+      }
+    }
   }, [searchParams]);
 
   const getPostAuthRedirect = React.useCallback(() => {
@@ -317,6 +325,9 @@ export default function LoginPage() {
     }
 
     try {
+      const inviteHandle =
+        (searchParams.get('invite') || '').replace(/^@/, '').trim() ||
+        (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('clips:inviteHandle') || '').replace(/^@/, '').trim() : '');
       const apiResponse = await registerUser({
         username: email.trim().split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
         email: email.trim(),
@@ -328,9 +339,15 @@ export default function LoginPage() {
         locationNational: national.trim(),
         accountType: (accountType ?? 'personal') as 'personal' | 'business',
         isBusiness: accountType === 'business',
+        inviteHandle: inviteHandle || undefined,
       });
       const token = apiResponse?.token;
       if (token) await persistAuthToken(token);
+      try {
+        sessionStorage.removeItem('clips:inviteHandle');
+      } catch {
+        // ignore
+      }
       const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
       const mergedUser = {
         ...userData,
@@ -414,17 +431,22 @@ export default function LoginPage() {
       const apiUser = (res as { user?: any }).user;
       if (token) await persistAuthToken(token);
       if (apiUser) {
+        const mapped = mapLaravelUserToAppFields(apiUser);
         const userData = {
-          name: apiUser.display_name || apiUser.name || apiUser.username || '',
-          email: apiUser.email || '',
-          handle: apiUser.handle || '',
-          local: apiUser.location_local || '',
-          regional: apiUser.location_regional || '',
-          national: apiUser.location_national || '',
-          avatarUrl: apiUser.avatar_url,
-          is_private: apiUser.is_private || false,
+          id: mapped.id,
+          name: mapped.name || apiUser.display_name || apiUser.name || apiUser.username || '',
+          email: mapped.email || apiUser.email || '',
+          handle: mapped.handle || apiUser.handle || '',
+          local: mapped.local || apiUser.location_local || '',
+          regional: mapped.regional || apiUser.location_regional || '',
+          national: mapped.national || apiUser.location_national || '',
+          avatarUrl: mapped.avatarUrl || apiUser.avatar_url,
+          is_private: mapped.is_private || apiUser.is_private || false,
           accountType:
-            apiUser.account_type === 'business' || apiUser.accountType === 'business' || apiUser.is_business === true
+            mapped.accountType === 'business' ||
+            apiUser.account_type === 'business' ||
+            apiUser.accountType === 'business' ||
+            apiUser.is_business === true
               ? 'business'
               : 'personal',
         };
@@ -525,6 +547,7 @@ export default function LoginPage() {
       if (res.token) await persistAuthToken(res.token);
       const mapped = mapLaravelUserToAppFields(res.user || {});
       login({
+        id: mapped.id,
         name: mapped.name || identifier.split('@')[0] || 'User',
         email: mapped.email || identifier,
         handle: mapped.handle,

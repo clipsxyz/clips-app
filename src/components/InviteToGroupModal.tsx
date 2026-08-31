@@ -25,7 +25,7 @@ export default function InviteToGroupModal({
     if (!isOpen) return;
     setLoading(true);
     fetchMyChatGroups(user?.handle)
-      .then(setGroups)
+      .then((items) => setGroups((items ?? []).filter((g) => g.is_admin)))
       .catch(() => setGroups([]))
       .finally(() => setLoading(false));
   }, [isOpen, user?.handle]);
@@ -76,9 +76,7 @@ export default function InviteToGroupModal({
             <div className="py-8 text-center text-white/50 text-sm">Loading your groups…</div>
           ) : groups.length === 0 ? (
             <div className="py-8 px-3 text-center text-white/55 text-sm leading-relaxed">
-              You don&apos;t have any groups yet. Create one from <strong className="text-white/80">your profile → New group</strong>, or{' '}
-              <strong className="text-white/80">⋯ on your own post → Create group</strong>. Then open the group and use{' '}
-              <strong className="text-white/80">+</strong> in the header to invite by username.
+              You can only invite people to communities you created.
             </div>
           ) : (
             <ul className="space-y-1">
