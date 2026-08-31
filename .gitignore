@@ -36,3 +36,23 @@ android/app/.cxx/
 android/ffmpeg-kit-local-maven/
 ios/FFmpegKitVendor/
 .tmp-ffmpeg-setup/
+
+# macOS
+.DS_Store
+
+# Expo local state
+.expo/
+
+# Local SQLite databases
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Local Laravel/PHP script and ini overrides
+laravel-backend/serve.sh
+laravel-backend/.user.ini
+laravel-backend/php-dev.d/
+laravel-backend/.phpunit.cache/
+laravel-backend/public/storage
+laravel-backend/vendor/
