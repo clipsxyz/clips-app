@@ -119,17 +119,23 @@ export default function LoginPage() {
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
-  const step = (stepFromUrl >= 1 && stepFromUrl <= 3) ? stepFromUrl : 1;
+  const step = (stepFromUrl >= 1 && stepFromUrl <= 4) ? stepFromUrl : 1;
 
   const signupStepTitle =
-    step === 1 ? 'Create your account' : step === 2 ? 'About you' : 'Add a photo';
+    step === 1
+      ? 'Create your account'
+      : step === 2
+        ? 'About you'
+        : step === 3
+          ? 'Choose your news feeds'
+          : 'Add a photo';
 
   const signupInputClass =
     'w-full rounded-lg border border-white/15 bg-white/5 px-3 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#7A8AF0]/60 focus:ring-1 focus:ring-[#7A8AF0]/30';
 
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
-    if (newStep >= 1 && newStep <= 3) {
+    if (newStep >= 1 && newStep <= 4) {
       setSignupError('');
       setSearchParams({ mode: 'signup', step: newStep.toString() });
     }
@@ -211,7 +217,8 @@ export default function LoginPage() {
     const age = getAgeFromBirthday();
     return age !== null && age >= MIN_AGE;
   }, [birthMonth, birthDay, birthYear]);
-  const step2CanContinue = Boolean(name.trim() && homeLocationComplete && birthdateComplete);
+  const step2CanContinue = Boolean(name.trim() && birthdateComplete);
+  const step3CanContinue = homeLocationComplete;
   const step1CanContinue =
     Boolean(accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines);
 
@@ -263,14 +270,10 @@ export default function LoginPage() {
     updateStep(2);
   }
 
-  function handleLocationSubmit(e: React.FormEvent) {
+  function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
     if (!name) nextErrors.name = 'Full name is required.';
-    if (!local || !regional || !national) {
-      nextErrors.homeLocation =
-        'Search and pick a place from the list ? we need your local, regional, and national feeds.';
-    }
     if (!birthMonth || !birthDay || !birthYear) {
       nextErrors.birthdate = 'Please enter your date of birth.';
     }
@@ -288,6 +291,20 @@ export default function LoginPage() {
     setSignupFieldErrors({});
     setSignupError('');
     updateStep(3);
+  }
+
+  function handleLocationSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!homeLocationComplete) {
+      setSignupFieldErrors({
+        homeLocation: 'Search and pick a place from the list — we need your local, regional, and national feeds.',
+      });
+      setSignupError('Please choose the location that will power your news feeds.');
+      return;
+    }
+    setSignupFieldErrors({});
+    setSignupError('');
+    updateStep(4);
   }
 
   async function handleProfilePictureSubmit(e: React.FormEvent) {
@@ -814,8 +831,10 @@ export default function LoginPage() {
             step === 1
               ? handleAccountSubmit
               : step === 2
-                ? handleLocationSubmit
-                : handleProfilePictureSubmit
+                ? handleProfileSubmit
+                : step === 3
+                  ? handleLocationSubmit
+                  : handleProfilePictureSubmit
           }
           className="flex flex-1 flex-col min-h-0 w-full h-full overflow-hidden bg-black"
         >
@@ -849,7 +868,7 @@ export default function LoginPage() {
               <div className="mx-auto mt-5 mb-1 h-0.5 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
                 <div
                   className="h-full rounded-full bg-[#7A8AF0] transition-all duration-300 ease-out"
-                  style={{ width: `${(step / 3) * 100}%` }}
+                  style={{ width: `${(step / 4) * 100}%` }}
                 />
               </div>
             </div>
@@ -1073,9 +1092,14 @@ export default function LoginPage() {
               {signupFieldErrors.birthdate && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.birthdate}</p>}
             </div>
 
+          </>
+        )}
+
+        {step === 3 && (
+          <>
             <div>
               <p className="text-xs text-gray-500 mb-2">
-                Home location ? local, regional, and national feeds.
+                Choose your home location to set your local, regional, and national news feeds.
               </p>
               <PlaceAutocompleteField
                 value={homeLocationQuery}
@@ -1127,7 +1151,7 @@ export default function LoginPage() {
           </>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <>
             <p className="text-center text-sm text-gray-400">
               <span className="font-medium text-white">@{handlePreview}</span>
@@ -1231,13 +1255,14 @@ export default function LoginPage() {
                 disabled={
                   signupSubmitting ||
                   (step === 1 && !step1CanContinue) ||
-                  (step === 2 && !step2CanContinue)
+                  (step === 2 && !step2CanContinue) ||
+                  (step === 3 && !step3CanContinue)
                 }
                 className="w-full rounded-lg bg-white px-4 py-3 text-sm font-semibold text-[#111827] transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:bg-white/25 disabled:text-white/50"
               >
                 {signupSubmitting
                   ? 'Creating account?'
-                  : step < 3
+                  : step < 4
                     ? 'Continue'
                     : 'Create account'}
               </button>

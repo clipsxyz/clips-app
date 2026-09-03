@@ -19,15 +19,17 @@ type Props = {
 };
 
 function bodyFontSize(size?: TextStyle['size']): number {
-    if (size === 'small') return 14;
-    if (size === 'large') return 18;
-    return 16;
+    if (size === 'small') return 12;
+    if (size === 'large') return 16;
+    return 14;
 }
 
 /** White “Twitter card” preview for text carousel slides (web ScenesModal parity). */
 export default function ScenesTextPostCard({ post, text, textStyle }: Props) {
     const textColor = textStyle?.color || '#FFFFFF';
     const textBg = textStyle?.background || '#000000';
+    const fontSize = bodyFontSize(textStyle?.size);
+    const lineHeight = Math.round(fontSize * 1.35);
     const handle = post.userHandle;
     const displayName = handle.split('@')[0] || handle;
 
@@ -58,7 +60,7 @@ export default function ScenesTextPostCard({ post, text, textStyle }: Props) {
                         <Text
                             style={[
                                 styles.textBody,
-                                { color: textColor, fontSize: bodyFontSize(textStyle?.size) },
+                                { color: textColor, fontSize, lineHeight },
                             ]}
                         >
                             {text}
@@ -133,6 +135,6 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     textBody: {
-        lineHeight: 22,
+        fontWeight: '500',
     },
 });

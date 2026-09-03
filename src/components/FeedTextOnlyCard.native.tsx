@@ -6,6 +6,7 @@ import FeedStickerOverlays from './FeedStickerOverlays.native';
 import { getEffectiveTextStyleForPost } from '../utils/effectiveTextPostStyle';
 import {
     getTextOnlyFontSize,
+    getTextOnlyLineHeight,
     getTextOnlyTextColor,
 } from '../utils/effectiveTextPostStyleNative';
 import {
@@ -68,7 +69,8 @@ export default function FeedTextOnlyCard({
         effectiveStyle?.background || FALLBACK_BACKGROUNDS[text.length % FALLBACK_BACKGROUNDS.length],
     );
     const textColor = effectiveStyle?.color || getTextOnlyTextColor(post);
-    const fontSize = safePositiveLayoutNumber(getTextOnlyFontSize(post), 16);
+    const fontSize = safePositiveLayoutNumber(getTextOnlyFontSize(post), 14);
+    const lineHeight = safePositiveLayoutNumber(getTextOnlyLineHeight(post), 19);
     const tailColor = resolveTextCardTailFill(selectedBackground, isFromViewer);
     const parsedGradient =
         selectedBackground.includes('gradient') ? gradientColorsFromCss(selectedBackground) : [];
@@ -164,6 +166,7 @@ export default function FeedTextOnlyCard({
                                 {
                                     color: textColor,
                                     fontSize,
+                                    lineHeight,
                                     fontFamily: nativeTextFontFamily(effectiveStyle?.fontFamily),
                                 },
                             ]}
@@ -227,8 +230,7 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     body: {
-        fontWeight: '600',
-        lineHeight: 22,
+        fontWeight: '500',
     },
     more: {
         marginTop: 8,

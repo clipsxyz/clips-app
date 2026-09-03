@@ -82,6 +82,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [placeSuggestions, setPlaceSuggestions] = useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = useState(false);
     const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
+    const [hideSuggestions, setHideSuggestions] = useState(false);
 
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
@@ -329,6 +330,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     };
 
     const onPlaceSuggestionPress = (suggestion: LocationSuggestion) => {
+        setHideSuggestions(true);
         const kind =
             searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
         const typed: LocationSuggestion =
@@ -494,7 +496,10 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         style={styles.searchInput}
                         placeholder={modePlaceholder[searchMode]}
                         value={searchQuery}
-                        onChangeText={setSearchQuery}
+                        onChangeText={(text) => {
+                            setSearchQuery(text);
+                            setHideSuggestions(false);
+                        }}
                         onSubmitEditing={handleSubmitSearch}
                         returnKeyType="search"
                         placeholderTextColor="#6B7280"
@@ -502,13 +507,13 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         autoCapitalize="none"
                     />
                     {!!searchQuery && (
-                        <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={8}>
+                        <TouchableOpacity onPress={() => { setSearchQuery(''); setHideSuggestions(false); }} hitSlop={8}>
                             <Icon name="close-circle" size={ox(18)} color="#6B7280" />
                         </TouchableOpacity>
                     )}
                 </View>
 
-                {isPlaceSearchMode && searchQuery.trim().length >= 2 && (
+                {isPlaceSearchMode && searchQuery.trim().length >= 2 && !hideSuggestions && (
                     <View style={styles.placeSuggestionsContainer}>
                         {placeSuggestionsLoading && placeSuggestions.length === 0 && (
                             <Text style={styles.placeSuggestionLoading}>Searching…</Text>
@@ -859,7 +864,10 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
         <PlaceFeedScopePickerModal
             visible={!!scopePicker}
             suggestion={scopePicker}
-            onClose={() => setScopePicker(null)}
+            onClose={() => {
+                setHideSuggestions(false);
+                setScopePicker(null);
+            }}
             onSelectScope={(scope) => {
                 if (!scopePicker) return;
                 void openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope), 'location');

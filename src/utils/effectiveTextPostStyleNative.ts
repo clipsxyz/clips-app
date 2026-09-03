@@ -66,7 +66,11 @@ export function getTextOnlyTextColor(post: Post): string {
 
 export function getTextOnlyFontSize(post: Post): number {
     const size = getEffectiveTextStyleForPost(post)?.size;
-    if (size === 'small') return 14;
-    if (size === 'large') return 20;
-    return 16;
+    if (size === 'small') return 12;
+    if (size === 'large') return 16;
+    return 14;
+}
+
+export function getTextOnlyLineHeight(post: Post): number {
+    return Math.round(getTextOnlyFontSize(post) * 1.35);
 }

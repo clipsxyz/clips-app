@@ -28,6 +28,7 @@ import { getImageFullscreenLaunch, clearImageFullscreenLaunch } from '../utils/i
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
+    getTextOnlyLineHeight,
     getTextOnlyTextColor,
 } from '../utils/effectiveTextPostStyleNative';
 import { getAvatarForHandle } from '../api/users';
@@ -377,6 +378,7 @@ export default function ImageFullscreenModal({
                                     {
                                         color: getTextOnlyTextColor(post),
                                         fontSize: getTextOnlyFontSize(post),
+                                        lineHeight: getTextOnlyLineHeight(post),
                                     },
                                 ]}
                             >
@@ -893,7 +895,6 @@ const styles = StyleSheet.create({
         paddingVertical: 28,
     },
     textCardBody: {
-        fontWeight: '600',
-        lineHeight: 28,
+        fontWeight: '500',
     },
 });

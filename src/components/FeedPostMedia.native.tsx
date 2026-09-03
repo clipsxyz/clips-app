@@ -30,6 +30,7 @@ import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
+    getTextOnlyLineHeight,
     getTextOnlyTextColor,
     isTextOnlyPost,
     isVideoPost,
@@ -653,6 +654,7 @@ const FeedPostMedia = React.memo(
             backgroundColor: getTextOnlyBackgroundColor(post),
             color: getTextOnlyTextColor(post),
             fontSize: getTextOnlyFontSize(post),
+            lineHeight: getTextOnlyLineHeight(post),
         };
     }, [post, textOnly]);
 
@@ -745,7 +747,7 @@ const FeedPostMedia = React.memo(
         return (
             <Pressable onPress={onPress} style={[styles.wrap, { width, minHeight: height * 0.55 }, style]}>
                 <View style={[styles.textOnlyCard, { backgroundColor: textOnlyStyle?.backgroundColor }]}>
-                    <Text style={[styles.textOnlyBody, { color: textOnlyStyle?.color, fontSize: textOnlyStyle?.fontSize }]}>
+                    <Text style={[styles.textOnlyBody, { color: textOnlyStyle?.color, fontSize: textOnlyStyle?.fontSize, lineHeight: textOnlyStyle?.lineHeight }]}>
                         {post.text}
                     </Text>
                 </View>
@@ -1215,8 +1217,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     textOnlyBody: {
-        fontWeight: '600',
-        lineHeight: 22,
+        fontWeight: '500',
     },
     imageTextOverlay: {
         position: 'absolute',

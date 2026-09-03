@@ -26,14 +26,15 @@ export default function DiscoverPage() {
     const [loading, setLoading] = React.useState(false);
     const [activeIndex, setActiveIndex] = React.useState<number>(-1);
     const [scopePicker, setScopePicker] = React.useState<LocationSuggestion | null>(null);
+    const [hideSuggestions, setHideSuggestions] = React.useState(false);
     const [keyboardOpen, setKeyboardOpen] = React.useState(false);
     const [placeholderCityIndex, setPlaceholderCityIndex] = React.useState(0);
     const searchInputRef = React.useRef<HTMLInputElement>(null);
 
     const hasSearchQuery = query.trim().length > 0;
-    const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker;
-    /** Keep carousel until user types 2+ chars (when suggestions panel opens). */
-    const showPlaceholderCarousel = !showSuggestionsPanel;
+    const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
+    /** Rotating city placeholder only while the field is empty. */
+    const showPlaceholderCarousel = query.trim().length < 2;
 
     const [visibleViewport, setVisibleViewport] = React.useState(() => ({
         top: 0,
@@ -46,6 +47,13 @@ export default function DiscoverPage() {
     function clearSearch() {
         setQuery('');
         setSuggestions([]);
+        setActiveIndex(-1);
+        setHideSuggestions(false);
+        searchInputRef.current?.blur();
+    }
+
+    function dismissSuggestionList() {
+        setHideSuggestions(true);
         setActiveIndex(-1);
         searchInputRef.current?.blur();
     }
@@ -148,6 +156,7 @@ export default function DiscoverPage() {
     }
 
     function onSuggestionSelected(suggestion: LocationSuggestion) {
+        dismissSuggestionList();
         if (getPlaceFeedPickerOptions(suggestion)) {
             setScopePicker(suggestion);
             return;
@@ -156,6 +165,7 @@ export default function DiscoverPage() {
     }
 
     function selectPopularCity(name: string) {
+        dismissSuggestionList();
         applyFeedSelection(
             resolvePlaceFeedSelection({ name, type: 'location', country: name, national: name, local: name, regional: name })
         );
@@ -268,7 +278,7 @@ export default function DiscoverPage() {
                         <input
                             ref={searchInputRef}
                             value={query}
-                            onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
+                            onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); setHideSuggestions(false); }}
                             onKeyDown={(e) => {
                                 if (e.key === 'ArrowDown') {
                                     e.preventDefault();
@@ -336,7 +346,7 @@ export default function DiscoverPage() {
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="discover-scope-picker-title"
-                    onClick={() => setScopePicker(null)}
+                    onClick={() => { setHideSuggestions(false); setScopePicker(null); }}
                 >
                     <motion.div
                         className="relative my-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#060d16] p-5 shadow-2xl"
@@ -368,7 +378,7 @@ export default function DiscoverPage() {
                         </div>
                         <button
                             type="button"
-                            onClick={() => setScopePicker(null)}
+                            onClick={() => { setHideSuggestions(false); setScopePicker(null); }}
                             className="mt-3 w-full rounded-xl py-2.5 text-sm text-[#3d9b8f] hover:text-[#9fd4cb]"
                         >
                             Cancel

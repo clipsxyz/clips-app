@@ -9,6 +9,7 @@ import Swal from 'sweetalert2';
 import { bottomSheet, mediaSourceChoiceSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import CreateGroupModal from '../components/CreateGroupModal';
+import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardingSheet';
 import CreateSourceAppsCarousel from '../components/CreateSourceAppsCarousel';
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 import { useAuth } from '../context/Auth';
@@ -143,6 +144,7 @@ export default function InstantCreatePage() {
     type StoryPreviewAction = 'filters' | 'audience' | 'save' | 'next';
     const [showCreateModePicker, setShowCreateModePicker] = React.useState(true);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
+    const [communityOnboardingOpen, setCommunityOnboardingOpen] = React.useState(false);
     const pendingSocialUploadRef = React.useRef<null>(null);
     const storyPickRef = React.useRef(false);
     const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS);
@@ -1729,20 +1731,7 @@ export default function InstantCreatePage() {
                                                                 return;
                                                             }
                                                             if (item.id === 'community') {
-                                                                (async () => {
-                                                                    const res = await Swal.fire(bottomSheet({
-                                                                        title: 'Create a community',
-                                                                        message:
-                                                                            'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
-                                                                        icon: 'info',
-                                                                        confirmButtonText: 'Continue',
-                                                                        cancelButtonText: 'Not now',
-                                                                        showCancelButton: true,
-                                                                    }));
-                                                                    if (res.isConfirmed) {
-                                                                        setCreateGroupOpen(true);
-                                                                    }
-                                                                })();
+                                                                setCommunityOnboardingOpen(true);
                                                                 return;
                                                             }
                                                             if (item.id === 'story') {
@@ -1801,6 +1790,14 @@ export default function InstantCreatePage() {
                                 </div>
                             </div>
                         )}
+                        <CommunityGroupOnboardingSheet
+                            isOpen={communityOnboardingOpen}
+                            onClose={() => setCommunityOnboardingOpen(false)}
+                            onCreateGroup={() => {
+                                setCommunityOnboardingOpen(false);
+                                setCreateGroupOpen(true);
+                            }}
+                        />
                         <CreateGroupModal
                             isOpen={createGroupOpen}
                             onClose={() => setCreateGroupOpen(false)}

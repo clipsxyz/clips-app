@@ -16,6 +16,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
+import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardingSheet.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
@@ -174,6 +175,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
     const insets = useSafeAreaInsets();
     const [centeredMode, setCenteredMode] = useState<CreateModeId>('gallery');
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [communityOnboardingOpen, setCommunityOnboardingOpen] = useState(false);
     const [hubAlert, setHubAlert] = useState<HubAlertConfig | null>(null);
     const [mediaSourceMenu, setMediaSourceMenu] = useState<{
         title: string;
@@ -475,19 +477,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
             openMediaSourceMenu('story24');
             return;
         }
-        setHubAlert({
-            title: 'Create a community',
-            message:
-                'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
-            icon: 'info',
-            confirmButtonText: 'Continue',
-            cancelButtonText: 'Not now',
-            showCancelButton: true,
-            onConfirm: () => {
-                setHubAlert(null);
-                setTimeout(() => setCreateGroupOpen(true), 100);
-            },
-        });
+        setCommunityOnboardingOpen(true);
     };
 
     const handleBack = () => {
@@ -552,6 +542,14 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                 </View>
             </View>
 
+            <CommunityGroupOnboardingSheet
+                visible={communityOnboardingOpen}
+                onDismiss={() => setCommunityOnboardingOpen(false)}
+                onCreateGroup={() => {
+                    setCommunityOnboardingOpen(false);
+                    setTimeout(() => setCreateGroupOpen(true), 100);
+                }}
+            />
             <CreateGroupModal
                 visible={createGroupOpen}
                 onClose={() => setCreateGroupOpen(false)}

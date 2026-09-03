@@ -50,6 +50,7 @@ export default function DiscoverScreen({ navigation }: any) {
     const [loading, setLoading] = useState(false);
     const [activeIndex, setActiveIndex] = useState(-1);
     const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
+    const [hideSuggestions, setHideSuggestions] = useState(false);
     const [placeholderCityIndex, setPlaceholderCityIndex] = useState(0);
     const [keyboardOpen, setKeyboardOpen] = useState(false);
     const inputRef = useRef<TextInput>(null);
@@ -60,7 +61,7 @@ export default function DiscoverScreen({ navigation }: any) {
     );
 
     const hasSearchQuery = query.trim().length > 0;
-    const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker;
+    const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
     const keyboardLayout = keyboardOpen && hasSearchQuery;
     const placeholderLabel = `Discover · ${ROTATING_CITIES[placeholderCityIndex]}`;
 
@@ -152,7 +153,15 @@ export default function DiscoverScreen({ navigation }: any) {
         }
     };
 
+    const dismissSuggestionList = () => {
+        setHideSuggestions(true);
+        setActiveIndex(-1);
+        inputRef.current?.blur();
+        Keyboard.dismiss();
+    };
+
     const onSuggestionSelected = (suggestion: LocationSuggestion) => {
+        dismissSuggestionList();
         if (getPlaceFeedPickerOptions(suggestion)) {
             setScopePicker(suggestion);
             return;
@@ -161,6 +170,7 @@ export default function DiscoverScreen({ navigation }: any) {
     };
 
     const selectPopularCity = (name: string) => {
+        dismissSuggestionList();
         void openFeedSelection(
             resolvePlaceFeedSelection({
                 name,
@@ -177,6 +187,7 @@ export default function DiscoverScreen({ navigation }: any) {
         setQuery('');
         setSuggestions([]);
         setActiveIndex(-1);
+        setHideSuggestions(false);
         inputRef.current?.blur();
         Keyboard.dismiss();
     };
@@ -344,6 +355,7 @@ export default function DiscoverScreen({ navigation }: any) {
                         onChangeText={(text) => {
                             setQuery(text);
                             setActiveIndex(-1);
+                            setHideSuggestions(false);
                         }}
                         placeholder={hasSearchQuery ? '' : placeholderLabel}
                         placeholderTextColor="#B0B0B0"
@@ -390,7 +402,10 @@ export default function DiscoverScreen({ navigation }: any) {
             <PlaceFeedScopePickerModal
                 visible={!!scopePicker}
                 suggestion={scopePicker}
-                onClose={() => setScopePicker(null)}
+                onClose={() => {
+                    setHideSuggestions(false);
+                    setScopePicker(null);
+                }}
                 onSelectScope={(scope) => {
                     if (!scopePicker) return;
                     void openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope));

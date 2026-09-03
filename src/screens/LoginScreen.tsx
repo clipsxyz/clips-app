@@ -217,7 +217,9 @@ export default function LoginScreen({ navigation, route }: any) {
               ? isBusinessAccount
                   ? 'About your business'
                   : 'About you'
-              : 'Add a photo';
+              : step === 3
+                ? 'Choose your news feeds'
+                : 'Add a photo';
 
     function getAgeFromBirthday(): number | null {
         const m = parseInt(birthMonth, 10);
@@ -251,16 +253,19 @@ export default function LoginScreen({ navigation, route }: any) {
         if (!acceptedGuidelines) missing.push('Guidelines');
         return missing;
     })();
-    const step2CanContinue = Boolean(name.trim() && homeLocationComplete && birthdateComplete);
+    const step2CanContinue = Boolean(name.trim() && birthdateComplete);
     const step2MissingHints = (() => {
         const missing: string[] = [];
         if (!name.trim()) missing.push(isBusinessAccount ? 'business name' : 'full name');
-        if (!homeLocationComplete) missing.push(isBusinessAccount ? 'business location' : 'home location');
         if (!birthdateComplete) {
             missing.push(isBusinessAccount ? 'owner date of birth (13+)' : 'date of birth (13+)');
         }
         return missing;
     })();
+    const step3CanContinue = homeLocationComplete;
+    const step3MissingHints = homeLocationComplete
+        ? []
+        : [isBusinessAccount ? 'business location' : 'home location'];
     const handlePreview = regional
         ? buildGazetteerHandle(
             name.trim() || (isBusinessAccount ? 'business' : 'you'),
@@ -575,16 +580,6 @@ export default function LoginScreen({ navigation, route }: any) {
         if (!name.trim()) {
             nextErrors.name = isBusinessAccount ? 'Business name is required.' : 'Full name is required.';
         }
-        if (!local || !regional || !national) {
-            nextErrors.homeLocation =
-                locationEntryMode === 'manual'
-                    ? isBusinessAccount
-                        ? 'Enter your business local area, region/city, and country.'
-                        : 'Enter your local area, region/city, and country.'
-                    : isBusinessAccount
-                      ? 'Search your business town or area and pick a suggestion, or enter location manually.'
-                      : 'Search your town or local area and pick a suggestion, or enter location manually.';
-        }
         if (!birthMonth || !birthDay || !birthYear) {
             nextErrors.birthdate = isBusinessAccount
                 ? 'Please enter the account owner’s date of birth.'
@@ -604,6 +599,26 @@ export default function LoginScreen({ navigation, route }: any) {
             return;
         }
         setStep(3);
+    };
+
+    const handleStep3Submit = () => {
+        setErrorText('');
+        setFieldErrors({});
+        if (homeLocationComplete) {
+            setStep(4);
+            return;
+        }
+        setFieldErrors({
+            homeLocation:
+                locationEntryMode === 'manual'
+                    ? isBusinessAccount
+                        ? 'Enter your business local area, region/city, and country.'
+                        : 'Enter your local area, region/city, and country.'
+                    : isBusinessAccount
+                      ? 'Search your business town or area and pick a suggestion, or enter location manually.'
+                      : 'Search your town or local area and pick a suggestion, or enter location manually.',
+        });
+        setErrorText('Please choose the location that will power your news feeds.');
     };
 
     const handleProfilePictureSubmit = async () => {
@@ -788,7 +803,7 @@ export default function LoginScreen({ navigation, route }: any) {
 
                         {mode === 'signup' ? (
                             <View style={styles.progressTrack}>
-                                <View style={[styles.progressFill, { width: `${(step / 3) * 100}%` }]} />
+                                <View style={[styles.progressFill, { width: `${(step / 4) * 100}%` }]} />
                             </View>
                         ) : null}
                     </View>
@@ -1035,11 +1050,15 @@ export default function LoginScreen({ navigation, route }: any) {
                                 />
                             </View>
                             {!!getFieldError('birthdate') && <Text style={styles.fieldErrorText}>{getFieldError('birthdate')}</Text>}
+                        </View>
+                    )}
 
+                    {mode === 'signup' && step === 3 && (
+                        <View style={styles.stepContent}>
                             <Text style={styles.fieldLabel}>
                                 {isBusinessAccount
-                                    ? 'Business location — used for local, regional, and national feeds.'
-                                    : 'Home location — used for local, regional, and national feeds.'}
+                                    ? 'Choose your business location for your local, regional, and national news feeds.'
+                                    : 'Choose your home location for your local, regional, and national news feeds.'}
                             </Text>
                             <View style={styles.locationModeTabs}>
                                 <TouchableOpacity
@@ -1159,7 +1178,7 @@ export default function LoginScreen({ navigation, route }: any) {
                         </View>
                     )}
 
-                    {mode === 'signup' && step === 3 && (
+                    {mode === 'signup' && step === 4 && (
                         <View style={[styles.stepContent, styles.step3Content]}>
                             <Text style={styles.step3Handle}>{handlePreview}</Text>
                             <Text style={styles.step3Location} numberOfLines={2}>
@@ -1274,24 +1293,43 @@ export default function LoginScreen({ navigation, route }: any) {
                                 <Text style={styles.profileTabText}>Back</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                onPress={step === 2 ? handleStep2Submit : handleProfilePictureSubmit}
+                                onPress={
+                                    step === 2
+                                        ? handleStep2Submit
+                                        : step === 3
+                                          ? handleStep3Submit
+                                          : handleProfilePictureSubmit
+                                }
                                 style={[
                                     styles.profileTabButton,
                                     styles.profileTabButtonActive,
                                     styles.swalPrimaryFlex,
-                                    (busy || (step === 2 && !step2CanContinue)) && styles.submitButtonDisabled,
+                                    (
+                                        busy ||
+                                        (step === 2 && !step2CanContinue) ||
+                                        (step === 3 && !step3CanContinue)
+                                    ) && styles.submitButtonDisabled,
                                 ]}
-                                disabled={busy || (step === 2 && !step2CanContinue)}
+                                disabled={
+                                    busy ||
+                                    (step === 2 && !step2CanContinue) ||
+                                    (step === 3 && !step3CanContinue)
+                                }
                                 activeOpacity={0.9}
                             >
                                 <Text style={styles.profileTabTextActive}>
-                                    {busy ? 'Please wait...' : step < 3 ? 'Continue' : 'Create account'}
+                                    {busy ? 'Please wait...' : step < 4 ? 'Continue' : 'Create account'}
                                 </Text>
                             </TouchableOpacity>
                         </View>
                         {step === 2 && !step2CanContinue && step2MissingHints.length > 0 ? (
                             <Text style={styles.consentCompactHint}>
                                 Still needed: {step2MissingHints.join(', ')}
+                            </Text>
+                        ) : null}
+                        {step === 3 && !step3CanContinue && step3MissingHints.length > 0 ? (
+                            <Text style={styles.consentCompactHint}>
+                                Still needed: {step3MissingHints.join(', ')}
                             </Text>
                         ) : null}
                     </View>

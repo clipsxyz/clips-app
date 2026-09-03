@@ -152,6 +152,7 @@ export default function SearchPage() {
     const [placeSuggestions, setPlaceSuggestions] = React.useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = React.useState(false);
     const [scopePicker, setScopePicker] = React.useState<LocationSuggestion | null>(null);
+    const [hideSuggestions, setHideSuggestions] = React.useState(false);
     const [visibleViewport, setVisibleViewport] = React.useState(() => ({
         top: 0,
         height: typeof window !== 'undefined' ? window.innerHeight : 800,
@@ -401,6 +402,8 @@ export default function SearchPage() {
 
     const onPlaceSuggestionSelected = React.useCallback(
         (suggestion: LocationSuggestion) => {
+            setHideSuggestions(true);
+            searchInputRef.current?.blur();
             const kind =
                 searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
             const typed: LocationSuggestion =
@@ -597,7 +600,7 @@ export default function SearchPage() {
                             ref={searchInputRef}
                             type="text"
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onChange={(e) => { setSearchQuery(e.target.value); setHideSuggestions(false); }}
                             onFocus={() => { setShowSearchMode(true); setIsFocused(true); }}
                             onBlur={() => setIsFocused(false)}
                             onKeyDown={(e) => {
@@ -615,7 +618,7 @@ export default function SearchPage() {
                         {searchQuery && (
                             <button
                                 type="button"
-                                onClick={() => setSearchQuery('')}
+                                onClick={() => { setSearchQuery(''); setHideSuggestions(false); }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-800 text-gray-400"
                                 aria-label="Clear search"
                             >
@@ -648,7 +651,7 @@ export default function SearchPage() {
                         })()}
                     </div>
                 )}
-                {isPlaceSearchMode && query.length >= 2 && (
+                {isPlaceSearchMode && query.length >= 2 && !hideSuggestions && (
                     <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-2xl border border-[#272727] bg-[#101010] shadow-xl">
                         <ul className="divide-y divide-white/5">
                             {placeSuggestionsLoading && placeSuggestions.length === 0 && (
@@ -1357,7 +1360,7 @@ export default function SearchPage() {
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="search-scope-picker-title"
-                    onClick={() => setScopePicker(null)}
+                    onClick={() => { setHideSuggestions(false); setScopePicker(null); }}
                 >
                     <div
                         className="relative my-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#060d16] p-5 shadow-2xl"
@@ -1387,7 +1390,7 @@ export default function SearchPage() {
                         </div>
                         <button
                             type="button"
-                            onClick={() => setScopePicker(null)}
+                            onClick={() => { setHideSuggestions(false); setScopePicker(null); }}
                             className="mt-3 w-full rounded-xl py-2.5 text-sm text-[#3d9b8f] hover:text-[#9fd4cb]"
                         >
                             Cancel

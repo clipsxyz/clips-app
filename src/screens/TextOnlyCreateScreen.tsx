@@ -49,9 +49,9 @@ import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
 type TagUser = { handle: string; displayName?: string; avatarUrl?: string };
 
 function templateFontSize(size: TextStoryTemplate['textSize']): number {
-  if (size === 'small') return 14;
-  if (size === 'large') return 20;
-  return 17;
+  if (size === 'small') return 12;
+  if (size === 'large') return 16;
+  return 14;
 }
 
 function TemplateComposerBackground({
@@ -343,7 +343,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   };
 
   const inputColor = activeTemplate?.textColor || '#FFFFFF';
-  const inputFontSize = activeTemplate ? templateFontSize(activeTemplate.textSize) : 17;
+  const inputFontSize = activeTemplate ? templateFontSize(activeTemplate.textSize) : 14;
 
   return (
     <View style={styles.root}>

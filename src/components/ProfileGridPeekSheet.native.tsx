@@ -18,6 +18,8 @@ import type { Post } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import {
     getTextOnlyBackgroundColor,
+    getTextOnlyFontSize,
+    getTextOnlyLineHeight,
     isTextOnlyPost,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
@@ -150,12 +152,8 @@ export default function ProfileGridPeekSheet({
                                                 styles.textPreviewBody,
                                                 {
                                                     color: textStyle?.color || '#111827',
-                                                    fontSize:
-                                                        textStyle?.size === 'large'
-                                                            ? 22
-                                                            : textStyle?.size === 'small'
-                                                              ? 14
-                                                              : 18,
+                                                    fontSize: getTextOnlyFontSize(post),
+                                                    lineHeight: getTextOnlyLineHeight(post),
                                                 },
                                             ]}
                                             numberOfLines={8}
@@ -308,8 +306,7 @@ const styles = StyleSheet.create({
     },
     textPreviewBody: {
         textAlign: 'center',
-        lineHeight: 24,
-        fontWeight: '600',
+        fontWeight: '500',
     },
     muteButton: {
         position: 'absolute',
