@@ -51,15 +51,19 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
 
     if (hasMedia && isVideo && videoSource && !videoFailed) {
         return (
-            <StorySafeVideo
-                source={videoSource}
-                posterSource={posterSource || (posterUri ? { uri: posterUri } : undefined)}
-                style={StyleSheet.absoluteFill}
-                repeat
-                muted={isMuted}
-                paused={paused}
-                onError={() => setVideoFailed(true)}
-            />
+            <View style={styles.videoRoot} collapsable={false}>
+                <StorySafeVideo
+                    source={videoSource}
+                    posterSource={posterSource || (posterUri ? { uri: posterUri } : undefined)}
+                    style={styles.videoFill}
+                    resizeMode="cover"
+                    repeat
+                    muted={isMuted}
+                    paused={paused}
+                    playWhenInactive
+                    onError={() => setVideoFailed(true)}
+                />
+            </View>
         );
     }
 
@@ -119,10 +123,17 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
 }
 
 const styles = StyleSheet.create({
+    videoRoot: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    videoFill: {
+        ...StyleSheet.absoluteFillObject,
+        width: '100%',
+        height: '100%',
+    },
     empty: {
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#000',
     },
     textOnlyWrap: {
         flex: 1,

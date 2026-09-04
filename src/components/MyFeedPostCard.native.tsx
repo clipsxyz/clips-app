@@ -29,6 +29,7 @@ import BoostMetricsPanel from './BoostMetricsPanel.native';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
 import { getPostCaptionWithoutLink } from '../utils/linkPreview';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
+import { resolveCarouselItemStillUri } from '../utils/postMedia';
 import {
     FEED_CARD_BODY,
     FEED_CARD_HEADER_WRAP,
@@ -80,13 +81,20 @@ export default function MyFeedPostCard({
     );
     const showCaptionRow =
         !textOnlyPost && hasFeedMedia && (captionWithoutLink.length > 0 || hasTaggedUsers);
-    const carouselThumbItems = useMemo(
-        () =>
-            (post.mediaItems || []).filter(
-                (item) => item?.type === 'image' || item?.type === 'video',
-            ),
-        [post.mediaItems],
-    );
+    const carouselThumbItems = useMemo(() => {
+        const items = (post.mediaItems || []).filter(
+            (item) => item?.type === 'image' || item?.type === 'video',
+        );
+        return items.map((item, index) => {
+            const still = resolveCarouselItemStillUri(item, post, index, items);
+            return {
+                ...item,
+                posterUrl: still,
+                thumbnailUrl: still,
+                thumbnail_url: still,
+            };
+        });
+    }, [post]);
     const postTags = post.tags?.filter(Boolean) ?? [];
     const isCurrentUser = true;
     const mediaHeight = Math.min(cardMediaWidth * 1.1, 420);

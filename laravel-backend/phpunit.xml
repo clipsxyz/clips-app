@@ -33,6 +33,13 @@
         <env name="DB_DATABASE" value="database/testing.sqlite"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="BROADCAST_DRIVER" value="reverb"/>
+        <env name="REVERB_APP_ID" value="100000"/>
+        <env name="REVERB_APP_KEY" value="testing-key"/>
+        <env name="REVERB_APP_SECRET" value="testing-secret"/>
+        <env name="REVERB_HOST" value="127.0.0.1"/>
+        <env name="REVERB_PORT" value="8080"/>
+        <env name="REVERB_SCHEME" value="http"/>
         <env name="SESSION_DRIVER" value="array"/>
     </php>
 </phpunit>

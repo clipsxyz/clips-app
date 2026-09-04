@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\MessageSent;
 use App\Http\Controllers\Controller;
 use App\Models\ChatGroup;
 use App\Models\ChatGroupMember;
@@ -12,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class MessageController extends Controller
@@ -503,6 +505,8 @@ class MessageController extends Controller
             return $message;
         });
 
+        $this->broadcastMessageSent($message);
+
         return response()->json($message, 201);
     }
 
@@ -547,7 +551,21 @@ class MessageController extends Controller
             'reply_to' => $this->normalizedReplyTo($request),
         ]);
 
+        $this->broadcastMessageSent($message);
+
         return response()->json($message, 201);
+    }
+
+    private function broadcastMessageSent(Message $message): void
+    {
+        try {
+            broadcast(new MessageSent($message))->toOthers();
+        } catch (\Throwable $e) {
+            Log::warning('MessageSent broadcast failed', [
+                'message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

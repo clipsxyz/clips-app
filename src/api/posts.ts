@@ -1397,28 +1397,23 @@ function syncLocalLikesFromApi(
   }
 }
 
-/** Adopt Laravel is_following onto the local map so unfollow sees the same state as the checkmark. */
+/** Adopt Laravel is_following:true onto the local map. Never unfollow from a feed page —
+ *  location feeds include people you don't follow, and wiping local true made the + stick
+ *  and emptied Following even after a successful follow. */
 function syncLocalFollowsFromApi(userId: string, rows: Post[]): void {
   if (isMockMode() || !userId || !Array.isArray(rows) || rows.length === 0) return;
   const s = getState(userId);
   let changed = false;
   for (const p of rows) {
     if (!p.userHandle) continue;
-    const apiFollowing = p.isFollowing === true;
+    if (p.isFollowing !== true) continue;
     const localFollowing = getFollowState(s.follows, p.userHandle);
     const explicit = hasExplicitFollowState(s.follows, p.userHandle);
-    if (apiFollowing) {
-      // Explicit unfollow wins over a stale feed row that still has is_following.
-      if (explicit && !localFollowing) continue;
-      if (localFollowing) continue;
-      setFollowStateKey(s.follows, p.userHandle, true);
-      changed = true;
-      continue;
-    }
-    if (explicit && localFollowing) {
-      setFollowStateKey(s.follows, p.userHandle, false);
-      changed = true;
-    }
+    // Explicit unfollow wins over a stale feed row that still has is_following.
+    if (explicit && !localFollowing) continue;
+    if (localFollowing) continue;
+    setFollowStateKey(s.follows, p.userHandle, true);
+    changed = true;
   }
   if (changed) saveFollowsToStorage(userId, s.follows);
 }
@@ -2876,6 +2871,7 @@ export async function toggleFollowForPost(
       console.warn('[toggleFollowForPost] Laravel follow sync failed', err);
       setFollowStateKey(s.follows, handle, wasFollowing);
       saveFollowsToStorage(userId, s.follows);
+      throw err;
     }
   }
 

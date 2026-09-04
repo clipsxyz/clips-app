@@ -126,6 +126,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const routeHandleRef = React.useRef(handle);
     routeHandleRef.current = handle;
     const connectionsAbortRef = React.useRef<AbortController | null>(null);
+    const followEpochRef = React.useRef(0);
 
     const [profileUser, setProfileUser] = useState<any>(null);
     const [posts, setPosts] = useState<Post[]>([]);
@@ -256,6 +257,8 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const loadProfile = async (isCancelled?: () => boolean) => {
         if (!handle) return;
         const cancelled = () => Boolean(isCancelled?.());
+        const loadEpoch = followEpochRef.current;
+        const followStateStillCurrent = () => loadEpoch === followEpochRef.current;
         setLoading(true);
         setFollowersList([]);
         setFollowingList([]);
@@ -265,7 +268,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             if (!cancelled()) setProfileIsPrivate(profilePrivate);
 
             const audienceTask = !isMockMode()
-                ? fetchProfileAudience(decodedHandle).then((audience) => {
+                ? fetchProfileAudience(decodedHandle, undefined, user?.id ? String(user.id) : undefined).then((audience) => {
                       if (cancelled()) return audience;
                       const current = String(routeHandleRef.current || '');
                       let currentDecoded = current;
@@ -285,7 +288,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                           followers: Math.max(prev.followers, audience.followers),
                           following: Math.max(prev.following, audience.following),
                       }));
-                      if (typeof audience.is_following === 'boolean') {
+                      if (typeof audience.is_following === 'boolean' && followStateStillCurrent()) {
                           setIsFollowing(audience.is_following);
                       }
                       const rawAvatar = String(audience.avatar_url || '').trim();
@@ -359,8 +362,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
                     setCanView(canViewProfileState);
                     if (
-                        audienceSettled.status !== 'fulfilled' ||
-                        typeof audienceSettled.value?.is_following !== 'boolean'
+                        followStateStillCurrent() &&
+                        (audienceSettled.status !== 'fulfilled' ||
+                            typeof audienceSettled.value?.is_following !== 'boolean')
                     ) {
                         setIsFollowing(isFollowingUser);
                     }
@@ -447,7 +451,11 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 !sameHandle(profileData.handle, decodedHandle)
             ) {
                 try {
-                    listAudience = await fetchProfileAudience(String(profileData.handle));
+                    listAudience = await fetchProfileAudience(
+                        String(profileData.handle),
+                        undefined,
+                        user?.id ? String(user.id) : undefined,
+                    );
                 } catch {
                     /* keep zeros */
                 }
@@ -496,7 +504,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 }
                 followersCount = Math.max(followersCount, listAudience.followers || 0);
                 followingCount = Math.max(followingCount, listAudience.following || 0);
-                if (isOwn) {
+                // Live Laravel counts are source of truth. Don't inflate own following
+                // with a stale Auth user object or local ghost follows.
+                if (isOwn && isMockMode()) {
                     followersCount = Math.max(
                         followersCount,
                         Number(user?.followers_count ?? 0) || 0,
@@ -587,15 +597,17 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             };
 
             paintLocalProfile(profileData);
-            if (typeof profileData?.is_following === 'boolean') {
-                setIsFollowing(profileData.is_following);
-                if (user?.id) {
-                    setFollowState(String(user.id), decodedHandle, profileData.is_following);
-                }
-            } else if (typeof profileData?.isFollowing === 'boolean') {
-                setIsFollowing(profileData.isFollowing);
-                if (user?.id) {
-                    setFollowState(String(user.id), decodedHandle, profileData.isFollowing);
+            if (followStateStillCurrent()) {
+                if (typeof profileData?.is_following === 'boolean') {
+                    setIsFollowing(profileData.is_following);
+                    if (user?.id) {
+                        setFollowState(String(user.id), decodedHandle, profileData.is_following);
+                    }
+                } else if (typeof profileData?.isFollowing === 'boolean') {
+                    setIsFollowing(profileData.isFollowing);
+                    if (user?.id) {
+                        setFollowState(String(user.id), decodedHandle, profileData.isFollowing);
+                    }
                 }
             }
             if (!cancelled()) setLoading(false);
@@ -641,6 +653,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         const handleToUse = profileUser?.handle || decodedHandle;
         const wasFollowingBeforeClick = isFollowing;
         const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
+        followEpochRef.current += 1;
 
         try {
             // Requested → cancel; Following → unfollow; else → follow/request.

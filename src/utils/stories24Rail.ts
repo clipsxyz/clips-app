@@ -1,12 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
-import { getFollowedUsers, posts as localPosts } from '../api/posts';
-import { getAvatarForHandle } from '../api/users';
-import { formatTextOnlyFeedByline } from './feedTextBubble';
+import { getFollowedUsers, getPostById, posts as localPosts } from '../api/posts';
 import {
     resolveStoryMediaUrl,
     resolveStoryVideoPlaybackUrl,
+    isStoryVideo,
+    isVideoUrl,
+    getPostMediaUrl,
 } from './storyMediaNative';
+import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
+import { formatTextOnlyFeedByline } from './feedTextBubble';
 
 export type Stories24RailItem = {
     handle: string;
@@ -14,7 +17,16 @@ export type Stories24RailItem = {
     subtitle?: string;
     thumb?: string;
     previewVideoUrl?: string;
+    avatarUrl?: string;
+    displayName?: string;
 };
+
+export function stories24DisplayName(handle: string, name?: string): string {
+    const trimmed = (name || '').trim();
+    if (trimmed && !trimmed.includes('@')) return trimmed;
+    const h = (handle || '').replace(/^@/, '').trim();
+    return h.split('@')[0] || h || 'Story';
+}
 
 /** RN AsyncStorage key — keep in sync with web `clips:stories24OpenedFromRailHandle` semantics. */
 export const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:rn:stories24OpenedFromRailHandle';
@@ -133,6 +145,24 @@ export async function buildStories24RailItems(
         },
     );
 
+    const missingSharedIds: string[] = [];
+    for (const group of groups) {
+        const latest = [...(group.stories || [])].sort(
+            (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+        )[0];
+        const sharedId = latest?.sharedFromPost ? String(latest.sharedFromPost) : '';
+        if (
+            sharedId &&
+            !localPosts.some((p) => String(p.id) === sharedId) &&
+            !missingSharedIds.includes(sharedId)
+        ) {
+            missingSharedIds.push(sharedId);
+        }
+    }
+    await Promise.all(
+        missingSharedIds.slice(0, 12).map((id) => getPostById(id, userId).catch(() => null)),
+    );
+
     const nextItems: Stories24RailItem[] = [];
     for (const group of groups) {
         const sortedStories = [...(group.stories || [])].sort(
@@ -143,41 +173,41 @@ export async function buildStories24RailItems(
 
         const latestMediaUrl = resolveStoryMediaUrl(latest.mediaUrl);
         const latestMediaType = latest.mediaType;
-        const firstImage = resolveStoryMediaUrl(
-            sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl,
-        );
         const sharedPost = latest.sharedFromPost
             ? localPosts.find((p) => String(p.id) === String(latest.sharedFromPost))
             : undefined;
-        const sharedPoster =
-            resolveStoryMediaUrl(latest.videoPosterUrl) ||
-            resolveStoryMediaUrl(sharedPost?.videoPosterUrl) ||
-            resolveStoryMediaUrl(
-                sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
-            ) ||
-            resolveStoryMediaUrl(
-                sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url,
-            );
-        const previewVideoUrl =
-            latestMediaType === 'video'
-                ? resolveStoryVideoPlaybackUrl(latest.mediaUrl)
-                : sharedPost?.mediaType === 'video'
-                  ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
-                  : undefined;
+        const postMediaUrl = sharedPost ? getPostMediaUrl(sharedPost) : undefined;
+        const isVideo = isStoryVideo(latest, sharedPost);
+        const previewVideoUrl = isVideo
+            ? resolveStoryVideoPlaybackUrl(postMediaUrl || latest.mediaUrl)
+            : undefined;
         const avatarUrl =
-            resolveStoryMediaUrl(group.avatarUrl) || getAvatarForHandle(group.userHandle);
-        // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
-        // the rail pauses previews and would flash the avatar instead of the shared clip.
-        let thumb =
-            firstImage ||
-            sharedPoster ||
-            (latestMediaType !== 'video' && !previewVideoUrl ? latestMediaUrl : undefined);
-        if (thumb && avatarUrl && thumb === avatarUrl) {
-            thumb = undefined;
+            resolveAvatarImageUri(group.avatarUrl, group.userHandle) ||
+            getAvatarForHandle(group.userHandle);
+        const storyImage =
+            latestMediaType === 'image' && latestMediaUrl && !isVideoUrl(latestMediaUrl)
+                ? latestMediaUrl
+                : undefined;
+        const storyPoster = resolveStoryMediaUrl(latest.videoPosterUrl);
+        const postPoster = resolveStoryMediaUrl(
+            sharedPost?.videoPosterUrl ||
+                sharedPost?.thumbnailUrl ||
+                (sharedPost as { thumbnail_url?: string } | undefined)?.thumbnail_url ||
+                sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
+        );
+        const postImage = resolveStoryMediaUrl(
+            sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url && !isVideoUrl(m.url))
+                ?.url,
+        );
+        // Thumb must be THIS story's still — never an avatar or another person's media.
+        let thumb = storyImage || storyPoster || postPoster || postImage;
+        if (thumb && isVideoUrl(thumb)) {
+            thumb = postPoster || postImage || undefined;
         }
-        if (!thumb && !previewVideoUrl) {
-            thumb = avatarUrl;
-        }
+        const displayName = stories24DisplayName(
+            group.userHandle,
+            (group as { name?: string }).name,
+        );
         const text =
             (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
             (latest.poll?.question || '').trim() ||
@@ -191,6 +221,8 @@ export async function buildStories24RailItems(
             subtitle,
             thumb,
             previewVideoUrl,
+            avatarUrl,
+            displayName,
         });
         if (nextItems.length >= 12) break;
     }

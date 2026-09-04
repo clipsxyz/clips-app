@@ -66,3 +66,55 @@ export function currentFeedSlideIsVideo(post: Post, carouselIndex = 0): boolean 
   }
   return postHasVideoMedia(post);
 }
+
+export function isVideoMediaUri(uri?: string | null): boolean {
+  return Boolean(uri && VIDEO_URL_RE.test(uri));
+}
+
+/** JPEG sitting next to an MP4 (`clip.mp4` → `clip.jpg`) — never use the MP4 as an Image source. */
+export function siblingJpegFromVideoUrl(url?: string | null): string | undefined {
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (!trimmed || !VIDEO_URL_RE.test(trimmed)) return undefined;
+  return trimmed.replace(/\.(mp4|webm|mov|m4v)(\?|#|$)/i, '.jpg$2');
+}
+
+function stillFromUnknown(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const uri = raw.trim();
+  if (!uri || isVideoMediaUri(uri) || /^data:video\//i.test(uri)) return undefined;
+  return uri;
+}
+
+/**
+ * Still for one carousel tile. Always this slide's picture — never another slide's
+ * poster or the playing MP4 URL (Android Image cannot decode video).
+ */
+export function resolveCarouselItemStillUri(
+  item: PostMediaItem | null | undefined,
+  post: Post,
+  index: number,
+  items: PostMediaItem[],
+): string | undefined {
+  if (!item) return undefined;
+  const extra = item as PostMediaItem & { poster_url?: string };
+  const fromItem = stillFromUnknown(
+    firstUri(extra.posterUrl, extra.poster_url, extra.thumbnailUrl, extra.thumbnail_url),
+  );
+  if (fromItem) return fromItem;
+
+  if (item.type === 'image' || stillFromUnknown(item.url)) {
+    const imageUri = stillFromUnknown(item.url);
+    if (imageUri) return imageUri;
+  }
+
+  const firstVideoIndex = items.findIndex((entry) => entry?.type === 'video');
+  if (item.type === 'video' && index === firstVideoIndex) {
+    const postPoster = stillFromUnknown(post.videoPosterUrl);
+    if (postPoster) return postPoster;
+  }
+
+  if (item.type === 'video') {
+    return siblingJpegFromVideoUrl(item.url);
+  }
+  return undefined;
+}

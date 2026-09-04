@@ -182,20 +182,9 @@ class PostController extends Controller
             $cursor = (string) $request->get('cursor', '');
             $limit = $request->get('limit', 10);
             $filter = $request->get('filter', 'Dublin');
-            $userId = $request->get('userId');
-            if ($userId === null && Auth::check()) {
-                $userId = Auth::id();
-            }
-            if ($userId === null && $request->bearerToken()) {
-                try {
-                    $token = PersonalAccessToken::findToken($request->bearerToken());
-                    if ($token && $token->tokenable) {
-                        $userId = $token->tokenable->id;
-                    }
-                } catch (\Throwable $e) {
-                    // ignore
-                }
-            }
+            // Sanctum identity always wins over a stale/wrong userId query param.
+            // A mismatched id made Following look empty even when the token was valid.
+            $userId = $this->resolveAuthenticatedUserId($request) ?? $request->get('userId');
             $cursorState = $this->decodeFeedCursor($cursor);
 
             // Do not cache feed pages: likes/views/comments/shares change constantly,
@@ -212,6 +201,28 @@ class PostController extends Controller
                 'followingCount' => 0,
             ]);
         }
+    }
+
+    /** Signed-in Sanctum user id, or null for guests. Never trust a conflicting userId query param over this. */
+    private function resolveAuthenticatedUserId(Request $request): ?string
+    {
+        if (Auth::check()) {
+            return (string) Auth::id();
+        }
+        $bearer = $request->bearerToken();
+        if (!$bearer) {
+            return null;
+        }
+        try {
+            $token = PersonalAccessToken::findToken($bearer);
+            if ($token && $token->tokenable) {
+                return (string) $token->tokenable->id;
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+
+        return null;
     }
 
     /**

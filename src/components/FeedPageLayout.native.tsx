@@ -212,6 +212,18 @@ export const FEED_CARD_ENGAGEMENT_LEFT = {
     marginRight: 8,
 };
 
+/**
+ * Caption + actions under media. ColorOS TextureView ignores overflow and paints
+ * into the next feed row (Stories 24); this lid sits above that surface.
+ */
+export const FEED_CARD_BELOW_MEDIA = {
+    position: 'relative' as const,
+    zIndex: 8,
+    elevation: 12,
+    backgroundColor: FEED_CARD_BG,
+    overflow: 'hidden' as const,
+};
+
 /** Web carousel thumb rail: px-3 py-2 bg-black/95 border-t border-white/10. */
 export const FEED_CARD_CAROUSEL_WRAP = {
     paddingHorizontal: 12,
@@ -219,8 +231,8 @@ export const FEED_CARD_CAROUSEL_WRAP = {
     backgroundColor: '#000000',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.1)',
-    zIndex: 8,
-    elevation: 12,
+    zIndex: 10,
+    elevation: 16,
     overflow: 'hidden' as const,
 };
 
@@ -258,6 +270,7 @@ export const FEED_CARD_CAROUSEL_THUMB = {
     backgroundColor: '#111827',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden' as const,
 };
 
 export const FEED_CARD_CAROUSEL_THUMB_ACTIVE = {

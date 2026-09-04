@@ -44,7 +44,7 @@ function mapLaravelReplyTo(raw: unknown): ChatMessage['replyTo'] | undefined {
   };
 }
 
-function laravelMsgToChatMessage(m: {
+export function laravelMsgToChatMessage(m: {
   id: string;
   sender_handle: string;
   text?: string | null;

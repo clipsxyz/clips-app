@@ -385,7 +385,7 @@ export default function ProfilePassportCards({
             if (signal?.aborted) return;
             const handles = connectionHandlesFromResponse(res);
             setFollowingList(handles);
-            setFollowingCount(Math.max(handles.length, connectionListTotal(res)));
+            setFollowingCount(connectionListTotal(res));
         } catch (error) {
             if (isAbortError(error) || signal?.aborted) return;
             setFollowingCount(Number(user?.following_count ?? 0) || 0);
@@ -404,7 +404,7 @@ export default function ProfilePassportCards({
             if (signal?.aborted) return;
             const handles = connectionHandlesFromResponse(res);
             setFollowersList(handles);
-            setFollowersCount(Math.max(handles.length, connectionListTotal(res)));
+            setFollowersCount(connectionListTotal(res));
         } catch (error) {
             if (isAbortError(error) || signal?.aborted) return;
             setFollowersCount(Number(user?.followers_count ?? 0) || 0);
@@ -413,11 +413,13 @@ export default function ProfilePassportCards({
     }, [user?.handle, user?.followers_count]);
 
     useEffect(() => {
-        if (typeof user?.followers_count === 'number' && user.followers_count > 0) {
-            setFollowersCount((prev) => Math.max(prev, user.followers_count ?? 0));
-        }
-        if (typeof user?.following_count === 'number' && user.following_count > 0) {
-            setFollowingCount((prev) => Math.max(prev, user.following_count ?? 0));
+        if (!isLaravelApiEnabled()) {
+            if (typeof user?.followers_count === 'number') {
+                setFollowersCount(user.followers_count);
+            }
+            if (typeof user?.following_count === 'number') {
+                setFollowingCount(user.following_count);
+            }
         }
     }, [user?.followers_count, user?.following_count]);
 

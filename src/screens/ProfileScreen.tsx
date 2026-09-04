@@ -431,18 +431,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     if (liveHandleForLists) {
                         const listSignal = unmountAbortRef.current?.signal;
                         try {
-                            liveFollowers = Math.max(
-                                liveFollowers,
-                                connectionListTotal(await fetchFollowers(liveHandleForLists, 0, 1, listSignal)),
+                            liveFollowers = connectionListTotal(
+                                await fetchFollowers(liveHandleForLists, 0, 1, listSignal),
                             );
                         } catch (error) {
                             if (isAbortError(error)) return;
                             /* keep /auth/me count */
                         }
                         try {
-                            liveFollowing = Math.max(
-                                liveFollowing,
-                                connectionListTotal(await fetchFollowing(liveHandleForLists, 0, 1, listSignal)),
+                            liveFollowing = connectionListTotal(
+                                await fetchFollowing(liveHandleForLists, 0, 1, listSignal),
                             );
                         } catch (error) {
                             if (isAbortError(error)) return;

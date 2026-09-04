@@ -551,4 +551,22 @@ class UserControllerTest extends TestCase
                 'is_following' => true,
             ]);
     }
+
+    public function test_audience_is_following_uses_user_id_query_when_unauthenticated(): void
+    {
+        $owner = User::factory()->create(['handle' => 'Gazetteer@Dublin', 'is_private' => false]);
+        $viewer = User::factory()->create(['handle' => 'Handyman@Madrid', 'is_private' => false]);
+
+        DB::table('user_follows')->insert([
+            'follower_id' => $viewer->id,
+            'following_id' => $owner->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/users/' . rawurlencode($owner->handle) . '/audience?userId=' . $viewer->id)
+            ->assertStatus(200)
+            ->assertJsonPath('is_following', true);
+    }
 }

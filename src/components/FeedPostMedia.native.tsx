@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
     Animated,
+    Dimensions,
     Image,
     NativeScrollEvent,
     NativeSyntheticEvent,
@@ -13,7 +14,7 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
-import { Gesture, GestureDetector, Pressable as GesturePressable, ScrollView } from 'react-native-gesture-handler';
+import { FlatList, Gesture, GestureDetector, Pressable as GesturePressable } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import type { Post, PostMediaItem, StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
@@ -35,7 +36,7 @@ import {
     isTextOnlyPost,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
-import { postHasVideoMedia, resolvePostPlaybackUri } from '../utils/postMedia';
+import { postHasVideoMedia, resolvePostPlaybackUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
@@ -105,6 +106,9 @@ type FeedPlayingVideoProps = {
     onProgress: (e: { currentTime?: number }) => void;
     onError: (e: unknown) => void;
     resizeMode?: 'cover' | 'contain';
+    /** Pixel box — ColorOS TextureView ignores % / overflow and paints into the next slide. */
+    boxWidth: number;
+    boxHeight: number;
 };
 
 /** Isolated so like-burst setState on the card does not rebuild ExoPlayer. */
@@ -124,6 +128,8 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     onProgress,
     onError,
     resizeMode = 'cover',
+    boxWidth,
+    boxHeight,
 }: FeedPlayingVideoProps) {
     const onLoadStartRef = useRef(onLoadStart);
     const onReadyRef = useRef(onReady);
@@ -144,13 +150,19 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
         [posterUri],
     );
 
+    const videoBox = {
+        width: boxWidth,
+        height: boxHeight,
+        overflow: 'hidden' as const,
+    };
+
     return (
-        <View style={styles.videoClip} pointerEvents={pointerEvents} collapsable={false}>
+        <View style={videoBox} pointerEvents={pointerEvents} collapsable={false}>
             <Video
                 key={`feed-exo-${remountEpoch}`}
                 ref={videoRef}
                 source={source}
-                style={styles.videoFill}
+                style={videoBox}
                 resizeMode={resizeMode}
                 controls={false}
                 paused={paused}
@@ -181,7 +193,9 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     prev.volume === next.volume &&
     prev.repeat === next.repeat &&
     prev.posterUri === next.posterUri &&
-    prev.resizeMode === next.resizeMode
+    prev.resizeMode === next.resizeMode &&
+    prev.boxWidth === next.boxWidth &&
+    prev.boxHeight === next.boxHeight
 ));
 
 function resolveFeedVideoPosterUri(
@@ -190,14 +204,28 @@ function resolveFeedVideoPosterUri(
 ): string | undefined {
     const extra = item as { posterUrl?: string; thumbnailUrl?: string; thumbnail_url?: string } | undefined;
     const postExtra = post as { thumbnailUrl?: string; thumbnail_url?: string };
-    return firstMediaUri(
+    const fromItem = firstMediaUri(
         extra?.posterUrl,
         extra?.thumbnailUrl,
         extra?.thumbnail_url,
-        post.videoPosterUrl,
-        postExtra.thumbnailUrl,
-        postExtra.thumbnail_url,
     );
+    if (fromItem && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(fromItem)) return fromItem;
+
+    const items = (post.mediaItems || []).filter(
+        (entry) => entry?.type === 'image' || entry?.type === 'video',
+    );
+    const firstVideo = items.find((entry) => entry?.type === 'video');
+    const isFirstVideo = !item || item === firstVideo || (!!firstVideo && item.url === firstVideo.url);
+    if (isFirstVideo) {
+        const postPoster = firstMediaUri(
+            post.videoPosterUrl,
+            postExtra.thumbnailUrl,
+            postExtra.thumbnail_url,
+        );
+        if (postPoster && !/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(postPoster)) return postPoster;
+    }
+
+    return siblingJpegFromVideoUrl(item?.url || resolvePostPlaybackUri(post, item));
 }
 
 export type FeedPostMediaHandle = {
@@ -244,6 +272,8 @@ type Props = {
     hideOverlayChrome?: boolean;
     /** Fill the expanding viewport and letterbox the video (no 4:5 crop-zoom). */
     fillViewport?: boolean;
+    /** Natural pixel size of the current slide — parent sizes the frame from this. */
+    onNaturalSize?: (width: number, height: number) => void;
 };
 
 const FeedPostMedia = React.memo(
@@ -268,9 +298,17 @@ const FeedPostMedia = React.memo(
         onOpenScenes,
         hideOverlayChrome = false,
         fillViewport = false,
+        onNaturalSize,
     },
     ref,
 ) {
+    const windowSlideWidth = Dimensions.get('window').width;
+    const [pageWidth, setPageWidth] = useState(() =>
+        width > 0 ? width : windowSlideWidth,
+    );
+    const [pageHeight, setPageHeight] = useState(() => (height > 0 ? height : 1));
+    const slideWidth = pageWidth > 0 ? pageWidth : windowSlideWidth;
+    const slideHeight = fillViewport && pageHeight > 0 ? pageHeight : height;
     const [loadingByUrl, setLoadingByUrl] = useState<Record<string, boolean>>({});
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
@@ -284,7 +322,7 @@ const FeedPostMedia = React.memo(
     const [muteFlash, setMuteFlash] = useState(false);
     const loadedUrlsRef = useRef<Set<string>>(new Set());
     const mediaLoadReportedRef = useRef(false);
-    const carouselScrollRef = useRef<ScrollView>(null);
+    const carouselListRef = useRef<FlatList>(null);
     const feedVideoRef = useRef<VideoRef>(null);
     const lastEmittedIndexRef = useRef(0);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
@@ -303,6 +341,15 @@ const FeedPostMedia = React.memo(
         getActiveFeedVideoPostId(),
     );
     const [isLandscapeMedia, setIsLandscapeMedia] = useState(false);
+    const onNaturalSizeRef = useRef(onNaturalSize);
+    onNaturalSizeRef.current = onNaturalSize;
+
+    const applyNaturalSize = useCallback((w: number, h: number) => {
+        if (!(Number(w) > 0 && Number(h) > 0)) return;
+        const nextLandscape = Number(w) > Number(h);
+        setIsLandscapeMedia((prev) => (prev === nextLandscape ? prev : nextLandscape));
+        onNaturalSizeRef.current?.(Number(w), Number(h));
+    }, []);
 
     const resetPosterCover = useCallback(() => {
         mediaRevealRef.current?.stop();
@@ -387,15 +434,15 @@ const FeedPostMedia = React.memo(
 
     const onCarouselScrollEnd = useCallback(
         (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-            if (!hasCarousel || !width) return;
-            const next = Math.round(e.nativeEvent.contentOffset.x / width);
+            if (!hasCarousel || !slideWidth) return;
+            const next = Math.round(e.nativeEvent.contentOffset.x / slideWidth);
             const clamped = Math.max(0, Math.min(next, maxCarouselIndex));
             if (clamped === currentIndex) return;
             lastEmittedIndexRef.current = clamped;
             setCurrentIndex(clamped);
             requestAnimationFrame(() => onCarouselIndexChange?.(clamped));
         },
-        [currentIndex, hasCarousel, maxCarouselIndex, onCarouselIndexChange, width],
+        [currentIndex, hasCarousel, maxCarouselIndex, onCarouselIndexChange, slideWidth],
     );
 
     useEffect(() => {
@@ -431,7 +478,7 @@ const FeedPostMedia = React.memo(
 
     /** Thumb-rail tap only — do not scrollTo when the swipe already moved us there. */
     useEffect(() => {
-        if (!hasCarousel || !width) return;
+        if (!hasCarousel || !slideWidth) return;
         if (safeCarouselIndex === currentIndex) return;
         if (safeCarouselIndex === lastEmittedIndexRef.current) {
             setCurrentIndex(safeCarouselIndex);
@@ -439,8 +486,11 @@ const FeedPostMedia = React.memo(
         }
         lastEmittedIndexRef.current = safeCarouselIndex;
         setCurrentIndex(safeCarouselIndex);
-        carouselScrollRef.current?.scrollTo({ x: safeCarouselIndex * width, animated: false });
-    }, [currentIndex, hasCarousel, safeCarouselIndex, width]);
+        carouselListRef.current?.scrollToOffset({
+            offset: safeCarouselIndex * slideWidth,
+            animated: false,
+        });
+    }, [currentIndex, hasCarousel, safeCarouselIndex, slideWidth]);
 
     const activeItem =
         carouselItems.length > 0
@@ -469,14 +519,11 @@ const FeedPostMedia = React.memo(
         Image.getSize(
             posterUriForSize,
             (w, h) => {
-                if (Number(w) > 0 && Number(h) > 0) {
-                    const nextLandscape = Number(w) > Number(h);
-                    setIsLandscapeMedia((prev) => (prev === nextLandscape ? prev : nextLandscape));
-                }
+                applyNaturalSize(w, h);
             },
             () => {},
         );
-    }, [posterUriForSize]);
+    }, [posterUriForSize, applyNaturalSize]);
     const showScenesCta =
         mode === 'feed' &&
         video &&
@@ -792,32 +839,52 @@ const FeedPostMedia = React.memo(
     };
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
+    const mediaFit = isLandscapeMedia ? 'contain' : 'cover';
 
-    const mediaAspect = isLandscapeMedia ? 16 / 9 : 4 / 5;
-    const frameHeight =
-        width > 0 ? Math.min(width / mediaAspect, height) : height;
-    // Explicit height (not only aspectRatio): ColorOS TextureView ignores overflow
-    // and expands to the MP4's 9:16, bleeding into the carousel thumb rail.
-    const frameStyle = fillViewport
+    useEffect(() => {
+        const next = width > 0 ? width : windowSlideWidth;
+        setPageWidth((prev) => (Math.abs(prev - next) > 1 ? next : prev));
+        if (!fillViewport && height > 0) {
+            setPageHeight((prev) => (Math.abs(prev - height) > 1 ? height : prev));
+        }
+    }, [fillViewport, height, width, windowSlideWidth]);
+
+    const onFrameLayout = useCallback(
+        (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+            const nextW = Math.round(e.nativeEvent.layout.width);
+            const nextH = Math.round(e.nativeEvent.layout.height);
+            if (nextW > 0) {
+                setPageWidth((prev) => (Math.abs(prev - nextW) > 1 ? nextW : prev));
+            }
+            if (nextH > 0) {
+                setPageHeight((prev) => (Math.abs(prev - nextH) > 1 ? nextH : prev));
+            }
+        },
+        [],
+    );
+
+    // Parent (FeedCard) owns the frame height. Numeric slide width — never % —
+    // so Android paging cannot squeeze two slides into one viewport.
+    const frameBoxStyle = fillViewport
         ? {
               width: '100%' as const,
               height: '100%' as const,
-              alignSelf: 'stretch' as const,
               overflow: 'hidden' as const,
               backgroundColor: '#000000',
-              marginRight: 0,
-              paddingHorizontal: 0,
           }
         : {
               width: '100%' as const,
-              height: frameHeight,
-              maxHeight: frameHeight,
-              alignSelf: 'stretch' as const,
+              height,
               overflow: 'hidden' as const,
               backgroundColor: '#121212',
-              marginRight: 0,
-              paddingHorizontal: 0,
           };
+    const frameStyle = frameBoxStyle;
+    const slideBoxStyle = {
+        width: slideWidth,
+        height: fillViewport ? slideHeight : height,
+        overflow: 'hidden' as const,
+        backgroundColor: '#121212' as const,
+    };
 
     const renderSlide = (
         item: (typeof carouselItems)[number],
@@ -825,7 +892,7 @@ const FeedPostMedia = React.memo(
     ) => {
         const slideRawUrl = resolvePostPlaybackUri(post, item) || item?.url || post.mediaUrl;
         if (!slideRawUrl) {
-            return <View style={[styles.mediaFrame, frameStyle]} collapsable={false} />;
+            return <View style={styles.slideFill} collapsable={false} />;
         }
 
         const slideUrl = getPlaybackUrl(slideRawUrl);
@@ -851,11 +918,11 @@ const FeedPostMedia = React.memo(
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
             return (
-                <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
+                <View style={styles.slideFill} collapsable={false}>
                     <Image
                         source={{ uri: slideUrl }}
-                        style={[styles.stillImage, { width: '100%', height: '100%' }]}
-                        resizeMode="cover"
+                        style={{ width: slideWidth, height: fillViewport ? slideHeight : height }}
+                        resizeMode={mediaFit}
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         progressiveRenderingEnabled={false}
                         pointerEvents={mediaPointerEvents}
@@ -865,10 +932,7 @@ const FeedPostMedia = React.memo(
                             if (!slideIsCurrent) return;
                             const src = e.nativeEvent.source;
                             if (src && Number(src.width) > 0 && Number(src.height) > 0) {
-                                const nextLandscape = Number(src.width) > Number(src.height);
-                                setIsLandscapeMedia((prev) =>
-                                    prev === nextLandscape ? prev : nextLandscape,
-                                );
+                                applyNaturalSize(Number(src.width), Number(src.height));
                             }
                         }}
                         onError={() => markUrlLoaded(slideRawUrl)}
@@ -886,7 +950,7 @@ const FeedPostMedia = React.memo(
         const cachedVideoSource = buildFeedVideoSource(slideUrl, slideRawUrl);
 
         return (
-            <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
+            <View style={styles.slideFill} collapsable={false}>
                 {slideMountVideo ? (
                     <FeedPlayingVideo
                         remountEpoch={playerEpoch}
@@ -896,7 +960,9 @@ const FeedPostMedia = React.memo(
                         volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
                         repeat={mode === 'feed'}
                         posterUri={slidePosterUri}
-                        resizeMode={fillViewport ? 'contain' : 'cover'}
+                        resizeMode={fillViewport ? 'contain' : mediaFit}
+                        boxWidth={slideWidth}
+                        boxHeight={fillViewport ? slideHeight : height}
                         pointerEvents={mediaPointerEvents}
                         videoRef={feedVideoRef}
                         onLoadStart={() => {
@@ -930,10 +996,7 @@ const FeedPostMedia = React.memo(
                             }
                             const ns = meta?.naturalSize;
                             if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
-                                const nextLandscape = Number(ns.width) > Number(ns.height);
-                                setIsLandscapeMedia((prev) =>
-                                    prev === nextLandscape ? prev : nextLandscape,
-                                );
+                                applyNaturalSize(Number(ns.width), Number(ns.height));
                             }
                         }}
                         onProgress={(e) => {
@@ -973,7 +1036,7 @@ const FeedPostMedia = React.memo(
                             styles.posterCover,
                             { opacity: slideMountVideo ? posterOpacity : 1 },
                         ]}
-                        resizeMode="cover"
+                        resizeMode={mediaFit}
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         pointerEvents="none"
                         onLoad={() => markUrlLoaded(slideRawUrl)}
@@ -998,45 +1061,57 @@ const FeedPostMedia = React.memo(
     const mediaBody = (
         <>
             {hasCarousel ? (
-                <ScrollView
-                    ref={carouselScrollRef}
+                <FlatList
+                    ref={carouselListRef}
+                    data={carouselItems}
                     horizontal
                     pagingEnabled
                     nestedScrollEnabled
                     directionalLockEnabled
+                    bounces={false}
+                    overScrollMode="never"
                     showsHorizontalScrollIndicator={false}
                     decelerationRate="fast"
+                    disableIntervalMomentum
+                    snapToInterval={slideWidth}
+                    snapToAlignment="start"
                     scrollEventThrottle={16}
                     onMomentumScrollEnd={onCarouselScrollEnd}
-                    style={frameStyle}
-                >
-                    {carouselItems.map((item, index) => (
-                        <View
-                            key={`${post.id}-carousel-${index}-${item.url}`}
-                            style={[styles.mediaFrame, frameStyle, width > 0 ? { width } : null]}
-                        >
+                    keyExtractor={(item, index) => `${post.id}-carousel-${index}-${item.url}`}
+                    extraData={`${currentIndex}-${isViewable}-${suspendNativeVideo}-${playerEpoch}`}
+                    getItemLayout={(_, index) => ({
+                        length: slideWidth,
+                        offset: slideWidth * index,
+                        index,
+                    })}
+                    windowSize={3}
+                    initialNumToRender={1}
+                    maxToRenderPerBatch={2}
+                    removeClippedSubviews={false}
+                    style={slideBoxStyle}
+                    renderItem={({ item, index }) => (
+                        <View style={slideBoxStyle} collapsable={false}>
                             {renderSlide(item, index)}
                         </View>
-                    ))}
-                </ScrollView>
+                    )}
+                />
             ) : (
-                <View style={[styles.mediaFrame, frameStyle]}>
-                    {inner}
-                </View>
+                <View style={styles.slideFill}>{inner}</View>
             )}
         </>
     );
 
     const mediaCard = (
         <View
-            style={[styles.wrap, styles.mediaFrame, frameStyle, style]}
+            style={[styles.wrap, frameStyle, style]}
             collapsable={false}
+            onLayout={onFrameLayout}
             accessibilityRole={feedTapCapture ? 'button' : undefined}
             accessibilityLabel={feedTapCapture ? 'Double tap to like' : undefined}
         >
             {feedTapCapture ? (
                 <GestureDetector gesture={mediaTapGesture}>
-                    <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
+                    <View style={styles.slideFill} collapsable={false}>
                         {mediaBody}
                     </View>
                 </GestureDetector>
@@ -1053,7 +1128,7 @@ const FeedPostMedia = React.memo(
                 <FeedStickerOverlays
                     stickers={stickers}
                     containerWidth={width}
-                    containerHeight={frameHeight}
+                    containerHeight={height}
                 />
             ) : null}
             {showScenesCta ? (
@@ -1134,8 +1209,13 @@ const styles = StyleSheet.create({
         alignSelf: 'stretch',
         position: 'relative',
         overflow: 'hidden',
-        marginRight: 0,
-        paddingHorizontal: 0,
+    },
+    slideFill: {
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        backgroundColor: '#121212',
+        position: 'relative',
     },
     mediaFrame: {
         width: '100%',
@@ -1143,31 +1223,24 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         backgroundColor: '#121212',
         position: 'relative',
-        marginRight: 0,
-        paddingHorizontal: 0,
     },
     videoClip: {
         width: '100%',
         height: '100%',
-        alignSelf: 'stretch',
         overflow: 'hidden',
         position: 'relative',
         backgroundColor: '#121212',
-        marginRight: 0,
-        paddingHorizontal: 0,
     },
     stillImage: {
         width: '100%',
         height: '100%',
-        alignSelf: 'stretch',
         overflow: 'hidden',
         opacity: 1,
     },
-    /** Fill the 16:9 / 4:5 frame — no pixel width (avoids a 1px right gutter on device). */
+    /** Fill the slide — percentage of the numeric-width page, not of content. */
     videoFill: {
         width: '100%',
         height: '100%',
-        alignSelf: 'stretch',
         overflow: 'hidden',
     },
     /** Sits above Video until first frame, then faded/unmounted. */

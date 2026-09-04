@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class UserController extends Controller
 {
@@ -588,6 +589,17 @@ class UserController extends Controller
         $viewer = Auth::user() ?: Auth::guard('sanctum')->user();
         if ($viewer instanceof User) {
             return $viewer;
+        }
+        $bearer = $request->bearerToken();
+        if ($bearer) {
+            try {
+                $token = PersonalAccessToken::findToken($bearer);
+                if ($token && $token->tokenable instanceof User) {
+                    return $token->tokenable;
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
         }
         $userId = (string) $request->get('userId', '');
         if ($userId !== '' && Str::isUuid($userId)) {

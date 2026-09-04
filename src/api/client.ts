@@ -112,6 +112,14 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
               ? (extraHeaders as Record<string, string>)
               : {};
 
+    let socketId: string | undefined;
+    try {
+        const { getEchoSocketId } = await import('../services/echo');
+        socketId = getEchoSocketId();
+    } catch {
+        socketId = undefined;
+    }
+
     const config: RequestInit = {
         ...fetchOptions,
         headers: {
@@ -119,6 +127,7 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
             'Content-Type': 'application/json',
             ...extraHeaderObj,
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(socketId ? { 'X-Socket-Id': socketId } : {}),
         },
         signal: controller.signal,
     };
@@ -1609,6 +1618,7 @@ export async function toggleFollow(handle: string, following?: boolean) {
     const encodedHandle = encodeUserIdentifier(handle);
     return apiRequest(`/users/${encodedHandle}/follow`, {
         method: 'POST',
+        timeoutMs: 15000,
         ...(typeof following === 'boolean' ? { body: JSON.stringify({ following }) } : {}),
     });
 }
@@ -1717,6 +1727,7 @@ export function profileAudienceFromPayload(payload: any): {
 export async function fetchProfileAudience(
     handle: string,
     signal?: AbortSignal,
+    viewerId?: string,
 ): Promise<{
     followers: number;
     following: number;
@@ -1728,7 +1739,11 @@ export async function fetchProfileAudience(
     if (!identifier) return { followers: 0, following: 0 };
     try {
         const encoded = encodeUserIdentifier(identifier);
-        const payload = await laravelUsersGet(`/users/${encoded}/audience`, { signal });
+        const params = new URLSearchParams();
+        const vid = String(viewerId || '').trim();
+        if (vid) params.set('userId', vid);
+        const qs = params.toString();
+        const payload = await laravelUsersGet(`/users/${encoded}/audience${qs ? `?${qs}` : ''}`, { signal });
         const parsed = profileAudienceFromPayload(payload);
         const followers = parsed.followers ?? 0;
         const following = parsed.following ?? 0;

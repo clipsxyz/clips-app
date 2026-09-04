@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import CarouselSlideThumb from './CarouselSlideThumb.native';
 import {
@@ -26,10 +26,16 @@ type Props = {
 };
 
 export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }: Props) {
+    const [recoverToken, setRecoverToken] = useState(0);
+    useEffect(() => {
+        const t = setTimeout(() => setRecoverToken((n) => n + 1), 40);
+        return () => clearTimeout(t);
+    }, [activeIndex]);
+
     if (items.length <= 1) return null;
 
     return (
-        <View style={FEED_CARD_CAROUSEL_WRAP}>
+        <View style={FEED_CARD_CAROUSEL_WRAP} collapsable={false}>
             <View style={FEED_CARD_CAROUSEL_HEADER}>
                 <Text style={FEED_CARD_CAROUSEL_TITLE}>Carousel</Text>
                 <Text style={FEED_CARD_CAROUSEL_COUNT}>
@@ -53,7 +59,7 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
                                 posterUrl={item.posterUrl}
                                 thumbnailUrl={item.thumbnailUrl}
                                 thumbnail_url={item.thumbnail_url}
-                                allowPausedVideo
+                                recoverToken={recoverToken}
                             />
                             {item.type === 'video' ? (
                                 <View style={styles.vidBadge} pointerEvents="none">

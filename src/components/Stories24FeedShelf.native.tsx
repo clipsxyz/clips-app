@@ -15,27 +15,59 @@ import {
     Image,
     StyleSheet,
     AppState,
+    Dimensions,
+    type NativeSyntheticEvent,
+    type NativeScrollEvent,
 } from 'react-native';
 import type { VideoRef } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
 import StorySafeVideo from './stories/StorySafeVideo.native';
+import Avatar from './Avatar';
 import type { Stories24RailItem, Stories24RailReturnPayload } from '../utils/stories24Rail';
 import {
     STORIES24_ADD_YOURS_HANDLE,
     getStories24RailHandles,
     isStories24AddYoursHandle,
     pickFirstStories24RailStory,
+    stories24DisplayName,
 } from '../utils/stories24Rail';
-import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
+import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
 import { storyVideoSource } from '../utils/storyMediaNative';
 
 const CARD_W = 140;
 const CARD_H = 220;
 const CARD_RADIUS = 12;
 const CARD_GAP = 10;
+const CARD_STRIDE = CARD_W + CARD_GAP;
+const RAIL_PAD_LEFT = 12;
 const PREVIEW_POSTER_FALLBACK = '#121212';
+
+function visibleCardRange(scrollX: number, viewportW: number, count: number): { start: number; end: number } {
+    if (count <= 0) return { start: 0, end: -1 };
+    const width = viewportW > 1 ? viewportW : Dimensions.get('window').width;
+    const peek = CARD_W;
+    const viewLeft = scrollX - peek;
+    const viewRight = scrollX + width + peek;
+    let start = 0;
+    let end = count - 1;
+    for (let i = 0; i < count; i++) {
+        const x = RAIL_PAD_LEFT + i * CARD_STRIDE;
+        if (x + CARD_W >= viewLeft) {
+            start = i;
+            break;
+        }
+    }
+    for (let i = count - 1; i >= 0; i--) {
+        const x = RAIL_PAD_LEFT + i * CARD_STRIDE;
+        if (x <= viewRight) {
+            end = i;
+            break;
+        }
+    }
+    return { start, end };
+}
 
 function stillUri(uri?: string | null): string | undefined {
     if (!uri || uri.startsWith('#')) return undefined;
@@ -54,6 +86,8 @@ type Props = {
     onCollapseHandled?: () => void;
 };
 
+const PREVIEW_LOOP_SECONDS = 2;
+
 function StoryPreviewVideo({
     uri,
     posterUri,
@@ -64,40 +98,55 @@ function StoryPreviewVideo({
     paused: boolean;
 }) {
     const videoRef = useRef<VideoRef>(null);
-    const [feedScrolling, setFeedScrolling] = useState(getFeedScrollBusy());
-    useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
-    const effectivelyPaused = paused || feedScrolling;
     const source = storyVideoSource(uri) || { uri };
     const posterSource = stillUri(posterUri) ? { uri: stillUri(posterUri)! } : undefined;
 
-    // TextureView steals touches — preview must stay non-interactive.
-    if (effectivelyPaused && posterSource) {
-        return (
-            <Image
-                source={posterSource}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
-                pointerEvents="none"
-            />
-        );
-    }
-
     return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <StorySafeVideo
-                videoRef={videoRef}
-                source={source}
-                posterSource={posterSource}
-                style={StyleSheet.absoluteFill}
-                muted
-                repeat
-                paused={effectivelyPaused}
-                onProgress={({ currentTime }) => {
-                    if (currentTime > 3) {
-                        videoRef.current?.seek(0);
-                    }
-                }}
-            />
+        <View style={styles.previewFrame} pointerEvents="none" collapsable={false}>
+            {posterSource ? (
+                <Image
+                    source={posterSource}
+                    style={styles.previewFrame}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
+            ) : (
+                <View style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />
+            )}
+            <View style={styles.previewVideoClip} pointerEvents="none" collapsable={false}>
+                <StorySafeVideo
+                    videoRef={videoRef}
+                    source={source}
+                    posterSource={posterSource}
+                    boxWidth={CARD_W}
+                    boxHeight={CARD_H}
+                    muted
+                    repeat
+                    paused={paused}
+                    playWhenInactive
+                    resizeMode="cover"
+                    progressUpdateInterval={200}
+                    onProgress={({ currentTime }) => {
+                        if (currentTime >= PREVIEW_LOOP_SECONDS) {
+                            videoRef.current?.seek(0);
+                        }
+                    }}
+                />
+            </View>
+        </View>
+    );
+}
+
+function CardIdentity({ item }: { item: Stories24RailItem }) {
+    const name = stories24DisplayName(item.handle, item.displayName);
+    const avatarUrl =
+        resolveAvatarImageUri(item.avatarUrl, item.handle) || getAvatarForHandle(item.handle);
+    return (
+        <View style={styles.identity} pointerEvents="none">
+            <Avatar src={avatarUrl} name={name} handle={item.handle} size={22} hasStory />
+            <Text style={styles.identityName} numberOfLines={1}>
+                {name}
+            </Text>
         </View>
     );
 }
@@ -142,37 +191,35 @@ function ShelfCard({
     }
 
     return (
-        <View collapsable={false}>
+        <View style={styles.card} collapsable={false}>
             <TouchableOpacity
-                style={styles.card}
+                style={styles.cardPress}
                 onPress={onPress}
                 activeOpacity={0.9}
                 accessibilityRole="button"
-                accessibilityLabel={item.title || 'Stories 24'}
+                accessibilityLabel={stories24DisplayName(item.handle, item.displayName)}
             >
-                {item.previewVideoUrl ? (
+                {playPreviewVideo && item.previewVideoUrl ? (
                     <StoryPreviewVideo
                         uri={item.previewVideoUrl}
                         posterUri={poster}
-                        paused={previewVideosPaused || !playPreviewVideo}
+                        paused={previewVideosPaused}
                     />
                 ) : poster ? (
                     <Image
                         source={{ uri: poster }}
-                        style={StyleSheet.absoluteFill}
+                        style={styles.previewFrame}
                         resizeMode="cover"
                         pointerEvents="none"
                     />
                 ) : (
                     <View
                         pointerEvents="none"
-                        style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
+                        style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
                     />
                 )}
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.gradient} />
-                <Text style={styles.headline} numberOfLines={3}>
-                    {item.title}
-                </Text>
+                <CardIdentity item={item} />
             </TouchableOpacity>
         </View>
     );
@@ -185,6 +232,10 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
     const railHandles = useMemo(() => getStories24RailHandles(items), [items]);
     const [railScrolling, setRailScrolling] = useState(false);
     const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+    const [railWidth, setRailWidth] = useState(() => Dimensions.get('window').width);
+    const scrollXRef = useRef(0);
+    const visibleRangeRef = useRef(visibleCardRange(0, Dimensions.get('window').width, items.length));
+    const [visibleRange, setVisibleRange] = useState(visibleRangeRef.current);
 
     useEffect(() => {
         const sub = AppState.addEventListener('change', (next) => {
@@ -198,12 +249,61 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
         onCollapseHandled?.();
     }, [collapsePayload, onCollapseHandled]);
 
-    const firstStoryPreviewHandle = useMemo(
-        () => items.find((i) => !isStories24AddYoursHandle(i.handle))?.handle ?? null,
-        [items],
+    const updateVisibleRange = useCallback(
+        (scrollX: number, viewportW = railWidth) => {
+            scrollXRef.current = scrollX;
+            const next = visibleCardRange(scrollX, viewportW, items.length);
+            const prev = visibleRangeRef.current;
+            if (prev.start === next.start && prev.end === next.end) return;
+            visibleRangeRef.current = next;
+            setVisibleRange(next);
+        },
+        [items.length, railWidth],
+    );
+
+    useEffect(() => {
+        updateVisibleRange(scrollXRef.current, railWidth);
+    }, [items.length, railWidth, updateVisibleRange]);
+
+    const onRailScroll = useCallback(
+        (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            updateVisibleRange(e.nativeEvent.contentOffset.x);
+        },
+        [updateVisibleRange],
     );
 
     const previewsPaused = railScrolling || !appActive;
+
+    const visibleVideoIndexes = useMemo(() => {
+        const next: number[] = [];
+        items.forEach((item, index) => {
+            if (!item.previewVideoUrl) return;
+            if (isStories24AddYoursHandle(item.handle)) return;
+            if (index < visibleRange.start || index > visibleRange.end) return;
+            next.push(index);
+        });
+        return next;
+    }, [items, visibleRange.end, visibleRange.start]);
+
+    const visibleVideoKey = visibleVideoIndexes.join(',');
+    const [previewTurn, setPreviewTurn] = useState(0);
+
+    useEffect(() => {
+        setPreviewTurn(0);
+    }, [visibleVideoKey]);
+
+    useEffect(() => {
+        if (visibleVideoIndexes.length <= 1) return;
+        const id = setInterval(() => {
+            setPreviewTurn((n) => n + 1);
+        }, PREVIEW_LOOP_SECONDS * 1000);
+        return () => clearInterval(id);
+    }, [visibleVideoIndexes.length, visibleVideoKey]);
+
+    const activePreviewIndex =
+        visibleVideoIndexes.length === 0
+            ? -1
+            : visibleVideoIndexes[previewTurn % visibleVideoIndexes.length];
 
     const openFirstStory = useCallback(() => {
         const first = pickFirstStories24RailStory(items);
@@ -227,12 +327,25 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
             <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
+                style={styles.rail}
                 contentContainerStyle={styles.listContent}
+                scrollEventThrottle={16}
+                onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    if (w > 1 && Math.abs(w - railWidth) > 1) setRailWidth(w);
+                }}
+                onScroll={onRailScroll}
                 onScrollBeginDrag={() => setRailScrolling(true)}
-                onScrollEndDrag={() => setRailScrolling(false)}
-                onMomentumScrollEnd={() => setRailScrolling(false)}
+                onScrollEndDrag={(e) => {
+                    setRailScrolling(false);
+                    updateVisibleRange(e.nativeEvent.contentOffset.x);
+                }}
+                onMomentumScrollEnd={(e) => {
+                    setRailScrolling(false);
+                    updateVisibleRange(e.nativeEvent.contentOffset.x);
+                }}
             >
-                {items.map((item) => (
+                {items.map((item, index) => (
                     <ShelfCard
                         key={
                             item.handle === STORIES24_ADD_YOURS_HANDLE
@@ -240,9 +353,7 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
                                 : item.handle
                         }
                         item={item}
-                        playPreviewVideo={
-                            !!item.previewVideoUrl && item.handle === firstStoryPreviewHandle
-                        }
+                        playPreviewVideo={!!item.previewVideoUrl && index === activePreviewIndex}
                         previewVideosPaused={previewsPaused}
                         onPress={() => {
                             if (item.handle === STORIES24_ADD_YOURS_HANDLE) {
@@ -264,6 +375,13 @@ const styles = StyleSheet.create({
     wrap: {
         paddingTop: 4,
         paddingBottom: 4,
+        overflow: 'hidden',
+        backgroundColor: '#030712',
+        position: 'relative',
+        zIndex: 8,
+    },
+    rail: {
+        overflow: 'hidden',
     },
     headerRow: {
         flexDirection: 'row',
@@ -283,7 +401,7 @@ const styles = StyleSheet.create({
         marginLeft: 6,
     },
     listContent: {
-        paddingLeft: 12,
+        paddingLeft: RAIL_PAD_LEFT,
         paddingRight: 2,
         paddingBottom: 4,
     },
@@ -294,6 +412,30 @@ const styles = StyleSheet.create({
         marginRight: CARD_GAP,
         overflow: 'hidden',
         backgroundColor: PREVIEW_POSTER_FALLBACK,
+        position: 'relative',
+        elevation: 0,
+    },
+    cardPress: {
+        width: CARD_W,
+        height: CARD_H,
+        overflow: 'hidden',
+        borderRadius: CARD_RADIUS,
+        position: 'relative',
+    },
+    previewFrame: {
+        width: CARD_W,
+        height: CARD_H,
+        overflow: 'hidden',
+        backgroundColor: PREVIEW_POSTER_FALLBACK,
+        position: 'relative',
+    },
+    previewVideoClip: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: CARD_W,
+        height: CARD_H,
+        overflow: 'hidden',
     },
     addYoursFill: {
         flex: 1,
@@ -325,5 +467,26 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 13,
         fontWeight: 'bold',
+    },
+    identity: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingHorizontal: 8,
+        paddingBottom: 8,
+        paddingTop: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    identityName: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+        textShadowColor: 'rgba(0,0,0,0.85)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 3,
     },
 });

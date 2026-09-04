@@ -80,9 +80,9 @@ export async function followOrRequest(opts: {
                 if (applied) return applied;
                 setFollowState(userId, targetHandle, false);
                 return { following: false, requested: false };
-            } catch {
+            } catch (err) {
                 setFollowState(userId, targetHandle, false);
-                return { following: false, requested: false };
+                throw err;
             }
         }
         setFollowState(userId, targetHandle, true);

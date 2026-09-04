@@ -8754,22 +8754,20 @@ function FeedPageWrapper() {
                       updateOneAndSuggestedStrip(p.id, _post => ({ ...updated }));
                       setFollowState(userId, p.userHandle, !!updated.isFollowing);
                     } catch {
-                      // Keep optimistic follow (e.g. post not in global list when feed from cache)
-                      setFollowState(userId, p.userHandle, true);
-                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+                      setFollowState(userId, p.userHandle, !!wasFollowing);
+                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: !!wasFollowing }));
                     }
                   } else if (is404 || apiError?.status >= 400) {
-                    setFollowState(userId, p.userHandle, true);
-                    updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+                    setFollowState(userId, p.userHandle, !!wasFollowing);
+                    updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: !!wasFollowing }));
                   } else {
-                    // Any other error (e.g. CORS, timeout on phone): persist follow locally so + works on phone too
                     try {
                       const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                       updateOneAndSuggestedStrip(p.id, _post => ({ ...updated }));
                       setFollowState(userId, p.userHandle, !!updated.isFollowing);
                     } catch {
-                      setFollowState(userId, p.userHandle, true);
-                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+                      setFollowState(userId, p.userHandle, !!wasFollowing);
+                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: !!wasFollowing }));
                     }
                   }
                 }

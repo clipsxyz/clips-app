@@ -77,7 +77,7 @@ import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
 } from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
-import { postHasVideoMedia, currentFeedSlideIsVideo } from '../utils/postMedia';
+import { postHasVideoMedia, currentFeedSlideIsVideo, resolveCarouselItemStillUri } from '../utils/postMedia';
 import NetInfo from '@react-native-community/netinfo';
 import {
     getFeedAutoplayPref,
@@ -111,6 +111,7 @@ import {
 
 import FeedPageLayout, {
     FEED_CARD_BODY,
+    FEED_CARD_BELOW_MEDIA,
     FEED_CARD_CAPTION_PADDING,
     FEED_CARD_CAPTION_ROW,
     FEED_CARD_CAPTION_TEXT_SLOT,
@@ -1089,13 +1090,31 @@ const FeedCard = React.memo(function FeedCard({
     const postViewRecordedRef = React.useRef(false);
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
-    // 4:5 portrait (default) or 16:9 landscape, capped to ~58% of the screen so
-    // header + media + likes/comments/share fit without scrolling one post.
+    const [naturalMediaSize, setNaturalMediaSize] = React.useState<{
+        width: number;
+        height: number;
+    } | null>(null);
+    const mediaWidthOverHeight =
+        naturalMediaSize && naturalMediaSize.height > 0
+            ? naturalMediaSize.width / naturalMediaSize.height
+            : undefined;
+    const isLandscapeMedia =
+        typeof mediaWidthOverHeight === 'number' && mediaWidthOverHeight > 1;
     const mediaFrameHeight = feedCardMediaHeight(
         cardMediaWidth,
         safePositiveLayoutNumber(windowHeight, 720),
         postHasVideoMedia(post),
+        isLandscapeMedia,
+        mediaWidthOverHeight,
     );
+
+    const handleNaturalSize = React.useCallback((w: number, h: number) => {
+        if (!(w > 0 && h > 0)) return;
+        setNaturalMediaSize((prev) => {
+            if (prev && prev.width === w && prev.height === h) return prev;
+            return { width: w, height: h };
+        });
+    }, []);
 
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
@@ -1107,17 +1126,16 @@ const FeedCard = React.memo(function FeedCard({
         const items = (post.mediaItems || []).filter(
             (item) => item?.type === 'image' || item?.type === 'video',
         );
-        const firstVideo = items.find((item) => item.type === 'video');
-        return items.map((item) => ({
-            ...item,
-            posterUrl:
-                item.posterUrl ||
-                item.thumbnailUrl ||
-                item.thumbnail_url ||
-                (item.type === 'image' ? item.url : undefined) ||
-                (item.type === 'video' && item === firstVideo ? post.videoPosterUrl : undefined),
-        }));
-    }, [post.mediaItems, post.videoPosterUrl]);
+        return items.map((item, index) => {
+            const still = resolveCarouselItemStillUri(item, post, index, items);
+            return {
+                ...item,
+                posterUrl: still,
+                thumbnailUrl: still,
+                thumbnail_url: still,
+            };
+        });
+    }, [post, post.mediaItems, post.videoPosterUrl]);
     const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
     const captionWithoutLink = React.useMemo(
         () => getPostCaptionWithoutLink(post, displayCaption),
@@ -1140,6 +1158,7 @@ const FeedCard = React.memo(function FeedCard({
     React.useEffect(() => {
         setCarouselIndex(0);
         postViewRecordedRef.current = false;
+        setNaturalMediaSize(null);
     }, [post.id]);
 
     React.useEffect(() => {
@@ -1295,6 +1314,8 @@ const FeedCard = React.memo(function FeedCard({
                                 height: mediaFrameHeight,
                                 maxHeight: mediaFrameHeight,
                                 overflow: 'hidden',
+                                backgroundColor: '#000000',
+                                alignSelf: 'stretch',
                             }}
                             ref={mediaWrapRef}
                             collapsable={false}
@@ -1307,6 +1328,7 @@ const FeedCard = React.memo(function FeedCard({
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
                                 height={mediaFrameHeight}
+                                onNaturalSize={handleNaturalSize}
                                 onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
                                 onLikeBurst={mediaGesturesEnabled ? onLikeBurst : undefined}
                                 onSingleTap={mediaGesturesEnabled ? handleMediaSingleTap : undefined}
@@ -1351,6 +1373,10 @@ const FeedCard = React.memo(function FeedCard({
                         </FeedScenesMediaExpand>
                     ) : null}
 
+                </View>
+            )}
+
+            <View style={FEED_CARD_BELOW_MEDIA} collapsable={false}>
                     {carouselThumbItems.length > 1 ? (
                         <FeedMediaCarouselThumbs
                             items={carouselThumbItems}
@@ -1358,10 +1384,6 @@ const FeedCard = React.memo(function FeedCard({
                             onSelect={setCarouselIndex}
                         />
                     ) : null}
-
-                </View>
-            )}
-
             {showCaptionRow ? (
                 <View style={FEED_CARD_CAPTION_PADDING}>
                     <View style={FEED_CARD_CAPTION_ROW}>
@@ -1442,6 +1464,7 @@ const FeedCard = React.memo(function FeedCard({
             ) : null}
 
             {post.bannerText ? <FeedNewsTicker text={post.bannerText} /> : null}
+            </View>
 
             {/* Profile quick actions menu (Visit profile / Follow-Unfollow / View stories) */}
             <FeedPostProfileQuickMenu
@@ -3892,10 +3915,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
         ({ item }: { item: FeedListRow }) => {
-            const wrapRow = (row: React.ReactElement, postId?: string) => (
+            const wrapRow = (row: React.ReactElement, extraStyle?: object) => (
                 <View
                     collapsable={false}
-                    style={styles.feedListRow}
+                    style={[styles.feedListRow, extraStyle]}
                 >
                     {row}
                 </View>
@@ -3959,6 +3982,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}
                     />,
+                    styles.stories24ListRow,
                 );
             }
             if (item.kind === 'interests') {
@@ -4188,15 +4212,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             patchFollowForHandle(mergedPost.userHandle, updated.isFollowing === true, {
                                 isFollowRequested,
                             } as Partial<Post>);
+                            if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                                setReloadTick((t) => t + 1);
+                            }
                         } catch (err) {
                             console.error('Error toggling follow in FeedScreen:', err);
-                            patchFollowForHandle(
-                                mergedPost.userHandle,
-                                !(mergedPost.isFollowing === true),
-                            );
-                        }
-                        if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
-                            setReloadTick((t) => t + 1);
                         }
                     }}
                     onView={async () => {
@@ -4365,7 +4385,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onOpenLikesSheet={() => setLikesSheetPost(mergedPost)}
                     onOpenTaggedSheet={() => setTaggedSheetPost(mergedPost)}
                 />,
-                mergedPost.id,
             );
         },
         [
@@ -5336,6 +5355,12 @@ const styles = StyleSheet.create({
         alignSelf: 'stretch',
         marginBottom: 16,
         backgroundColor: FEED_PAGE_BG,
+    },
+    stories24ListRow: {
+        zIndex: 24,
+        elevation: 24,
+        backgroundColor: FEED_PAGE_BG,
+        overflow: 'hidden',
     },
     feedListContent: {
         backgroundColor: FEED_PAGE_BG,

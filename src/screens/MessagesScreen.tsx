@@ -45,6 +45,7 @@ import {
     deleteConversation,
     type ChatMessage,
 } from '../api/messages';
+import { mergeRealtimeChatMessage, useRealtimeChat } from '../services/useRealtimeChat';
 import { createChatGroup, fetchMyChatGroups, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
@@ -248,6 +249,20 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [swipingMessageId, setSwipingMessageId] = useState<string | null>(null);
     const audioRecorderRef = useRef(AudioRecorderPlayer);
     const communityCreatedHandledRef = useRef(false);
+
+    const appendRealtimeMessage = useCallback((incoming: ChatMessage) => {
+        shouldAutoScrollRef.current = true;
+        setMessages((prev) => mergeRealtimeChatMessage(prev, incoming));
+    }, []);
+
+    useRealtimeChat({
+        enabled: isLaravelApiEnabled() && Boolean(user?.id),
+        userId: user?.id,
+        peerHandle: handle,
+        chatGroupId,
+        isGroupThread,
+        onMessage: appendRealtimeMessage,
+    });
 
     useEffect(() => {
         isRecordingVoiceRef.current = isRecordingVoice;

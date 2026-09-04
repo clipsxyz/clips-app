@@ -101,16 +101,33 @@ const FEED_UI_BY_MODE = {
 export const FEED_UI_MODE: FeedUiMode = 'compact';
 export const FEED_UI = FEED_UI_BY_MODE[FEED_UI_MODE];
 
-/** Media frame height: 4:5 vertical (default) or 16:9 landscape, capped to the viewport. */
+/**
+ * Media frame height from the feed card width.
+ * `widthOverHeight` is the media's width/height (e.g. 16/9). When omitted, videos
+ * default to 4:5 portrait unless `isLandscape` is set (then 16:9).
+ */
 export function feedCardMediaHeight(
   width: number,
   windowHeight: number,
   isVideo: boolean,
   isLandscape = false,
+  widthOverHeight?: number,
 ): number {
-  const aspect =
-    isVideo && isLandscape ? FEED_UI.media.videoLandscapeAspect : FEED_UI.media.maxAspect;
-  const byAspect = width * aspect;
+  let heightOverWidth = FEED_UI.media.maxAspect;
+  if (typeof widthOverHeight === 'number' && Number.isFinite(widthOverHeight) && widthOverHeight > 0) {
+    const natural = 1 / widthOverHeight;
+    if (widthOverHeight > 1) {
+      heightOverWidth = natural;
+    } else {
+      heightOverWidth = Math.min(
+        Math.max(natural, FEED_UI.media.minAspect),
+        FEED_UI.media.maxAspect,
+      );
+    }
+  } else if (isVideo && isLandscape) {
+    heightOverWidth = FEED_UI.media.videoLandscapeAspect;
+  }
+  const byAspect = width * heightOverWidth;
   const cap = windowHeight * FEED_UI.media.maxViewportFraction;
   return Math.min(byAspect, cap);
 }

@@ -226,6 +226,7 @@ export default function ViewProfilePage() {
     const profilePostsLoadMoreRef = React.useRef<HTMLDivElement | null>(null);
     const [loading, setLoading] = React.useState(true);
     const [isFollowing, setIsFollowing] = React.useState(false);
+    const followEpochRef = React.useRef(0);
     const [stats, setStats] = React.useState({ following: 0, followers: 0, likes: 0, views: 0 });
     const [selectedPost, setSelectedPost] = React.useState<Post | null>(null);
     const [gridPeekPost, setGridPeekPost] = React.useState<Post | null>(null);
@@ -1311,6 +1312,7 @@ export default function ViewProfilePage() {
         // Use same key as Stories/Scenes (user.id) so follow state is shared; fallback to getStableUserId when id missing
         const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
         const useLaravelApi = !isMockMode();
+        followEpochRef.current += 1;
 
         // Mock-only: update state immediately and return (no API, no await) – same pattern as Stories so Follow always works
         if (!useLaravelApi) {
@@ -1625,6 +1627,8 @@ export default function ViewProfilePage() {
             const decodedHandle = decodeURIComponent(handle);
             const handleToUse = decodedHandle;
             const canonicalHandle = normalizeHandleForPrivacy(handleToUse);
+            const loadEpoch = followEpochRef.current;
+            const followStateStillCurrent = () => loadEpoch === followEpochRef.current;
             setLoading(true);
             setProfilePostsCursor(null);
             setProfilePostsHasMore(false);
@@ -1653,7 +1657,9 @@ export default function ViewProfilePage() {
                     }
 
                     setCanViewProfileState(effectiveCanView);
-                    setIsFollowing(effectiveIsFollowing);
+                    if (followStateStillCurrent()) {
+                        setIsFollowing(effectiveIsFollowing);
+                    }
                     setHasPendingRequest(hasPending);
                     
                     // Show SweetAlert if profile is private and user can't view (same bottom-sheet style as Follow Request Sent)
@@ -1806,6 +1812,19 @@ export default function ViewProfilePage() {
                         if (Array.isArray(apiPt) && apiPt.length > 0) {
                             placesTraveled = apiPt.filter((s: unknown) => typeof s === 'string');
                         }
+                        if (followStateStillCurrent()) {
+                            if (typeof userProfileData.is_following === 'boolean') {
+                                setIsFollowing(userProfileData.is_following);
+                                if (user?.id) {
+                                    setFollowState(String(user.id), decodedHandle, userProfileData.is_following);
+                                }
+                            } else if (typeof userProfileData.isFollowing === 'boolean') {
+                                setIsFollowing(userProfileData.isFollowing);
+                                if (user?.id) {
+                                    setFollowState(String(user.id), decodedHandle, userProfileData.isFollowing);
+                                }
+                            }
+                        }
                     } catch (error: any) {
                         const isConnectionError =
                             error?.message === 'CONNECTION_REFUSED' ||
@@ -1818,7 +1837,7 @@ export default function ViewProfilePage() {
                 }
 
                 // When API failed or mock: if current user follows this profile, show at least 1 follower
-                if (user?.id && decodedHandle !== user?.handle) {
+                if (!useLaravelApi && user?.id && decodedHandle !== user?.handle) {
                     try {
                         const followedList = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
                         const followsThisProfile = followedList.some(h => h.toLowerCase() === decodedHandle.toLowerCase());
@@ -1829,11 +1848,11 @@ export default function ViewProfilePage() {
                 // When viewing own profile, ensure following count is at least the frontend follow list size
                 // (e.g. user followed Ava from feed but backend count wasn't updated or API failed)
                 const isOwnProfile = decodeURIComponent(handle || '').replace(/^@/, '').trim().toLowerCase() === String(user?.handle || '').replace(/^@/, '').trim().toLowerCase();
-                if (isOwnProfile) {
+                if (isOwnProfile && !useLaravelApi) {
                     followersCount = Math.max(followersCount, Number(user?.followers_count ?? 0) || 0);
                     followingCount = Math.max(followingCount, Number(user?.following_count ?? 0) || 0);
                 }
-                if (isOwnProfile && user?.id) {
+                if (isOwnProfile && user?.id && !useLaravelApi) {
                     try {
                         const followedList = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
                         if (followedList.length > followingCount) {

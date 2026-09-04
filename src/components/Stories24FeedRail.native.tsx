@@ -120,6 +120,7 @@ function StoryPreviewVideo({
     // Prefer the story/post still — never the bundled BBB rainbow test card.
     const posterSource =
         posterUri && !posterUri.startsWith('#') ? { uri: posterUri } : undefined;
+    const previewFrame = { width: CARD_W, height: CARD_H, overflow: 'hidden' as const };
 
     // Android TextureView steals touches — keep preview non-interactive so the card press works.
     // When paused without a real still, keep a paused video frame (not profile avatar / empty).
@@ -127,7 +128,7 @@ function StoryPreviewVideo({
         return (
             <Image
                 source={posterSource}
-                style={StyleSheet.absoluteFill}
+                style={previewFrame}
                 resizeMode="cover"
                 pointerEvents="none"
             />
@@ -135,12 +136,12 @@ function StoryPreviewVideo({
     }
 
     return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={previewFrame} pointerEvents="none" collapsable={false}>
             <StorySafeVideo
                 videoRef={videoRef}
                 source={source}
                 posterSource={posterSource}
-                style={StyleSheet.absoluteFill}
+                style={previewFrame}
                 muted
                 repeat
                 paused={effectivelyPaused}

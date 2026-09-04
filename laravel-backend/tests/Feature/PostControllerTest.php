@@ -6,6 +6,7 @@ use Tests\TestCase;
 use App\Models\User;
 use App\Models\Post;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 class PostControllerTest extends TestCase
@@ -359,6 +360,33 @@ class PostControllerTest extends TestCase
             ->assertJsonPath('followingCount', 1)
             ->assertJsonCount(1, 'items')
             ->assertJsonPath('items.0.id', $followedPost->id);
+    }
+
+    public function test_following_feed_uses_auth_user_not_query_user_id(): void
+    {
+        $viewer = User::factory()->create();
+        $other = User::factory()->create();
+        $followed = User::factory()->create(['is_private' => false]);
+        $post = Post::factory()->create([
+            'user_id' => $followed->id,
+            'user_handle' => $followed->handle,
+        ]);
+
+        DB::table('user_follows')->insert([
+            'follower_id' => $viewer->id,
+            'following_id' => $followed->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/posts?filter=Following&limit=10&userId=' . $other->id);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followingCount', 1)
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.id', $post->id);
     }
 
     public function test_discover_filter_is_following_feed_not_a_location(): void

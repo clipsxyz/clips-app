@@ -6,7 +6,6 @@ import {
     TouchableOpacity,
     StyleSheet,
     ActivityIndicator,
-    Platform,
     type ImageSourcePropType,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -29,7 +28,6 @@ import { getAvatarForHandle } from '../../api/users';
 import { timeAgo } from '../../utils/timeAgo';
 import { ox } from '../../constants/nativeOpticalScale';
 
-const SHARED_BACKDROP = ['#0f172a', '#111827', '#1f2937'];
 /** Soft atlas wash behind text-only shares (not IG purple/magenta). */
 const TEXT_SHARE_FALLBACK_BACKDROP = ['#0f2430', '#060d16', '#12263a'];
 
@@ -88,24 +86,40 @@ function SharedCardMedia({
     posterSource,
     isMuted,
     paused,
+    boxWidth,
+    boxHeight,
 }: {
     isVideo: boolean;
     mediaUrl: string;
     posterSource?: ImageSourcePropType;
     isMuted: boolean;
     paused: boolean;
+    boxWidth?: number;
+    boxHeight?: number;
 }) {
     if (isVideo) {
         const source = storyVideoSource(mediaUrl);
         if (source) {
+            const pinned =
+                boxWidth && boxHeight && boxWidth > 1 && boxHeight > 1
+                    ? { width: boxWidth, height: boxHeight }
+                    : undefined;
             return (
-                <View style={styles.cardMediaFill} pointerEvents="none">
+                <View
+                    style={pinned ? pinned : styles.cardMediaFill}
+                    pointerEvents="none"
+                    collapsable={false}
+                >
                     <StorySafeVideo
                         source={source}
                         posterSource={posterSource}
-                        style={StyleSheet.absoluteFill}
+                        style={pinned ? pinned : styles.cardMediaFill}
+                        boxWidth={pinned?.width}
+                        boxHeight={pinned?.height}
+                        resizeMode="cover"
                         muted={isMuted}
                         paused={paused}
+                        playWhenInactive
                     />
                 </View>
             );
@@ -157,6 +171,7 @@ function SharedPostMediaCard({
     onPress: () => void;
 }) {
     const displayHandle = handle.replace(/^@/, '');
+    const [mediaBox, setMediaBox] = React.useState<{ width: number; height: number } | null>(null);
 
     return (
         <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.95}>
@@ -171,13 +186,29 @@ function SharedPostMediaCard({
                 </Text>
             </View>
 
-            <View style={styles.cardMediaWrap}>
+            <View
+                style={styles.cardMediaWrap}
+                collapsable={false}
+                onLayout={(e) => {
+                    const { width, height } = e.nativeEvent.layout;
+                    if (!(width > 1 && height > 1)) return;
+                    setMediaBox((prev) =>
+                        prev &&
+                        Math.abs(prev.width - width) < 1 &&
+                        Math.abs(prev.height - height) < 1
+                            ? prev
+                            : { width: Math.round(width), height: Math.round(height) },
+                    );
+                }}
+            >
                 <SharedCardMedia
                     isVideo={isVideo}
                     mediaUrl={mediaUrl}
                     posterSource={posterSource}
                     isMuted={isMuted}
                     paused={paused}
+                    boxWidth={mediaBox?.width}
+                    boxHeight={mediaBox?.height}
                 />
                 {isCarousel ? (
                     <View style={styles.carouselBadge} pointerEvents="none">
@@ -247,9 +278,8 @@ export default function StorySharedPostViewer({
 
     if (story.sharedFromPost && !post && sharedPostFetchFailed && fallbackUrl) {
         return (
-            <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
+            <View style={styles.sharedStage}>
                 <SharedBackdrop isVideo={isVideo} mediaUrl={fallbackUrl} posterSource={posterSource} />
-                <View style={styles.backdropDim} />
                 <View style={styles.cardColumn}>
                     <SharedPostMediaCard
                         handle={handle || story.sharedFromUser || 'post'}
@@ -265,7 +295,7 @@ export default function StorySharedPostViewer({
                         onPress={onOpenModal}
                     />
                 </View>
-            </LinearGradient>
+            </View>
         );
     }
 
@@ -281,9 +311,8 @@ export default function StorySharedPostViewer({
         const imageText = String(post.imageText || '').trim();
         const isCarousel = (post.mediaItems?.length || 0) > 1;
         return (
-            <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
+            <View style={styles.sharedStage}>
                 <SharedBackdrop isVideo={isVideo} mediaUrl={mediaUrl} posterSource={posterSource} />
-                <View style={styles.backdropDim} />
                 <View style={styles.cardColumn}>
                     <SharedPostMediaCard
                         handle={post.userHandle || handle}
@@ -299,7 +328,7 @@ export default function StorySharedPostViewer({
                         onPress={onOpenModal}
                     />
                 </View>
-            </LinearGradient>
+            </View>
         );
     }
 
@@ -409,11 +438,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     fallbackText: { color: '#fff', fontSize: 14 },
-    backdropMedia: { opacity: 0.58 },
-    backdropDim: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.35)',
+    sharedStage: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
     },
+    backdropMedia: { opacity: 0.58 },
     cardColumn: {
         flex: 1,
         alignItems: 'center',
@@ -425,7 +455,6 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 300,
         borderRadius: 12,
-        overflow: 'hidden',
         backgroundColor: '#FFFFFF',
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: 'rgba(0,0,0,0.08)',
@@ -433,7 +462,6 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.35,
         shadowRadius: 18,
         shadowOffset: { width: 0, height: 10 },
-        elevation: Platform.OS === 'android' ? 10 : 0,
     },
     cardHeader: {
         flexDirection: 'row',
@@ -452,11 +480,10 @@ const styles = StyleSheet.create({
     cardMediaWrap: {
         width: '100%',
         aspectRatio: 4 / 5,
-        backgroundColor: '#111',
-        overflow: 'hidden',
         position: 'relative',
     },
     cardMediaFill: {
+        ...StyleSheet.absoluteFillObject,
         width: '100%',
         height: '100%',
     },

@@ -2042,10 +2042,11 @@ const styles = StyleSheet.create({
     },
     storyViewer: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: 'transparent',
     },
     mediaLayer: {
         ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'transparent',
     },
     profileCardHost: {
         position: 'absolute',

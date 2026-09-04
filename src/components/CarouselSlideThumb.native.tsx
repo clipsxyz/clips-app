@@ -3,11 +3,8 @@ import { Image, Platform, StyleSheet, View } from 'react-native';
 import Video from 'react-native-video';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
+import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { normalizeNativeUploadUri } from '../utils/uploadFileNative';
-
-function looksLikeVideoUri(url: string): boolean {
-    return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
-}
 
 function resolveThumbUri(raw?: string | null): string | undefined {
     const trimmed = String(raw || '').trim();
@@ -17,6 +14,12 @@ function resolveThumbUri(raw?: string | null): string | undefined {
     return resolved || undefined;
 }
 
+function asStillUri(raw?: string | null): string | undefined {
+    const uri = resolveThumbUri(raw);
+    if (!uri || isVideoMediaUri(uri) || /^data:video\//i.test(uri)) return undefined;
+    return uri;
+}
+
 type Props = {
     size: number;
     uri?: string | null;
@@ -24,13 +27,15 @@ type Props = {
     posterUrl?: string | null;
     thumbnailUrl?: string | null;
     thumbnail_url?: string | null;
-    /** When true, video slides without a JPEG use a paused first frame. */
+    /** Bump after the main player swaps so ColorOS redraws the JPEG. */
+    recoverToken?: number;
+    /** Composer / gallery only. Feed thumbs must stay stills. */
     allowPausedVideo?: boolean;
 };
 
 /**
- * One still per carousel tile. Pixel size (not %) so ColorOS paints every cell.
- * Prefer JPEG poster; images use their own URL; leftover videos can use a paused frame.
+ * One JPEG per carousel tile. Never decode the playing MP4 here — a second
+ * TextureView on ColorOS blanks the strip or paints the feed video into it.
  */
 export default function CarouselSlideThumb({
     size,
@@ -39,24 +44,26 @@ export default function CarouselSlideThumb({
     posterUrl,
     thumbnailUrl,
     thumbnail_url,
+    recoverToken = 0,
     allowPausedVideo = false,
 }: Props) {
     const radius = Math.max(8, Math.round(size * 0.14));
     const box = { width: size, height: size, borderRadius: radius };
-    const poster = [posterUrl, thumbnailUrl, thumbnail_url]
-        .map((value) => resolveThumbUri(value))
-        .find((value) => value && !looksLikeVideoUri(value));
     const media = resolveThumbUri(uri);
     const stillUri =
-        poster ||
-        (type !== 'video' && media && !looksLikeVideoUri(media) ? media : undefined) ||
-        (type === 'image' && media ? media : undefined);
+        asStillUri(posterUrl) ||
+        asStillUri(thumbnailUrl) ||
+        asStillUri(thumbnail_url) ||
+        (type !== 'video' ? asStillUri(media) : undefined) ||
+        (type === 'image' ? asStillUri(media) : undefined) ||
+        (type === 'video' ? asStillUri(siblingJpegFromVideoUrl(media)) : undefined);
 
     let inner: React.ReactNode = <View style={[box, styles.fallback]} />;
 
     if (stillUri) {
         inner = (
             <Image
+                key={`${stillUri}-${recoverToken}`}
                 source={{ uri: stillUri }}
                 style={box}
                 resizeMode="cover"

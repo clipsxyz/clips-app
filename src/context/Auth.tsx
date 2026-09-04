@@ -5,6 +5,7 @@ import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate, hydratePrivacyStorage } from '../api/privacy';
 import { hydrateFollowsStorage, clearUserState, getState, syncFollowsFromLaravel } from '../api/posts';
 import { connectSocket, disconnectSocket } from '../services/socketio';
+import { connectEcho, disconnectEcho } from '../services/echo';
 import { db } from '../utils/db';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import { setAvatarForHandle } from '../api/users';
@@ -380,6 +381,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } catch (e) {
               console.warn('Socket connect skipped:', e);
             }
+            void connectEcho();
           }
           if (parsed.handle) {
             import('../services/notifications').then((mod) => {
@@ -504,6 +506,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
           console.warn('Socket connect skipped:', e);
         }
+        void connectEcho();
         import('../services/notifications').then((mod) => {
           const init = mod.initializeNotifications;
           const register =
@@ -530,6 +533,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await logoutFromServer();
     disconnectSocket();
+    disconnectEcho();
     setUser(null);
     if (prevId) clearUserState(prevId);
     localStorage.removeItem('user');
