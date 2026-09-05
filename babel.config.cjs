@@ -7,6 +7,7 @@ module.exports = function (api) {
     ],
     plugins: [
       './babel-plugin-import-meta-env.cjs',
+      '@babel/plugin-transform-class-static-block',
       'react-native-reanimated/plugin',
     ],
     overrides: [

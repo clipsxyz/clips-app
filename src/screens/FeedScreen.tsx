@@ -5360,7 +5360,7 @@ const styles = StyleSheet.create({
         zIndex: 24,
         elevation: 24,
         backgroundColor: FEED_PAGE_BG,
-        overflow: 'hidden',
+        overflow: 'visible',
     },
     feedListContent: {
         backgroundColor: FEED_PAGE_BG,
