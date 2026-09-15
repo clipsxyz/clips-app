@@ -453,6 +453,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       socialLinks: userData.socialLinks || undefined,
       placesTraveled: userData.placesTraveled || undefined,
       accountType: resolvedAccountType,
+      businessAddress: userData.businessAddress || undefined,
+      latitude:
+        typeof userData.latitude === 'number' && Number.isFinite(userData.latitude)
+          ? userData.latitude
+          : userData.latitude == null
+            ? undefined
+            : Number.isFinite(Number(userData.latitude))
+              ? Number(userData.latitude)
+              : undefined,
+      longitude:
+        typeof userData.longitude === 'number' && Number.isFinite(userData.longitude)
+          ? userData.longitude
+          : userData.longitude == null
+            ? undefined
+            : Number.isFinite(Number(userData.longitude))
+              ? Number(userData.longitude)
+              : undefined,
       is_private:
         typeof userData.is_private === 'boolean'
           ? userData.is_private

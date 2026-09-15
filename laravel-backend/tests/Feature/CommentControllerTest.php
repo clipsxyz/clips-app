@@ -6,6 +6,7 @@ use App\Models\Comment;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class CommentControllerTest extends TestCase
@@ -112,6 +113,29 @@ class CommentControllerTest extends TestCase
 
         $response2->assertStatus(200)
             ->assertJson(['liked' => false]);
+    }
+
+    public function test_toggle_comment_like_returns_404_when_missing(): void
+    {
+        $user = User::factory()->create();
+        $missingId = (string) Str::uuid();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/comments/{$missingId}/like");
+
+        $response->assertStatus(404)
+            ->assertJson(['message' => 'Comment no longer exists']);
+    }
+
+    public function test_toggle_comment_like_returns_404_for_temp_style_id(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/comments/temp-123/like');
+
+        $response->assertStatus(404)
+            ->assertJson(['message' => 'Comment no longer exists']);
     }
 
     public function test_add_comment_validates_text(): void

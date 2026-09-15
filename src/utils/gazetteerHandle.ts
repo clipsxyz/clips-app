@@ -51,6 +51,29 @@ export function buildGazetteerHandle(displayName: string, place: string): string
     return `${sanitizeHandleNamePart(displayName)}@${sanitizeHandlePlacePart(place)}`;
 }
 
+/** Signup username: one word, letters/numbers/underscore (matches Laravel auth regex). */
+export const SIGNUP_USERNAME_MIN = 3;
+export const SIGNUP_USERNAME_MAX = 50;
+
+export function sanitizeSignupUsernameInput(raw: string): string {
+    return String(raw || '')
+        .replace(/\s+/g, '')
+        .replace(/[^a-zA-Z0-9_]/g, '')
+        .slice(0, SIGNUP_USERNAME_MAX);
+}
+
+export function validateSignupUsername(raw: string): string | null {
+    const value = sanitizeSignupUsernameInput(raw);
+    if (!value) return 'Username is required.';
+    if (value.length < SIGNUP_USERNAME_MIN) {
+        return `Username must be at least ${SIGNUP_USERNAME_MIN} characters.`;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(value)) {
+        return 'Username must be one word (letters, numbers, underscore only).';
+    }
+    return null;
+}
+
 /**
  * Next handle after a passport name edit.
  * Keeps the existing @place when possible; falls back to regional / local.

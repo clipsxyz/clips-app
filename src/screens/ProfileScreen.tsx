@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
+import BusinessAddressPin from '../components/BusinessAddressPin.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import { resetRootToScreen } from '../navigation/rootNavigationRef';
 import {
@@ -1416,6 +1417,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         {user?.bio && (
                             <Text style={styles.userBio}>{user.bio}</Text>
                         )}
+                        <BusinessAddressPin
+                            address={user?.businessAddress}
+                            latitude={user?.latitude}
+                            longitude={user?.longitude}
+                        />
                     </View>
                 </View>
 

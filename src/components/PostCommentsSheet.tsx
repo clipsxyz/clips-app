@@ -718,6 +718,13 @@ export default function PostCommentsSheet({
     };
 
     const handleLikeComment = async (commentId: string) => {
+        if (!commentId || String(commentId).startsWith('temp-')) {
+            return;
+        }
+
+        const snapshot = comments.find((c) => c.id === commentId);
+        if (!snapshot) return;
+
         setComments((prev) =>
             prev.map((comment) => {
                 if (comment.id !== commentId) return comment;
@@ -725,15 +732,27 @@ export default function PostCommentsSheet({
                 return {
                     ...comment,
                     userLiked: nextLiked,
-                    likes: (comment.likes || 0) + (nextLiked ? 1 : -1),
+                    likes: Math.max(0, (comment.likes || 0) + (nextLiked ? 1 : -1)),
                 };
             }),
         );
+
         try {
             const updated = await toggleCommentLike(commentId);
-            setComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+            setComments((prev) =>
+                prev.map((c) =>
+                    c.id === commentId
+                        ? {
+                              ...c,
+                              userLiked: updated.userLiked,
+                              likes: typeof updated.likes === 'number' ? updated.likes : c.likes,
+                          }
+                        : c,
+                ),
+            );
         } catch (err) {
             console.error('Failed to like comment:', err);
+            setComments((prev) => prev.map((c) => (c.id === commentId ? snapshot : c)));
         }
     };
 

@@ -19,15 +19,16 @@ import * as ImagePicker from 'react-native-image-picker';
 import { launchNativeCamera } from '../utils/launchNativeCamera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/Auth';
-import { loginUser, registerUser, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
+import { loginUser, registerUser, checkSignupAvailability, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode } from '../api/client';
 import { persistAuthToken } from '../utils/authTokenBridge';
 import { resetRootToScreen, rootNavigationRef } from '../navigation/rootNavigationRef';
-import { buildGazetteerHandle } from '../utils/gazetteerHandle';
+import { buildGazetteerHandle, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import Avatar from '../components/Avatar';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import GazetteerMenuSheet from '../components/GazetteerMenuSheet.native';
 import type { LocationSuggestion } from '../api/locations';
+import { geocodeLocation } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import {
@@ -44,6 +45,13 @@ function resolveAuthMode(raw: unknown): AuthMode {
 }
 
 const INVITE_HANDLE_KEY = 'clips:inviteHandle';
+
+function normalizeSignupPassword(value: string): string {
+    return String(value || '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\r\n/g, '\n')
+        .trim();
+}
 
 function parseInviteFromUrl(url: string | null | undefined): string {
     if (!url) return '';
@@ -103,8 +111,12 @@ export default function LoginScreen({ navigation, route }: any) {
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [accountType, setAccountType] = useState<'personal' | 'business' | ''>('personal');
+    const [businessAddress, setBusinessAddress] = useState('');
+    const [businessLatitude, setBusinessLatitude] = useState<number | null>(null);
+    const [businessLongitude, setBusinessLongitude] = useState<number | null>(null);
 
     const [name, setName] = useState('');
+    const [username, setUsername] = useState('');
     const [local, setLocal] = useState('');
     const [regional, setRegional] = useState('');
     const [national, setNational] = useState('');
@@ -240,23 +252,27 @@ export default function LoginScreen({ navigation, route }: any) {
         const age = getAgeFromBirthday();
         return age !== null && age >= MIN_AGE;
     })();
+    const passwordNorm = normalizeSignupPassword(password);
+    const confirmPasswordNorm = normalizeSignupPassword(confirmPassword);
+    const passwordsMatch = passwordNorm.length >= 8 && passwordNorm === confirmPasswordNorm;
     const step1CanContinue = Boolean(
-        accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines
+        accountType && email.trim() && passwordsMatch && acceptedTerms && acceptedGuidelines
     );
     const step1MissingHints = (() => {
         const missing: string[] = [];
         if (!accountType) missing.push('account type');
         if (!email.trim()) missing.push('email');
-        if (password.length < 8) missing.push('password (8+)');
-        if (!confirmPassword || password !== confirmPassword) missing.push('matching confirm password');
+        if (passwordNorm.length < 8) missing.push('password (8+)');
+        else if (!confirmPasswordNorm || passwordNorm !== confirmPasswordNorm) missing.push('matching confirm password');
         if (!acceptedTerms) missing.push('Terms');
         if (!acceptedGuidelines) missing.push('Guidelines');
         return missing;
     })();
-    const step2CanContinue = Boolean(name.trim() && birthdateComplete);
+    const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
     const step2MissingHints = (() => {
         const missing: string[] = [];
         if (!name.trim()) missing.push(isBusinessAccount ? 'business name' : 'full name');
+        if (validateSignupUsername(username)) missing.push('username (one word, 3+)');
         if (!birthdateComplete) {
             missing.push(isBusinessAccount ? 'owner date of birth (13+)' : 'date of birth (13+)');
         }
@@ -266,15 +282,10 @@ export default function LoginScreen({ navigation, route }: any) {
     const step3MissingHints = homeLocationComplete
         ? []
         : [isBusinessAccount ? 'business location' : 'home location'];
+    const usernameForHandle = sanitizeSignupUsernameInput(username) || (isBusinessAccount ? 'business' : 'you');
     const handlePreview = regional
-        ? buildGazetteerHandle(
-            name.trim() || (isBusinessAccount ? 'business' : 'you'),
-            regional,
-          )
-        : buildGazetteerHandle(
-            name.trim() || (isBusinessAccount ? 'business' : 'you'),
-            'yourregion',
-          );
+        ? buildGazetteerHandle(usernameForHandle, regional)
+        : buildGazetteerHandle(usernameForHandle, 'yourregion');
 
     function applyHomeLocation(suggestion: LocationSuggestion) {
         const parsed = parsedPlaceFeedFromSuggestion(suggestion);
@@ -282,6 +293,26 @@ export default function LoginScreen({ navigation, route }: any) {
         setRegional(parsed.regional);
         setNational(parsed.national);
         setHomeLocationQuery(parsed.fullName || suggestion.name);
+    }
+
+    async function applyBusinessAddress(suggestion: LocationSuggestion) {
+        const label = String(
+            suggestion.formatted_address || suggestion.display_name || suggestion.name || '',
+        ).trim();
+        let lat = typeof suggestion.latitude === 'number' ? suggestion.latitude : null;
+        let lng = typeof suggestion.longitude === 'number' ? suggestion.longitude : null;
+        let address = label;
+        if ((lat == null || lng == null) && (suggestion.place_id || label)) {
+            const geo = await geocodeLocation({ placeId: suggestion.place_id, q: label });
+            if (geo) {
+                lat = geo.latitude;
+                lng = geo.longitude;
+                address = String(geo.formatted_address || geo.label || address).trim();
+            }
+        }
+        setBusinessAddress(address);
+        setBusinessLatitude(lat);
+        setBusinessLongitude(lng);
     }
 
     function clearHomeLocation() {
@@ -553,15 +584,17 @@ export default function LoginScreen({ navigation, route }: any) {
         }
     };
 
-    const handleStep1Submit = () => {
+    const handleStep1Submit = async () => {
         setErrorText('');
         setFieldErrors({});
         const nextErrors: Record<string, string> = {};
         if (!email) nextErrors.email = 'Email is required.';
-        if (!password) nextErrors.password = 'Password is required.';
-        if (!confirmPassword) nextErrors.confirmPassword = 'Please confirm password.';
-        if (password && password.length < 8) nextErrors.password = 'Password must be at least 8 characters.';
-        if (password && confirmPassword && password !== confirmPassword) nextErrors.confirmPassword = 'Passwords do not match.';
+        if (!passwordNorm) nextErrors.password = 'Password is required.';
+        if (!confirmPasswordNorm) nextErrors.confirmPassword = 'Please confirm password.';
+        if (passwordNorm && passwordNorm.length < 8) nextErrors.password = 'Password must be at least 8 characters.';
+        if (passwordNorm && confirmPasswordNorm && passwordNorm !== confirmPasswordNorm) {
+            nextErrors.confirmPassword = 'Passwords do not match.';
+        }
         if (!accountType) nextErrors.accountType = 'Choose personal or business.';
         if (!acceptedTerms) nextErrors.terms = 'You must accept Terms.';
         if (!acceptedGuidelines) nextErrors.guidelines = 'You must accept Community Guidelines.';
@@ -570,16 +603,44 @@ export default function LoginScreen({ navigation, route }: any) {
             setErrorText('Please fix the highlighted fields.');
             return;
         }
-        setStep(2);
+
+        setBusy(true);
+        try {
+            const availability = await checkSignupAvailability({ email: email.trim() });
+            if (availability.email_taken) {
+                setFieldErrors({ email: 'This email is already taken. Try logging in instead.' });
+                setErrorText('This email is already registered.');
+                return;
+            }
+            if (availability.errors?.email?.[0]) {
+                setFieldErrors({ email: availability.errors.email[0] });
+                setErrorText('Please fix the highlighted fields.');
+                return;
+            }
+            setStep(2);
+        } catch (err: any) {
+            const msg = String(err?.message || '');
+            const isConnection =
+                err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+            setErrorText(
+                isConnection
+                    ? 'Cannot reach the server. Check Laravel is running and try again.'
+                    : msg || 'Could not verify email. Try again.',
+            );
+        } finally {
+            setBusy(false);
+        }
     };
 
-    const handleStep2Submit = () => {
+    const handleStep2Submit = async () => {
         setErrorText('');
         setFieldErrors({});
         const nextErrors: Record<string, string> = {};
         if (!name.trim()) {
             nextErrors.name = isBusinessAccount ? 'Business name is required.' : 'Full name is required.';
         }
+        const usernameError = validateSignupUsername(username);
+        if (usernameError) nextErrors.username = usernameError;
         if (!birthMonth || !birthDay || !birthYear) {
             nextErrors.birthdate = isBusinessAccount
                 ? 'Please enter the account owner’s date of birth.'
@@ -598,7 +659,34 @@ export default function LoginScreen({ navigation, route }: any) {
             setErrorText('Please complete all required profile fields.');
             return;
         }
-        setStep(3);
+
+        setBusy(true);
+        try {
+            const cleanUsername = sanitizeSignupUsernameInput(username);
+            const availability = await checkSignupAvailability({ username: cleanUsername });
+            if (availability.username_taken) {
+                setFieldErrors({ username: 'This username is already taken. Try another.' });
+                setErrorText('Please choose a different username.');
+                return;
+            }
+            if (availability.errors?.username?.[0]) {
+                setFieldErrors({ username: availability.errors.username[0] });
+                setErrorText('Please fix the highlighted fields.');
+                return;
+            }
+            setStep(3);
+        } catch (err: any) {
+            const msg = String(err?.message || '');
+            const isConnection =
+                err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+            setErrorText(
+                isConnection
+                    ? 'Cannot reach the server. Check Laravel is running and try again.'
+                    : msg || 'Could not verify username. Try again.',
+            );
+        } finally {
+            setBusy(false);
+        }
     };
 
     const handleStep3Submit = () => {
@@ -626,7 +714,8 @@ export default function LoginScreen({ navigation, route }: any) {
         setErrorText('');
         const age = getAgeFromBirthday();
         const consentTimestamp = new Date().toISOString();
-        const handle = buildGazetteerHandle(name.trim() || 'user', regional);
+        const cleanUsername = sanitizeSignupUsernameInput(username);
+        const handle = buildGazetteerHandle(cleanUsername || 'user', regional);
         const userData = {
             name: name.trim(),
             email: email.trim(),
@@ -640,13 +729,16 @@ export default function LoginScreen({ navigation, route }: any) {
             countryFlag: normalizeCountryFlagInput('', national),
             avatarUrl: profilePicture || undefined,
             accountType: accountType || 'personal',
+            businessAddress: accountType === 'business' ? businessAddress.trim() || undefined : undefined,
+            latitude: accountType === 'business' ? businessLatitude ?? undefined : undefined,
+            longitude: accountType === 'business' ? businessLongitude ?? undefined : undefined,
             termsAcceptedAt: consentTimestamp,
             guidelinesAcceptedAt: consentTimestamp,
         };
 
         try {
             const apiResponse = await registerUser({
-                username: email.trim().split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
+                username: cleanUsername,
                 email: email.trim(),
                 password,
                 displayName: name.trim(),
@@ -656,6 +748,9 @@ export default function LoginScreen({ navigation, route }: any) {
                 locationNational: String(national || '').trim(),
                 accountType: accountType as 'personal' | 'business',
                 isBusiness: accountType === 'business',
+                businessAddress: accountType === 'business' ? businessAddress.trim() || undefined : undefined,
+                latitude: accountType === 'business' ? businessLatitude : undefined,
+                longitude: accountType === 'business' ? businessLongitude : undefined,
                 inviteHandle: inviteHandle || undefined,
             });
             if (apiResponse?.token) {
@@ -705,11 +800,43 @@ export default function LoginScreen({ navigation, route }: any) {
                 const msg = String(err?.message || 'Registration failed');
                 const isConnection =
                     err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
-                setErrorText(
-                    isConnection
-                        ? 'Cannot reach the server. Check Laravel is running and try again.'
-                        : msg,
-                );
+                const responseErrors = (err as any)?.response?.errors || {};
+                const emailErr = Array.isArray(responseErrors.email)
+                    ? String(responseErrors.email[0] || '')
+                    : '';
+                const usernameErr = Array.isArray(responseErrors.username)
+                    ? String(responseErrors.username[0] || '')
+                    : '';
+                const handleErr = Array.isArray(responseErrors.handle)
+                    ? String(responseErrors.handle[0] || '')
+                    : '';
+                if (/email/i.test(emailErr) || /email.*(taken|unique|already)/i.test(msg)) {
+                    setStep(1);
+                    setFieldErrors({
+                        email: emailErr || 'This email is already taken. Try logging in instead.',
+                    });
+                    setErrorText('This email is already registered.');
+                } else if (
+                    /username/i.test(usernameErr) ||
+                    /username.*(taken|unique|already)/i.test(msg) ||
+                    /handle.*(taken|unique|already)/i.test(handleErr) ||
+                    /handle.*(taken|unique|already)/i.test(msg)
+                ) {
+                    setStep(2);
+                    setFieldErrors({
+                        username:
+                            usernameErr ||
+                            handleErr ||
+                            'This username is already taken. Try another.',
+                    });
+                    setErrorText('Please choose a different username.');
+                } else {
+                    setErrorText(
+                        isConnection
+                            ? 'Cannot reach the server. Check Laravel is running and try again.'
+                            : msg,
+                    );
+                }
                 setBusy(false);
                 return;
             }
@@ -880,7 +1007,12 @@ export default function LoginScreen({ navigation, route }: any) {
                             <View style={styles.profileTabsWrap}>
                                 <View style={styles.profileTabsRow}>
                                     <TouchableOpacity
-                                        onPress={() => setAccountType('personal')}
+                                        onPress={() => {
+                                            setAccountType('personal');
+                                            setBusinessAddress('');
+                                            setBusinessLatitude(null);
+                                            setBusinessLongitude(null);
+                                        }}
                                         style={[
                                             styles.profileTabButton,
                                             accountType === 'personal' && styles.profileTabButtonActive,
@@ -916,7 +1048,21 @@ export default function LoginScreen({ navigation, route }: any) {
                                 </View>
                             </View>
                             {accountType === 'business' ? (
-                                <Text style={styles.hintText}>Eligible for local business suggestion cards.</Text>
+                                <>
+                                    <Text style={styles.hintText}>Eligible for local business suggestion cards.</Text>
+                                    <Text style={styles.fieldLabel}>Business Address</Text>
+                                    <PlaceAutocompleteField
+                                        value={businessAddress}
+                                        onChange={(v) => {
+                                            setBusinessAddress(v);
+                                            setBusinessLatitude(null);
+                                            setBusinessLongitude(null);
+                                        }}
+                                        onSelectSuggestion={applyBusinessAddress}
+                                        mode="all"
+                                        placeholder="Search business address"
+                                    />
+                                </>
                             ) : null}
                             {!!getFieldError('accountType') && <Text style={styles.fieldErrorText}>{getFieldError('accountType')}</Text>}
 
@@ -934,11 +1080,27 @@ export default function LoginScreen({ navigation, route }: any) {
                             <View style={styles.passwordRow}>
                                 <TextInput
                                     value={password}
-                                    onChangeText={setPassword}
+                                    onChangeText={(text) => {
+                                        setPassword(text);
+                                        // iOS/Oppo autofill often fills only the first field.
+                                        if (
+                                            password.length === 0 &&
+                                            normalizeSignupPassword(text).length >= 8 &&
+                                            !normalizeSignupPassword(confirmPassword)
+                                        ) {
+                                            setConfirmPassword(text);
+                                        }
+                                    }}
                                     placeholder="Password (8+ characters)"
                                     placeholderTextColor="#6B7280"
                                     style={[styles.input, { flex: 1 }]}
                                     secureTextEntry={!showSignupPassword}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    spellCheck={false}
+                                    textContentType="newPassword"
+                                    autoComplete="new-password"
+                                    passwordRules="minlength: 8;"
                                 />
                                 <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupPassword((v) => !v)}>
                                     <Icon name={showSignupPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
@@ -954,11 +1116,34 @@ export default function LoginScreen({ navigation, route }: any) {
                                     placeholderTextColor="#6B7280"
                                     style={[styles.input, { flex: 1 }]}
                                     secureTextEntry={!showSignupConfirmPassword}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    spellCheck={false}
+                                    textContentType="newPassword"
+                                    autoComplete="new-password"
+                                    importantForAutofill="no"
                                 />
                                 <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupConfirmPassword((v) => !v)}>
                                     <Icon name={showSignupConfirmPassword ? 'eye-off' : 'eye'} size={ox(18)} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </View>
+                            {password.length > 0 || confirmPassword.length > 0 ? (
+                                <Text
+                                    style={
+                                        passwordsMatch
+                                            ? styles.passwordMatchOk
+                                            : confirmPasswordNorm
+                                              ? styles.passwordMatchBad
+                                              : styles.passwordMatchWarn
+                                    }
+                                >
+                                    {passwordsMatch
+                                        ? 'Passwords match'
+                                        : confirmPasswordNorm
+                                          ? 'Passwords don’t match'
+                                          : 'Confirm your password'}
+                                </Text>
+                            ) : null}
                             {!!getFieldError('confirmPassword') && <Text style={styles.fieldErrorText}>{getFieldError('confirmPassword')}</Text>}
                         </View>
                     )}
@@ -999,6 +1184,27 @@ export default function LoginScreen({ navigation, route }: any) {
                                 autoCapitalize="words"
                             />
                             {!!getFieldError('name') && <Text style={styles.fieldErrorText}>{getFieldError('name')}</Text>}
+
+                            <Text style={styles.fieldLabel}>Username</Text>
+                            <Text style={styles.hintText}>
+                                One word — used in your Gazetteer handle (letters, numbers, underscore).
+                            </Text>
+                            <TextInput
+                                value={username}
+                                onChangeText={(v) => setUsername(sanitizeSignupUsernameInput(v))}
+                                placeholder="e.g. John or JohnS"
+                                placeholderTextColor="#6B7280"
+                                style={styles.input}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                autoComplete="username"
+                            />
+                            {!!getFieldError('username') && (
+                                <Text style={styles.fieldErrorText}>{getFieldError('username')}</Text>
+                            )}
+                            {sanitizeSignupUsernameInput(username).length >= 3 ? (
+                                <Text style={styles.hintText}>Your handle will be {handlePreview}</Text>
+                            ) : null}
 
                             <Text style={styles.fieldLabel}>
                                 {isBusinessAccount
@@ -1630,7 +1836,26 @@ const styles = StyleSheet.create({
         marginTop: ox(-6),
         marginBottom: ox(2),
     },
+    passwordMatchOk: {
+        color: '#4ADE80',
+        fontSize: ox(12),
+        fontWeight: '600',
+        marginTop: ox(-4),
+    },
+    passwordMatchWarn: {
+        color: '#FBBF24',
+        fontSize: ox(12),
+        fontWeight: '600',
+        marginTop: ox(-4),
+    },
+    passwordMatchBad: {
+        color: '#FCA5A5',
+        fontSize: ox(12),
+        fontWeight: '600',
+        marginTop: ox(-4),
+    },
     passwordRow: {
+        width: '100%',
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(8),

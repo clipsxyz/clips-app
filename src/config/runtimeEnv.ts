@@ -94,7 +94,7 @@ export function isMockMode(): boolean {
 }
 
 /** Mac LAN IP used when the phone cannot reach localhost (adb reverse drops). */
-export const DEV_LAN_API_HOST = '192.168.1.9';
+export const DEV_LAN_API_HOST = '192.168.1.12';
 export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
 
 /**
@@ -168,7 +168,7 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
   if (typeof require === 'undefined') return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { NativeModules } = require('react-native') as typeof import('react-native');
+    const { NativeModules, Platform } = require('react-native') as typeof import('react-native');
     const port = '8000';
 
     const scriptUrl = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
@@ -178,6 +178,13 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
         const host = parsed.hostname;
         const protocol = String(parsed.protocol || '').replace(/:$/, '');
         if (protocol === 'file' || !host) return null;
+        // Metro via adb reverse uses localhost — API can use the same reverse on :8000.
+        if (host === 'localhost' || host === '127.0.0.1') {
+          if (Platform.OS === 'android') {
+            return `http://127.0.0.1:${port}/api`;
+          }
+          return null;
+        }
         if (host !== 'localhost' && host !== '127.0.0.1') {
           return `http://${host}:${port}/api`;
         }

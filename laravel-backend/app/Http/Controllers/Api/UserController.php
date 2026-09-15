@@ -20,6 +20,8 @@ class UserController extends Controller
     /**
      * Check if the given user (by handle) follows the current viewer. Used for mutual-follow DM icon.
      * GET /api/users/check-follows-me?handle=Ava@galway
+     *
+     * Always returns 200 — missing handles do not 404 (avoids frontend console crashes).
      */
     public function checkFollowsMe(Request $request): JsonResponse
     {
@@ -29,18 +31,48 @@ class UserController extends Controller
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
-        $handle = $request->query('handle');
-        $other = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
+
+        $rawHandle = (string) $request->query('handle', '');
+        $decoded = urldecode($rawHandle);
+        $normalized = ltrim($decoded, '@');
+        $candidates = array_values(array_unique(array_filter([
+            $rawHandle,
+            $decoded,
+            $normalized,
+            '@' . $normalized,
+        ], fn ($h) => is_string($h) && $h !== '')));
+
+        $other = null;
+        foreach ($candidates as $candidate) {
+            $other = User::whereRaw('LOWER(handle) = LOWER(?)', [$candidate])->first();
+            if ($other) {
+                break;
+            }
+        }
+        if (!$other && $normalized !== '') {
+            $other = $this->resolveProfileUser($normalized);
+        }
+
         $viewer = Auth::user();
         if (!$viewer || !$other) {
-            return response()->json(['follows_me' => false]);
+            return response()->json([
+                'follows_me' => false,
+                'follows' => false,
+                'user_exists' => false,
+            ]);
         }
+
         $followsMe = DB::table('user_follows')
             ->where('follower_id', $other->id)
             ->where('following_id', $viewer->id)
             ->where('status', 'accepted')
             ->exists();
-        return response()->json(['follows_me' => $followsMe]);
+
+        return response()->json([
+            'follows_me' => $followsMe,
+            'follows' => $followsMe,
+            'user_exists' => true,
+        ]);
     }
 
     /**

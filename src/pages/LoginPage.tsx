@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
-import { loginUser, registerUser, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode, uploadFile, updateAuthProfile } from '../api/client';
+import { loginUser, registerUser, checkSignupAvailability, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode, uploadFile, updateAuthProfile } from '../api/client';
 import { isMockMode } from '../api/apiMode';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
@@ -14,7 +14,7 @@ import { persistAuthToken } from '../utils/authTokenBridge';
 import { setAvatarForHandle } from '../api/users';
 import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import { db } from '../utils/db';
-import { buildGazetteerHandle } from '../utils/gazetteerHandle';
+import { buildGazetteerHandle, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
 const avatarStorageKey = (id: string) => `clips_app_avatar_${id}`;
@@ -143,6 +143,7 @@ export default function LoginPage() {
 
   // Step 2: Profile & location
   const [name, setName] = React.useState('');
+  const [username, setUsername] = React.useState('');
   const [local, setLocal] = React.useState('');
   const [regional, setRegional] = React.useState('');
   const [national, setNational] = React.useState('');
@@ -209,15 +210,17 @@ export default function LoginPage() {
     return age;
   }
 
-  const handleFirstName = name.trim().split(/\s+/)[0] || 'yourname';
-  const handlePreview = regional ? `${handleFirstName}@${regional}` : `${handleFirstName}@yourregion`;
+  const usernameForHandle = sanitizeSignupUsernameInput(username) || 'yourname';
+  const handlePreview = regional
+    ? buildGazetteerHandle(usernameForHandle, regional)
+    : buildGazetteerHandle(usernameForHandle, 'yourregion');
   const previewCountryFlag = normalizeCountryFlagInput('', national);
   const homeLocationComplete = Boolean(local && regional && national);
   const birthdateComplete = React.useMemo(() => {
     const age = getAgeFromBirthday();
     return age !== null && age >= MIN_AGE;
   }, [birthMonth, birthDay, birthYear]);
-  const step2CanContinue = Boolean(name.trim() && birthdateComplete);
+  const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
   const step3CanContinue = homeLocationComplete;
   const step1CanContinue =
     Boolean(accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines);
@@ -237,7 +240,7 @@ export default function LoginPage() {
     setHomeLocationQuery('');
   }
 
-  function handleAccountSubmit(e: React.FormEvent) {
+  async function handleAccountSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
     if (!email || !password || !confirmPassword) {
@@ -265,15 +268,43 @@ export default function LoginPage() {
       setSignupError('Please fix the highlighted fields.');
       return;
     }
-    setSignupFieldErrors({});
+
+    setSignupSubmitting(true);
     setSignupError('');
-    updateStep(2);
+    try {
+      const availability = await checkSignupAvailability({ email: email.trim() });
+      if (availability.email_taken) {
+        setSignupFieldErrors({ email: 'This email is already taken. Try logging in instead.' });
+        setSignupError('This email is already registered.');
+        return;
+      }
+      if (availability.errors?.email?.[0]) {
+        setSignupFieldErrors({ email: availability.errors.email[0] });
+        setSignupError('Please fix the highlighted fields.');
+        return;
+      }
+      setSignupFieldErrors({});
+      updateStep(2);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isConnection =
+        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+      setSignupError(
+        isConnection
+          ? 'Cannot reach the server. Check Laravel is running and try again.'
+          : msg || 'Could not verify email. Try again.',
+      );
+    } finally {
+      setSignupSubmitting(false);
+    }
   }
 
-  function handleProfileSubmit(e: React.FormEvent) {
+  async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
     if (!name) nextErrors.name = 'Full name is required.';
+    const usernameError = validateSignupUsername(username);
+    if (usernameError) nextErrors.username = usernameError;
     if (!birthMonth || !birthDay || !birthYear) {
       nextErrors.birthdate = 'Please enter your date of birth.';
     }
@@ -288,9 +319,36 @@ export default function LoginPage() {
       setSignupError('Please complete all required profile fields.');
       return;
     }
-    setSignupFieldErrors({});
+
+    setSignupSubmitting(true);
     setSignupError('');
-    updateStep(3);
+    try {
+      const cleanUsername = sanitizeSignupUsernameInput(username);
+      const availability = await checkSignupAvailability({ username: cleanUsername });
+      if (availability.username_taken) {
+        setSignupFieldErrors({ username: 'This username is already taken. Try another.' });
+        setSignupError('Please choose a different username.');
+        return;
+      }
+      if (availability.errors?.username?.[0]) {
+        setSignupFieldErrors({ username: availability.errors.username[0] });
+        setSignupError('Please fix the highlighted fields.');
+        return;
+      }
+      setSignupFieldErrors({});
+      updateStep(3);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isConnection =
+        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+      setSignupError(
+        isConnection
+          ? 'Cannot reach the server. Check Laravel is running and try again.'
+          : msg || 'Could not verify username. Try again.',
+      );
+    } finally {
+      setSignupSubmitting(false);
+    }
   }
 
   function handleLocationSubmit(e: React.FormEvent) {
@@ -315,7 +373,8 @@ export default function LoginPage() {
     setSignupSubmitting(true);
     const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
-    const handle = buildGazetteerHandle(name.trim() || 'user', regional);
+    const cleanUsername = sanitizeSignupUsernameInput(username);
+    const handle = buildGazetteerHandle(cleanUsername || 'user', regional);
     const userId = email.trim().toLowerCase();
     const userData = {
       id: userId,
@@ -348,7 +407,7 @@ export default function LoginPage() {
         (searchParams.get('invite') || '').replace(/^@/, '').trim() ||
         (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('clips:inviteHandle') || '').replace(/^@/, '').trim() : '');
       const apiResponse = await registerUser({
-        username: email.trim().split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
+        username: cleanUsername,
         email: email.trim(),
         password,
         displayName: name.trim(),
@@ -413,11 +472,40 @@ export default function LoginPage() {
         const isConnection =
           message.includes('CONNECTION_REFUSED') ||
           (err instanceof Error && err.name === 'ConnectionRefused');
-        setSignupError(
-          isConnection
-            ? 'Cannot reach the server. Check Laravel is running and try again.'
-            : message,
-        );
+        const responseErrors = (err as any)?.response?.errors || {};
+        const emailErr = Array.isArray(responseErrors.email)
+          ? String(responseErrors.email[0] || '')
+          : '';
+        const usernameErr = Array.isArray(responseErrors.username)
+          ? String(responseErrors.username[0] || '')
+          : '';
+        const handleErr = Array.isArray(responseErrors.handle)
+          ? String(responseErrors.handle[0] || '')
+          : '';
+        if (/email/i.test(emailErr) || /email.*(taken|unique|already)/i.test(message)) {
+          updateStep(1);
+          setSignupFieldErrors({
+            email: emailErr || 'This email is already taken. Try logging in instead.',
+          });
+          setSignupError('This email is already registered.');
+        } else if (
+          /username/i.test(usernameErr) ||
+          /username.*(taken|unique|already)/i.test(message) ||
+          /handle.*(taken|unique|already)/i.test(handleErr) ||
+          /handle.*(taken|unique|already)/i.test(message)
+        ) {
+          updateStep(2);
+          setSignupFieldErrors({
+            username: usernameErr || handleErr || 'This username is already taken. Try another.',
+          });
+          setSignupError('Please choose a different username.');
+        } else {
+          setSignupError(
+            isConnection
+              ? 'Cannot reach the server. Check Laravel is running and try again.'
+              : message,
+          );
+        }
         setSignupSubmitting(false);
         return;
       }
@@ -1020,7 +1108,7 @@ export default function LoginPage() {
                 {showConfirmPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
               </button>
               {confirmPassword && (
-                <p className={`text-xs mt-1.5 px-1 ${password === confirmPassword ? 'text-green-500' : 'text-red-500'}`}>
+                <p className={`text-xs mt-1.5 px-1 font-semibold ${password === confirmPassword ? 'text-green-400' : 'text-amber-300'}`}>
                   {password === confirmPassword ? 'Passwords match' : 'Passwords don\'t match'}
                 </p>
               )}
@@ -1044,6 +1132,30 @@ export default function LoginPage() {
                 autoComplete="name"
               />
               {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-2">
+                Username — one word for your Gazetteer handle (letters, numbers, underscore).
+              </p>
+              <input
+                value={username}
+                onChange={e => setUsername(sanitizeSignupUsernameInput(e.target.value))}
+                className={signupInputClass}
+                placeholder="e.g. John or JohnS"
+                required
+                autoComplete="username"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+              {signupFieldErrors.username && (
+                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.username}</p>
+              )}
+              {sanitizeSignupUsernameInput(username).length >= 3 && (
+                <p className="mt-1.5 text-xs text-gray-400 px-1">
+                  Your handle will be <span className="text-white font-medium">{handlePreview}</span>
+                </p>
+              )}
             </div>
 
             {/* Date of Birth - required, 13+ */}

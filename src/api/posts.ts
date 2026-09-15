@@ -3556,6 +3556,7 @@ export async function fetchPostsByUser(
         name: error?.name,
         message: error?.message,
         status: error?.status,
+        url: error?.url,
         response: error?.response,
       });
       throw error;
@@ -3698,17 +3699,47 @@ export async function addComment(postId: string, userHandle: string, text: strin
 }
 
 export async function toggleCommentLike(commentId: string): Promise<Comment> {
+  const id = String(commentId || '').trim();
+  if (!id || id.startsWith('temp-')) {
+    throw new Error('Comment is still saving — try again in a moment');
+  }
+
+  if (!isMockMode()) {
+    const response = await apiClient.toggleCommentLike(id);
+    const liked = response?.liked === true;
+    const likesFromApi = Number(response?.likes_count ?? response?.likesCount);
+    const cached = comments.find((c) => c.id === id);
+    const nextLikes = Number.isFinite(likesFromApi)
+      ? Math.max(0, likesFromApi)
+      : Math.max(0, (cached?.likes || 0) + (liked ? 1 : -1));
+
+    if (cached) {
+      cached.userLiked = liked;
+      cached.likes = nextLikes;
+      return { ...cached };
+    }
+
+    return {
+      id,
+      postId: '',
+      userHandle: '',
+      text: '',
+      createdAt: Date.now(),
+      likes: nextLikes,
+      userLiked: liked,
+    };
+  }
+
   await delay(100);
-  const comment = comments.find(c => c.id === commentId);
+  const comment = comments.find((c) => c.id === id);
   if (!comment) {
     throw new Error('Comment not found');
   }
 
-  // Toggle the like state
   comment.userLiked = !comment.userLiked;
   comment.likes += comment.userLiked ? 1 : -1;
 
-  return comment;
+  return { ...comment };
 }
 
 export async function toggleReplyLike(parentCommentId: string, replyId: string): Promise<Comment> {

@@ -156,30 +156,102 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         }
     } catch (error: any) {
         clearTimeout(timeoutId);
+        const attemptedUrl = `${API_BASE_URL}${endpoint}`;
         // Suppress connection refused errors when backend isn't running
         // Check for various connection error patterns
         const isAbort = error?.name === 'AbortError';
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+            (error?.name === 'TypeError' &&
+                (error?.message?.includes('fetch') || error?.message?.includes('Network request failed')));
 
         if (isAbort) {
             throw error;
         }
         if (isConnectionError) {
+            console.error('[apiRequest] Network request failed', {
+                url: attemptedUrl,
+                method: String(config.method || 'GET').toUpperCase(),
+                name: error?.name,
+                message: error?.message,
+            });
             // Re-throw with a specific error type that can be caught and handled gracefully
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
+            (connectionError as any).url = attemptedUrl;
             throw connectionError;
         }
+        console.error('[apiRequest] request failed', {
+            url: attemptedUrl,
+            name: error?.name,
+            message: error?.message,
+            status: error?.status,
+        });
         throw error;
     }
 }
 
 // Auth API
+export async function checkSignupAvailability(opts: {
+    email?: string;
+    username?: string;
+}): Promise<{
+    available: boolean;
+    email_taken: boolean;
+    username_taken: boolean;
+    errors?: Record<string, string[]>;
+}> {
+    if (isMockMode()) {
+        return { available: true, email_taken: false, username_taken: false };
+    }
+
+    const params = new URLSearchParams();
+    const email = String(opts.email || '').trim().toLowerCase();
+    const username = String(opts.username || '').trim();
+    if (email) params.set('email', email);
+    if (username) params.set('username', username);
+    if (![...params.keys()].length) {
+        return { available: true, email_taken: false, username_taken: false };
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/check-availability?${params.toString()}`;
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            return {
+                available: false,
+                email_taken: Boolean((data as any)?.email_taken),
+                username_taken: Boolean((data as any)?.username_taken),
+                errors: (data as any)?.errors,
+            };
+        }
+        return {
+            available: (data as any)?.available !== false,
+            email_taken: Boolean((data as any)?.email_taken),
+            username_taken: Boolean((data as any)?.username_taken),
+            errors: (data as any)?.errors,
+        };
+    } catch (err: any) {
+        const msg = String(err?.message || '');
+        if (msg.includes('Failed to fetch') || msg.includes('Network request failed')) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw err;
+    }
+}
+
 export async function registerUser(userData: {
     username: string;
     email: string;
@@ -191,6 +263,9 @@ export async function registerUser(userData: {
     locationNational?: string;
     accountType?: 'personal' | 'business';
     isBusiness?: boolean;
+    businessAddress?: string;
+    latitude?: number | null;
+    longitude?: number | null;
     inviteHandle?: string;
 }): Promise<{ user: Record<string, unknown>; token: string }> {
     if (isMockMode()) {
@@ -225,6 +300,9 @@ export async function registerUser(userData: {
         locationNational: String(userData.locationNational || '').trim() || undefined,
         accountType: userData.accountType,
         isBusiness: userData.isBusiness,
+        businessAddress: String(userData.businessAddress || '').trim() || undefined,
+        latitude: typeof userData.latitude === 'number' ? userData.latitude : undefined,
+        longitude: typeof userData.longitude === 'number' ? userData.longitude : undefined,
         invite: String(userData.inviteHandle || '').replace(/^@/, '').trim() || undefined,
     };
 
@@ -802,6 +880,23 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         is_verified: apiUser.is_verified as boolean | undefined,
         facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
+        businessAddress: (() => {
+            const raw = apiUser.business_address ?? apiUser.businessAddress;
+            const text = raw != null ? String(raw).trim() : '';
+            return text || undefined;
+        })(),
+        latitude: (() => {
+            const raw = apiUser.latitude;
+            if (raw == null || raw === '') return null;
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : null;
+        })(),
+        longitude: (() => {
+            const raw = apiUser.longitude;
+            if (raw == null || raw === '') return null;
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : null;
+        })(),
         followers_count: Number(apiUser.followers_count ?? apiUser.followersCount ?? 0) || 0,
         following_count: Number(apiUser.following_count ?? apiUser.followingCount ?? 0) || 0,
         phone_number:
@@ -831,6 +926,10 @@ export async function updateAuthProfile(data: {
     avatar_url?: string | null;
     account_type?: 'personal' | 'business';
     is_business?: boolean;
+    business_address?: string | null;
+    businessAddress?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
     is_private?: boolean;
     email_digest_enabled?: boolean;
 }) {
@@ -973,7 +1072,18 @@ export async function fetchStoriesPage(cursor: string | null = null, limit: numb
 }
 
 /** Check if the user with the given handle follows the current viewer (for mutual-follow DM icon). Requires auth. */
-export async function checkFollowsMe(handle: string): Promise<{ follows_me: boolean }> {
+export async function checkFollowsMe(handle: string): Promise<{
+    follows_me: boolean;
+    follows?: boolean;
+    user_exists?: boolean;
+}> {
+    const normalizedHandle = String(handle || '')
+        .trim()
+        .replace(/^@+/, '');
+    if (!normalizedHandle) {
+        return { follows_me: false, follows: false, user_exists: false };
+    }
+
     if (!isLaravelApiEnabled()) {
         let viewerHandle = '';
         try {
@@ -981,10 +1091,11 @@ export async function checkFollowsMe(handle: string): Promise<{ follows_me: bool
             if (raw) viewerHandle = String(JSON.parse(raw)?.handle || '');
         } catch (_) {}
         const { mockAuthorFollowsViewer } = await import('./mockFollowGraph');
-        return Promise.resolve({ follows_me: mockAuthorFollowsViewer(handle, viewerHandle) });
+        const follows = mockAuthorFollowsViewer(normalizedHandle, viewerHandle);
+        return Promise.resolve({ follows_me: follows, follows, user_exists: true });
     }
-    const params = new URLSearchParams({ handle });
-    return apiRequest(`/users/check-follows-me?${params}`);
+
+    return apiRequest(`/users/check-follows-me?handle=${encodeURIComponent(normalizedHandle)}`);
 }
 
 export async function createPost(postData: {
@@ -1534,13 +1645,17 @@ async function laravelUsersGet(
         }
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+            (error?.name === 'TypeError' &&
+                (error?.message?.includes('fetch') || error?.message?.includes('Network request failed')));
         if (isConnectionError) {
+            console.error('[laravelUsersGet] Network request failed — attempted endpoint:', url);
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
+            (connectionError as any).url = url;
             throw connectionError;
         }
         throw error;

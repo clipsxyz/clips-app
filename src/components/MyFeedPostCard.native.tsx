@@ -11,6 +11,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post, User } from '../types';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedPostMedia from './FeedPostMedia.native';
+import PostHeaderOverlay from './PostHeaderOverlay.native';
 import FeedTextOnlyFeedLayout from './FeedTextOnlyFeedLayout.native';
 import FeedCaptionText from './FeedCaptionText.native';
 import FeedTaggedMediaBadge from './FeedTaggedMediaBadge.native';
@@ -103,6 +104,16 @@ export default function MyFeedPostCard({
         setHeartDrop({ startX: pageX, startY: pageY });
     };
 
+    const handleLocationPress = (location: string) => {
+        const filter = location.trim();
+        if (!filter) return;
+        navigation.navigate('Feed', {
+            location: filter,
+            locationLabel: filter,
+            filterType: 'location',
+        });
+    };
+
     return (
         <TouchableOpacity activeOpacity={0.95} style={styles.card} onPress={onPress}>
             <FeedPostTagRow tags={postTags} />
@@ -144,6 +155,7 @@ export default function MyFeedPostCard({
                                 height={mediaHeight}
                                 mode="feed"
                             />
+                            <PostHeaderOverlay post={post} onLocationPress={handleLocationPress} />
                         </View>
                     ) : null}
                     {carouselThumbItems.length > 1 ? (

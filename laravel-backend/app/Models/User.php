@@ -43,6 +43,9 @@ class User extends Authenticatable
         'location_local',
         'location_regional',
         'location_national',
+        'business_address',
+        'latitude',
+        'longitude',
         'is_verified',
         'is_private',
         'followers_count',
@@ -71,6 +74,8 @@ class User extends Authenticatable
         'posts_count' => 'integer',
         'social_links' => 'array', // Cast JSON to array
         'places_traveled' => 'array',
+        'latitude' => 'float',
+        'longitude' => 'float',
     ];
 
     // Relationships

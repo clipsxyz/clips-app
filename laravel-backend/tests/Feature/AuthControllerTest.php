@@ -52,6 +52,38 @@ class AuthControllerTest extends TestCase
         ]);
     }
 
+    public function test_check_availability_reports_taken_email_and_username(): void
+    {
+        User::factory()->create([
+            'email' => 'taken@example.com',
+            'username' => 'TakenUser',
+        ]);
+
+        $this->getJson('/api/auth/check-availability?email=free@example.com&username=freshuser')
+            ->assertStatus(200)
+            ->assertJson([
+                'available' => true,
+                'email_taken' => false,
+                'username_taken' => false,
+            ]);
+
+        $this->getJson('/api/auth/check-availability?email=TAKEN@example.com')
+            ->assertStatus(200)
+            ->assertJson([
+                'available' => false,
+                'email_taken' => true,
+                'username_taken' => false,
+            ]);
+
+        $this->getJson('/api/auth/check-availability?username=takenuser')
+            ->assertStatus(200)
+            ->assertJson([
+                'available' => false,
+                'email_taken' => false,
+                'username_taken' => true,
+            ]);
+    }
+
     public function test_can_register_then_login_with_same_password(): void
     {
         $this->postJson('/api/auth/register', [
@@ -332,5 +364,68 @@ class AuthControllerTest extends TestCase
         $this->withHeader('Authorization', 'Bearer '.$plain)
             ->getJson('/api/auth/me')
             ->assertUnauthorized();
+    }
+
+    public function test_register_stores_business_address_only_for_business_accounts(): void
+    {
+        $business = $this->postJson('/api/auth/register', [
+            'username' => 'cafedublin',
+            'email' => 'cafe@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'displayName' => 'Cafe Dublin',
+            'handle' => 'Cafe@Dublin',
+            'accountType' => 'business',
+            'businessAddress' => '12 Dame Street, Dublin',
+            'latitude' => 53.3441,
+            'longitude' => -6.2675,
+        ]);
+
+        $business->assertStatus(201)
+            ->assertJsonPath('user.business_address', '12 Dame Street, Dublin')
+            ->assertJsonPath('user.latitude', 53.3441)
+            ->assertJsonPath('user.longitude', -6.2675);
+
+        $personal = $this->postJson('/api/auth/register', [
+            'username' => 'personaldublin',
+            'email' => 'personal@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'displayName' => 'Personal Dublin',
+            'handle' => 'Personal@Dublin',
+            'accountType' => 'personal',
+            'businessAddress' => 'Should not save',
+            'latitude' => 53.3441,
+            'longitude' => -6.2675,
+        ]);
+
+        $personal->assertStatus(201)
+            ->assertJsonPath('user.business_address', null)
+            ->assertJsonPath('user.latitude', null)
+            ->assertJsonPath('user.longitude', null);
+    }
+
+    public function test_update_profile_sets_and_clears_business_address(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/auth/profile', [
+                'account_type' => 'business',
+                'business_address' => '1 Grafton Street, Dublin',
+                'latitude' => 53.342,
+                'longitude' => -6.26,
+            ])
+            ->assertOk()
+            ->assertJsonPath('business_address', '1 Grafton Street, Dublin');
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/auth/profile', [
+                'account_type' => 'personal',
+            ])
+            ->assertOk()
+            ->assertJsonPath('business_address', null)
+            ->assertJsonPath('latitude', null)
+            ->assertJsonPath('longitude', null);
     }
 }

@@ -69,6 +69,7 @@ import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI, feedCardMediaHeight } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import PostHeaderOverlay from '../components/PostHeaderOverlay.native';
 import FeedScenesMediaExpand, {
     type FeedScenesOrigin,
 } from '../components/FeedScenesMediaExpand.native';
@@ -1021,6 +1022,7 @@ const FeedCard = React.memo(function FeedCard({
     onLikeBurst,
     onShareToStories,
     onShareToStoriesSuccess,
+    onLocationPress,
     scenesExpanding = false,
     scenesExpandProgress,
     scenesExpandOrigin,
@@ -1062,6 +1064,10 @@ const FeedCard = React.memo(function FeedCard({
     /** Parent-owned share modal — per-card Modal show/hide jumps FlatList on Android. */
     onShareToStories?: () => void;
     onShareToStoriesSuccess?: (postId: string) => void;
+    onLocationPress?: (
+        location: string,
+        filterType?: 'location' | 'venue' | 'landmark',
+    ) => void;
     scenesExpanding?: boolean;
     scenesExpandProgress?: import('react-native-reanimated').SharedValue<number>;
     scenesExpandOrigin?: FeedScenesOrigin | null;
@@ -1353,6 +1359,12 @@ const FeedCard = React.memo(function FeedCard({
                                         : undefined
                                 }
                             />
+                            {!scenesExpanding && !isClientUploading ? (
+                                <PostHeaderOverlay
+                                    post={post}
+                                    onLocationPress={onLocationPress}
+                                />
+                            ) : null}
                             {isClientUploading ? (
                                 <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
                                     <ActivityIndicator size="large" color="#FFFFFF" />
@@ -4384,6 +4396,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onRegisterDmAnchor={registerDmAnchor}
                     onOpenLikesSheet={() => setLikesSheetPost(mergedPost)}
                     onOpenTaggedSheet={() => setTaggedSheetPost(mergedPost)}
+                    onLocationPress={handleHeaderLocationSearch}
                 />,
             );
         },
@@ -4394,6 +4407,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             showFollowingFeed,
             currentFilter,
             navigation,
+            handleHeaderLocationSearch,
             handleShareToStoriesSuccess,
             openShareToStoriesForPost,
             updatePost,

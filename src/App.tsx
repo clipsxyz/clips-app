@@ -77,6 +77,7 @@ import {
 import SuggestedPlacesFeedSection from './components/SuggestedPlacesFeedSection';
 import LocationPlaceSummaryCard from './components/LocationPlaceSummaryCard';
 import LocationPlaceSummaryModal from './components/LocationPlaceSummaryModal';
+import PostHeaderOverlay from './components/PostHeaderOverlay';
 import LocalBusinessSuggestionCard from './components/LocalBusinessSuggestionCard';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining, getBoostAnalytics } from './api/boost';
@@ -1420,27 +1421,6 @@ function PostHeader({
     post.userReclipped === true;
   const profileTargetHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
 
-  // Metadata carousel: location â†’ venue â†’ landmark â†’ timestamp, one at a time
-  const metadataItems = React.useMemo(() => {
-    const out: Array<{ label: string; type: 'location' | 'venue' | 'landmark' | 'timestamp' }> = [];
-    if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
-    if (post.venue) out.push({ label: post.venue, type: 'venue' });
-    if (post.landmark) out.push({ label: post.landmark, type: 'landmark' });
-    const ts = post.createdAt != null ? (typeof post.createdAt === 'string' ? parseInt(post.createdAt, 10) : post.createdAt) : null;
-    if (typeof ts === 'number' && !Number.isNaN(ts)) out.push({ label: timeAgo(ts), type: 'timestamp' });
-    return out;
-  }, [post.locationLabel, post.venue, post.landmark, post.createdAt]);
-  const [metadataIndex, setMetadataIndex] = React.useState(0);
-  // Transition style for carousel (currently fixed to slide-left)
-  const metadataTransitionClass = 'metadata-carousel-slide-left';
-  React.useEffect(() => {
-    if (metadataItems.length <= 1) return;
-    const t = setInterval(() => {
-      setMetadataIndex((i) => (i + 1) % metadataItems.length);
-    }, 3000);
-    return () => clearInterval(t);
-  }, [metadataItems.length]);
-
   // Check if this is the current user's post
   const isCurrentUser = user?.handle === post.userHandle;
   // Use current user's avatarUrl if it's their post, otherwise get from handle
@@ -1711,7 +1691,7 @@ function PostHeader({
         {/* Top row: @handle + flag (left), same metadata carousel as media cards + menu (right). Byline stays inside the bubble below. */}
         {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row â€” a following sibling would otherwise cover it. */}
         <div className="relative z-40">
-          <div className="flex items-start justify-between gap-3 pt-1">
+          <div className="flex items-center justify-between gap-3 pt-1">
             <div className="min-w-0 flex-1 flex flex-col gap-1 pr-2">
               {isReclippedPost && (
                 <div className={`text-xs flex items-center gap-1 ${reclipColorClass}`}>
@@ -1753,38 +1733,7 @@ function PostHeader({
                 </span>
               ) : null}
             </div>
-            <div className="flex flex-col items-end shrink-0 gap-0.5 pt-0.5">
-              {metadataItems.length > 0 && (() => {
-                const current = metadataItems[metadataIndex];
-                const Icon =
-                  current.type === 'location'
-                    ? FiMapPin
-                    : current.type === 'venue'
-                      ? FiHome
-                      : current.type === 'landmark'
-                        ? GiGreekTemple
-                        : FiClock;
-                const iconMuted = isOverlaid ? 'text-white/80' : 'text-gray-500 dark:text-gray-400';
-                const labelMuted = isOverlaid ? 'text-white/90' : 'text-gray-600 dark:text-gray-300';
-                return (
-                  <div
-                    className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
-                    title={metadataItems.map((m) => m.label).join(' Â· ')}
-                  >
-                    <div
-                      key={metadataIndex}
-                      className={`flex items-center gap-1 justify-end min-w-0 max-w-[140px] ${metadataTransitionClass}`}
-                    >
-                      <Icon className={`w-3 h-3 flex-shrink-0 ${iconMuted}`} />
-                      <span
-                        className={`text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight ${labelMuted}`}
-                      >
-                        {current.label}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
+            <div className="flex flex-col items-end shrink-0 justify-center">
               {onMenuClick ? (
                 <button
                   type="button"
@@ -1795,7 +1744,7 @@ function PostHeader({
                   }}
                   onMouseDown={(e) => e.stopPropagation()}
                   onTouchStart={(e) => e.stopPropagation()}
-                  className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all active:scale-[.98] z-50 relative ${
+                  className={`p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full transition-all active:scale-[.98] z-50 relative ${
                     isOverlaid
                       ? 'text-white hover:opacity-70'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
@@ -1944,14 +1893,14 @@ function PostHeader({
   }
 
   return (
-    <div className="relative flex items-start justify-between px-3 pt-3 pb-2">
+    <div className="relative flex items-center justify-between px-3 pt-3 pb-2">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
         <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
       )}
 
       {/* Content layer - above scrim */}
-      <div className="relative z-10 flex items-start justify-between w-full">
+      <div className="relative z-10 flex items-center justify-between w-full">
         <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
           <div
             className="relative overflow-visible"
@@ -2061,33 +2010,7 @@ function PostHeader({
             ) : null}
           </div>
         </div>
-        <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
-          {/* Metadata pill on top: location â†’ venue â†’ landmark â†’ timestamp (Instagram-style: clean, minimal, no shimmer) */}
-          {metadataItems.length > 0 && (() => {
-            const current = metadataItems[metadataIndex];
-            const Icon =
-              current.type === 'location' ? FiMapPin
-                : current.type === 'venue' ? FiHome
-                  : current.type === 'landmark' ? GiGreekTemple
-                    : FiClock;
-            return (
-              <div
-                className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
-                title={metadataItems.map((m) => m.label).join(' Â· ')}
-              >
-                <div
-                  key={metadataIndex}
-                  className={`flex items-center gap-1 justify-end min-w-0 max-w-[140px] ${metadataTransitionClass}`}
-                >
-                  <Icon className="w-3 h-3 flex-shrink-0 text-white/80" />
-                  <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-white/90">
-                    {current.label}
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
-          {/* 3 dots underneath */}
+        <div className="relative z-10 flex flex-col items-center justify-center flex-shrink-0">
           {onMenuClick && (
             <button
               onClick={(e) => {
@@ -2097,7 +2020,7 @@ function PostHeader({
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
-              className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center transition-all active:scale-[.98] z-50 relative ${isOverlaid
+              className={`p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center transition-all active:scale-[.98] z-50 relative ${isOverlaid
                 ? 'text-white hover:opacity-70'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
@@ -4978,7 +4901,7 @@ function PostAnalyticsCard({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, onShareSuccess, priority = false, engagementVariant = 'default', knownBoosted, onMuteAuthor, onBlockAuthor, onHidePost, onNotInterestedPost }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, onShareSuccess, priority = false, engagementVariant = 'default', knownBoosted, onMuteAuthor, onBlockAuthor, onHidePost, onNotInterestedPost, onLocationPress }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -5004,6 +4927,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onBlockAuthor?: (handle: string) => void;
   onHidePost?: (postId: string) => void;
   onNotInterestedPost?: (postId: string) => void;
+  /** Switch the main feed to this location / venue / landmark label */
+  onLocationPress?: (
+    location: string,
+    filterType?: 'location' | 'venue' | 'landmark',
+  ) => void;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -5466,6 +5394,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             activeCarouselIndex={carouselIndex}
           />
         )}
+        {hasMedia && !isTileBoostMode ? (
+          <PostHeaderOverlay
+            post={post}
+            onLocationPress={onLocationPress}
+            className="top-12"
+          />
+        ) : null}
       </div>
       {!isTileBoostMode && carouselThumbItems.length > 1 ? (
         <div className="px-3 py-2 bg-black/95 border-t border-white/10">
@@ -9165,6 +9100,7 @@ function FeedPageWrapper() {
               setTimeout(() => dmSheetInputRef.current?.focus(), 100);
             } : undefined}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
+                onLocationPress={applyCustomLocationFromHeader}
               />
               {showStories24AfterThisPost && (
                 <Stories24FeedRail

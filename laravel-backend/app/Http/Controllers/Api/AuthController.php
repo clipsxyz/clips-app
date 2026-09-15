@@ -22,6 +22,59 @@ use Illuminate\Validation\Rules\Password;
 class AuthController extends Controller
 {
     /**
+     * Public signup pre-check so email / username conflicts surface on the right step.
+     * GET /api/auth/check-availability?email=&username=
+     */
+    public function checkAvailability(Request $request): JsonResponse
+    {
+        $email = strtolower(trim((string) $request->query('email', '')));
+        $username = trim((string) $request->query('username', ''));
+
+        if ($email === '' && $username === '') {
+            return response()->json([
+                'errors' => ['query' => ['Provide email and/or username to check.']],
+            ], 400);
+        }
+
+        $emailTaken = false;
+        $usernameTaken = false;
+
+        if ($email !== '') {
+            if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return response()->json([
+                    'available' => false,
+                    'email_taken' => false,
+                    'username_taken' => false,
+                    'errors' => ['email' => ['Enter a valid email address.']],
+                ], 400);
+            }
+            $emailTaken = User::query()
+                ->whereRaw('LOWER(email) = ?', [$email])
+                ->exists();
+        }
+
+        if ($username !== '') {
+            if (! preg_match('/^[a-zA-Z0-9_]{3,50}$/', $username)) {
+                return response()->json([
+                    'available' => false,
+                    'email_taken' => $emailTaken,
+                    'username_taken' => false,
+                    'errors' => ['username' => ['Username must be 3–50 characters (letters, numbers, underscore).']],
+                ], 400);
+            }
+            $usernameTaken = User::query()
+                ->whereRaw('LOWER(username) = ?', [strtolower($username)])
+                ->exists();
+        }
+
+        return response()->json([
+            'available' => ! $emailTaken && ! $usernameTaken,
+            'email_taken' => $emailTaken,
+            'username_taken' => $usernameTaken,
+        ]);
+    }
+
+    /**
      * Register new user
      */
     public function register(Request $request): JsonResponse
@@ -35,6 +88,14 @@ class AuthController extends Controller
             'locationLocal' => 'nullable|string|max:100',
             'locationRegional' => 'nullable|string|max:100',
             'locationNational' => 'nullable|string|max:100',
+            'accountType' => 'nullable|in:personal,business',
+            'account_type' => 'nullable|in:personal,business',
+            'isBusiness' => 'nullable|boolean',
+            'is_business' => 'nullable|boolean',
+            'businessAddress' => 'nullable|string|max:500',
+            'business_address' => 'nullable|string|max:500',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
             'avatar_url' => 'nullable|string|max:500',
             'avatarUrl' => 'nullable|string|max:500',
             'invite' => 'nullable|string|max:100',
@@ -56,7 +117,9 @@ class AuthController extends Controller
             (string) ($request->input('invite') ?: $request->input('inviteHandle') ?: '')
         );
 
-        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational, $avatarUrl, $inviter) {
+        $businessFields = $this->businessAddressAttributes($request, $this->requestIsBusinessAccount($request));
+
+        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational, $avatarUrl, $inviter, $businessFields) {
             $attributes = [
                 'username' => $request->username,
                 'email' => strtolower(trim((string) $request->email)),
@@ -68,6 +131,7 @@ class AuthController extends Controller
                 'location_regional' => $locationRegional,
                 'location_national' => $locationNational,
                 'avatar_url' => $avatarUrl,
+                ...$businessFields,
             ];
             if ($inviter && Schema::hasColumn('users', 'invited_by_user_id')) {
                 $attributes['invited_by_user_id'] = $inviter->id;
@@ -309,6 +373,14 @@ class AuthController extends Controller
             'location_local' => 'sometimes|nullable|string|max:100',
             'location_regional' => 'sometimes|nullable|string|max:100',
             'location_national' => 'sometimes|nullable|string|max:100',
+            'accountType' => 'sometimes|nullable|in:personal,business',
+            'account_type' => 'sometimes|nullable|in:personal,business',
+            'isBusiness' => 'sometimes|boolean',
+            'is_business' => 'sometimes|boolean',
+            'businessAddress' => 'sometimes|nullable|string|max:500',
+            'business_address' => 'sometimes|nullable|string|max:500',
+            'latitude' => 'sometimes|nullable|numeric|between:-90,90',
+            'longitude' => 'sometimes|nullable|numeric|between:-180,180',
             'social_links' => 'sometimes|nullable|array',
             'profile_background_url' => 'sometimes|nullable|string|max:65535',
             'avatar_url' => 'sometimes|nullable|string|max:500',
@@ -330,6 +402,7 @@ class AuthController extends Controller
                 $user->{$field} = $data[$field];
             }
         }
+        $this->applyBusinessAddressUpdate($user, $request);
         if (array_key_exists('profile_background_url', $data)) {
             $raw = $data['profile_background_url'];
             $user->profile_background_url = ($raw === null || $raw === '') ? null : $raw;
@@ -903,6 +976,96 @@ class AuthController extends Controller
         }
 
         return array_values(array_unique($out));
+    }
+
+    private function requestIsBusinessAccount(Request $request): bool
+    {
+        $type = strtolower(trim((string) ($request->input('accountType') ?? $request->input('account_type') ?? '')));
+        if ($type === 'business') {
+            return true;
+        }
+        if ($type === 'personal') {
+            return false;
+        }
+
+        return $request->boolean('isBusiness') || $request->boolean('is_business');
+    }
+
+    private function nullableCoord(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function businessAddressAttributes(Request $request, bool $isBusiness): array
+    {
+        if (! Schema::hasColumn('users', 'business_address')) {
+            return [];
+        }
+
+        if (! $isBusiness) {
+            return [
+                'business_address' => null,
+                'latitude' => null,
+                'longitude' => null,
+            ];
+        }
+
+        return [
+            'business_address' => $this->nullableTrimmedString(
+                $request->input('business_address') ?? $request->input('businessAddress')
+            ),
+            'latitude' => $this->nullableCoord($request->input('latitude')),
+            'longitude' => $this->nullableCoord($request->input('longitude')),
+        ];
+    }
+
+    private function applyBusinessAddressUpdate(User $user, Request $request): void
+    {
+        if (! Schema::hasColumn('users', 'business_address')) {
+            return;
+        }
+
+        $accountTypeSent = $request->exists('accountType')
+            || $request->exists('account_type')
+            || $request->exists('isBusiness')
+            || $request->exists('is_business');
+        $addressSent = $request->exists('business_address')
+            || $request->exists('businessAddress')
+            || $request->exists('latitude')
+            || $request->exists('longitude');
+
+        if ($accountTypeSent && ! $this->requestIsBusinessAccount($request)) {
+            $user->business_address = null;
+            $user->latitude = null;
+            $user->longitude = null;
+
+            return;
+        }
+
+        if (! $addressSent) {
+            return;
+        }
+
+        $payload = $this->businessAddressAttributes($request, true);
+        if ($request->exists('business_address') || $request->exists('businessAddress')) {
+            $user->business_address = $payload['business_address'];
+        }
+        if ($request->exists('latitude')) {
+            $user->latitude = $payload['latitude'];
+        }
+        if ($request->exists('longitude')) {
+            $user->longitude = $payload['longitude'];
+        }
     }
 
     private function nullableTrimmedString(mixed $value): ?string

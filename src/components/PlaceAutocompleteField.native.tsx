@@ -16,7 +16,7 @@ import {
   parsedPlaceFeedFromSuggestion,
 } from '../utils/placeFeedLevels';
 
-export type PlaceFieldMode = 'location' | 'venue' | 'landmark';
+export type PlaceFieldMode = 'location' | 'venue' | 'landmark' | 'all';
 
 type Props = {
   value: string;
@@ -32,6 +32,9 @@ type Props = {
 };
 
 function labelForPostField(s: LocationSuggestion, mode: PlaceFieldMode): string {
+  if (mode === 'all' || mode === 'venue') {
+    return String(s.formatted_address || s.name || s.display_name || '').trim();
+  }
   const parsed = parsedPlaceFeedFromSuggestion(s);
   if (mode === 'location') {
     return parsed.local || parsed.regional || parsed.national || feedHeaderLabelFromSuggestion(s, parsed);
@@ -72,9 +75,10 @@ export default function PlaceAutocompleteField({
       return;
     }
     const ctrl = new AbortController();
-    const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : 'location';
-    setSuggestions(searchLocalGazetteer(q, 12, apiMode));
+    const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : mode === 'all' ? 'all' : 'location';
     setOpen(true);
+    setLoading(true);
+    setSuggestions(searchLocalGazetteer(q, 12, apiMode));
     const id = setTimeout(async () => {
       try {
         setLoading(true);

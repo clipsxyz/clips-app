@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import LinearGradient from 'react-native-linear-gradient';
@@ -11,9 +11,7 @@ import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/s
 import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
-import FeedPostMetaCarousel from './FeedPostMetaCarousel.native';
 import {
-    buildPostMetadataItems,
     getPostSocialSourceLabel,
     getReclipDisplay,
 } from '../utils/feedPostMeta';
@@ -59,14 +57,6 @@ export default function FeedPostHeader({
     const originalAvatarSrc = resolveAvatarImageUri(post.originalUserAvatarUrl, originalDisplayHandle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
-    const metadataItems = useMemo(() => {
-        const items = buildPostMetadataItems(post);
-        const hasLocation = items.some((item) => item.type === 'location');
-        if (hasLocation) return items;
-        const raw = String(post.locationLabel || '').trim();
-        const label = raw && raw !== 'Unknown Location' ? raw : 'Gazetteer';
-        return [{ label, type: 'location' as const }, ...items];
-    }, [post]);
     const socialSourceLabel = getPostSocialSourceLabel(post);
     const isFollowing = post.isFollowing === true;
     const viewer = viewerHandle ?? user?.handle;
@@ -229,9 +219,6 @@ export default function FeedPostHeader({
                 </View>
             </View>
             <View style={styles.right}>
-                {metadataItems.length > 0 ? (
-                    <FeedPostMetaCarousel items={metadataItems} overlaid={isOverlaid} align="right" />
-                ) : null}
                 {onOverflowPress ? (
                     <GesturePressable
                         onPress={onOverflowPress}
@@ -321,7 +308,7 @@ const styles = StyleSheet.create({
     },
     row: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'space-between',
     },
     left: {
@@ -341,9 +328,10 @@ const styles = StyleSheet.create({
         gap: 0,
     },
     right: {
-        alignItems: 'flex-end',
-        gap: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
         flexShrink: 0,
+        alignSelf: 'center',
     },
     avatarWrap: {
         position: 'relative',
@@ -453,9 +441,10 @@ const styles = StyleSheet.create({
     },
     // Web: `p-2 min-w/h-[40px]`, icon `w-4 h-4`
     overflowBtn: {
-        minWidth: 40,
-        minHeight: 40,
-        padding: 8,
+        minWidth: 36,
+        minHeight: 36,
+        padding: 6,
+        marginTop: 0,
         alignItems: 'center',
         justifyContent: 'center',
     },

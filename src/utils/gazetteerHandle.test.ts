@@ -3,6 +3,8 @@ import {
     buildGazetteerHandle,
     nameFromHandle,
     regionalFromHandle,
+    sanitizeSignupUsernameInput,
+    validateSignupUsername,
 } from './gazetteerHandle';
 
 describe('gazetteer handle Name@Place', () => {
@@ -20,5 +22,12 @@ describe('gazetteer handle Name@Place', () => {
     it('builds handles as name@place, not place@name', () => {
         expect(buildGazetteerHandle('Paris', 'Cork')).toBe('Paris@Cork');
         expect(buildGazetteerHandle('Ireland', 'Dublin')).toBe('Ireland@Dublin');
+    });
+
+    it('sanitizes signup username to one word', () => {
+        expect(sanitizeSignupUsernameInput('John Smith')).toBe('JohnSmith');
+        expect(sanitizeSignupUsernameInput('john_s!')).toBe('john_s');
+        expect(validateSignupUsername('ab')).toMatch(/at least/i);
+        expect(validateSignupUsername('John')).toBeNull();
     });
 });

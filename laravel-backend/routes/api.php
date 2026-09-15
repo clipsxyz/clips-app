@@ -142,6 +142,7 @@ Route::get('/search/places/details', [LocationController::class, 'details']);
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::get('/check-availability', [AuthController::class, 'checkAvailability']);
     Route::post('/password/reset-local', [AuthController::class, 'resetPasswordLocal']);
     Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
     Route::post('/password/reset', [AuthController::class, 'resetPassword']);
@@ -226,6 +227,9 @@ Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken']
 // Public profile reads (guest viewing). Send Bearer when logged in so private
 // profiles and Boost still resolve the viewer. `{handle}` allows `@` / `%40`.
 Route::prefix('users')->group(function () {
+    // Must be before /{handle} or "check-follows-me" is treated as a profile handle (404).
+    Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe'])
+        ->middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class]);
     Route::get('/{handle}/posts', [UserController::class, 'posts'])->where('handle', '[^/]+');
     Route::get('/{handle}/audience', [UserController::class, 'audience'])->where('handle', '[^/]+');
     Route::get('/{handle}/followers', [UserController::class, 'followers'])->where('handle', '[^/]+');
@@ -309,7 +313,6 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
 
     // Users routes (profile GET is public above — follow/privacy still require auth)
     Route::prefix('users')->group(function () {
-        Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe']);
         Route::post('/{handle}/follow', [UserController::class, 'toggleFollow'])->where('handle', '[^/]+');
         Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest'])->where('handle', '[^/]+');
         Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest'])->where('handle', '[^/]+');

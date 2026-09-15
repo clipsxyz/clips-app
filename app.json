@@ -1,4 +1,7 @@
 {
   "name": "ClipsApp",
-  "displayName": "ClipsApp"
+  "displayName": "ClipsApp",
+  "android": {
+    "usesCleartextTraffic": true
+  }
 }

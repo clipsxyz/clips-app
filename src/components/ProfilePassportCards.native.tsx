@@ -25,6 +25,7 @@ import { renameUserHandleEverywhere } from '../api/posts';
 import { fetchCitiesForRegion, fetchRegionsForCountry } from '../utils/googleMaps';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import type { LocationSuggestion } from '../api/locations';
+import { geocodeLocation } from '../api/locations';
 import type { User } from '../types';
 import {
     profilePassportCard,
@@ -282,6 +283,9 @@ export default function ProfilePassportCards({
     const [accountType, setAccountType] = useState<'personal' | 'business'>(
         user?.accountType === 'business' ? 'business' : 'personal',
     );
+    const [businessAddress, setBusinessAddress] = useState(user?.businessAddress || '');
+    const [businessLatitude, setBusinessLatitude] = useState<number | null>(user?.latitude ?? null);
+    const [businessLongitude, setBusinessLongitude] = useState<number | null>(user?.longitude ?? null);
 
     const [followersCount, setFollowersCount] = useState(() => user?.followers_count ?? 0);
     const [followingCount, setFollowingCount] = useState(() => user?.following_count ?? 0);
@@ -309,6 +313,9 @@ export default function ProfilePassportCards({
         setLocal(user?.local || '');
         setPreferredLocations(user?.placesTraveled ?? []);
         setAccountType(user?.accountType === 'business' ? 'business' : 'personal');
+        setBusinessAddress(user?.businessAddress || '');
+        setBusinessLatitude(user?.latitude ?? null);
+        setBusinessLongitude(user?.longitude ?? null);
     }, [user]);
 
     useEffect(() => {
@@ -613,23 +620,34 @@ export default function ProfilePassportCards({
         if (!user) return;
         setSaving(true);
         const places = preferredLocations.slice(0, 12);
+        const isBusiness = accountType === 'business';
+        const nextAddress = isBusiness ? businessAddress.trim() : '';
         try {
             await persistLaravelProfile({
                 places_traveled: places,
                 account_type: accountType,
-                is_business: accountType === 'business',
+                is_business: isBusiness,
+                business_address: nextAddress || null,
+                latitude: isBusiness ? businessLatitude : null,
+                longitude: isBusiness ? businessLongitude : null,
             });
             // Always refresh local session so Business/Personal badge updates immediately.
             login({
                 ...user,
                 placesTraveled: places.length ? places : undefined,
                 accountType,
+                businessAddress: nextAddress || undefined,
+                latitude: isBusiness ? businessLatitude : null,
+                longitude: isBusiness ? businessLongitude : null,
             });
         } catch {
             login({
                 ...user,
                 placesTraveled: places.length ? places : undefined,
                 accountType,
+                businessAddress: nextAddress || undefined,
+                latitude: isBusiness ? businessLatitude : null,
+                longitude: isBusiness ? businessLongitude : null,
             });
         } finally {
             setSaving(false);
@@ -828,7 +846,14 @@ export default function ProfilePassportCards({
                             <TouchableOpacity
                                 key={type}
                                 style={[styles.accountTypeBtn, accountType === type && styles.accountTypeBtnActive]}
-                                onPress={() => setAccountType(type)}
+                                onPress={() => {
+                                    setAccountType(type);
+                                    if (type === 'personal') {
+                                        setBusinessAddress('');
+                                        setBusinessLatitude(null);
+                                        setBusinessLongitude(null);
+                                    }
+                                }}
                             >
                                 <Text
                                     style={[
@@ -842,6 +867,55 @@ export default function ProfilePassportCards({
                         ))}
                     </View>
                     <Text style={styles.fieldHint}>Business accounts are eligible for local business suggestion cards.</Text>
+
+                    {accountType === 'business' ? (
+                        <>
+                            <Text style={[styles.fieldLabel, styles.fieldSpaced]}>Business Address</Text>
+                            <PlaceAutocompleteField
+                                value={businessAddress}
+                                onChange={(v) => {
+                                    setBusinessAddress(v);
+                                    setBusinessLatitude(null);
+                                    setBusinessLongitude(null);
+                                }}
+                                onSelectSuggestion={(suggestion: LocationSuggestion) => {
+                                    void (async () => {
+                                        const label = String(
+                                            suggestion.formatted_address ||
+                                                suggestion.display_name ||
+                                                suggestion.name ||
+                                                '',
+                                        ).trim();
+                                        let lat =
+                                            typeof suggestion.latitude === 'number' ? suggestion.latitude : null;
+                                        let lng =
+                                            typeof suggestion.longitude === 'number' ? suggestion.longitude : null;
+                                        let address = label;
+                                        if ((lat == null || lng == null) && (suggestion.place_id || label)) {
+                                            const geo = await geocodeLocation({
+                                                placeId: suggestion.place_id,
+                                                q: label,
+                                            });
+                                            if (geo) {
+                                                lat = geo.latitude;
+                                                lng = geo.longitude;
+                                                address = String(
+                                                    geo.formatted_address || geo.label || address,
+                                                ).trim();
+                                            }
+                                        }
+                                        setBusinessAddress(address);
+                                        setBusinessLatitude(lat);
+                                        setBusinessLongitude(lng);
+                                    })();
+                                }}
+                                mode="all"
+                                showIcon
+                                placeholder="Search business address"
+                                inputStyle={styles.wordInput}
+                            />
+                        </>
+                    ) : null}
 
                     <Text style={[styles.fieldLabel, styles.fieldSpaced]}>Preferred locations for suggestions</Text>
                     <Text style={styles.fieldHint}>

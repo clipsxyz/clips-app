@@ -35,6 +35,10 @@ export type User = {
   has_pending_request?: boolean; // Whether current user has pending follow request
   /** Explicit account classification from signup/profile. */
   accountType?: 'personal' | 'business';
+  /** Street / Places address for business accounts. */
+  businessAddress?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   phone_number?: string | null;
   phone_verified_at?: string | null;
 };
@@ -75,6 +79,9 @@ export type Post = {
   venue?: string;
   /** Named landmark (e.g. Eiffel Tower, River Liffey); optional; carousel + landmark feeds */
   landmark?: string;
+  /** Optional broadcast overlay tags (venue / time / landmark) from API */
+  carousel_meta?: { venue?: string; time?: string; landmark?: string } | null;
+  carouselMeta?: { venue?: string; time?: string; landmark?: string } | null;
   /** Google Places id when the post was tagged to a real place */
   placeId?: string | null;
   latitude?: number | null;

@@ -17,6 +17,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
+import BusinessAddressPin from '../components/BusinessAddressPin.native';
 import VerifiedBadge from '../components/VerifiedBadge.native';
 import {
     glassSearch,
@@ -541,6 +542,26 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                           : isOwn
                             ? user?.accountType
                             : undefined;
+                const businessAddress = String(
+                    apiData?.businessAddress ??
+                        apiData?.business_address ??
+                        (isOwn ? user?.businessAddress : '') ??
+                        '',
+                ).trim();
+                const latitudeRaw = apiData?.latitude ?? (isOwn ? user?.latitude : null);
+                const longitudeRaw = apiData?.longitude ?? (isOwn ? user?.longitude : null);
+                const latitude =
+                    typeof latitudeRaw === 'number'
+                        ? latitudeRaw
+                        : latitudeRaw != null && latitudeRaw !== ''
+                          ? Number(latitudeRaw)
+                          : null;
+                const longitude =
+                    typeof longitudeRaw === 'number'
+                        ? longitudeRaw
+                        : longitudeRaw != null && longitudeRaw !== ''
+                          ? Number(longitudeRaw)
+                          : null;
 
                 setProfileUser({
                     handle: decodedHandle,
@@ -560,6 +581,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         placesTraveled && placesTraveled.length > 0 ? placesTraveled : undefined,
                     ...(apiData || {}),
                     accountType: resolvedAccountType,
+                    businessAddress: businessAddress || undefined,
+                    latitude: Number.isFinite(latitude) ? latitude : null,
+                    longitude: Number.isFinite(longitude) ? longitude : null,
                 });
                 setPosts(userPosts);
                 const handleKey = decodedHandle.trim().toLowerCase();
@@ -1473,6 +1497,11 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                             <Text style={styles.bioPlaceholder}>No bio yet</Text>
                         </View>
                     )}
+                    <BusinessAddressPin
+                        address={profileUser?.businessAddress}
+                        latitude={profileUser?.latitude}
+                        longitude={profileUser?.longitude}
+                    />
                     {(socialLinks.website ||
                         socialLinks.x ||
                         socialLinks.instagram ||

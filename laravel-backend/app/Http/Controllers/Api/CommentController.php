@@ -289,31 +289,34 @@ class CommentController extends Controller
      */
     public function toggleLike(Request $request, string $id): JsonResponse
     {
-        $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:comments,id'
-        ]);
+        if (!Str::isUuid($id)) {
+            return response()->json(['message' => 'Comment no longer exists'], 404);
+        }
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+        $comment = Comment::find($id);
+        if (!$comment) {
+            return response()->json(['message' => 'Comment no longer exists'], 404);
         }
 
         $user = Auth::user();
-        $comment = Comment::findOrFail($id);
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
 
         $result = DB::transaction(function () use ($user, $comment) {
             $existingLike = $user->commentLikes()->where('comment_id', $comment->id)->first();
 
             if ($existingLike) {
-                // Unlike
                 $user->commentLikes()->detach($comment->id);
-                $comment->decrement('likes_count');
-                return ['liked' => false];
-            } else {
-                // Like
-                $user->commentLikes()->attach($comment->id);
-                $comment->increment('likes_count');
-                return ['liked' => true];
+                if ((int) $comment->likes_count > 0) {
+                    $comment->decrement('likes_count');
+                }
+                return ['liked' => false, 'likes_count' => max(0, (int) $comment->fresh()->likes_count)];
             }
+
+            $user->commentLikes()->attach($comment->id);
+            $comment->increment('likes_count');
+            return ['liked' => true, 'likes_count' => (int) $comment->fresh()->likes_count];
         });
 
         return response()->json($result);

@@ -33,8 +33,27 @@ class UserControllerTest extends TestCase
                 'handle',
                 'display_name',
                 'posts',
+                'business_address',
+                'latitude',
+                'longitude',
             ]);
         $this->assertEquals($user->id, $response->json('id'));
+    }
+
+    public function test_public_user_profile_includes_business_address(): void
+    {
+        $user = User::factory()->create([
+            'is_private' => false,
+            'business_address' => 'Temple Bar, Dublin',
+            'latitude' => 53.3456,
+            'longitude' => -6.2641,
+        ]);
+
+        $this->getJson('/api/users/'.$user->handle)
+            ->assertOk()
+            ->assertJsonPath('business_address', 'Temple Bar, Dublin')
+            ->assertJsonPath('latitude', 53.3456)
+            ->assertJsonPath('longitude', -6.2641);
     }
 
     public function test_public_user_profile_is_guest_accessible(): void
@@ -100,6 +119,45 @@ class UserControllerTest extends TestCase
 
         $response->assertStatus(404)
             ->assertJsonFragment(['error' => 'User not found']);
+    }
+
+    public function test_check_follows_me_is_not_captured_by_profile_show_route(): void
+    {
+        $viewer = User::factory()->create();
+
+        // Previously matched GET /users/{handle} with handle=check-follows-me → 404.
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/check-follows-me?handle=' . rawurlencode('@Nobody@Nowhere'));
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'follows_me' => false,
+                'follows' => false,
+                'user_exists' => false,
+            ]);
+    }
+
+    public function test_check_follows_me_normalizes_at_and_case(): void
+    {
+        $viewer = User::factory()->create();
+        $other = User::factory()->create([
+            'is_private' => false,
+            'handle' => 'Ava@galway',
+        ]);
+
+        $this->actingAs($other, 'sanctum')
+            ->postJson('/api/users/' . rawurlencode($viewer->handle) . '/follow')
+            ->assertStatus(200);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/check-follows-me?handle=' . rawurlencode('@ava@GALWAY'));
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'follows_me' => true,
+                'follows' => true,
+                'user_exists' => true,
+            ]);
     }
 
     public function test_profile_returns_posts_and_accepts_user_id_or_handle_case(): void
