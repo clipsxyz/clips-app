@@ -16,7 +16,7 @@ type Props = {
  * Uses onTouch* (does not steal the responder), so FlatList scroll + swipe-to-reply
  * still work, while tiny finger jitter won't cancel the hold the way Pressable does.
  */
-export default function DmMessagePressable({
+function DmMessagePressable({
     onLongPress,
     delayMs = 280,
     moveTolerance = 18,
@@ -76,3 +76,5 @@ export default function DmMessagePressable({
         </View>
     );
 }
+
+export default React.memo(DmMessagePressable);

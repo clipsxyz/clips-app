@@ -150,14 +150,15 @@ Route::prefix('auth')->group(function () {
 
 // Public music routes (no auth required)
 Route::prefix('music')->group(function () {
-    Route::post('/generate', [MusicController::class, 'generate']); // Generate AI music (public)
+    Route::post('/generate', [MusicController::class, 'generate'])
+        ->middleware('throttle:api-media'); // Generate AI music (public) — high cost
     Route::get('/library', [MusicLibraryController::class, 'index']); // Get music library (public - license-safe tracks only)
     Route::get('/library/{id}', [MusicLibraryController::class, 'show']); // Get single library track (public)
     Route::get('/file/{id}', [MusicLibraryController::class, 'serveFile']); // Serve music file for preview (public)
 });
 
 // Public upload routes (allow unauthenticated for video editing workflow)
-Route::prefix('upload')->group(function () {
+Route::prefix('upload')->middleware('throttle:api-media')->group(function () {
     Route::post('/single', [UploadController::class, 'single']);
     Route::post('/multiple', [UploadController::class, 'multiple']);
 });
@@ -207,17 +208,22 @@ Route::get('/dev/ava-follows-barry', function () {
     ]);
 });
 
-Route::get('/feed', [PostController::class, 'index']); // Alias of GET /api/posts (native / docs)
+Route::get('/feed', [PostController::class, 'index'])
+    ->middleware('throttle:api-feed'); // Alias of GET /api/posts (native / docs)
 
 // Public posts routes (allow viewing posts without auth)
 Route::prefix('posts')->group(function () {
-    Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
+    Route::get('/', [PostController::class, 'index'])
+        ->middleware('throttle:api-feed'); // Public feed browse
     // Must be registered before /{id} so "suggested-by-places" is not parsed as a UUID
     Route::match(['get', 'post'], '/suggested-by-places', [SuggestedPlacesController::class, 'index'])
-        ->middleware('auth:sanctum');
-    Route::get('/{id}/likes', [PostController::class, 'listLikes']); // Public - likers list for feed sheet
-    Route::get('/{id}', [PostController::class, 'show']); // Public - anyone can view single post
-    Route::post('/{id}/view', [PostController::class, 'incrementView']); // Public - track views without auth
+        ->middleware(['auth:sanctum', 'throttle:api-feed']);
+    Route::get('/{id}/likes', [PostController::class, 'listLikes'])
+        ->middleware('throttle:api-feed'); // Public - likers list for feed sheet
+    Route::get('/{id}', [PostController::class, 'show'])
+        ->middleware('throttle:api-feed'); // Public - anyone can view single post
+    Route::post('/{id}/view', [PostController::class, 'incrementView'])
+        ->middleware('throttle:api-feed'); // Public - track views without auth
 });
 
 // Public permanent share-link preview endpoint (guest-safe payload).
@@ -268,7 +274,8 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
 
     // Posts routes (protected - require auth for actions)
     Route::prefix('posts')->group(function () {
-        Route::post('/', [PostController::class, 'store']);
+        Route::post('/', [PostController::class, 'store'])
+            ->middleware('throttle:api-media'); // Create post / media publish
         Route::put('/{id}', [PostController::class, 'update']);
         Route::delete('/{id}', [PostController::class, 'destroy']);
         Route::post('/{id}/like', [PostController::class, 'toggleLike']);
@@ -358,10 +365,15 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
 
     // Stories routes
     Route::prefix('stories')->group(function () {
-        Route::get('/', [StoryController::class, 'index']);
-        Route::get('/paged', [StoryController::class, 'paged']);
-        Route::get('/user/{handle}', [StoryController::class, 'getUserStories'])->where('handle', '[^/]+');
-        Route::post('/', [StoryController::class, 'store']);
+        Route::get('/', [StoryController::class, 'index'])
+            ->middleware('throttle:api-feed');
+        Route::get('/paged', [StoryController::class, 'paged'])
+            ->middleware('throttle:api-feed');
+        Route::get('/user/{handle}', [StoryController::class, 'getUserStories'])
+            ->where('handle', '[^/]+')
+            ->middleware('throttle:api-feed');
+        Route::post('/', [StoryController::class, 'store'])
+            ->middleware('throttle:api-media'); // Story media publish
         Route::post('/{id}/view', [StoryController::class, 'view']);
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);
         Route::post('/{id}/reply', [StoryController::class, 'addReply']);
@@ -392,7 +404,8 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
     // Music routes (protected - require auth)
     Route::prefix('music')->group(function () {
         Route::get('/{id}', [MusicController::class, 'show']); // Get single track (AI or library)
-        Route::post('/upload', [MusicController::class, 'upload']); // Upload custom audio
+        Route::post('/upload', [MusicController::class, 'upload'])
+            ->middleware('throttle:api-media'); // Upload custom audio
         Route::post('/{id}/use', [MusicController::class, 'incrementUsage']); // Increment usage count
     });
 });

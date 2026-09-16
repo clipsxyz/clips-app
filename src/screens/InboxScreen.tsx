@@ -9,12 +9,15 @@ import {
     Image,
     ScrollView,
 } from 'react-native';
-import { FlatList } from 'react-native-gesture-handler';
+import { FlashList } from '@shopify/flash-list';
+import { queryClient, queryKeys } from '../api/queryClient';
+import { runAfterInteractions } from '../utils/runAfterInteractionsNative';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import InboxConversationRow, { inboxConversationRowId } from '../components/InboxConversationRow.native';
 import InboxChatInfoSheet from '../components/InboxChatInfoSheet.native';
 import InboxLoadingSkeleton from '../components/InboxLoadingSkeleton.native';
@@ -107,6 +110,11 @@ export default function InboxScreen({ navigation, route }: any) {
     const [seenInsightIds, setSeenInsightIds] = useState<Set<string>>(new Set());
     const [openSwipeHandle, setOpenSwipeHandle] = useState<string | null>(null);
     const [inboxChatInfo, setInboxChatInfo] = useState<ConversationSummary | null>(null);
+    const [followRequestAlert, setFollowRequestAlert] = useState<{
+        title: string;
+        message: string;
+        icon: 'success' | 'alert';
+    } | null>(null);
     const avatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
     const resolveInsightAvatar = React.useCallback((handle?: string): string => {
         const raw = (handle || '').trim();
@@ -186,10 +194,12 @@ export default function InboxScreen({ navigation, route }: any) {
     );
 
     useEffect(() => {
-        loadData();
-        if (user?.handle) {
-            void loadSeenInsights(user.handle);
-        }
+        void runAfterInteractions(() => {
+            void loadData();
+            if (user?.handle) {
+                void loadSeenInsights(user.handle);
+            }
+        });
     }, [user?.handle]);
 
     // Refresh when returning to Inbox (e.g. after sending a feed DM to Ava).
@@ -197,7 +207,9 @@ export default function InboxScreen({ navigation, route }: any) {
     useFocusEffect(
         useCallback(() => {
             if (!user?.handle) return;
-            void loadData({ silent: true });
+            void runAfterInteractions(() => {
+                void loadData({ silent: true });
+            });
         }, [user?.handle])
     );
 
@@ -299,7 +311,10 @@ export default function InboxScreen({ navigation, route }: any) {
         }
         try {
             const [notifs, storyInsights] = await Promise.all([
-                getNotifications(user.handle),
+                queryClient.fetchQuery({
+                    queryKey: queryKeys.notifications(user.handle),
+                    queryFn: () => getNotifications(user.handle),
+                }),
                 getStoryInsightsForUser(user.handle),
             ]);
             const storyReplyNotifs = notifs.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
@@ -331,7 +346,10 @@ export default function InboxScreen({ navigation, route }: any) {
             }
             setNotifications(notifs);
             setInsights(storyInsights);
-            const convs = await listConversations(user.handle);
+            const convs = await queryClient.fetchQuery({
+                queryKey: queryKeys.conversations(user.handle),
+                queryFn: () => listConversations(user.handle),
+            });
             setConversations(convs);
 
             if (user?.id) {
@@ -356,8 +374,16 @@ export default function InboxScreen({ navigation, route }: any) {
             } else {
                 setStoryGroups([]);
             }
-        } catch (error) {
-            console.error('Error loading inbox:', error);
+        } catch (error: any) {
+            if (
+                error?.name === 'ConnectionRefused' ||
+                error?.message === 'CONNECTION_REFUSED' ||
+                String(error?.message || '').includes('Network request failed')
+            ) {
+                console.debug('Inbox offline — keeping previous data');
+            } else {
+                console.warn('Error loading inbox:', error);
+            }
         } finally {
             setLoading(false);
         }
@@ -554,10 +580,18 @@ export default function InboxScreen({ navigation, route }: any) {
             }
             await deleteNotification(notif.id, user.handle);
             await loadData();
-            Alert.alert('Follow request accepted', `You are now following ${notif.fromHandle}.`);
+            setFollowRequestAlert({
+                title: 'Follow Request Accepted',
+                message: `${notif.fromHandle} is now following you.`,
+                icon: 'success',
+            });
         } catch (error) {
             console.error('Failed to accept follow request:', error);
-            Alert.alert('Error', 'Failed to accept follow request.');
+            setFollowRequestAlert({
+                title: 'Error',
+                message: 'Failed to accept follow request.',
+                icon: 'alert',
+            });
         }
     };
 
@@ -1040,7 +1074,8 @@ export default function InboxScreen({ navigation, route }: any) {
 
             {/* Content */}
             {activeTab === 'notifications' ? (
-                <FlatList
+                <FlashList
+                    estimatedItemSize={88}
                     key="notifications"
                     data={allNotifications}
                     keyExtractor={(item) => item.id}
@@ -1171,7 +1206,8 @@ export default function InboxScreen({ navigation, route }: any) {
                     }
                 />
             ) : activeTab === 'insights' ? (
-                <FlatList
+                <FlashList
+                    estimatedItemSize={88}
                     key="insights"
                     data={actionableInsights}
                     keyExtractor={(item) => item.storyId}
@@ -1322,7 +1358,8 @@ export default function InboxScreen({ navigation, route }: any) {
                     }
                 />
             ) : activeTab === 'groups' ? (
-                <FlatList
+                <FlashList
+                    estimatedItemSize={88}
                     key="groups"
                     data={groupMessages}
                     keyExtractor={(item, idx) => `group-${item.chatGroupId || idx}`}
@@ -1373,7 +1410,8 @@ export default function InboxScreen({ navigation, route }: any) {
                         })}
                     </ScrollView>
                 ) : null}
-                <FlatList
+                <FlashList
+                    estimatedItemSize={88}
                     key={`messages-${messageFilter}`}
                     data={
                         showMessageSections
@@ -1498,6 +1536,15 @@ export default function InboxScreen({ navigation, route }: any) {
                           }
                         : undefined
                 }
+            />
+            <GazetteerAlertSheet
+                visible={followRequestAlert != null}
+                title={followRequestAlert?.title || ''}
+                message={followRequestAlert?.message}
+                icon={followRequestAlert?.icon || 'success'}
+                confirmButtonText="Done"
+                onConfirm={() => setFollowRequestAlert(null)}
+                onDismiss={() => setFollowRequestAlert(null)}
             />
         </GazetteerScreenShell>
     );

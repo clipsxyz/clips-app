@@ -303,5 +303,160 @@ class StoryControllerTest extends TestCase
         $this->assertArrayHasKey('reactions_count', $firstStory);
         $this->assertArrayHasKey('replies_count', $firstStory);
     }
+
+    public function test_private_user_stories_hidden_from_non_followers(): void
+    {
+        $private = User::factory()->create(['is_private' => true, 'handle' => 'StevieG@NewtonAbbot']);
+        $viewer = User::factory()->create();
+
+        Story::factory()->forUser($private)->create(['text' => 'Secret 24']);
+
+        $index = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/stories?userId='.$viewer->id);
+        $index->assertStatus(200);
+        $texts = collect($index->json())->flatMap(fn ($group) => collect($group['stories'])->pluck('text'))->all();
+        $this->assertNotContains('Secret 24', $texts);
+
+        $byHandle = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/stories/user/'.rawurlencode($private->handle).'?userId='.$viewer->id);
+        $byHandle->assertStatus(403)->assertJsonFragment(['can_view' => false]);
+    }
+
+    public function test_private_user_stories_visible_to_accepted_followers(): void
+    {
+        $private = User::factory()->create(['is_private' => true, 'handle' => 'StevieG@NewtonAbbot']);
+        $follower = User::factory()->create();
+
+        \DB::table('user_follows')->insert([
+            'follower_id' => $follower->id,
+            'following_id' => $private->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $story = Story::factory()->forUser($private)->create(['text' => 'Follower only']);
+
+        $index = $this->actingAs($follower, 'sanctum')
+            ->getJson('/api/stories?userId='.$follower->id);
+        $index->assertStatus(200)->assertJsonFragment(['text' => 'Follower only']);
+
+        $view = $this->actingAs($follower, 'sanctum')
+            ->postJson('/api/stories/'.$story->id.'/view');
+        $view->assertStatus(200)->assertJsonPath('success', true);
+    }
+
+    public function test_non_follower_cannot_view_private_story(): void
+    {
+        $private = User::factory()->create(['is_private' => true]);
+        $stranger = User::factory()->create();
+        $story = Story::factory()->forUser($private)->create(['text' => 'Nope']);
+
+        $this->actingAs($stranger, 'sanctum')
+            ->postJson('/api/stories/'.$story->id.'/view')
+            ->assertStatus(403)
+            ->assertJsonFragment(['is_private' => true]);
+    }
+
+    public function test_store_persists_audience_location_tags_and_link_sticker(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'media_url' => 'https://example.com/story.jpg',
+                'media_type' => 'image',
+                'location' => 'Galway',
+                'venue' => 'Galway',
+                'audience' => 'close_friends',
+                'taggedUsers' => ['Barry@Galway'],
+                'taggedUsersPositions' => [
+                    ['handle' => 'Barry@Galway', 'x' => 42.5, 'y' => 61],
+                ],
+                'stickers' => [
+                    [
+                        'id' => 'link-1',
+                        'stickerId' => 'link-1',
+                        'sticker' => ['id' => 'link-1', 'name' => 'Site', 'category' => 'Link'],
+                        'x' => 50,
+                        'y' => 40,
+                        'scale' => 1,
+                        'rotation' => 0,
+                        'opacity' => 1,
+                        'textContent' => 'Site',
+                        'linkUrl' => 'https://example.com/page',
+                        'linkName' => 'Site',
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('audience', 'close_friends')
+            ->assertJsonPath('location', 'Galway')
+            ->assertJsonPath('tagged_users.0', 'Barry@Galway')
+            ->assertJsonPath('tagged_users_positions.0.handle', 'Barry@Galway');
+
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'audience' => 'close_friends',
+            'location' => 'Galway',
+        ]);
+
+        $stickers = $response->json('stickers');
+        $this->assertIsArray($stickers);
+        $this->assertSame('https://example.com/page', $stickers[0]['linkUrl'] ?? null);
+    }
+
+    public function test_only_me_story_hidden_from_others_in_index(): void
+    {
+        $author = User::factory()->create(['is_private' => false]);
+        $viewer = User::factory()->create();
+
+        Story::factory()->forUser($author)->create([
+            'text' => 'Secret only me',
+            'audience' => 'only_me',
+        ]);
+        Story::factory()->forUser($author)->create([
+            'text' => 'Public story',
+            'audience' => 'public',
+        ]);
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/stories?userId='.$viewer->id);
+
+        $response->assertStatus(200);
+        $texts = collect($response->json())->flatMap(fn ($group) => collect($group['stories'])->pluck('text'))->all();
+        $this->assertContains('Public story', $texts);
+        $this->assertNotContains('Secret only me', $texts);
+    }
+
+    public function test_close_friends_story_visible_to_followers_only(): void
+    {
+        $author = User::factory()->create(['is_private' => false]);
+        $follower = User::factory()->create();
+        $stranger = User::factory()->create();
+
+        \DB::table('user_follows')->insert([
+            'follower_id' => $follower->id,
+            'following_id' => $author->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Story::factory()->forUser($author)->create([
+            'text' => 'Followers only',
+            'audience' => 'close_friends',
+        ]);
+
+        $asFollower = $this->actingAs($follower, 'sanctum')
+            ->getJson('/api/stories?userId='.$follower->id);
+        $asFollower->assertStatus(200)->assertJsonFragment(['text' => 'Followers only']);
+
+        $asStranger = $this->actingAs($stranger, 'sanctum')
+            ->getJson('/api/stories?userId='.$stranger->id);
+        $texts = collect($asStranger->json())->flatMap(fn ($group) => collect($group['stories'])->pluck('text'))->all();
+        $this->assertNotContains('Followers only', $texts);
+    }
 }
 

@@ -25,8 +25,22 @@ class RouteServiceProvider extends ServiceProvider
     public function boot(): void
     {
         RateLimiter::for('api', function (Request $request) {
-            // Local device debugging (feed + profile + stories) exceeds 60/min easily.
-            $perMinute = $this->app->environment('local') ? 300 : 60;
+            // Ceiling for the global API group. Feed browsing uses api-feed (120);
+            // keep this ≥ feed so named feed limits are not capped by the group.
+            // Local device debugging (feed + profile + stories) spikes quickly.
+            $perMinute = $this->app->environment('local') ? 300 : 120;
+            return Limit::perMinute($perMinute)->by($request->user()?->id ?: $request->ip());
+        });
+
+        // Infinite-scroll feed + post reads — 120/min per user or IP.
+        RateLimiter::for('api-feed', function (Request $request) {
+            $perMinute = $this->app->environment('local') ? 300 : 120;
+            return Limit::perMinute($perMinute)->by($request->user()?->id ?: $request->ip());
+        });
+
+        // Uploads, post/story create, AI music — tighter 20/min per user or IP.
+        RateLimiter::for('api-media', function (Request $request) {
+            $perMinute = $this->app->environment('local') ? 60 : 20;
             return Limit::perMinute($perMinute)->by($request->user()?->id ?: $request->ip());
         });
 

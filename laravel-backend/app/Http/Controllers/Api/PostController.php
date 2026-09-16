@@ -226,7 +226,13 @@ class PostController extends Controller
     }
 
     /**
-     * Build feed items and nextCursor (used by index with Laravel Cache).
+     * Build feed items and nextCursor.
+     *
+     * Uses keyset (cursor) pagination on (created_at, id) — not offset pages.
+     * This matches Laravel cursorPaginate semantics while preserving our opaque
+     * nextCursor token for native/web clients. Media lives on posts.media_items
+     * (JSON column), so there is no separate media() relation to eager-load;
+     * author + tags are eager-loaded below to avoid N+1.
      */
     private function buildFeedResponse(array $cursorState, int $limit, string $filter, ?string $userId): array
     {
@@ -242,6 +248,7 @@ class PostController extends Controller
 
             // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
             // Location feeds: only original posts from that location.
+            // Eager-load author + reclip source + tags (media_items is a cast column, not a relation).
             $query = Post::query()
                 ->with([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
                 ->withCount(Post::engagementWithCounts());

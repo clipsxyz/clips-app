@@ -15,6 +15,10 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { getGlobalVideoMutedNative, setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
+import {
+    loadFeedVideoPrebufferConfig,
+    setFeedVideoPrebufferConfig,
+} from '../utils/prefetchFeedVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 const AUTOPLAY_OPTIONS: { id: FeedAutoplayPref; label: string; hint: string }[] = [
@@ -26,6 +30,8 @@ const AUTOPLAY_OPTIONS: { id: FeedAutoplayPref; label: string; hint: string }[] 
 export default function VideoPlaybackSettingsScreen({ navigation }: any) {
     const [autoplayPref, setAutoplayPref] = useState<FeedAutoplayPref>('wifi');
     const [muted, setMuted] = useState(true);
+    /** When true, Range-prebuffer upcoming feed videos on cellular (uses mobile data). */
+    const [prebufferOnCellular, setPrebufferOnCellular] = useState(false);
     const [networkLabel, setNetworkLabel] = useState('Checking connection…');
     const [loading, setLoading] = useState(true);
 
@@ -54,10 +60,15 @@ export default function VideoPlaybackSettingsScreen({ navigation }: any) {
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            const [pref, isMuted] = await Promise.all([getFeedAutoplayPref(), getGlobalVideoMutedNative()]);
+            const [pref, isMuted, prebufferCfg] = await Promise.all([
+                getFeedAutoplayPref(),
+                getGlobalVideoMutedNative(),
+                loadFeedVideoPrebufferConfig(),
+            ]);
             if (cancelled) return;
             setAutoplayPref(pref);
             setMuted(isMuted);
+            setPrebufferOnCellular(!prebufferCfg.skipOnCellular);
             setLoading(false);
         })();
         void refreshNetworkLabel();
@@ -78,6 +89,11 @@ export default function VideoPlaybackSettingsScreen({ navigation }: any) {
     const toggleMuted = async (next: boolean) => {
         setMuted(next);
         await setGlobalVideoMutedNative(next);
+    };
+
+    const togglePrebufferOnCellular = (next: boolean) => {
+        setPrebufferOnCellular(next);
+        setFeedVideoPrebufferConfig({ skipOnCellular: !next });
     };
 
     return (
@@ -123,6 +139,25 @@ export default function VideoPlaybackSettingsScreen({ navigation }: any) {
                                 </TouchableOpacity>
                             );
                         })}
+                    </View>
+                </View>
+
+                <View style={styles.section}>
+                    <View style={styles.toggleRow}>
+                        <View style={styles.toggleInfo}>
+                            <Text style={styles.sectionTitle}>Pre-load on cellular</Text>
+                            <Text style={styles.sectionSubtext}>
+                                When on, upcoming feed videos pre-buffer a short segment over mobile data for
+                                faster start. Off by default to save data; Wi‑Fi pre-load always runs when online.
+                            </Text>
+                        </View>
+                        <Switch
+                            value={prebufferOnCellular}
+                            onValueChange={togglePrebufferOnCellular}
+                            disabled={loading}
+                            trackColor={{ false: '#374151', true: '#9D174D' }}
+                            thumbColor={prebufferOnCellular ? '#f472b6' : '#9CA3AF'}
+                        />
                     </View>
                 </View>
 

@@ -1,14 +1,18 @@
+import { convertToProxyURL, isVideoCacheProxyUri } from './videoCacheProxyNative';
+
 /**
- * Shared ExoPlayer / AVPlayer buffer + disk-cache settings for feed MP4s.
- * `cacheSizeMB` enables react-native-video SimpleCache so re-scrolling
- * reuses previously buffered bytes instead of re-downloading.
+ * Shared ExoPlayer / AVPlayer buffer settings for feed MP4s.
+ * Tuned for Instant Start: begin playback as soon as ~1s is buffered.
+ *
+ * Remote URIs are rewritten via `convertToProxyURL` (react-native-video-cache
+ * LRU disk proxy) so Range prebuffer + the active player share one cache.
  */
 export const FEED_VIDEO_BUFFER_CONFIG = {
     minBufferMs: 1500,
     maxBufferMs: 12000,
-    bufferForPlaybackMs: 250,
+    bufferForPlaybackMs: 1000,
     bufferForPlaybackAfterRebufferMs: 500,
-    /** Disk cache budget for previously loaded remote MP4s (Android SimpleCache). */
+    /** Fallback ExoPlayer SimpleCache when the HTTP proxy is unavailable. */
     cacheSizeMB: 150,
 } as const;
 
@@ -25,20 +29,30 @@ function isRemoteHttpUri(uri: unknown): uri is string {
 }
 
 /**
- * Attach shouldCache + bufferConfig for remote HTTP(S) feed videos.
- * Local/file/require sources are returned unchanged.
+ * Rewrite remote feed/story video URIs through the local LRU proxy and attach
+ * an Instant-Start bufferConfig for react-native-video.
  */
 export function withFeedVideoCache<T extends VideoSourceLike | number>(source: T): T {
     if (source == null || typeof source === 'number') return source;
     if (typeof source !== 'object') return source;
     const uri = source.uri;
     if (!isRemoteHttpUri(uri)) return source;
+
+    const proxied = convertToProxyURL(uri);
+    const usingProxy = isVideoCacheProxyUri(proxied) && proxied !== uri;
+
     return {
         ...source,
-        shouldCache: true,
+        uri: proxied,
+        // Proxy owns the shared disk LRU — avoid double-caching into ExoPlayer SimpleCache.
+        // When proxy is unavailable, keep shouldCache so SimpleCache still helps re-scrolls.
+        shouldCache: usingProxy ? false : true,
         bufferConfig: {
             ...FEED_VIDEO_BUFFER_CONFIG,
             ...(source.bufferConfig || {}),
+            // Always enforce Instant-Start playback thresholds.
+            minBufferMs: FEED_VIDEO_BUFFER_CONFIG.minBufferMs,
+            bufferForPlaybackMs: FEED_VIDEO_BUFFER_CONFIG.bufferForPlaybackMs,
         },
     };
 }

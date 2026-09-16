@@ -42,6 +42,8 @@ class Kernel extends HttpKernel
         'api' => [
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \App\Http\Middleware\QueryProfiler::class,
+            // Named limiter `api` (120/min prod, 300 local) — NOT the legacy 60/min default.
+            // Feed/media routes also apply throttle:api-feed / throttle:api-media in routes/api.php.
             \Illuminate\Routing\Middleware\ThrottleRequests::class.':api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],

@@ -201,15 +201,26 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                         byId.set(mapped.id, mapped);
                     }
                 }
-            } catch (pendingError) {
-                console.warn('Failed to fetch pending community invites:', pendingError);
+            } catch (pendingError: any) {
+                if (
+                    pendingError?.name === 'ConnectionRefused' ||
+                    pendingError?.message === 'CONNECTION_REFUSED'
+                ) {
+                    console.debug('Pending community invites offline');
+                } else {
+                    console.warn('Failed to fetch pending community invites:', pendingError);
+                }
             }
             return filterNotificationsByPreferences(
                 forHandle,
                 Array.from(byId.values()).sort((a, b) => b.timestamp - a.timestamp)
             );
-        } catch (error) {
-            console.warn('Failed to fetch notifications from API, falling back to local store:', error);
+        } catch (error: any) {
+            if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+                console.debug('Notifications API offline — using local store');
+            } else {
+                console.warn('Failed to fetch notifications from API, falling back to local store:', error);
+            }
         }
         try {
             const { fetchPendingGroupInvites } = await import('./chatGroups');
@@ -234,8 +245,15 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                 ...(notifications.get(forHandle) || []),
                 ...fallback,
             ]);
-        } catch (pendingError) {
-            console.warn('Failed to fetch pending community invites:', pendingError);
+        } catch (pendingError: any) {
+            if (
+                pendingError?.name === 'ConnectionRefused' ||
+                pendingError?.message === 'CONNECTION_REFUSED'
+            ) {
+                console.debug('Pending community invites offline');
+            } else {
+                console.warn('Failed to fetch pending community invites:', pendingError);
+            }
         }
     }
     return filterNotificationsByPreferences(forHandle, notifications.get(forHandle) || []);

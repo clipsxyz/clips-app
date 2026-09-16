@@ -28,6 +28,10 @@ allprojects {
         maven {
             url = uri("${rootDir}/ffmpeg-kit-local-maven")
         }
+        maven {
+            // react-native-video-cache → AndroidVideoCache AAR
+            url = uri("${rootDir}/../node_modules/react-native-video-cache/android/libs")
+        }
         maven { url 'https://www.jitpack.io' }
     }
 }

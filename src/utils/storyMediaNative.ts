@@ -9,6 +9,7 @@ import {
     resolveMockFeedVideoPosterUrl,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
+import { withFeedVideoCache } from './feedVideoSourceNative';
 
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
 
@@ -110,7 +111,11 @@ export function storyVideoSource(url?: string | null): { uri: string } | null {
         const playback = resolveStoryVideoPlaybackUrl(raw);
         source = playback ? { uri: playback } : null;
     }
-    if (source) STORY_VIDEO_SOURCE_CACHE.set(raw, source);
+    if (source) {
+        const wrapped = withFeedVideoCache(source) as { uri: string };
+        STORY_VIDEO_SOURCE_CACHE.set(raw, wrapped);
+        return wrapped;
+    }
     return source;
 }
 

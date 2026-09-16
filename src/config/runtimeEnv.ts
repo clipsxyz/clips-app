@@ -96,6 +96,32 @@ export function isMockMode(): boolean {
 /** Mac LAN IP used when the phone cannot reach localhost (adb reverse drops). */
 export const DEV_LAN_API_HOST = '192.168.1.12';
 export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
+export const DEV_LOOPBACK_API_BASE_URL = 'http://127.0.0.1:8000/api';
+
+/** Remember which API host last worked on this RN session (adb reverse vs LAN). */
+export type RnApiHostPreference = 'loopback' | 'lan';
+let preferredRnApiHost: RnApiHostPreference | null = null;
+
+export function getPreferredRnApiHost(): RnApiHostPreference | null {
+  return preferredRnApiHost;
+}
+
+export function setPreferredRnApiHost(pref: RnApiHostPreference | null): void {
+  preferredRnApiHost = pref;
+}
+
+export function rememberSuccessfulApiBaseUrl(apiBaseUrl: string): void {
+  try {
+    const host = new URL(String(apiBaseUrl || '').trim()).hostname;
+    if (host === '127.0.0.1' || host === 'localhost') {
+      preferredRnApiHost = 'loopback';
+    } else if (host === DEV_LAN_API_HOST || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+      preferredRnApiHost = 'lan';
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Prefer migration env `EXPO_PUBLIC_API_BASE_URL`, then

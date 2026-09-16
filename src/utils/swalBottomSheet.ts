@@ -248,6 +248,25 @@ export function followRequestSentBottomSheet(): SweetAlertOptions {
   };
 }
 
+export function followRequestAcceptedBottomSheet(fromHandle: string): SweetAlertOptions {
+  const who = escapeHtml(fromHandle);
+  return {
+    ...BOTTOM_SHEET_BASE,
+    showConfirmButton: true,
+    confirmButtonText: 'OK',
+    showCancelButton: false,
+    title: undefined,
+    html: `
+      <div class="swal-bottom-sheet-content">
+        <p class="swal-bottom-sheet-gazetteer">Gazetteer says</p>
+        <div class="swal-bottom-sheet-icon">${ICON_SUCCESS_SVG}</div>
+        <h3 class="swal-bottom-sheet-title-text">Follow Request Accepted</h3>
+        <p class="swal-bottom-sheet-message"><strong>${who}</strong> is now following you.</p>
+      </div>
+    `,
+  };
+}
+
 /** First card: "This account is private" – same bottom-sheet style, Cancel + Follow buttons */
 export function accountIsPrivateBottomSheet(): SweetAlertOptions {
   return {

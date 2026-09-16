@@ -39,6 +39,8 @@ class Story extends Model
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers', // JSON array of StickerOverlay objects
         'tagged_users', // JSON array of user handles
+        'tagged_users_positions', // JSON array of { handle, x, y }
+        'audience', // public | close_friends | only_me
         'link_preview',
     ];
 
@@ -48,6 +50,7 @@ class Story extends Model
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers' => 'array', // Array of StickerOverlay objects
         'tagged_users' => 'array', // Array of user handles
+        'tagged_users_positions' => 'array',
         'link_preview' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -99,6 +102,36 @@ class Story extends Model
     public function scopeByMediaType($query, $type)
     {
         return $query->where('media_type', $type);
+    }
+
+    /**
+     * Audience: public = everyone; close_friends = author's followers; only_me = author.
+     * Combine with User::constrainAuthorVisibility for private profiles.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeVisibleToAudience($query, ?string $viewerId)
+    {
+        return $query->where(function ($outer) use ($viewerId) {
+            $outer->where(function ($public) {
+                $public->whereNull('audience')
+                    ->orWhere('audience', 'public');
+            });
+
+            if ($viewerId) {
+                $outer->orWhere('user_id', $viewerId)
+                    ->orWhere(function ($followersOnly) use ($viewerId) {
+                        $followersOnly->where('audience', 'close_friends')
+                            ->whereIn('user_id', function ($sub) use ($viewerId) {
+                                $sub->select('following_id')
+                                    ->from('user_follows')
+                                    ->where('follower_id', $viewerId)
+                                    ->where('status', 'accepted');
+                            });
+                    });
+            }
+        });
     }
 
     // Helper methods

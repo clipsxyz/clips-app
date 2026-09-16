@@ -842,6 +842,8 @@ function mapLaravelStoryToStory(story: any): Story {
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
         taggedUsers: story.tagged_users || undefined,
+        taggedUsersPositions: story.tagged_users_positions || story.taggedUsersPositions || undefined,
+        audience: story.audience || 'public',
         sharedFromPost: story.shared_from_post_id || story.sharedFromPost || undefined,
         sharedFromUser: story.shared_from_user_handle || story.sharedFromUser || undefined,
         videoPosterUrl: resolveStoryMediaUrl(story.video_poster_url) || undefined,
@@ -1163,7 +1165,11 @@ export async function createStory(
             textColor: response.text_color || textColor || undefined,
             textSize: response.text_size || textSize || undefined,
             textStyle: response.text_style || textStyle || undefined,
-            stickers: normalizeStoryStickers(response.stickers) || stickers || undefined,
+            stickers: (() => {
+                const fromApi = normalizeStoryStickers(response.stickers);
+                if (fromApi && fromApi.length > 0) return fromApi;
+                return stickers || undefined;
+            })(),
             taggedUsers: response.tagged_users || taggedUsers || undefined, // Get tagged users from backend
             taggedUsersPositions: response.tagged_users_positions || taggedUsersPositions || undefined, // Get tagged users with positions
             createdAt: new Date(response.created_at).getTime() || now,

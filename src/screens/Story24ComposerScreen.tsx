@@ -23,6 +23,10 @@ import { isMockMode } from '../config/runtimeEnv';
 import { hapticLight } from '../utils/hapticsNative';
 import StickerOverlayNative from '../components/StickerOverlay.native';
 import StoryModalShell from '../components/StoryModalShell.native';
+import StoryNewsHeadlineScaffold, {
+    NEWS_HEADLINE_CTA_LABEL,
+    NEWS_HEADLINE_MAX_CHARS,
+} from '../components/StoryNewsHeadlineScaffold.native';
 import TaggedUserOverlayNative, {
     type TaggedUserOverlayItem,
 } from '../components/TaggedUserOverlay.native';
@@ -43,6 +47,11 @@ type RailAction = 'text' | 'location' | 'link' | 'tag' | 'audience';
 
 const RAIL_ACTIONS: RailAction[] = ['text', 'location', 'link', 'tag', 'audience'];
 const RAIL_SLOT = 72;
+
+/** Fixed position for persisted headline sticker (percent of canvas). */
+const HEADLINE_STICKER_Y = 48;
+/** Spawn free-move stickers mid-canvas so they aren't under the footer rail. */
+const DEFAULT_STICKER_Y = 50;
 
 function normalizeStoryLinkUrl(rawUrl: string): string | null {
     const cleaned = rawUrl.trim().replace(/[\u200B-\u200D\uFEFF]/g, '');
@@ -91,7 +100,6 @@ function audienceInnerBg(audience: StoryAudience): string {
 function RailIcon({
     action,
     centered,
-    audience: _audience,
 }: {
     action: RailAction;
     centered: boolean;
@@ -107,6 +115,44 @@ function RailIcon({
     return <Icon name="people-outline" size={size} color="#FFFFFF" />;
 }
 
+function buildHeadlineSticker(headline: string): StickerOverlay | null {
+    const trimmed = headline.trim().toUpperCase().slice(0, NEWS_HEADLINE_MAX_CHARS);
+    if (!trimmed) return null;
+    const id = 'news-headline';
+    return {
+        id,
+        stickerId: id,
+        sticker: { id, name: trimmed, category: 'Headline', isTrending: false },
+        x: 50,
+        y: HEADLINE_STICKER_Y,
+        scale: 1,
+        rotation: 0,
+        opacity: 1,
+        textContent: trimmed,
+        textColor: '#FFFFFF',
+        fontSize: 'large',
+    };
+}
+
+function buildLinkSticker(url: string, existing?: StickerOverlay | null): StickerOverlay {
+    const id = existing?.id || 'news-cta-link';
+    return {
+        id,
+        stickerId: id,
+        sticker: { id, name: NEWS_HEADLINE_CTA_LABEL, category: 'Link', isTrending: false },
+        x: existing?.x ?? 50,
+        y: existing?.y ?? DEFAULT_STICKER_Y,
+        scale: existing?.scale ?? 1,
+        rotation: existing?.rotation ?? 0,
+        opacity: existing?.opacity ?? 1,
+        textContent: NEWS_HEADLINE_CTA_LABEL,
+        textColor: '#000000',
+        fontSize: 'medium',
+        linkUrl: url,
+        linkName: NEWS_HEADLINE_CTA_LABEL,
+    };
+}
+
 export default function Story24ComposerScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
@@ -118,12 +164,12 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         route.params?.mediaType === 'video' ? 'video' : 'image';
     const videoCoverTime = Number(route.params?.videoCoverTime || 0);
 
-    const [textStickers, setTextStickers] = useState<StickerOverlay[]>([]);
+    const [headlineText, setHeadlineText] = useState('');
+    const [linkSticker, setLinkSticker] = useState<StickerOverlay | null>(null);
     const [locationStickers, setLocationStickers] = useState<StickerOverlay[]>([]);
-    const [linkStickers, setLinkStickers] = useState<StickerOverlay[]>([]);
     const [taggedUsers, setTaggedUsers] = useState<TaggedUserOverlayItem[]>([]);
     const [storyAudience, setStoryAudience] = useState<StoryAudience>('public');
-    const [centeredRail, setCenteredRail] = useState<RailAction>('link');
+    const [centeredRail, setCenteredRail] = useState<RailAction>('text');
     const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
     const [selectedTaggedUserId, setSelectedTaggedUserId] = useState<string | null>(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
@@ -135,15 +181,20 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const [showTagModal, setShowTagModal] = useState(false);
     const [locationDraft, setLocationDraft] = useState('');
     const [linkUrlDraft, setLinkUrlDraft] = useState('');
-    const [linkNameDraft, setLinkNameDraft] = useState('');
 
     const railRef = useRef<ScrollView | null>(null);
     const videoRef = useRef<VideoRef>(null);
 
-    const allOverlays = useMemo(
-        () => [...textStickers, ...locationStickers, ...linkStickers],
-        [textStickers, locationStickers, linkStickers],
-    );
+    const movableStickers = useMemo(() => {
+        const list: StickerOverlay[] = [...locationStickers];
+        if (linkSticker) list.push(linkSticker);
+        return list;
+    }, [linkSticker, locationStickers]);
+
+    const allOverlays = useMemo(() => {
+        const headline = buildHeadlineSticker(headlineText);
+        return [...(headline ? [headline] : []), ...movableStickers];
+    }, [headlineText, movableStickers]);
 
     const centerRailAction = useCallback(
         (action: RailAction, animated = true) => {
@@ -158,7 +209,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     const updateCenteredRailFromScroll = useCallback(
         (scrollX: number) => {
             const centerX = scrollX + screenWidth / 2;
-            let closest: RailAction = 'link';
+            let closest: RailAction = 'text';
             let minDist = Number.POSITIVE_INFINITY;
             RAIL_ACTIONS.forEach((action, index) => {
                 const itemCenter = railPadWidth + index * RAIL_SLOT + RAIL_SLOT / 2;
@@ -180,7 +231,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
     }, [mediaUrl, navigation]);
 
     useEffect(() => {
-        const timer = setTimeout(() => centerRailAction('link', false), 60);
+        const timer = setTimeout(() => centerRailAction('text', false), 60);
         return () => clearTimeout(timer);
     }, [centerRailAction]);
 
@@ -191,6 +242,11 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
 
     const onRailScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
         updateCenteredRailFromScroll(e.nativeEvent.contentOffset.x);
+    };
+
+    const openLinkEditor = () => {
+        setLinkUrlDraft(linkSticker?.linkUrl || '');
+        setShowLinkModal(true);
     };
 
     const handleRailPress = (action: RailAction) => {
@@ -209,28 +265,12 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         }
         if (action === 'text') setShowTextModal(true);
         if (action === 'location') setShowLocationModal(true);
-        if (action === 'link') setShowLinkModal(true);
+        if (action === 'link') openLinkEditor();
         if (action === 'tag') setShowTagModal(true);
     };
 
-    const addTextSticker = (text: string, fontSize: 'small' | 'medium' | 'large', color: string) => {
-        const id = `text-${Date.now()}`;
-        const sticker: StickerOverlay = {
-            id,
-            stickerId: id,
-            sticker: { id, name: text, category: 'Text', isTrending: false },
-            x: 50,
-            y: 50,
-            scale: fontSize === 'small' ? 0.8 : fontSize === 'large' ? 1.4 : 1,
-            rotation: 0,
-            opacity: 1,
-            textContent: text,
-            textColor: color,
-            fontSize,
-        };
-        setTextStickers((prev) => [...prev, sticker]);
-        setSelectedOverlayId(id);
-        setSelectedTaggedUserId(null);
+    const saveHeadline = (text: string) => {
+        setHeadlineText(text.trim().toUpperCase().slice(0, NEWS_HEADLINE_MAX_CHARS));
     };
 
     const addLocationSticker = () => {
@@ -245,7 +285,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
             stickerId: id,
             sticker: { id, name: label, category: 'Location', isTrending: false },
             x: 50,
-            y: 50,
+            y: DEFAULT_STICKER_Y,
             scale: 0.9,
             rotation: 0,
             opacity: 1,
@@ -260,34 +300,46 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         setShowLocationModal(false);
     };
 
-    const addLinkSticker = () => {
+    const saveLink = () => {
         const formatted = normalizeStoryLinkUrl(linkUrlDraft);
         if (!formatted) {
             Alert.alert('Invalid link', 'Enter a valid website URL.');
             return;
         }
-        const label = linkNameDraft.trim() || formatted;
-        const id = `link-${Date.now()}`;
-        const sticker: StickerOverlay = {
-            id,
-            stickerId: id,
-            sticker: { id, name: label, category: 'Link', isTrending: false },
-            x: 50,
-            y: 40,
-            scale: 1,
-            rotation: 0,
-            opacity: 1,
-            textContent: label,
-            textColor: '#FFFFFF',
-            fontSize: 'medium',
-        };
-        setLinkStickers((prev) => [...prev, sticker]);
-        setSelectedOverlayId(id);
+        const next = buildLinkSticker(formatted, linkSticker);
+        setLinkSticker(next);
+        setSelectedOverlayId(next.id);
         setSelectedTaggedUserId(null);
         setLinkUrlDraft('');
-        setLinkNameDraft('');
         setShowLinkModal(false);
     };
+
+    const clearLink = () => {
+        setLinkSticker(null);
+        setLinkUrlDraft('');
+        setShowLinkModal(false);
+        if (selectedOverlayId === linkSticker?.id) setSelectedOverlayId(null);
+    };
+
+    const updateMovableSticker = useCallback((updated: StickerOverlay) => {
+        if (updated.sticker.category === 'Link' || updated.linkUrl) {
+            setLinkSticker(updated);
+            return;
+        }
+        setLocationStickers((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+    }, []);
+
+    const removeMovableSticker = useCallback(
+        (id: string) => {
+            if (linkSticker?.id === id) {
+                setLinkSticker(null);
+            } else {
+                setLocationStickers((prev) => prev.filter((o) => o.id !== id));
+            }
+            if (selectedOverlayId === id) setSelectedOverlayId(null);
+        },
+        [linkSticker?.id, selectedOverlayId],
+    );
 
     const addTaggedUser = (handle: string) => {
         const normalized = handle.replace(/^@+/, '').trim();
@@ -320,6 +372,10 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         const stickerSnapshot = [...allOverlays];
         const taggedSnapshot = taggedUsers.map((tu) => ({ ...tu }));
         const audienceSnapshot = storyAudience;
+        const locationSnapshot =
+            locationStickers
+                .map((s) => String(s.textContent || '').trim())
+                .find((v) => v.length > 0) || undefined;
 
         setIsPosting(true);
         hapticLight();
@@ -355,6 +411,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     userHandle: user.handle,
                     mediaUrl: remoteUrl,
                     mediaType: remoteType,
+                    location: locationSnapshot,
                     stickers: stickerSnapshot.length > 0 ? stickerSnapshot : undefined,
                     taggedUsers: handles.length > 0 ? handles : undefined,
                     taggedUsersPositions:
@@ -375,9 +432,9 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
         label: string;
         count?: number;
     }> = [
-        { id: 'text', label: 'Text', count: textStickers.length },
+        { id: 'text', label: 'Text', count: headlineText ? 1 : 0 },
         { id: 'location', label: 'Location', count: locationStickers.length },
-        { id: 'link', label: 'Link', count: linkStickers.length },
+        { id: 'link', label: 'Link', count: linkSticker ? 1 : 0 },
         { id: 'tag', label: 'Tag', count: taggedUsers.length },
         { id: 'audience', label: audienceLabel(storyAudience) },
     ];
@@ -407,6 +464,8 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     />
                 )}
 
+                <View style={styles.legibilityGradient} pointerEvents="none" />
+
                 <Pressable
                     style={styles.deselectLayer}
                     onPress={() => {
@@ -415,8 +474,15 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     }}
                 />
 
+                <StoryNewsHeadlineScaffold
+                    mode="editor"
+                    headline={headlineText}
+                    showEmptyGuides
+                    onPressHeadline={() => setShowTextModal(true)}
+                />
+
                 {previewSize.width > 0 &&
-                    allOverlays.map((overlay) => (
+                    movableStickers.map((overlay) => (
                         <StickerOverlayNative
                             key={overlay.id}
                             overlay={overlay}
@@ -429,23 +495,8 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                                 setSelectedOverlayId(overlay.id);
                                 setSelectedTaggedUserId(null);
                             }}
-                            onUpdate={(updated) => {
-                                const updateList = (list: StickerOverlay[]) =>
-                                    list.map((o) => (o.id === updated.id ? updated : o));
-                                if (textStickers.some((o) => o.id === updated.id)) {
-                                    setTextStickers(updateList);
-                                } else if (locationStickers.some((o) => o.id === updated.id)) {
-                                    setLocationStickers(updateList);
-                                } else {
-                                    setLinkStickers(updateList);
-                                }
-                            }}
-                            onRemove={() => {
-                                setTextStickers((prev) => prev.filter((o) => o.id !== overlay.id));
-                                setLocationStickers((prev) => prev.filter((o) => o.id !== overlay.id));
-                                setLinkStickers((prev) => prev.filter((o) => o.id !== overlay.id));
-                                if (selectedOverlayId === overlay.id) setSelectedOverlayId(null);
-                            }}
+                            onUpdate={updateMovableSticker}
+                            onRemove={() => removeMovableSticker(overlay.id)}
                         />
                     ))}
 
@@ -581,8 +632,9 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
             <TextStickerModalNative
                 visible={showTextModal}
                 onClose={() => setShowTextModal(false)}
-                onConfirm={addTextSticker}
+                onConfirm={(text) => saveHeadline(text)}
                 variant="story"
+                initialText={headlineText}
             />
 
             <StoryModalShell
@@ -625,40 +677,43 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                 <View style={modalStyles.header}>
                     <View style={modalStyles.headerLeft}>
                         <Icon name="link-outline" size={ox(22)} color="#FFFFFF" />
-                        <Text style={modalStyles.title}>Add Link</Text>
+                        <Text style={modalStyles.title}>TAP TO READ</Text>
                     </View>
                     <TouchableOpacity onPress={() => setShowLinkModal(false)} hitSlop={8}>
                         <Icon name="close" size={ox(20)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
-                <Text style={modalStyles.label}>Link Name / Description</Text>
-                <TextInput
-                    value={linkNameDraft}
-                    onChangeText={setLinkNameDraft}
-                    placeholder="e.g., Check out my website"
-                    placeholderTextColor="#6B7280"
-                    style={modalStyles.input}
-                    maxLength={50}
-                />
+                <Text style={modalStyles.hint}>
+                    Paste the article URL. The sticker always shows “TAP TO READ”.
+                </Text>
                 <Text style={modalStyles.label}>URL</Text>
                 <TextInput
                     value={linkUrlDraft}
                     onChangeText={setLinkUrlDraft}
-                    placeholder="https://example.com"
+                    placeholder="https://example.com/article"
                     placeholderTextColor="#6B7280"
                     style={modalStyles.input}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    autoFocus
                 />
                 <View style={modalStyles.actions}>
-                    <TouchableOpacity
-                        style={modalStyles.cancelBtn}
-                        onPress={() => setShowLinkModal(false)}
-                    >
-                        <Text style={modalStyles.cancelBtnText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={modalStyles.confirmBtn} onPress={addLinkSticker}>
-                        <Text style={modalStyles.confirmBtnText}>Add Link</Text>
+                    {linkSticker ? (
+                        <TouchableOpacity style={modalStyles.cancelBtn} onPress={clearLink}>
+                            <Text style={modalStyles.cancelBtnText}>Remove</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity
+                            style={modalStyles.cancelBtn}
+                            onPress={() => setShowLinkModal(false)}
+                        >
+                            <Text style={modalStyles.cancelBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                    )}
+                    <TouchableOpacity style={modalStyles.confirmBtn} onPress={saveLink}>
+                        <Text style={modalStyles.confirmBtnText}>
+                            {linkSticker ? 'Update Link' : 'Add Link'}
+                        </Text>
                     </TouchableOpacity>
                 </View>
             </StoryModalShell>
@@ -682,6 +737,7 @@ const modalStyles = StyleSheet.create({
     },
     headerLeft: { flexDirection: 'row', alignItems: 'center', gap: ox(8) },
     title: { color: '#FFFFFF', fontSize: ox(20), fontWeight: '700' },
+    hint: { color: '#9CA3AF', fontSize: ox(13), marginBottom: ox(12), lineHeight: ox(18) },
     label: { color: '#D1D5DB', fontSize: ox(14), fontWeight: '500', marginBottom: ox(8) },
     input: {
         borderWidth: 1,
@@ -723,6 +779,11 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     media: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+    legibilityGradient: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 2,
+        backgroundColor: 'rgba(0,0,0,0.22)',
+    },
     headerOverlay: {
         position: 'absolute',
         top: 0,

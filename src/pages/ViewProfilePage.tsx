@@ -18,7 +18,7 @@ import ShareModal from '../components/ShareModal';
 import ScenesModal from '../components/ScenesModal';
 import { getEffectiveTextStyleForPost, getTextOnlyFallbackBackground, getTextOnlyPreviewTextClass } from '../utils/effectiveTextPostStyle';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
-import { fetchFollowers, fetchFollowing, fetchUserProfile, toggleFollow, connectionListTotal, profileAudienceFromPayload } from '../api/client';
+import { fetchFollowers, fetchFollowing, fetchUserProfile, fetchProfileAudience, toggleFollow, connectionListTotal, profileAudienceFromPayload } from '../api/client';
 import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { 
@@ -28,7 +28,8 @@ import {
   hasPendingFollowRequest,
   createFollowRequest,
   removeFollowRequest,
-  normalizeHandleForPrivacy
+  normalizeHandleForPrivacy,
+  setProfilePrivacy,
 } from '../api/privacy';
 import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
@@ -1637,6 +1638,54 @@ export default function ViewProfilePage() {
                 // Check privacy using localStorage
                 const profilePrivate = isProfilePrivate(canonicalHandle);
                 setProfileIsPrivate(profilePrivate);
+
+                // Live audience first — paint private sheet without waiting on follow graph / posts.
+                if (!isMockMode() && user?.handle && decodedHandle !== user.handle) {
+                    try {
+                        const audience = await fetchProfileAudience(
+                            decodedHandle,
+                            undefined,
+                            user?.id ? String(user.id) : undefined,
+                        );
+                        if (audience.can_view === false || audience.is_private === true) {
+                            setProfileIsPrivate(true);
+                            setCanViewProfileState(false);
+                            if (typeof audience.is_following === 'boolean' && followStateStillCurrent()) {
+                                setIsFollowing(audience.is_following);
+                            }
+                            if (typeof audience.has_pending_request === 'boolean') {
+                                setHasPendingRequest(audience.has_pending_request);
+                            } else {
+                                setHasPendingRequest(hasPendingFollowRequest(user.handle, canonicalHandle));
+                            }
+                            try {
+                                setProfilePrivacy(canonicalHandle, true);
+                            } catch {
+                                /* ignore */
+                            }
+                            setProfileUser((prev: any) =>
+                                prev || {
+                                    handle: audience.handle || decodedHandle,
+                                    name: (audience.handle || decodedHandle).split('@')[0],
+                                    avatarUrl: audience.avatar_url || getAvatarForHandle(decodedHandle),
+                                },
+                            );
+                            Swal.fire(accountIsPrivateBottomSheet()).then(async (result) => {
+                                if (result.isConfirmed && user?.id) {
+                                    try {
+                                        await handleFollow();
+                                    } catch (error) {
+                                        console.error('Error following user:', error);
+                                    }
+                                }
+                            });
+                            setLoading(false);
+                            return;
+                        }
+                    } catch {
+                        /* fall through to local privacy / full load */
+                    }
+                }
                 
                 if (user?.id && user?.handle) {
                     const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
@@ -1666,7 +1715,7 @@ export default function ViewProfilePage() {
                     if (!canView && profilePrivate && decodedHandle !== user.handle) {
                         Swal.fire(accountIsPrivateBottomSheet()).then(async (result) => {
                             // Only create follow request if user explicitly clicked "Follow"
-                            // If they clicked "Cancel" (result.isDismissed or !result.isConfirmed), do nothing
+                            // If they clicked Cancel (result.isDismissed or !result.isConfirmed), do nothing
                             if (result.isConfirmed && user?.id) {
                                 try {
                                     await handleFollow();

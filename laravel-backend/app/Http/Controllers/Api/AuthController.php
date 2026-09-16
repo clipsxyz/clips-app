@@ -385,6 +385,7 @@ class AuthController extends Controller
             'profile_background_url' => 'sometimes|nullable|string|max:65535',
             'avatar_url' => 'sometimes|nullable|string|max:500',
             'email_digest_enabled' => 'sometimes|boolean',
+            'is_private' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -396,7 +397,7 @@ class AuthController extends Controller
         $newHandle = array_key_exists('handle', $data) ? (string) $data['handle'] : $oldHandle;
         $handleChanging = $newHandle !== '' && strcasecmp($oldHandle, $newHandle) !== 0;
 
-        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled'];
+        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled', 'is_private'];
         foreach ($fillable as $field) {
             if (array_key_exists($field, $data)) {
                 $user->{$field} = $data[$field];

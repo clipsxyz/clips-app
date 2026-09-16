@@ -241,14 +241,40 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         })();
     }, [carouselItems.length]);
 
-    const applyAssets = useCallback((assets: ImagePicker.Asset[]) => {
-        const next = assetsToCarouselItems(assets, CAROUSEL_MAX);
-        if (next.length === 0) return false;
-        setCarouselItems(next);
-        setCarouselActiveIndex(0);
-        if (next.length > 1) setCardTab('carousel');
-        return true;
-    }, []);
+    const openStoryComposer = useCallback(
+        (item: LocalCarouselItem) => {
+            navigation.replace('Story24Composer', {
+                mediaUrl: item.uri,
+                mediaType: item.type,
+                videoCoverTime: item.type === 'video' ? item.videoCoverTime ?? 0 : 0,
+                videoDurationSec: item.type === 'video' ? item.durationSec : undefined,
+            });
+        },
+        [navigation],
+    );
+
+    const applyAssets = useCallback(
+        (assets: ImagePicker.Asset[]) => {
+            const next = assetsToCarouselItems(assets, CAROUSEL_MAX);
+            if (next.length === 0) return false;
+            // Story flow: skip feed caption/settings and open the story composer.
+            if (story24) {
+                openStoryComposer(next[0]);
+                return true;
+            }
+            setCarouselItems(next);
+            setCarouselActiveIndex(0);
+            if (next.length > 1) setCardTab('carousel');
+            return true;
+        },
+        [openStoryComposer, story24],
+    );
+
+    // If we landed here with story media already (legacy routes), forward immediately.
+    useEffect(() => {
+        if (!story24 || initialItems.length === 0) return;
+        openStoryComposer(initialItems[0]);
+    }, [initialItems, openStoryComposer, story24]);
 
     useEffect(() => {
         if (!autoStart) return;
@@ -259,7 +285,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             void (async () => {
                 try {
                     const picked = await pickFromFullGallery(
-                        autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
+                        story24 || autoStart.kind === 'single' ? 1 : CAROUSEL_MAX,
                     );
                     if (picked === 'denied' || picked === 'cancel') {
                         navigation.goBack();
@@ -312,7 +338,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                 );
             })();
         }
-    }, [applyAssets, autoStart, carouselItems.length, initialItems.length, navigation]);
+    }, [applyAssets, autoStart, carouselItems.length, initialItems.length, navigation, story24]);
 
     const removeCarouselItem = useCallback((index: number) => {
         setCarouselItems((prev) => {
@@ -400,12 +426,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         if (story24) {
             const first = carouselItems[0];
             if (!first) return;
-            navigation.replace('Story24Composer', {
-                mediaUrl: first.uri,
-                mediaType: first.type,
-                videoCoverTime: first.type === 'video' ? first.videoCoverTime ?? 0 : 0,
-                videoDurationSec: first.type === 'video' ? first.durationSec : undefined,
-            });
+            openStoryComposer(first);
             return;
         }
 

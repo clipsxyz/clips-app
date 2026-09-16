@@ -177,7 +177,7 @@ export default function TaggedUserOverlayNative({
             style={[
                 styles.wrap,
                 {
-                    zIndex: isSelected ? 40 : 25,
+                    zIndex: isSelected ? 70 : 60,
                 },
                 positionStyle,
             ]}

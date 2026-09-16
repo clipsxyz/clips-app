@@ -86,6 +86,19 @@ export async function deleteChatGroup(groupId: string): Promise<unknown> {
 
 export async function fetchPendingGroupInvites(): Promise<ChatGroupInviteRow[]> {
   if (!isLaravelApiEnabled() || !hasAuthToken()) return [];
-  const res = (await client.fetchPendingChatGroupInvites()) as { items?: ChatGroupInviteRow[] };
-  return res.items ?? [];
+  try {
+    const res = (await client.fetchPendingChatGroupInvites()) as { items?: ChatGroupInviteRow[] };
+    return res.items ?? [];
+  } catch (error: any) {
+    if (
+      error?.name === 'ConnectionRefused' ||
+      error?.message === 'CONNECTION_REFUSED' ||
+      String(error?.message || '').includes('Network request failed')
+    ) {
+      console.debug('Pending group invites unavailable (offline)');
+      return [];
+    }
+    console.warn('Failed to fetch pending community invites:', error);
+    return [];
+  }
 }

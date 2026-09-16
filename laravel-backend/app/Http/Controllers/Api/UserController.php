@@ -338,11 +338,27 @@ class UserController extends Controller
 
         $viewer = Auth::user() ?: $this->resolveViewer($request);
         if (! $this->viewerCanSeeProfile($user, $viewer instanceof User ? $viewer : null)) {
+            $viewerId = $viewer instanceof User ? (string) $viewer->id : null;
+            $hasPending = $viewerId
+                ? DB::table('user_follows')
+                    ->where('follower_id', $viewerId)
+                    ->where('following_id', $user->id)
+                    ->where('status', 'pending')
+                    ->exists()
+                : false;
+
+            // 200 + can_view:false so clients paint the lock screen without treating this as an error.
             return response()->json([
-                'error' => 'Profile is private',
+                'handle' => $user->handle,
+                'avatar_url' => $user->avatar_url,
+                'followers_count' => 0,
+                'following_count' => 0,
+                'is_following' => false,
+                'has_pending_request' => $hasPending,
                 'is_private' => true,
                 'can_view' => false,
-            ], 403);
+                'requires_follow' => true,
+            ]);
         }
 
         $counts = $user->syncLiveAudienceCounts(false);
@@ -360,6 +376,8 @@ class UserController extends Controller
                     ->where('status', 'accepted')
                     ->exists()
                 : false,
+            'is_private' => false,
+            'can_view' => true,
         ]);
     }
 
@@ -609,11 +627,7 @@ class UserController extends Controller
 
     private function viewerCanSeeProfile(User $profile, ?User $viewer): bool
     {
-        if (! $profile->is_private) {
-            return true;
-        }
-
-        return $viewer instanceof User && $profile->canViewProfile($viewer);
+        return $profile->isVisibleTo($viewer instanceof User ? $viewer : null);
     }
 
     private function resolveViewer(Request $request): ?User

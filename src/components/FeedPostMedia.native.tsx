@@ -73,9 +73,9 @@ function buildFeedVideoSource(uri: string, rawUrl?: string): object {
     if (isPlayableLocalMediaUri(rawUrl) || isPlayableLocalMediaUri(uri)) {
         source = { uri: rawUrl && isPlayableLocalMediaUri(rawUrl) ? rawUrl : uri };
     } else if (rawUrl && isMockDemoVideoPath(rawUrl)) {
-        source = mockFeedVideoSource(rawUrl) as object;
+        source = withFeedVideoCache(mockFeedVideoSource(rawUrl) as object) as object;
     } else if (isMockDemoVideoPath(uri)) {
-        source = mockFeedVideoSource(uri) as object;
+        source = withFeedVideoCache(mockFeedVideoSource(uri) as object) as object;
     } else {
         const lower = sourceUri.toLowerCase();
         if (lower.includes('.m3u8')) {
@@ -917,11 +917,12 @@ const FeedPostMedia = React.memo(
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
+            const slideH = fillViewport ? slideHeight : height;
             return (
                 <View style={styles.slideFill} collapsable={false}>
                     <Image
-                        source={{ uri: slideUrl }}
-                        style={{ width: slideWidth, height: fillViewport ? slideHeight : height }}
+                        source={{ uri: slideUrl, width: slideWidth, height: slideH }}
+                        style={{ width: slideWidth, height: slideH }}
                         resizeMode={mediaFit}
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         progressiveRenderingEnabled={false}
@@ -1179,6 +1180,9 @@ const FeedPostMedia = React.memo(
     function feedPostMediaPropsAreEqual(prev: Props, next: Props) {
         const a = prev.post;
         const b = next.post;
+        // Callback props (onPress / onSingleTap / onOpenScenes / …) are omitted on
+        // purpose — FeedScreen recreates them often; media uses stable post fields +
+        // remount keys for playback. Boolean() checks cover optional burst hooks only.
         return (
             a.id === b.id &&
             a.mediaUrl === b.mediaUrl &&

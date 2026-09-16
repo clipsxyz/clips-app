@@ -69,6 +69,7 @@ export default function StickerOverlayNative({
     const isLinkSticker = overlay.sticker.category === 'Link';
     const isTextSticker =
         overlay.sticker.category === 'Text' ||
+        overlay.sticker.category === 'Headline' ||
         (Boolean(overlay.textContent) && !isLocationSticker && !isLinkSticker);
     const isPillSticker = isLocationSticker || isLinkSticker;
 
@@ -211,24 +212,29 @@ export default function StickerOverlayNative({
     ) : isLinkSticker ? (
         <View style={styles.linkPill}>
             <View style={styles.linkIconWrap}>
-                <Icon name="link" size={11} color="#E11D48" />
+                <Icon name="link-outline" size={14} color="#FFFFFF" />
             </View>
             <Text style={styles.linkPillText} numberOfLines={1}>
-                {label}
+                {(label || 'TAP TO READ').toUpperCase()}
             </Text>
         </View>
-    ) : overlay.textContent && overlay.sticker.category === 'Text' ? (
+    ) : overlay.textContent && (overlay.sticker.category === 'Text' || overlay.sticker.category === 'Headline') ? (
         <Text
             style={[
                 styles.textSticker,
+                overlay.sticker.category === 'Headline' && styles.headlineSticker,
                 {
                     color: overlay.textColor || '#FFFFFF',
-                    fontSize: fontSizePx(overlay.fontSize) * overlay.scale,
+                    fontSize:
+                        (overlay.sticker.category === 'Headline' ? 22 : fontSizePx(overlay.fontSize)) *
+                        overlay.scale,
                 },
             ]}
             numberOfLines={4}
         >
-            {overlay.textContent}
+            {overlay.sticker.category === 'Headline'
+                ? String(overlay.textContent).toUpperCase()
+                : overlay.textContent}
         </Text>
     ) : overlay.sticker.url ? (
         <Image source={{ uri: overlay.sticker.url }} style={styles.imageSticker} resizeMode="contain" />
@@ -248,7 +254,7 @@ export default function StickerOverlayNative({
                     minWidth: isPillSticker ? 96 : Math.max(width, 48),
                     minHeight: isPillSticker ? 40 : Math.max(height, 48),
                     opacity: overlay.opacity,
-                    zIndex: isSelected ? 30 : 20,
+                    zIndex: isSelected ? 70 : 60,
                 },
                 isPillSticker && styles.pillRoot,
                 isSelected && styles.rootSelected,
@@ -327,9 +333,16 @@ const styles = StyleSheet.create({
         textShadowRadius: 3,
         paddingHorizontal: 4,
     },
+    headlineSticker: {
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+        textShadowColor: 'rgba(0,0,0,0.72)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 6,
+    },
     imageSticker: { width: '100%', height: '100%' },
     pillRoot: {
-        maxWidth: 260,
+        maxWidth: 280,
     },
     locationPill: {
         flexDirection: 'row',
@@ -349,28 +362,26 @@ const styles = StyleSheet.create({
     linkPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.68)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.52)',
+        gap: 10,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF',
     },
     linkIconWrap: {
-        width: 18,
-        height: 18,
-        borderRadius: 9,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.58)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.68)',
+        backgroundColor: '#E11D48',
     },
     linkPillText: {
-        color: '#0B1220',
-        fontSize: 11,
-        fontWeight: '600',
+        color: '#000000',
+        fontSize: 13,
+        fontWeight: '700',
+        letterSpacing: 1,
+        textTransform: 'uppercase',
         flexShrink: 1,
     },
     controls: {

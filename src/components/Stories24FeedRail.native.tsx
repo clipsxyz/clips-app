@@ -4,7 +4,6 @@ import {
     Text,
     ScrollView,
     TouchableOpacity,
-    Image,
     StyleSheet,
     Modal,
     Platform,
@@ -12,6 +11,7 @@ import {
     useWindowDimensions,
     type LayoutChangeEvent,
 } from 'react-native';
+import CachedImage from './CachedImage.native';
 import Animated, {
     Easing,
     cancelAnimation,
@@ -126,11 +126,13 @@ function StoryPreviewVideo({
     // When paused without a real still, keep a paused video frame (not profile avatar / empty).
     if (effectivelyPaused && posterSource) {
         return (
-            <Image
+            <CachedImage
                 source={posterSource}
+                uri={typeof posterSource === 'object' && 'uri' in posterSource ? posterSource.uri : undefined}
                 style={previewFrame}
-                resizeMode="cover"
-                pointerEvents="none"
+                width={CARD_W}
+                height={CARD_H}
+                contentFit="cover"
             />
         );
     }
@@ -155,7 +157,7 @@ function StoryPreviewVideo({
     );
 }
 
-function StoryCard({
+function StoryCardInner({
     item,
     onPress,
     registerCardRef,
@@ -175,19 +177,23 @@ function StoryCard({
     const handleKey = normalizeStories24Handle(item.handle);
     const isAddYours = item.handle === STORIES24_ADD_YOURS_HANDLE;
     const displayHandle = item.handle.startsWith('@') ? item.handle : `@${item.handle.replace(/^@/, '')}`;
+    const onPressRef = useRef(onPress);
+    onPressRef.current = onPress;
+    const registerCardRefStable = useRef(registerCardRef);
+    registerCardRefStable.current = registerCardRef;
 
-    const measureAndPress = () => {
+    const measureAndPress = useCallback(() => {
         const fallback: CardRect = { x: 0, y: 0, width: CARD_W, height: CARD_H };
         const node = cardRef.current;
         if (!node) {
-            onPress(fallback);
+            onPressRef.current(fallback);
             return;
         }
         let settled = false;
         const settle = (rect: CardRect) => {
             if (settled) return;
             settled = true;
-            onPress(rect);
+            onPressRef.current(rect);
         };
         node.measureInWindow((x, y, width, height) => {
             if (width < 8 || height < 8) {
@@ -198,12 +204,12 @@ function StoryCard({
         });
         // Android can drop measureInWindow after rail remount (e.g. post share refresh).
         setTimeout(() => settle(fallback), 64);
-    };
+    }, []);
 
-    const setCardRef = (node: View | null) => {
+    const setCardRef = useCallback((node: View | null) => {
         (cardRef as React.MutableRefObject<View | null>).current = node;
-        registerCardRef(handleKey, node);
-    };
+        registerCardRefStable.current(handleKey, node);
+    }, [handleKey]);
 
     if (isAddYours) {
         return (
@@ -260,11 +266,13 @@ function StoryCard({
                         paused={previewVideosPaused || !playPreviewVideo}
                     />
                 ) : item.thumb ? (
-                    <Image
-                        source={{ uri: item.thumb }}
+                    <CachedImage
+                        uri={item.thumb}
                         style={StyleSheet.absoluteFill}
-                        resizeMode="cover"
-                        pointerEvents="none"
+                        width={CARD_W}
+                        height={CARD_H}
+                        contentFit="cover"
+                        recyclingKey={item.thumb}
                     />
                 ) : (
                     <View
@@ -289,6 +297,21 @@ function StoryCard({
         </View>
     );
 }
+
+const StoryCard = React.memo(StoryCardInner, (prev, next) => {
+    // Ignore onPress / registerCardRef identity — StoryCardInner keeps them in refs
+    // so taps always hit the latest parent handlers without re-rendering the card.
+    return (
+        prev.item.handle === next.item.handle &&
+        prev.item.thumb === next.item.thumb &&
+        prev.item.previewVideoUrl === next.item.previewVideoUrl &&
+        prev.item.title === next.item.title &&
+        prev.item.subtitle === next.item.subtitle &&
+        prev.playPreviewVideo === next.playPreviewVideo &&
+        prev.previewVideosPaused === next.previewVideosPaused &&
+        prev.morphHidden === next.morphHidden
+    );
+});
 
 function Stories24ExpandOverlay({
     expanding,
@@ -382,7 +405,14 @@ function Stories24ExpandOverlay({
                         style={StyleSheet.absoluteFill}
                     />
                     {stillUri ? (
-                        <Image source={{ uri: stillUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                        <CachedImage
+                            uri={stillUri}
+                            style={StyleSheet.absoluteFill}
+                            width={CARD_W}
+                            height={CARD_H}
+                            contentFit="cover"
+                            recyclingKey={stillUri}
+                        />
                     ) : (
                         <View style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />
                     )}
@@ -515,10 +545,13 @@ function Stories24CollapseOverlay({
                                 style={StyleSheet.absoluteFill}
                             />
                             {stillUri ? (
-                                <Image
-                                    source={{ uri: stillUri }}
+                                <CachedImage
+                                    uri={stillUri}
                                     style={StyleSheet.absoluteFill}
-                                    resizeMode="cover"
+                                    width={CARD_W}
+                                    height={CARD_H}
+                                    contentFit="cover"
+                                    recyclingKey={stillUri}
                                 />
                             ) : (
                                 <View
@@ -738,7 +771,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
 
     if (items.length === 0) return null;
 
-    const handleStoryCardPress = (item: Stories24RailItem, rect: CardRect) => {
+    const handleStoryCardPress = useCallback((item: Stories24RailItem, rect: CardRect) => {
         const handleKey = normalizeStories24Handle(item.handle);
         lastOpenRectByHandleRef.current[handleKey] = rect;
         // If a morph is already in flight (or stuck), open immediately instead of eating taps.
@@ -755,7 +788,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         }
         setExpandHideSource(false);
         setExpanding({ item, railHandles, rect });
-    };
+    }, [onOpenStory, railHandles]);
 
     const finishExpand = () => {
         const current = expandingRef.current;

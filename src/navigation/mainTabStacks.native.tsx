@@ -13,6 +13,7 @@ const Stack = createNativeStackNavigator();
 const stackScreenOptions = {
     headerShown: false,
     contentStyle: { backgroundColor: GAZETTEER_ABYSS },
+    freezeOnBlur: true,
 } as const;
 
 type FeedHomeBoundaryState = { error: Error | null; retryKey: number };

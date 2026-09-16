@@ -66,7 +66,7 @@ type Props = {
     onDelete?: () => void;
 };
 
-export default function InboxConversationRow({
+function InboxConversationRow({
     conv,
     viewerHandle,
     avatarSrc,
@@ -231,6 +231,27 @@ export default function InboxConversationRow({
         </View>
     );
 }
+
+export default React.memo(InboxConversationRow, (prev, next) => {
+    const a = prev.conv;
+    const b = next.conv;
+    return (
+        inboxConversationRowId(a) === inboxConversationRowId(b) &&
+        a.unread === b.unread &&
+        a.isPinned === b.isPinned &&
+        a.isMuted === b.isMuted &&
+        a.isRequest === b.isRequest &&
+        a.hasUnviewedStories === b.hasUnviewedStories &&
+        a.groupName === b.groupName &&
+        a.groupAvatarUrl === b.groupAvatarUrl &&
+        a.lastMessage?.id === b.lastMessage?.id &&
+        a.lastMessage?.text === b.lastMessage?.text &&
+        a.lastMessage?.createdAt === b.lastMessage?.createdAt &&
+        prev.viewerHandle === next.viewerHandle &&
+        prev.avatarSrc === next.avatarSrc &&
+        prev.isSwipeOpen === next.isSwipeOpen
+    );
+});
 
 const styles = StyleSheet.create({
     wrap: {

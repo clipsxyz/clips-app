@@ -1,6 +1,7 @@
 import type { Post, PostMediaItem } from '../types';
 import { mockFeedVideoSource, resolveMockFeedVideoUrl } from '../constants/mockFeedVideos';
 import { decodeScenesTextSlideContent } from './scenesTextSlideNative';
+import { withFeedVideoCache } from './feedVideoSourceNative';
 
 export type ScenesMediaSlide = {
     url: string;
@@ -40,7 +41,7 @@ export function resolveScenesVideoUrl(raw: string): string {
     return resolveMockFeedVideoUrl(raw);
 }
 
-/** Video source for Scenes — HTTPS URI (demo slots map through mockFeedVideoSource). */
+/** Video source for Scenes — HTTPS URI through the shared LRU video-cache proxy. */
 export function scenesVideoSource(raw: string): { uri: string } {
-    return mockFeedVideoSource(raw);
+    return withFeedVideoCache(mockFeedVideoSource(raw)) as { uri: string };
 }

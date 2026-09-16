@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Image,
     StyleSheet,
@@ -9,6 +9,8 @@ import {
     type ViewStyle,
 } from 'react-native';
 import Video, { ViewType, type OnProgressData, type VideoRef } from 'react-native-video';
+import { withFeedVideoCache } from '../../utils/feedVideoSourceNative';
+import { withFeedVideoCache, FEED_VIDEO_BUFFER_CONFIG } from '../../utils/feedVideoSourceNative';
 
 type Props = {
     source: { uri: string };
@@ -69,6 +71,10 @@ export default function StorySafeVideo({
     );
     const notifiedReadyRef = React.useRef(false);
     const sourceKey = source.uri || '';
+    const cachedSource = useMemo(
+        () => withFeedVideoCache(source) as { uri: string },
+        [sourceKey],
+    );
     const pinnedBox =
         boxWidth && boxHeight && boxWidth > 1 && boxHeight > 1
             ? { width: Math.round(boxWidth), height: Math.round(boxHeight) }
@@ -129,7 +135,7 @@ export default function StorySafeVideo({
         >
             <Video
                 ref={videoRef}
-                source={source}
+                source={cachedSource}
                 style={videoStyle}
                 resizeMode={resizeMode}
                 muted={muted}

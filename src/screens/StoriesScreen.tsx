@@ -38,6 +38,7 @@ import StoryInsightsSheet from '../components/stories/StoryInsightsSheet.native'
 import StoryBottomBar from '../components/stories/StoryBottomBar.native';
 import StoryViewerHeader from '../components/stories/StoryViewerHeader.native';
 import StoryTextOverlay from '../components/stories/StoryTextOverlay.native';
+import StoryNewsHeadlineScaffold from '../components/StoryNewsHeadlineScaffold.native';
 import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { 
@@ -49,6 +50,7 @@ import {
     voteOnPoll,
     type StoryViewMetrics,
 } from '../api/stories';
+import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import StoryPollOverlay from '../components/stories/StoryPollOverlay.native';
 import {
     STORIES24_LOADING_HOLD_MS,
@@ -153,6 +155,9 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [isSendingReply, setIsSendingReply] = useState(false);
     const [showStoryShareModal, setShowStoryShareModal] = useState(false);
     const [showInsightsSheet, setShowInsightsSheet] = useState(false);
+    const [storyLinkAlert, setStoryLinkAlert] = useState<{ url: string; host: string } | null>(
+        null,
+    );
     const [replyText, setReplyText] = useState('');
     const [insightsAvatarMap, setInsightsAvatarMap] = useState<Record<string, string | undefined>>({});
     const [isHoldingToPause, setIsHoldingToPause] = useState(false);
@@ -371,7 +376,8 @@ export default function StoriesScreen({ route, navigation }: any) {
             showInlineReplyComposer ||
             isSendingReply ||
             isHoldingToPause ||
-            suspendStoryMedia,
+            suspendStoryMedia ||
+            storyLinkAlert,
     );
 
     useEffect(() => {
@@ -804,27 +810,16 @@ export default function StoriesScreen({ route, navigation }: any) {
         finalizeCloseNavigation();
     };
 
-    const openStoryLink = async (rawUrl?: string) => {
+    const openStoryLink = (rawUrl?: string) => {
         if (!rawUrl) return;
         const withProtocol = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
-        Alert.alert(
-            'Visit link?',
-            'You are about to open this link in your browser.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Visit link',
-                    onPress: async () => {
-                        try {
-                            await Linking.openURL(withProtocol);
-                        } catch (error) {
-                            console.error('Failed to open story link:', error);
-                        }
-                    },
-                },
-            ],
-            { cancelable: true }
-        );
+        let host = withProtocol;
+        try {
+            host = new URL(withProtocol).hostname.replace(/^www\./i, '');
+        } catch {
+            // keep raw fallback
+        }
+        setStoryLinkAlert({ url: withProtocol, host });
     };
 
     const pauseForHold = () => {
@@ -1650,42 +1645,145 @@ export default function StoriesScreen({ route, navigation }: any) {
                         </View>
                     ) : null}
 
-                    {Array.isArray(currentStory.stickers) &&
-                        currentStory.stickers
-                            .filter((overlay) => !!overlay?.linkUrl)
-                            .map((overlay) => {
-                                const label = (overlay.linkName || overlay.textContent || 'Shop now').trim();
-                                const iconColor = '#E11D48';
-                                const labelColor = '#111111';
-                                return (
-                                    <TouchableOpacity
-                                        key={overlay.id}
-                                        activeOpacity={0.9}
-                                        onPress={() => openStoryLink(overlay.linkUrl)}
-                                        style={[
-                                            styles.storyLinkSticker,
-                                            {
-                                                left: `${overlay.x}%`,
-                                                top: `${overlay.y}%`,
-                                                transform: [
-                                                    { translateX: -91 },
-                                                    { translateY: -17 },
-                                                    { scale: overlay.scale || 1 },
-                                                    { rotate: `${overlay.rotation || 0}deg` },
-                                                ],
-                                                opacity: overlay.opacity ?? 1,
-                                            },
-                                        ]}
-                                    >
-                                        <View style={styles.storyLinkIconTile}>
-                                            <Icon name="link-outline" size={ox(15)} color={iconColor} />
+                    {(() => {
+                        const stickers = Array.isArray(currentStory.stickers)
+                            ? currentStory.stickers
+                            : [];
+                        const headlineSticker = stickers.find(
+                            (s) => s?.sticker?.category === 'Headline',
+                        );
+                        const newsHeadline = String(
+                            headlineSticker?.textContent || headlineSticker?.sticker?.name || '',
+                        ).trim();
+
+                        const linkStickers = stickers.filter(
+                            (s) =>
+                                !!s?.linkUrl ||
+                                !!(s as { link_url?: string })?.link_url ||
+                                s?.sticker?.category === 'Link',
+                        );
+                        const locationStickers = stickers.filter(
+                            (s) =>
+                                s?.sticker?.category === 'Location' &&
+                                String(s.textContent || s.sticker?.name || '').trim().length > 0,
+                        );
+                        // Older posts may have a duplicate auto-added at the bottom —
+                        // keep the first sticker per label (composer-positioned one).
+                        const seenLocationLabels = new Set<string>();
+                        const uniqueLocationStickers = locationStickers.filter((overlay) => {
+                            const label = String(
+                                overlay.textContent || overlay.sticker?.name || '',
+                            )
+                                .trim()
+                                .toLowerCase();
+                            if (!label || seenLocationLabels.has(label)) return false;
+                            seenLocationLabels.add(label);
+                            return true;
+                        });
+
+                        return (
+                            <>
+                                {newsHeadline ? (
+                                    <StoryNewsHeadlineScaffold
+                                        mode="viewer"
+                                        headline={newsHeadline}
+                                    />
+                                ) : null}
+
+                                {linkStickers.map((overlay) => {
+                                    const url = String(
+                                        overlay.linkUrl ||
+                                            (overlay as { link_url?: string }).link_url ||
+                                            '',
+                                    ).trim();
+                                    if (!url) return null;
+                                    const label = (
+                                        overlay.linkName ||
+                                        overlay.textContent ||
+                                        'TAP TO READ'
+                                    ).trim();
+                                    return (
+                                        <TouchableOpacity
+                                            key={overlay.id}
+                                            activeOpacity={0.9}
+                                            onPress={() => openStoryLink(url)}
+                                            style={[
+                                                styles.storyLinkSticker,
+                                                {
+                                                    left: `${overlay.x ?? 50}%`,
+                                                    top: `${overlay.y ?? 50}%`,
+                                                    transform: [
+                                                        { translateX: -91 },
+                                                        { translateY: -22 },
+                                                        { scale: overlay.scale || 1 },
+                                                        {
+                                                            rotate: `${overlay.rotation || 0}deg`,
+                                                        },
+                                                    ],
+                                                    opacity: overlay.opacity ?? 1,
+                                                    zIndex: 130,
+                                                },
+                                            ]}
+                                        >
+                                            <View style={styles.storyLinkIconTile}>
+                                                <Icon
+                                                    name="link-outline"
+                                                    size={ox(15)}
+                                                    color="#E11D48"
+                                                />
+                                            </View>
+                                            <Text
+                                                numberOfLines={1}
+                                                style={[
+                                                    styles.storyLinkLabel,
+                                                    { color: '#000000' },
+                                                ]}
+                                            >
+                                                {label.toUpperCase()}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+
+                                {uniqueLocationStickers.map((overlay) => {
+                                    const label = String(
+                                        overlay.textContent || overlay.sticker?.name || '',
+                                    ).trim();
+                                    if (!label) return null;
+                                    return (
+                                        <View
+                                            key={overlay.id}
+                                            pointerEvents="none"
+                                            style={[
+                                                styles.storyLocationSticker,
+                                                {
+                                                    left: `${overlay.x ?? 50}%`,
+                                                    top: `${overlay.y ?? 50}%`,
+                                                    transform: [
+                                                        { translateX: -70 },
+                                                        { translateY: -16 },
+                                                        { scale: overlay.scale || 1 },
+                                                        {
+                                                            rotate: `${overlay.rotation || 0}deg`,
+                                                        },
+                                                    ],
+                                                    opacity: overlay.opacity ?? 1,
+                                                },
+                                            ]}
+                                        >
+                                            <Icon name="location" size={ox(12)} color="#EF4444" />
+                                            <Text
+                                                numberOfLines={1}
+                                                style={styles.storyLocationLabel}
+                                            >
+                                                {label}
+                                            </Text>
                                         </View>
-                                        <Text numberOfLines={1} style={[styles.storyLinkLabel, { color: labelColor }]}>
-                                            {label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
+                                    );
+                                })}
+                            </>
+                        );
+                    })()}
 
                     <StoryBottomBar
                         hidden={isHoldingToPause}
@@ -1968,6 +2066,29 @@ export default function StoriesScreen({ route, navigation }: any) {
                     onBeforeNavigate={closeStories}
                 />
             ) : null}
+
+            <GazetteerAlertSheet
+                visible={storyLinkAlert != null}
+                title="Visit link?"
+                message={
+                    storyLinkAlert
+                        ? `Open ${storyLinkAlert.host} in your browser?`
+                        : 'You are about to open this link in your browser.'
+                }
+                icon="info"
+                showCancelButton
+                cancelButtonText="Cancel"
+                confirmButtonText="Visit link"
+                onDismiss={() => setStoryLinkAlert(null)}
+                onConfirm={() => {
+                    const url = storyLinkAlert?.url;
+                    setStoryLinkAlert(null);
+                    if (!url) return;
+                    void Linking.openURL(url).catch((error) => {
+                        console.error('Failed to open story link:', error);
+                    });
+                }}
+            />
         </Animated.View>
         </View>
     );
@@ -2303,43 +2424,59 @@ const styles = StyleSheet.create({
     },
     storyLinkSticker: {
         position: 'absolute',
-        width: 176,
-        height: ox(32),
-        borderRadius: ox(16),
-        backgroundColor: 'rgba(255,255,255,0.72)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.52)',
+        minWidth: 176,
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF',
         flexDirection: 'row',
         alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
         overflow: 'hidden',
         shadowColor: '#000',
-        shadowOpacity: 0.24,
+        shadowOpacity: 0.28,
         shadowRadius: 8,
-        shadowOffset: { width: 0, height: 3 },
-        elevation: 5,
-        zIndex: 25,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 6,
+        zIndex: 130,
+    },
+    storyLocationSticker: {
+        position: 'absolute',
+        maxWidth: 200,
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.92)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        zIndex: 125,
+    },
+    storyLocationLabel: {
+        color: '#111827',
+        fontSize: ox(12),
+        fontWeight: '600',
+        flexShrink: 1,
+        maxWidth: 160,
     },
     storyLinkIconTile: {
-        width: ox(18),
-        height: ox(18),
-        marginLeft: 6,
-        borderRadius: ox(9),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.68)',
-        backgroundColor: 'rgba(255,255,255,0.58)',
+        width: ox(22),
+        height: ox(22),
+        marginLeft: 0,
+        borderRadius: ox(11),
+        backgroundColor: '#E11D48',
         alignItems: 'center',
         justifyContent: 'center',
     },
     storyLinkLabel: {
         flex: 1,
-        marginLeft: 7,
-        marginRight: 7,
-        fontSize: ox(11),
-        lineHeight: ox(11.5),
-        fontFamily: 'Inter-SemiBold',
-        fontWeight: '600',
-        letterSpacing: ox(0.05),
-        color: '#0B1220',
+        marginLeft: 10,
+        marginRight: 4,
+        fontSize: ox(13),
+        lineHeight: ox(16),
+        fontWeight: '700',
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+        color: '#000000',
     },
     replyModal: {
         flex: 1,

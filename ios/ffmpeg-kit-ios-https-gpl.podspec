@@ -1,7 +1,6 @@
 # Vendored FFmpeg Kit iOS binaries (de-id/ffmpeg-kit release).
 # Run: npm run setup:ffmpeg-native  then  cd ios && pod install
-# Kept for scripts that still reference the *-local.podspec name.
-# Canonical podspec: ./ffmpeg-kit-ios-https-gpl.podspec (version 6.0).
+# Version must be 6.0 to satisfy ffmpeg-kit-react-native-alt/https-gpl (= 6.0).
 Pod::Spec.new do |s|
   s.name             = 'ffmpeg-kit-ios-https-gpl'
   s.version          = '6.0'

@@ -3,10 +3,10 @@ import {
     View,
     Text,
     StyleSheet,
-    FlatList,
     TouchableOpacity,
     ActivityIndicator,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -102,8 +102,9 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
                 </Text>
             </View>
 
-            <FlatList
+            <FlashList
                 data={posts}
+                estimatedItemSize={128}
                 keyExtractor={(item) => item.id}
                 numColumns={3}
                 style={styles.list}

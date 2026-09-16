@@ -8,6 +8,7 @@ import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorS
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -15,6 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
 import { getUnreadNotificationCount } from './src/api/notifications';
+import { queryClient, queryKeys } from './src/api/queryClient';
 import {
   HomeTabStack,
   BoostTabStack,
@@ -22,6 +24,7 @@ import {
   InboxTabStack,
 } from './src/navigation/mainTabStacks.native';
 import MainTabBar from './src/components/MainTabBar.native';
+import { runAfterInteractions } from './src/utils/runAfterInteractionsNative';
 
 // Import screens
 import BoostScreen from './src/screens/BoostScreen';
@@ -123,17 +126,28 @@ function MainTabs() {
     const refresh = async () => {
       try {
         const [notificationUnread, messageUnread] = await Promise.all([
-          getUnreadNotificationCount(handle).catch(() => 0),
-          getUnreadTotal(handle).catch(() => 0),
+          queryClient.fetchQuery({
+            queryKey: [...queryKeys.unreadBadge(handle), 'notifications'],
+            queryFn: () => getUnreadNotificationCount(handle),
+          }),
+          queryClient.fetchQuery({
+            queryKey: [...queryKeys.unreadBadge(handle), 'messages'],
+            queryFn: () => getUnreadTotal(handle),
+          }),
         ]);
         if (mounted) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
       } catch {
         if (mounted) setInboxBadgeCount(0);
       }
     };
-    void refresh();
-    const interval = setInterval(() => {
+    // Defer badge polling until after the first transition settles.
+    void runAfterInteractions(() => {
       void refresh();
+    });
+    const interval = setInterval(() => {
+      void runAfterInteractions(() => {
+        void refresh();
+      });
     }, 8000);
 
     const onInboxUnread = (payload?: { handle?: string; unread?: number }) => {
@@ -239,6 +253,7 @@ function App(): React.JSX.Element {
   return (
     <AppErrorBoundary>
     <GestureHandlerRootView style={styles.appRoot}>
+    <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <BottomSheetModalProvider>
       <SafeAreaProvider>
@@ -250,6 +265,8 @@ function App(): React.JSX.Element {
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: GAZETTEER_ABYSS },
+              // Prefer native transitions; freeze inactive screens to cut JS work.
+              freezeOnBlur: true,
             }}
           >
           <Stack.Screen name="Splash" component={SplashScreen} />
@@ -374,6 +391,7 @@ function App(): React.JSX.Element {
       </SafeAreaProvider>
       </BottomSheetModalProvider>
     </AuthProvider>
+    </QueryClientProvider>
     </GestureHandlerRootView>
     </AppErrorBoundary>
   );

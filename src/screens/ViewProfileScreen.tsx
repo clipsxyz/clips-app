@@ -36,6 +36,7 @@ import {
     profileAudienceFromPayload,
     fetchProfileAudience,
     isAbortError,
+    isPrivateProfileBlocked,
     isTooManyRequestsError,
 } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
@@ -48,6 +49,7 @@ import {
     canViewProfile,
     hasPendingFollowRequest,
     canSendMessage,
+    setProfilePrivacy,
 } from '../api/privacy';
 import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts, isMockDirectoryHandle } from '../api/mockFollowGraph';
 import { isMockMode } from '../config/runtimeEnv';
@@ -266,64 +268,27 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         try {
             const decodedHandle = decodeURIComponent(handle);
             const profilePrivate = isProfilePrivate(decodedHandle);
-            if (!cancelled()) setProfileIsPrivate(profilePrivate);
-
-            const audienceTask = !isMockMode()
-                ? fetchProfileAudience(decodedHandle, undefined, user?.id ? String(user.id) : undefined).then((audience) => {
-                      if (cancelled()) return audience;
-                      const current = String(routeHandleRef.current || '');
-                      let currentDecoded = current;
-                      try {
-                          currentDecoded = decodeURIComponent(current);
-                      } catch {
-                          /* already decoded */
-                      }
-                      const stillThisProfile =
-                          sameHandle(current, decodedHandle) ||
-                          sameHandle(currentDecoded, decodedHandle) ||
-                          sameHandle(current, audience.handle) ||
-                          sameHandle(currentDecoded, audience.handle);
-                      if (!stillThisProfile) return audience;
-                      setStats((prev) => ({
-                          ...prev,
-                          followers: Math.max(prev.followers, audience.followers),
-                          following: Math.max(prev.following, audience.following),
-                      }));
-                      if (typeof audience.is_following === 'boolean' && followStateStillCurrent()) {
-                          setIsFollowing(audience.is_following);
-                      }
-                      const rawAvatar = String(audience.avatar_url || '').trim();
-                      if (rawAvatar) {
-                          const url = resolvePublicMediaUrl(rawAvatar) || rawAvatar;
-                          setAvatarForHandle(decodedHandle, url);
-                          if (audience.handle) setAvatarForHandle(audience.handle, url);
-                          setProfileUser((prev: any) =>
-                              prev
-                                  ? { ...prev, avatarUrl: prev.avatarUrl || url }
-                                  : {
-                                        handle: decodedHandle,
-                                        name: decodedHandle.split('@')[0],
-                                        avatarUrl: url,
-                                    },
-                          );
-                      } else {
-                          setProfileUser((prev: any) =>
-                              prev || {
-                                  handle: decodedHandle,
-                                  name: decodedHandle.split('@')[0],
-                              },
-                          );
-                      }
-                      // Counts are ready — don't keep the spinner up for the posts payload.
-                      if (!cancelled()) setLoading(false);
-                      return audience;
-                  })
-                : Promise.resolve({ followers: 0, following: 0, is_following: undefined as boolean | undefined });
-
-            const followedTask =
-                user?.id && user?.handle
-                    ? getFollowedUsers(user.id).catch(() => [] as string[])
-                    : Promise.resolve([] as string[]);
+            if (!cancelled()) {
+                setProfileIsPrivate(profilePrivate);
+                // Known-private + pending: show lock immediately while audience confirms.
+                if (
+                    profilePrivate &&
+                    user?.handle &&
+                    !isOwnProfileIdentity(user, decodedHandle) &&
+                    hasPendingFollowRequest(user.handle, decodedHandle)
+                ) {
+                    setCanView(false);
+                    setHasPendingRequest(true);
+                    setProfileUser((prev: any) =>
+                        prev || {
+                            handle: decodedHandle,
+                            name: decodedHandle.split('@')[0],
+                            avatarUrl: getAvatarForHandle(decodedHandle),
+                        },
+                    );
+                    setLoading(false);
+                }
+            }
 
             let userPosts: Post[] = [];
             let profileData: any;
@@ -333,6 +298,91 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             let profileRateLimited = false;
 
             if (!isMockMode()) {
+                // Audience first — tiny payload; paint private lock without waiting on posts/profile.
+                let audience: Awaited<ReturnType<typeof fetchProfileAudience>> | null = null;
+                try {
+                    audience = await fetchProfileAudience(
+                        decodedHandle,
+                        undefined,
+                        user?.id ? String(user.id) : undefined,
+                    );
+                } catch (error) {
+                    if (isTooManyRequestsError(error)) {
+                        audienceRateLimited = true;
+                    }
+                }
+                if (cancelled()) return;
+
+                if (audience) {
+                    listAudience = audience;
+                    const current = String(routeHandleRef.current || '');
+                    let currentDecoded = current;
+                    try {
+                        currentDecoded = decodeURIComponent(current);
+                    } catch {
+                        /* already decoded */
+                    }
+                    const stillThisProfile =
+                        sameHandle(current, decodedHandle) ||
+                        sameHandle(currentDecoded, decodedHandle) ||
+                        sameHandle(current, audience.handle) ||
+                        sameHandle(currentDecoded, audience.handle);
+                    if (stillThisProfile) {
+                        setStats((prev) => ({
+                            ...prev,
+                            followers: Math.max(prev.followers, audience.followers),
+                            following: Math.max(prev.following, audience.following),
+                        }));
+                        if (typeof audience.is_following === 'boolean' && followStateStillCurrent()) {
+                            setIsFollowing(audience.is_following);
+                        }
+                        const rawAvatar = String(audience.avatar_url || '').trim();
+                        if (rawAvatar) {
+                            const url = resolvePublicMediaUrl(rawAvatar) || rawAvatar;
+                            setAvatarForHandle(decodedHandle, url);
+                            if (audience.handle) setAvatarForHandle(audience.handle, url);
+                            setProfileUser((prev: any) =>
+                                prev
+                                    ? { ...prev, avatarUrl: prev.avatarUrl || url, handle: audience.handle || prev.handle }
+                                    : {
+                                          handle: audience.handle || decodedHandle,
+                                          name: (audience.handle || decodedHandle).split('@')[0],
+                                          avatarUrl: url,
+                                      },
+                            );
+                        } else {
+                            setProfileUser((prev: any) =>
+                                prev || {
+                                    handle: audience.handle || decodedHandle,
+                                    name: (audience.handle || decodedHandle).split('@')[0],
+                                    avatarUrl: getAvatarForHandle(decodedHandle),
+                                },
+                            );
+                        }
+                    }
+
+                    if (audience.can_view === false || audience.is_private === true) {
+                        if (!cancelled()) {
+                            setCanView(false);
+                            setProfileIsPrivate(true);
+                            if (typeof audience.has_pending_request === 'boolean') {
+                                setHasPendingRequest(audience.has_pending_request);
+                            } else if (user?.handle) {
+                                setHasPendingRequest(hasPendingFollowRequest(user.handle, decodedHandle));
+                            }
+                            try {
+                                setProfilePrivacy(decodedHandle, true);
+                            } catch {
+                                /* ignore */
+                            }
+                            setLoading(false);
+                        }
+                        return;
+                    }
+                    // Counts ready for public profiles — don't keep spinner for posts payload.
+                    if (!cancelled()) setLoading(false);
+                }
+
                 const fetchProfile = (identifier: string) =>
                     fetchUserProfile(
                         identifier,
@@ -342,10 +392,13 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         typeof sourcePostId === 'string' ? sourcePostId : undefined,
                         'all',
                     );
-                const [followedSettled, profileSettled, audienceSettled] = await Promise.allSettled([
+                const followedTask =
+                    user?.id && user?.handle
+                        ? getFollowedUsers(user.id).catch(() => [] as string[])
+                        : Promise.resolve([] as string[]);
+                const [followedSettled, profileSettled] = await Promise.allSettled([
                     followedTask,
                     fetchProfile(decodedHandle),
-                    audienceTask,
                 ]);
                 followedUsers =
                     followedSettled.status === 'fulfilled' && Array.isArray(followedSettled.value)
@@ -362,30 +415,35 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     );
                     const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
                     setCanView(canViewProfileState);
-                    if (
-                        followStateStillCurrent() &&
-                        (audienceSettled.status !== 'fulfilled' ||
-                            typeof audienceSettled.value?.is_following !== 'boolean')
-                    ) {
+                    if (followStateStillCurrent() && typeof audience?.is_following !== 'boolean') {
                         setIsFollowing(isFollowingUser);
                     }
                     setHasPendingRequest(hasPending);
                     if (
                         !canViewProfileState &&
-                        profilePrivate &&
+                        (profilePrivate || audience?.is_private) &&
                         !isOwnProfileIdentity(user, decodedHandle)
                     ) {
+                        setProfileIsPrivate(true);
                         setLoading(false);
                         return;
                     }
                 }
-                if (audienceSettled.status === 'fulfilled') {
-                    listAudience = audienceSettled.value;
-                } else if (isTooManyRequestsError(audienceSettled.reason)) {
-                    audienceRateLimited = true;
-                }
                 if (profileSettled.status === 'fulfilled') {
                     profileData = profileSettled.value;
+                    if (isPrivateProfileBlocked(profileData)) {
+                        if (!cancelled()) {
+                            setCanView(false);
+                            setProfileIsPrivate(true);
+                            setLoading(false);
+                            try {
+                                setProfilePrivacy(decodedHandle, true);
+                            } catch {
+                                /* ignore */
+                            }
+                        }
+                        return;
+                    }
                     userPosts = mapLaravelProfilePosts(profileData?.posts);
                 } else {
                     const error: any = profileSettled.reason;
@@ -402,6 +460,17 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         if (!cancelled()) {
                             try {
                                 profileData = await fetchProfile(decodedHandle);
+                                if (isPrivateProfileBlocked(profileData)) {
+                                    setCanView(false);
+                                    setProfileIsPrivate(true);
+                                    setLoading(false);
+                                    try {
+                                        setProfilePrivacy(decodedHandle, true);
+                                    } catch {
+                                        /* ignore */
+                                    }
+                                    return;
+                                }
                                 userPosts = mapLaravelProfilePosts(profileData?.posts);
                             } catch (retryError) {
                                 if (isTooManyRequestsError(retryError)) {
@@ -418,6 +487,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                             profileData = await fetchProfile(ownHandle);
                             retried = true;
                             if (cancelled()) return;
+                            if (isPrivateProfileBlocked(profileData)) {
+                                setCanView(false);
+                                setProfileIsPrivate(true);
+                                setLoading(false);
+                                return;
+                            }
                             userPosts = mapLaravelProfilePosts(profileData?.posts);
                         } catch {
                             retried = false;
@@ -435,11 +510,19 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     if (error?.status === 403 && !cancelled() && !profileData) {
                         setCanView(false);
                         setProfileIsPrivate(true);
+                        try {
+                            setProfilePrivacy(decodedHandle, true);
+                        } catch {
+                            /* ignore */
+                        }
                     }
                 }
             } else {
                 userPosts = await fetchPostsByUser(decodedHandle, 20);
                 if (cancelled()) return;
+                if (user?.id && user?.handle) {
+                    followedUsers = await getFollowedUsers(user.id).catch(() => [] as string[]);
+                }
             }
 
             if (

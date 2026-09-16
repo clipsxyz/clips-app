@@ -1,11 +1,61 @@
 /// <reference types="vite/client" />
-import { clearLaravelUnreachable, getRuntimeEnv, isLaravelApiEnabled, markLaravelUnreachable } from '../config/runtimeEnv';
+import {
+    clearLaravelUnreachable,
+    DEV_LAN_API_BASE_URL,
+    DEV_LAN_API_HOST,
+    getRuntimeEnv,
+    isLaravelApiEnabled,
+    markLaravelUnreachable,
+} from '../config/runtimeEnv';
 import { getAuthTokenAsync, getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
-import { getApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
+import { getApiBaseUrl, getApiBaseUrlCandidates, rememberSuccessfulApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { isMockMode } from './apiMode';
 
 /** Must stay ≥ 10s so local Metro/Laravel profile GETs are not aborted early. */
 const LARAVEL_USERS_GET_TIMEOUT_MS = 12_000;
+
+/** Background polls — connection failures should not LogBox / red-screen. */
+const SOFT_NETWORK_PATH_PREFIXES = [
+    '/notifications',
+    '/messages/conversations',
+    '/chat-groups/invites/pending',
+] as const;
+
+function isSoftNetworkEndpoint(endpoint: string): boolean {
+    const path = (endpoint.split('?')[0] || '').replace(/\/$/, '') || '/';
+    return SOFT_NETWORK_PATH_PREFIXES.some(
+        (prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(prefix),
+    );
+}
+
+function isFetchConnectionError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const name = String((error as { name?: string }).name || '');
+    const message = String((error as { message?: string }).message || '');
+    return (
+        message.includes('Failed to fetch') ||
+        message.includes('Network request failed') ||
+        message.includes('ERR_CONNECTION_REFUSED') ||
+        message.includes('NetworkError') ||
+        message === 'CONNECTION_REFUSED' ||
+        name === 'ConnectionRefused' ||
+        (name === 'TypeError' &&
+            (message.includes('fetch') || message.includes('Network request failed')))
+    );
+}
+
+function rewriteUrlToApiBase(url: string, apiBase: string): string | null {
+    try {
+        const absolute = new URL(url);
+        const base = new URL(apiBase.endsWith('/') ? apiBase : `${apiBase}/`);
+        absolute.protocol = base.protocol;
+        absolute.hostname = base.hostname;
+        absolute.port = base.port;
+        return absolute.toString();
+    } catch {
+        return null;
+    }
+}
 
 export function isAbortError(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
@@ -57,6 +107,8 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/chat-groups',
     '/messages/send',
     '/messages/conversations',
+    // Exact list path — prefix `/notifications/` alone does not match `/notifications`.
+    '/notifications',
     '/notifications/unread-count',
     '/notifications/mark-all-read',
     '/users/privacy/toggle',
@@ -99,10 +151,8 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
 
     const token = (await getAuthTokenAsync())?.trim() || '';
     const { timeoutMs = 8000, ...fetchOptions } = options;
-    const API_BASE_URL = getApiBaseUrl();
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const softNetwork = isSoftNetworkEndpoint(endpoint);
+    const candidates = getApiBaseUrlCandidates();
 
     const extraHeaders = fetchOptions.headers;
     const extraHeaderObj =
@@ -120,79 +170,116 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         socketId = undefined;
     }
 
-    const config: RequestInit = {
-        ...fetchOptions,
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            ...extraHeaderObj,
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...(socketId ? { 'X-Socket-Id': socketId } : {}),
-        },
-        signal: controller.signal,
-    };
+    let lastError: any = null;
+    let lastAttemptedUrl = '';
 
-    try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Network error' }));
-            const errorMessage = errorData.error || errorData.message || (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
-            const error = new Error(errorMessage);
-            (error as any).status = response.status;
-            (error as any).response = errorData;
-            throw error;
-        }
-
-        const text = await response.text();
-        clearLaravelUnreachable();
-        if (!text) return null;
-        try {
-            return JSON.parse(text);
-        } catch {
-            const preview = text.slice(0, 80).replace(/\s+/g, ' ');
-            throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
-        }
-    } catch (error: any) {
-        clearTimeout(timeoutId);
+    for (let i = 0; i < candidates.length; i++) {
+        const API_BASE_URL = candidates[i];
         const attemptedUrl = `${API_BASE_URL}${endpoint}`;
-        // Suppress connection refused errors when backend isn't running
-        // Check for various connection error patterns
-        const isAbort = error?.name === 'AbortError';
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('Network request failed') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' &&
-                (error?.message?.includes('fetch') || error?.message?.includes('Network request failed')));
+        lastAttemptedUrl = attemptedUrl;
 
-        if (isAbort) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        const config: RequestInit = {
+            ...fetchOptions,
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                ...extraHeaderObj,
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                ...(socketId ? { 'X-Socket-Id': socketId } : {}),
+            },
+            signal: controller.signal,
+        };
+
+        try {
+            const response = await fetch(attemptedUrl, config);
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Network error' }));
+                const errorMessage =
+                    errorData.error ||
+                    errorData.message ||
+                    (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+                const error = new Error(errorMessage);
+                (error as any).status = response.status;
+                (error as any).response = errorData;
+                throw error;
+            }
+
+            const text = await response.text();
+            clearLaravelUnreachable();
+            rememberSuccessfulApiBaseUrl(API_BASE_URL);
+            if (!text) return null;
+            try {
+                return JSON.parse(text);
+            } catch {
+                const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+                throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
+            }
+        } catch (error: any) {
+            clearTimeout(timeoutId);
+            lastError = error;
+            const isAbort = error?.name === 'AbortError';
+            if (isAbort) throw error;
+
+            const isConnectionError = isFetchConnectionError(error);
+            if (isConnectionError && i < candidates.length - 1) {
+                console.debug('[apiRequest] host unreachable — trying alternate API base', {
+                    failedUrl: attemptedUrl,
+                    nextBase: candidates[i + 1],
+                    soft: softNetwork,
+                });
+                continue;
+            }
+
+            if (isConnectionError) {
+                const logPayload = {
+                    url: attemptedUrl,
+                    method: String(config.method || 'GET').toUpperCase(),
+                    name: error?.name,
+                    message: error?.message,
+                    tried: candidates,
+                };
+                if (softNetwork) {
+                    console.debug('[apiRequest] soft network unavailable', logPayload);
+                } else {
+                    console.warn('[apiRequest] Network request failed', logPayload);
+                }
+                markLaravelUnreachable();
+                const connectionError = new Error('CONNECTION_REFUSED');
+                connectionError.name = 'ConnectionRefused';
+                (connectionError as any).url = lastAttemptedUrl;
+                throw connectionError;
+            }
+
+            if (!softNetwork) {
+                console.error('[apiRequest] request failed', {
+                    url: attemptedUrl,
+                    name: error?.name,
+                    message: error?.message,
+                    status: error?.status,
+                });
+            } else {
+                console.debug('[apiRequest] soft request failed', {
+                    url: attemptedUrl,
+                    name: error?.name,
+                    message: error?.message,
+                    status: error?.status,
+                });
+            }
             throw error;
         }
-        if (isConnectionError) {
-            console.error('[apiRequest] Network request failed', {
-                url: attemptedUrl,
-                method: String(config.method || 'GET').toUpperCase(),
-                name: error?.name,
-                message: error?.message,
-            });
-            // Re-throw with a specific error type that can be caught and handled gracefully
-            markLaravelUnreachable();
-            const connectionError = new Error('CONNECTION_REFUSED');
-            connectionError.name = 'ConnectionRefused';
-            (connectionError as any).url = attemptedUrl;
-            throw connectionError;
-        }
-        console.error('[apiRequest] request failed', {
-            url: attemptedUrl,
-            name: error?.name,
-            message: error?.message,
-            status: error?.status,
-        });
-        throw error;
     }
+
+    markLaravelUnreachable();
+    const connectionError = new Error('CONNECTION_REFUSED');
+    connectionError.name = 'ConnectionRefused';
+    (connectionError as any).url = lastAttemptedUrl;
+    (connectionError as any).cause = lastError;
+    throw connectionError;
 }
 
 // Auth API
@@ -441,10 +528,12 @@ export async function loginUser(email: string, password: string): Promise<{
         }
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
             error?.name === 'AbortError' ||
-            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+            (error?.name === 'TypeError' &&
+                (error?.message?.includes('fetch') || error?.message?.includes('Network request failed')));
         if (isConnectionError) {
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
@@ -1019,7 +1108,18 @@ export async function fetchPostsPage(
         }
         if (payload && typeof payload === 'object') {
             clearLaravelUnreachable();
-            return payload;
+            const raw = payload as Record<string, unknown>;
+            const next =
+                raw.nextCursor !== undefined
+                    ? raw.nextCursor
+                    : raw.next_cursor !== undefined
+                      ? raw.next_cursor
+                      : null;
+            return {
+                ...raw,
+                items: Array.isArray(raw.items) ? raw.items : [],
+                nextCursor: next === undefined ? null : next,
+            };
         }
         const preview = text.slice(0, 80).replace(/\s+/g, ' ');
         throw new Error(`API returned non-JSON (${response.status}): ${preview}`);
@@ -1561,6 +1661,87 @@ function isProfileUuid(value: string): boolean {
     );
 }
 
+/** Laravel (and client stubs) for a private profile the viewer cannot open. */
+export type PrivateProfileBlockedPayload = {
+    isPrivate: true;
+    is_private: true;
+    can_view: false;
+    canView: false;
+    requires_follow: true;
+    posts: [];
+    data: [];
+    error: string;
+    message?: string;
+};
+
+export function isPrivateProfileBlocked(payload: unknown): payload is PrivateProfileBlockedPayload {
+    if (!payload || typeof payload !== 'object') return false;
+    const p = payload as Record<string, unknown>;
+    const privateFlag = p.is_private === true || p.isPrivate === true;
+    const blocked = p.can_view === false || p.canView === false;
+    return privateFlag && blocked;
+}
+
+export function isPrivateProfileError(error: unknown): boolean {
+    const err = error as { status?: number; isPrivate?: boolean; response?: unknown } | null;
+    if (!err) return false;
+    if (err.isPrivate === true && err.status === 403) return true;
+    return err.status === 403 && isPrivateProfileBlocked(err.response);
+}
+
+export function privateProfileBlockedStub(
+    message = 'Profile is private',
+): PrivateProfileBlockedPayload {
+    return {
+        isPrivate: true,
+        is_private: true,
+        can_view: false,
+        canView: false,
+        requires_follow: true,
+        posts: [],
+        data: [],
+        error: message,
+        message,
+    };
+}
+
+async function fetchLaravelUsersUrl(
+    url: string,
+    init: RequestInit,
+): Promise<Response> {
+    const candidates = getApiBaseUrlCandidates();
+    let lastError: any = null;
+
+    for (let i = 0; i < candidates.length; i++) {
+        const attemptUrl =
+            i === 0 ? url : rewriteUrlToApiBase(url, candidates[i]) || url;
+        try {
+            const response = await fetch(attemptUrl, init);
+            rememberSuccessfulApiBaseUrl(candidates[i]);
+            return response;
+        } catch (error: any) {
+            lastError = error;
+            if (!isFetchConnectionError(error)) throw error;
+            if (i < candidates.length - 1) {
+                console.debug('[laravelUsersGet] host unreachable — trying alternate', {
+                    failedUrl: attemptUrl,
+                    nextBase: candidates[i + 1],
+                });
+                continue;
+            }
+        }
+    }
+
+    const msg = String(lastError?.message || '');
+    console.warn('[laravelUsersGet] Network request failed', {
+        failedUrl: url,
+        lanHost: DEV_LAN_API_HOST,
+        tip: 'Confirm Laravel is on :8000 and run: adb reverse tcp:8000 tcp:8000',
+        error: msg,
+    });
+    throw lastError;
+}
+
 async function laravelUsersGet(
     pathAndQuery: string,
     options?: { signal?: AbortSignal; timeoutMs?: number },
@@ -1580,9 +1761,13 @@ async function laravelUsersGet(
     if (token) {
         headers.Authorization = `Bearer ${token}`;
     }
-    console.log('[laravelUsersGet] GET', url, { hasAuth: Boolean(token) });
+    console.log('[laravelUsersGet] GET', url, {
+        hasAuth: Boolean(token),
+        apiBase: API_BASE_URL,
+        lanFallback: DEV_LAN_API_BASE_URL,
+    });
 
-    const timeoutMs = Math.max(10_000, options?.timeoutMs ?? LARAVEL_USERS_GET_TIMEOUT_MS);
+    const timeoutMs = options?.timeoutMs ?? LARAVEL_USERS_GET_TIMEOUT_MS;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const external = options?.signal;
@@ -1594,7 +1779,7 @@ async function laravelUsersGet(
     external?.addEventListener('abort', onExternalAbort);
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchLaravelUsersUrl(url, {
             method: 'GET',
             headers,
             signal: controller.signal,
@@ -1611,6 +1796,22 @@ async function laravelUsersGet(
                 payload?.error ||
                 payload?.message ||
                 (payload?.errors ? JSON.stringify(payload.errors) : `HTTP ${response.status}`);
+            // Private profile: return a stable stub so UI can show lock + Follow without throwing.
+            if (
+                response.status === 403 &&
+                (isPrivateProfileBlocked(payload) ||
+                    /private/i.test(String(errorMessage)) ||
+                    payload?.requires_follow === true)
+            ) {
+                console.warn('[laravelUsersGet] private profile blocked', {
+                    url,
+                    status: 403,
+                    payload,
+                });
+                return privateProfileBlockedStub(
+                    typeof errorMessage === 'string' ? errorMessage : 'Profile is private',
+                );
+            }
             console.error('[laravelUsersGet] API error', {
                 url,
                 status: response.status,
@@ -1634,24 +1835,22 @@ async function laravelUsersGet(
             if (isAbortError(error)) throw error;
             throwAbortError();
         }
-        console.error('[laravelUsersGet] fetch error', {
+        console.warn('[laravelUsersGet] fetch error', {
             url,
             name: error?.name,
             message: error?.message,
             status: error?.status,
+            lanFallback: DEV_LAN_API_BASE_URL,
         });
         if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
             throw error;
         }
-        const isConnectionError =
-            error?.message?.includes('Failed to fetch') ||
-            error?.message?.includes('Network request failed') ||
-            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-            error?.message?.includes('NetworkError') ||
-            (error?.name === 'TypeError' &&
-                (error?.message?.includes('fetch') || error?.message?.includes('Network request failed')));
+        const isConnectionError = isFetchConnectionError(error);
         if (isConnectionError) {
-            console.error('[laravelUsersGet] Network request failed — attempted endpoint:', url);
+            console.warn(
+                '[laravelUsersGet] Network request failed — tip: adb reverse tcp:8000 tcp:8000 && ensure Laravel on :8000',
+                { url, lanHost: DEV_LAN_API_HOST },
+            );
             markLaravelUnreachable();
             const connectionError = new Error('CONNECTION_REFUSED');
             connectionError.name = 'ConnectionRefused';
@@ -1688,6 +1887,10 @@ export async function fetchUserProfile(
     const encoded = encodeUserIdentifier(handle);
     const qs = params.toString();
     const payload = await laravelUsersGet(`/users/${encoded}${qs ? `?${qs}` : ''}`, { signal });
+    if (isPrivateProfileBlocked(payload)) {
+        console.warn('[fetchUserProfile/client] private — returning stub', { handle });
+        return payload;
+    }
     console.log('[fetchUserProfile/client] ok', {
         handle: payload?.handle,
         posts_count: payload?.posts_count ?? payload?.postsCount,
@@ -1720,6 +1923,10 @@ export async function fetchUserPosts(
         signal: options.signal,
         timeoutMs: options.timeoutMs,
     });
+    if (isPrivateProfileBlocked(payload)) {
+        console.warn('[fetchUserPosts/client] private — returning stub', { identifier });
+        return payload;
+    }
     console.log('[fetchUserPosts/client] ok', {
         identifier,
         posts_count: payload?.posts_count ?? payload?.postsCount,
@@ -1849,6 +2056,9 @@ export async function fetchProfileAudience(
     is_following?: boolean;
     handle?: string;
     avatar_url?: string;
+    is_private?: boolean;
+    can_view?: boolean;
+    has_pending_request?: boolean;
 }> {
     const identifier = String(handle || '').trim();
     if (!identifier) return { followers: 0, following: 0 };
@@ -1858,7 +2068,29 @@ export async function fetchProfileAudience(
         const vid = String(viewerId || '').trim();
         if (vid) params.set('userId', vid);
         const qs = params.toString();
-        const payload = await laravelUsersGet(`/users/${encoded}/audience${qs ? `?${qs}` : ''}`, { signal });
+        // Audience is a tiny payload — fail fast so private lock screens are not stuck on a 12s timeout.
+        const payload = await laravelUsersGet(`/users/${encoded}/audience${qs ? `?${qs}` : ''}`, {
+            signal,
+            timeoutMs: 5_000,
+        });
+        if (isPrivateProfileBlocked(payload) || (payload?.is_private === true && payload?.can_view === false)) {
+            return {
+                followers: 0,
+                following: 0,
+                is_following: false,
+                is_private: true,
+                can_view: false,
+                handle: typeof payload?.handle === 'string' ? payload.handle : undefined,
+                avatar_url:
+                    typeof payload?.avatar_url === 'string'
+                        ? payload.avatar_url
+                        : typeof payload?.avatarUrl === 'string'
+                          ? payload.avatarUrl
+                          : undefined,
+                has_pending_request:
+                    payload?.has_pending_request === true || payload?.hasPendingRequest === true,
+            };
+        }
         const parsed = profileAudienceFromPayload(payload);
         const followers = parsed.followers ?? 0;
         const following = parsed.following ?? 0;
@@ -1873,15 +2105,29 @@ export async function fetchProfileAudience(
                       : undefined,
             handle: typeof payload?.handle === 'string' ? payload.handle : undefined,
             avatar_url: parsed.avatar_url,
+            is_private: false,
+            can_view: true,
+            has_pending_request:
+                payload?.has_pending_request === true || payload?.hasPendingRequest === true,
         };
     } catch (error) {
         if (isAbortError(error) || signal?.aborted) throw error;
+        if (isPrivateProfileError(error)) {
+            return { followers: 0, following: 0, is_private: true, can_view: false };
+        }
         // 429: extra list fetches make throttling worse and keep View Profile at 0.
         if (isTooManyRequestsError(error)) throw error;
         const [followersRes, followingRes] = await Promise.all([
-            fetchFollowers(identifier, 0, 20, signal).catch(() => null),
+            fetchFollowers(identifier, 0, 20, signal).catch((err) => {
+                if (isPrivateProfileBlocked(err) || isPrivateProfileError(err)) return null;
+                return null;
+            }),
             fetchFollowing(identifier, 0, 20, signal).catch(() => null),
         ]);
+        // Followers/following now return private stubs on 403 — don't treat as public lists.
+        if (isPrivateProfileBlocked(followersRes) || isPrivateProfileBlocked(followingRes)) {
+            return { followers: 0, following: 0, is_private: true, can_view: false };
+        }
         return {
             followers: connectionListTotal(followersRes),
             following: connectionListTotal(followingRes),

@@ -5,7 +5,10 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+
+# Expo requires >= 16.4; keep RN pods aligned.
+platform :ios, '16.4'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
@@ -15,8 +18,21 @@ if linkage != nil
 end
 
 target 'ClipsApp' do
+  use_expo_modules!
+
+  # Firebase Swift pods need module maps when linked as static libs.
+  pod 'GoogleUtilities', :modular_headers => true
+  pod 'FirebaseCore', :modular_headers => true
+  pod 'FirebaseCoreInternal', :modular_headers => true
+  pod 'FirebaseCoreExtension', :modular_headers => true
+  pod 'FirebaseInstallations', :modular_headers => true
+  pod 'FirebaseMessaging', :modular_headers => true
+  pod 'GoogleDataTransport', :modular_headers => true
+  pod 'nanopb', :modular_headers => true
+
   # Vendored iOS binaries (npm run setup:ffmpeg-native). Must be before RN autolink.
-  pod 'ffmpeg-kit-ios-https-gpl', :podspec => './ffmpeg-kit-ios-https-gpl-local.podspec'
+  # Local path pod at version 6.0 matches ffmpeg-kit-react-native-alt/https-gpl (= 6.0).
+  pod 'ffmpeg-kit-ios-https-gpl', :path => '.'
   pod 'ffmpeg-kit-react-native-alt', :subspecs => ['https-gpl'], :podspec => '../node_modules/ffmpeg-kit-react-native-alt/ffmpeg-kit-react-native-alt.podspec'
 
   config = use_native_modules!
@@ -34,5 +50,20 @@ target 'ClipsApp' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.4'
+      end
+    end
+
+    installer.aggregate_targets.each do |aggregate_target|
+      aggregate_target.user_project.native_targets.each do |target|
+        target.build_configurations.each do |config|
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.4'
+        end
+      end
+      aggregate_target.user_project.save
+    end
   end
 end

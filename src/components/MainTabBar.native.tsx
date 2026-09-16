@@ -15,6 +15,8 @@ import {
   isFeedScenesFullscreen,
   subscribeFeedScenesFullscreen,
 } from '../utils/feedScenesFullscreenNative';
+import { useAuth } from '../context/Auth';
+import { prefetchInbox } from '../utils/prefetchNative';
 
 type Props = BottomTabBarProps & {
   inboxBadgeCount: number;
@@ -37,6 +39,7 @@ export default function MainTabBar({
   onCreatePress,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const activeRouteName = state.routes[state.index]?.name;
   const [showContributeCue, setShowContributeCue] = React.useState(false);
   const [scenesFullscreen, setScenesFullscreen] = React.useState(() =>
@@ -137,6 +140,9 @@ export default function MainTabBar({
             accessibilityState={focused ? { selected: true } : {}}
             accessibilityLabel={options.tabBarAccessibilityLabel}
             onPress={onPress}
+            onPressIn={() => {
+              if (route.name === 'Inbox') prefetchInbox(user?.handle);
+            }}
             onLongPress={onLongPress}
             style={styles.tabItem}
             activeOpacity={0.85}

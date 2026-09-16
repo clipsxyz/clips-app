@@ -39,12 +39,14 @@ class StoryController extends Controller
 
         $limit = (int) $request->get('limit', 20);
         $cursorState = $this->decodeStoryCursor((string) $request->get('cursor', ''));
-        $userId = $request->get('userId');
+        $userId = $this->resolveViewerId($request);
         $hasViewer = !empty($userId);
 
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url', 'reactions', 'replies'])
+            ->with(['user:id,handle,display_name,avatar_url,is_private', 'reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views']);
+        User::constrainAuthorVisibility($query, $userId);
+        $query->visibleToAudience($userId);
 
         if ($hasViewer) {
             $query->withExists([
@@ -91,11 +93,13 @@ class StoryController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = $request->get('userId');
+        $userId = $this->resolveViewerId($request);
         $hasViewer = !empty($userId);
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url', 'reactions', 'replies'])
+            ->with(['user:id,handle,display_name,avatar_url,is_private', 'reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views']);
+        User::constrainAuthorVisibility($query, $userId);
+        $query->visibleToAudience($userId);
 
         if ($hasViewer) {
             $query->withExists([
@@ -140,7 +144,12 @@ class StoryController extends Controller
             return response()->json(['errors' => ['handle' => ['User not found']]], 404);
         }
 
-        $userId = $request->get('userId') ?: Auth::id();
+        $userId = $this->resolveViewerId($request);
+        $viewer = $userId ? User::query()->find($userId) : null;
+        if (! $user->isVisibleTo($viewer instanceof User ? $viewer : null)) {
+            return $this->privateProfileForbidden();
+        }
+
         $hasViewer = !empty($userId);
 
         $query = Story::where('user_id', $user->id)
@@ -148,6 +157,7 @@ class StoryController extends Controller
             ->with(['reactions', 'replies'])
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
+        $query->visibleToAudience($userId);
 
         if ($hasViewer) {
             $query->withExists([
@@ -185,12 +195,36 @@ class StoryController extends Controller
         $question = $request->input('question');
         $textStyle = $request->input('textStyle', $request->input('text_style'));
         $taggedUsers = $request->input('taggedUsers', $request->input('tagged_users'));
+        $taggedUsersPositions = $request->input('taggedUsersPositions', $request->input('tagged_users_positions'));
+        $audience = $request->input('audience', 'public');
 
         if (!is_string($text) || trim($text) === '') {
             if (is_array($poll) && !empty($poll['question'])) {
                 $text = (string) $poll['question'];
             } elseif (is_string($question) && trim($question) !== '') {
                 $text = $question;
+            }
+        }
+
+        $normalizedPositions = null;
+        if (is_array($taggedUsersPositions)) {
+            $normalizedPositions = [];
+            foreach ($taggedUsersPositions as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $handle = isset($row['handle']) ? trim((string) $row['handle']) : '';
+                if ($handle === '') {
+                    continue;
+                }
+                $normalizedPositions[] = [
+                    'handle' => $handle,
+                    'x' => isset($row['x']) ? (float) $row['x'] : 50.0,
+                    'y' => isset($row['y']) ? (float) $row['y'] : 50.0,
+                ];
+            }
+            if ($normalizedPositions === []) {
+                $normalizedPositions = null;
             }
         }
 
@@ -207,6 +241,8 @@ class StoryController extends Controller
             'textStyle' => is_array($textStyle) ? $textStyle : null,
             'stickers' => is_array($stickers) ? $stickers : null,
             'taggedUsers' => is_array($taggedUsers) ? array_values(array_filter($taggedUsers, 'is_string')) : null,
+            'taggedUsersPositions' => $normalizedPositions,
+            'audience' => is_string($audience) ? strtolower(trim($audience)) : 'public',
         ];
 
         $validator = Validator::make($payload, [
@@ -225,6 +261,11 @@ class StoryController extends Controller
             'stickers' => 'nullable|array',
             'taggedUsers' => 'nullable|array',
             'taggedUsers.*' => 'nullable|string|max:100',
+            'taggedUsersPositions' => 'nullable|array',
+            'taggedUsersPositions.*.handle' => 'required_with:taggedUsersPositions|string|max:100',
+            'taggedUsersPositions.*.x' => 'nullable|numeric',
+            'taggedUsersPositions.*.y' => 'nullable|numeric',
+            'audience' => 'nullable|in:public,close_friends,only_me',
         ]);
 
         if ($validator->fails()) {
@@ -241,6 +282,25 @@ class StoryController extends Controller
             return response()->json(['error' => 'Story must have media, text, or stickers'], 400);
         }
 
+        if (! in_array($payload['audience'], ['public', 'close_friends', 'only_me'], true)) {
+            $payload['audience'] = 'public';
+        }
+
+        // Prefer explicit location; else first location sticker label.
+        if ((! is_string($payload['location']) || trim((string) $payload['location']) === '') && $hasStickers) {
+            foreach ($payload['stickers'] as $sticker) {
+                if (! is_array($sticker)) {
+                    continue;
+                }
+                $category = strtolower((string) ($sticker['sticker']['category'] ?? $sticker['category'] ?? ''));
+                $label = trim((string) ($sticker['textContent'] ?? $sticker['text_content'] ?? ''));
+                if ($category === 'location' && $label !== '') {
+                    $payload['location'] = $label;
+                    break;
+                }
+            }
+        }
+
         \Log::info('stories.store', [
             'user_id' => $user->id,
             'handle' => $user->handle,
@@ -248,9 +308,25 @@ class StoryController extends Controller
             'media_type' => $payload['media_type'],
             'has_text' => (bool) $payload['text'],
             'has_stickers' => $hasStickers,
+            'audience' => $payload['audience'],
         ]);
 
-        $linkPreview = app(LinkPreviewService::class)->previewFromText($payload['text']);
+        $linkSource = $payload['text'];
+        if ((! is_string($linkSource) || trim($linkSource) === '') && $hasStickers) {
+            foreach ($payload['stickers'] as $sticker) {
+                if (! is_array($sticker)) {
+                    continue;
+                }
+                $url = trim((string) ($sticker['linkUrl'] ?? $sticker['link_url'] ?? ''));
+                if ($url !== '') {
+                    $linkSource = $url;
+                    break;
+                }
+            }
+        }
+        $linkPreview = app(LinkPreviewService::class)->previewFromText(
+            is_string($linkSource) ? $linkSource : null
+        );
 
         $story = DB::transaction(function () use ($payload, $user, $linkPreview) {
             $attrs = [
@@ -261,8 +337,8 @@ class StoryController extends Controller
                 'text' => $payload['text'],
                 'text_color' => $payload['text_color'],
                 'text_size' => $payload['text_size'],
-                'location' => $payload['location'],
-                'venue' => $payload['venue'],
+                'location' => is_string($payload['location']) ? trim($payload['location']) ?: null : null,
+                'venue' => is_string($payload['venue']) ? trim($payload['venue']) ?: null : $payload['venue'],
                 'shared_from_post_id' => $payload['shared_from_post_id'],
                 'shared_from_user_handle' => $payload['shared_from_post_id']
                     ? (Post::find($payload['shared_from_post_id'])?->user_handle
@@ -273,6 +349,12 @@ class StoryController extends Controller
                 'tagged_users' => $payload['taggedUsers'],
                 'expires_at' => now('UTC')->addHours(24),
             ];
+            if (Schema::hasColumn('stories', 'audience')) {
+                $attrs['audience'] = $payload['audience'] ?: 'public';
+            }
+            if (Schema::hasColumn('stories', 'tagged_users_positions')) {
+                $attrs['tagged_users_positions'] = $payload['taggedUsersPositions'];
+            }
             if (Schema::hasColumn('stories', 'link_preview')) {
                 $attrs['link_preview'] = $linkPreview;
             }
@@ -310,7 +392,10 @@ class StoryController extends Controller
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
 
-        $story = Story::findOrFail($id);
+        $story = Story::with('user')->findOrFail($id);
+        if ($forbidden = $this->forbidUnlessStoryVisible($story, $user)) {
+            return $forbidden;
+        }
 
         if ($story->isExpired()) {
             return response()->json(['error' => 'Story has expired'], 400);
@@ -349,7 +434,10 @@ class StoryController extends Controller
         }
 
         $user = Auth::user();
-        $story = Story::findOrFail($id);
+        $story = Story::with('user')->findOrFail($id);
+        if ($forbidden = $this->forbidUnlessStoryVisible($story, $user instanceof User ? $user : null)) {
+            return $forbidden;
+        }
 
         if ($story->isExpired()) {
             return response()->json(['error' => 'Story has expired'], 400);
@@ -394,7 +482,10 @@ class StoryController extends Controller
         }
 
         $user = Auth::user();
-        $story = Story::findOrFail($id);
+        $story = Story::with('user')->findOrFail($id);
+        if ($forbidden = $this->forbidUnlessStoryVisible($story, $user instanceof User ? $user : null)) {
+            return $forbidden;
+        }
 
         if ($story->isExpired()) {
             return response()->json(['error' => 'Story has expired'], 400);
@@ -439,6 +530,61 @@ class StoryController extends Controller
                 'created_at' => $reply->created_at,
             ])->values()->all(),
         ];
+    }
+
+    private function resolveViewerId(Request $request): ?string
+    {
+        if (Auth::check()) {
+            return (string) Auth::id();
+        }
+        $userId = (string) $request->get('userId', '');
+
+        return $userId !== '' ? $userId : null;
+    }
+
+    private function privateProfileForbidden(): JsonResponse
+    {
+        return response()->json([
+            'error' => 'Profile is private',
+            'is_private' => true,
+            'can_view' => false,
+            'requires_follow' => true,
+        ], 403);
+    }
+
+    private function forbidUnlessStoryVisible(Story $story, ?User $viewer): ?JsonResponse
+    {
+        $author = $story->relationLoaded('user') ? $story->user : User::query()->find($story->user_id);
+        if (! $author instanceof User) {
+            return response()->json(['error' => 'Story not found'], 404);
+        }
+        if (! $author->isVisibleTo($viewer)) {
+            return $this->privateProfileForbidden();
+        }
+
+        $audience = strtolower((string) ($story->audience ?? 'public'));
+        if ($audience === '' || $audience === 'public') {
+            return null;
+        }
+        if ($viewer instanceof User && (string) $viewer->id === (string) $story->user_id) {
+            return null;
+        }
+        if ($audience === 'only_me') {
+            return $this->privateProfileForbidden();
+        }
+        if ($audience === 'close_friends') {
+            $isFollower = $viewer instanceof User
+                && DB::table('user_follows')
+                    ->where('follower_id', $viewer->id)
+                    ->where('following_id', $story->user_id)
+                    ->where('status', 'accepted')
+                    ->exists();
+            if (! $isFollower) {
+                return $this->privateProfileForbidden();
+            }
+        }
+
+        return null;
     }
 
     private function decodeStoryCursor(?string $cursor): array

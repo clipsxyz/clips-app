@@ -47,7 +47,7 @@ type Props = {
     onShareToStoriesSuccess?: (postId: string) => void;
 };
 
-export default function MyFeedPostCard({
+function MyFeedPostCard({
     post,
     user,
     onPress,
@@ -279,6 +279,26 @@ export default function MyFeedPostCard({
         </TouchableOpacity>
     );
 }
+
+export default React.memo(MyFeedPostCard, (prev, next) => {
+    const a = prev.post;
+    const b = next.post;
+    return (
+        a.id === b.id &&
+        a.userLiked === b.userLiked &&
+        a.isBookmarked === b.isBookmarked &&
+        a.stats?.likes === b.stats?.likes &&
+        a.stats?.comments === b.stats?.comments &&
+        a.stats?.views === b.stats?.views &&
+        a.stats?.reclips === b.stats?.reclips &&
+        a.stats?.saves === b.stats?.saves &&
+        a.mediaUrl === b.mediaUrl &&
+        a.mediaType === b.mediaType &&
+        a.text === b.text &&
+        a.bannerText === b.bannerText &&
+        prev.user?.id === next.user?.id
+    );
+});
 
 const styles = StyleSheet.create({
     card: {

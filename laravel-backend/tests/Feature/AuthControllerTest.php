@@ -428,4 +428,27 @@ class AuthControllerTest extends TestCase
             ->assertJsonPath('latitude', null)
             ->assertJsonPath('longitude', null);
     }
+
+    public function test_update_profile_persists_is_private(): void
+    {
+        $user = User::factory()->create(['is_private' => false]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/auth/profile', [
+                'is_private' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('is_private', true);
+
+        $this->assertTrue($user->fresh()->is_private);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/auth/profile', [
+                'is_private' => false,
+            ])
+            ->assertOk()
+            ->assertJsonPath('is_private', false);
+
+        $this->assertFalse($user->fresh()->is_private);
+    }
 }

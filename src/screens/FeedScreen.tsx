@@ -23,6 +23,7 @@ import {
     useWindowDimensions,
     Animated,
     DeviceEventEmitter,
+    RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -86,6 +87,7 @@ import {
     subscribeFeedAutoplayPref,
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
+import { loadFeedVideoPrebufferConfig } from '../utils/prefetchFeedVideoNative';
 import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
@@ -105,7 +107,8 @@ import {
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
-import { FlatList, RefreshControl } from 'react-native-gesture-handler';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import {
     useSharedValue,
 } from 'react-native-reanimated';
@@ -211,6 +214,7 @@ import {
     type Stories24RailItem,
     type Stories24RailReturnPayload,
 } from '../utils/stories24Rail';
+import { runAfterInteractions } from '../utils/runAfterInteractionsNative';
 import { INTERESTS_ONBOARDING_DISMISSED_KEY, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
 import {
     SUGGESTED_FOLLOWER_DISMISSED_KEY,
@@ -237,10 +241,9 @@ import {
     setPostNotificationsPrefMobile,
     hasPostNotificationsPrefMobile,
 } from '../utils/feedEngagementPrefsMobile';
-import {
-    fetchInitialVisibleFeed,
-    fetchVisibleFeedPage,
-} from '../utils/nativeFeedLoader';
+import { useHomeFeedInfinite } from '../hooks/useHomeFeedInfinite';
+import { useQueryClient } from '@tanstack/react-query';
+import { prefetchFeedPostMedia } from '../utils/prefetchNative';
 import {
     filterPostsByContentPrefs,
     hideFeedPostMobile,
@@ -990,7 +993,7 @@ function PillTabs({
     );
 }
 
-// Memoized FeedCard for better performance - prevents unnecessary re-renders
+// Memoized FeedCard — ignore handler identity churn from renderItem closures.
 const FeedCard = React.memo(function FeedCard({
     post,
     onLike,
@@ -1534,7 +1537,9 @@ const FeedCard = React.memo(function FeedCard({
         prev.suspendNativeVideo === next.suspendNativeVideo &&
         prev.scenesExpanding === next.scenesExpanding &&
         prev.viewerHandle === next.viewerHandle &&
-        prev.onShareToStoriesSuccess === next.onShareToStoriesSuccess &&
+        // Intentionally ignore handler identity (onLike/onShare/…) — parents pass
+        // fresh closures each render; comparing them would defeat memo. Handlers
+        // close over latest state via renderItem / refs, not this comparator.
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
         a.clientLocalMediaUri === b.clientLocalMediaUri &&
@@ -1776,7 +1781,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [stories24CollapsePayload, setStories24CollapsePayload] =
         React.useState<Stories24RailReturnPayload | null>(null);
     const stories24RailRef = React.useRef<Stories24FeedShelfHandle>(null);
-    const flatListRef = useRef<FlatList<FeedListRow>>(null);
+    const flatListRef = useRef<FlashListRef<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
     const pinFeedScrollSoon = useCallback((explicitY?: number | null) => {
         const y = explicitY ?? feedScrollYRef.current;
@@ -1878,6 +1883,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (cancelled) return;
             void syncFeedAutoplayAllowed(pref);
         });
+        void loadFeedVideoPrebufferConfig();
         void (async () => {
             try {
                 const migrated = await AsyncStorage.getItem('clips:feedAudioDefaultUnmuted_v1');
@@ -1965,13 +1971,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (!user?.id || customLocation || showFollowingFeed) {
             return;
         }
-        void reloadStories24Rail();
+        let cancelled = false;
+        void runAfterInteractions(() => {
+            if (!cancelled) void reloadStories24Rail();
+        });
         const pollMs = getStoriesRailPollMs();
         const interval = pollMs != null ? setInterval(() => void reloadStories24Rail(), pollMs) : null;
         const unsubRefresh = subscribeStoriesRefresh(() => {
             void reloadStories24Rail();
         });
         return () => {
+            cancelled = true;
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
@@ -1980,7 +1990,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id || customLocation || showFollowingFeed) return;
-            void reloadStories24Rail();
+            void runAfterInteractions(() => {
+                void reloadStories24Rail();
+            });
         }, [user?.id, customLocation, showFollowingFeed, reloadStories24Rail]),
     );
 
@@ -2289,6 +2301,31 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const tab = String(active || user?.national || 'Ireland').trim();
         return tab.toLowerCase() === 'following' ? 'discover' : tab;
     }, [active, customLocation, currentFilter, showFollowingFeed, user?.national]);
+
+    const queryClient = useQueryClient();
+    const getFeedPrefs = React.useCallback(() => feedContentPrefsRef.current, []);
+    const {
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+        isPending: feedQueryPending,
+        isFetching: feedQueryFetching,
+        isError: feedQueryIsError,
+        error: feedQueryError,
+        dataUpdatedAt: feedDataUpdatedAt,
+        pageBatches,
+        followingCount: queryFollowingCount,
+        queryKey: homeFeedQueryKey,
+    } = useHomeFeedInfinite({
+        filter: feedFetchFilter,
+        viewerUserId: userId,
+        viewerHandle: user?.handle,
+        userLocal: user?.local || 'Finglas',
+        userRegional: user?.regional || 'Dublin',
+        userNational: user?.national || 'Ireland',
+        getPrefs: getFeedPrefs,
+        enabled: Boolean(userId),
+    });
 
     const syncFeedFetchCtx = React.useCallback((filter: string) => {
         feedFetchCtxRef.current = {
@@ -3055,174 +3092,167 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [userId],
     );
 
+    /** Map React Query infinite pages → local `pages` (keeps optimistic setPages working). */
+    const syncPagesFromInfiniteBatches = React.useCallback(
+        (batches: Post[][]) => {
+            const feedTab = String(feedFetchCtxRef.current.filter || '').trim();
+            const recent = recentCreatedPostsRef.current
+                .map((p) => {
+                    const live = getLocalPostById(p.id);
+                    const merged = live
+                        ? {
+                              ...p,
+                              ...live,
+                              stats: { ...p.stats, ...live.stats },
+                          }
+                        : p;
+                    return decorateForUser(userId, merged);
+                })
+                .filter((p) => {
+                    if (!feedTab || feedTab.toLowerCase() === 'discover') return true;
+                    return postMatchesLocationTab(p, feedTab);
+                });
+            recentCreatedPostsRef.current = recent;
+            const recentIds = new Set(recent.map((p) => String(p.id)));
+
+            const processBatch = (items: Post[], isFirst: boolean): Post[] => {
+                let merged = isFirst
+                    ? (() => {
+                          const withoutDupes = items.filter((p) => !recentIds.has(String(p.id)));
+                          return recent.length > 0 ? [...recent, ...withoutDupes] : items;
+                      })()
+                    : items;
+                merged = merged.map((p) => {
+                    const prev = lastEngagementByIdRef.current.get(String(p.id));
+                    if (!prev) return p;
+                    return {
+                        ...p,
+                        userLiked: p.userLiked === true || prev.userLiked === true,
+                        stats: mergeEngagementStats(p.stats, prev.stats),
+                    };
+                });
+                if (isLocationScopedFeedTab(feedTab)) {
+                    merged = filterPostsForLocationFeed(merged, feedTab);
+                }
+                return excludeLinkShareFeedPosts(merged);
+            };
+
+            const nextPages = batches
+                .map((batch, idx) => processBatch(batch, idx === 0))
+                .filter((batch) => batch.length > 0);
+
+            if (nextPages.length > 0) {
+                setPages(nextPages);
+            }
+        },
+        [userId],
+    );
+
+    const feedQueryBusyRef = useRef({ pending: false, fetching: false });
+    feedQueryBusyRef.current = { pending: feedQueryPending, fetching: feedQueryFetching };
+
+    React.useEffect(() => {
+        if (typeof queryFollowingCount === 'number') {
+            setFollowingCount(queryFollowingCount);
+        }
+    }, [queryFollowingCount]);
+
+    React.useEffect(() => {
+        // Only sync when React Query data changes — not when fetch flags flip.
+        if (!pageBatches.length) {
+            if (!feedQueryBusyRef.current.pending && !feedQueryBusyRef.current.fetching) {
+                setPages([]);
+            }
+            return;
+        }
+        syncPagesFromInfiniteBatches(pageBatches);
+    }, [feedDataUpdatedAt, pageBatches, syncPagesFromInfiniteBatches]);
+
+    const feedMediaPrefetchCountRef = useRef(0);
+    React.useEffect(() => {
+        const n = pageBatches.length;
+        if (n === 0) {
+            feedMediaPrefetchCountRef.current = 0;
+            return;
+        }
+        if (n <= feedMediaPrefetchCountRef.current) return;
+        // Prefetch only newly arrived batches (including the first page).
+        for (let i = feedMediaPrefetchCountRef.current; i < n; i += 1) {
+            prefetchFeedPostMedia(pageBatches[i] || []);
+        }
+        feedMediaPrefetchCountRef.current = n;
+    }, [pageBatches]);
+
+    React.useEffect(() => {
+        setInitialLoading(feedQueryPending && pagesRef.current.flat().length === 0);
+        setLoadingMore(isFetchingNextPage);
+        setEnd(!hasNextPage && !feedQueryPending);
+        setCursor(hasNextPage ? 1 : null);
+    }, [feedQueryPending, isFetchingNextPage, hasNextPage, feedDataUpdatedAt]);
+
+    React.useEffect(() => {
+        if (!feedQueryIsError || !feedQueryError) return;
+        const err = feedQueryError;
+        const errMsg = err instanceof Error ? err.message : String(err ?? '');
+        const isTransientNetwork =
+            (err instanceof TypeError && /network request failed|failed to fetch/i.test(errMsg)) ||
+            (err instanceof Error &&
+                (err.name === 'AbortError' ||
+                    err.name === 'ConnectionRefused' ||
+                    /network request failed|failed to fetch|CONNECTION_REFUSED|timed out/i.test(errMsg)));
+        if (pagesRef.current.flat().length === 0) {
+            setError(
+                isTransientNetwork || /network request failed|failed to fetch/i.test(errMsg)
+                    ? 'Couldn’t reach Gazetteer — tap Retry'
+                    : errMsg.includes('timed out')
+                      ? 'Feed load timed out — tap Retry'
+                      : errMsg
+                        ? `Failed to load feed (${errMsg.slice(0, 100)})`
+                        : 'Failed to load feed',
+            );
+            setEnd(true);
+        }
+    }, [feedQueryIsError, feedQueryError, feedDataUpdatedAt]);
+
     const reloadFeedFromStart = React.useCallback(async (opts?: { quiet?: boolean }) => {
         const gen = ++feedLoadGenRef.current;
         setEnd(false);
-        // Pull-to-refresh keeps existing cards visible (quiet); cold load shows skeleton.
+        setError(null);
         if (!opts?.quiet) {
             setInitialLoading(true);
         }
-        setError(null);
-        // Longer than the feed GET timeout so a busy Laravel (e.g. carousel upload)
-        // can finish instead of racing an immediate dropout.
-        const timeoutMs = Platform.OS === 'web' ? 20000 : 25000;
-
-        const makeLoadTimeout = () => {
-            let loadTimeoutId: ReturnType<typeof setTimeout> | undefined;
-            const promise = new Promise<never>((_, reject) => {
-                loadTimeoutId = setTimeout(
-                    () => reject(new Error('Feed load timed out')),
-                    timeoutMs,
-                );
-            });
-            return { promise, clear: () => loadTimeoutId && clearTimeout(loadTimeoutId) };
-        };
-
-        const params = buildFeedFetchParams(0);
-        const requestedFilter = params.filter;
-        const runFetch = () => fetchInitialVisibleFeed(params);
-        const firstTimeout = makeLoadTimeout();
         try {
-            const result = await Promise.race([runFetch(), firstTimeout.promise]);
+            await queryClient.resetQueries({ queryKey: homeFeedQueryKey });
             if (gen !== feedLoadGenRef.current) return;
-            applyFeedPageResult(result.items, result.nextCursor, result.followingCount, requestedFilter);
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
-            const errMsg = err instanceof Error ? err.message : String(err ?? '');
-            const isTransientNetwork =
-                (err instanceof TypeError && /network request failed|failed to fetch/i.test(errMsg)) ||
-                (err instanceof Error &&
-                    (err.name === 'AbortError' ||
-                        err.name === 'ConnectionRefused' ||
-                        /network request failed|failed to fetch|CONNECTION_REFUSED|timed out/i.test(
-                            errMsg,
-                        )));
-            if (__DEV__) {
-                console.warn('Feed load failed gracefully:', err);
-            } else if (!isTransientNetwork) {
-                console.warn('Error loading feed:', errMsg.slice(0, 120));
-            }
-            const looksLikeCorruptJson =
-                err instanceof SyntaxError ||
-                /JSON\s*Parse|Unexpected .* position|at position \d+/i.test(errMsg);
-
-            // Only clear posts cache on corrupt JSON — never wipe collections on timeouts.
-            if (looksLikeCorruptJson) {
-                try {
-                    const { clearCorruptPostsStorageNative } = await import('../api/postsStorage.native');
-                    await clearCorruptPostsStorageNative();
-                } catch {
-                    /* ignore */
-                }
-                try {
-                    if (typeof localStorage !== 'undefined') {
-                        localStorage.removeItem('clips_app_posts');
-                    }
-                } catch {
-                    /* ignore */
-                }
-            }
-
-            if (isLaravelApiEnabled() && !isTransientNetwork) {
-                // Soft-fail only: don't poison the whole session so login/upload keep working.
-                console.warn('[FeedScreen] feed load failed (Laravel still enabled for auth/upload)');
-            }
-
-            const retryTimeout = makeLoadTimeout();
-            try {
-                const retryResult = await Promise.race([runFetch(), retryTimeout.promise]);
-                if (gen !== feedLoadGenRef.current) return;
-                applyFeedPageResult(retryResult.items, retryResult.nextCursor, retryResult.followingCount, requestedFilter);
-                return;
-            } catch (retryErr) {
-                if (__DEV__) console.warn('Feed recovery retry failed gracefully:', retryErr);
-            } finally {
-                retryTimeout.clear();
-            }
-
+            if (__DEV__) console.warn('Feed reload failed:', err);
             const msg = err instanceof Error ? err.message : '';
-            setError(
-                isTransientNetwork || /network request failed|failed to fetch/i.test(msg)
-                    ? 'Couldn’t reach Gazetteer — tap Retry'
-                    : msg.includes('timed out')
-                      ? 'Feed load timed out — tap Retry'
-                      : msg
-                        ? `Failed to load feed (${msg.slice(0, 100)})`
-                        : 'Failed to load feed',
-            );
-            // Keep whatever cards we already have. Applying [] here used to look like
-            // "You're early to this feed" after a timeout or dropped adb reverse.
-            if (pagesRef.current.flat().length === 0) {
-                setEnd(true);
-            }
+            setError(msg ? `Failed to load feed (${msg.slice(0, 100)})` : 'Failed to load feed');
+            if (pagesRef.current.flat().length === 0) setEnd(true);
         } finally {
-            firstTimeout.clear();
             if (gen === feedLoadGenRef.current) {
                 setInitialLoading(false);
             }
         }
-    }, [applyFeedPageResult, buildFeedFetchParams]);
+    }, [queryClient, homeFeedQueryKey]);
 
     reloadFeedFromStartRef.current = reloadFeedFromStart;
 
-    const loadMore = React.useCallback(async () => {
-        if (initialLoading || loadingMore || end || cursor === null) {
-            return;
-        }
-        const gen = feedLoadGenRef.current;
-        setLoadingMore(true);
-        setError(null);
-        try {
-            let walkCursor: string | number | null = cursor;
-            let appended: Post[] = [];
-            const feedTab = String(buildFeedFetchParams(cursor).filter || '').trim();
-            for (let step = 0; step < 16; step += 1) {
-                if (gen !== feedLoadGenRef.current) return;
-                const page = await fetchVisibleFeedPage(buildFeedFetchParams(walkCursor));
-                if (page.items.length > 0) {
-                    appended = page.items;
-                    walkCursor = page.nextCursor;
-                    break;
-                }
-                if (page.nextCursor == null) {
-                    setEnd(true);
-                    return;
-                }
-                walkCursor = page.nextCursor;
-            }
-            if (gen !== feedLoadGenRef.current) return;
-            if (appended.length > 0) {
-                const safeAppended = excludeLinkShareFeedPosts(
-                    isLocationScopedFeedTab(feedTab)
-                    ? filterPostsForLocationFeed(appended, feedTab)
-                    : appended,
-                );
-                if (safeAppended.length === 0) {
-                    setCursor(walkCursor);
-                    setEnd(walkCursor == null);
-                    return;
-                }
-                setPages((prev) => [...prev, safeAppended]);
-                setCursor(walkCursor);
-                setEnd(walkCursor == null);
-            } else {
-                setEnd(true);
-            }
-        } catch (err) {
-            if (gen !== feedLoadGenRef.current) return;
-            console.error('Error loading feed:', err);
-            setError('Failed to load feed');
-        } finally {
-            setLoadingMore(false);
-        }
-    }, [buildFeedFetchParams, cursor, end, initialLoading, loadingMore]);
+    const loadMore = React.useCallback(() => {
+        if (!hasNextPage || isFetchingNextPage || feedQueryPending) return;
+        void fetchNextPage();
+    }, [hasNextPage, isFetchingNextPage, feedQueryPending, fetchNextPage]);
 
+    // Filter / viewer changes remount the infinite query via queryKey — no manual reload needed.
+    // reloadTick (Retry) forces a cold reset.
     useEffect(() => {
+        if (reloadTick === 0) return;
         const t = setTimeout(() => {
             void reloadFeedFromStartRef.current();
         }, 0);
         return () => clearTimeout(t);
-    }, [reloadTick, feedFetchFilter, userId]);
+    }, [reloadTick]);
 
     useFocusEffect(
         useCallback(() => {
@@ -3887,10 +3917,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 (row) => row.kind === 'post' && String(row.post.id) === String(postId),
             );
             if (idx >= 0) {
-                flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+                flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 }).catch(() => {
+                    pinFeedScrollSoon();
+                });
             }
         },
-        [flatForRender],
+        [flatForRender, pinFeedScrollSoon],
     );
 
     const handleSuggestedCardFollow = React.useCallback(
@@ -4449,6 +4481,110 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         pinFeedScrollSoon(y);
     }, [restoreFeedVideoAfterOverlay, pinFeedScrollSoon]);
 
+    const onFeedScrollBeginDrag = React.useCallback(() => {
+        feedScrollingRef.current = true;
+        setFeedScrollBusy(true);
+        if (feedScrollIdleTimerRef.current) {
+            clearTimeout(feedScrollIdleTimerRef.current);
+            feedScrollIdleTimerRef.current = null;
+        }
+    }, []);
+
+    const onFeedMomentumScrollBegin = React.useCallback(() => {
+        if (feedScrollIdleTimerRef.current) {
+            clearTimeout(feedScrollIdleTimerRef.current);
+            feedScrollIdleTimerRef.current = null;
+        }
+        feedScrollingRef.current = true;
+        setFeedScrollBusy(true);
+    }, []);
+
+    const onFeedMomentumScrollEnd = React.useCallback(() => {
+        feedScrollingRef.current = false;
+        if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+        feedScrollIdleTimerRef.current = setTimeout(() => {
+            // Scroll settle only — never from like/comment re-renders.
+            if (feedAutoplayOverlayBlocks()) {
+                requestAnimationFrame(() => setFeedScrollBusy(false));
+                return;
+            }
+            scheduleActiveFeedVideoRef.current(
+                feedAutoplayAllowedRef.current
+                    ? lastViewableVideoPostIdRef.current
+                    : null,
+                false,
+            );
+            requestAnimationFrame(() => setFeedScrollBusy(false));
+        }, 80);
+    }, []);
+
+    const onFeedScrollEndDrag = React.useCallback((e: any) => {
+        feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+        if (e.nativeEvent.velocity && Math.abs(e.nativeEvent.velocity.y) > 0.05) {
+            // Momentum will follow — keep busy until momentum end.
+            return;
+        }
+        if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+        feedScrollIdleTimerRef.current = setTimeout(() => {
+            feedScrollingRef.current = false;
+            if (feedAutoplayOverlayBlocks()) {
+                requestAnimationFrame(() => setFeedScrollBusy(false));
+                return;
+            }
+            scheduleActiveFeedVideoRef.current(
+                feedAutoplayAllowedRef.current
+                    ? lastViewableVideoPostIdRef.current
+                    : null,
+                false,
+            );
+            requestAnimationFrame(() => setFeedScrollBusy(false));
+        }, 80);
+    }, []);
+
+    const onFeedScroll = React.useCallback((e: any) => {
+        feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+    }, []);
+
+    const feedKeyExtractor = React.useCallback((item: FeedListRow) => {
+        if (item.kind === 'post') return `post:${item.post.id}`;
+        if (item.kind === 'interests' || item.kind === 'stories24') {
+            return item.kind === 'stories24'
+                ? `stories24:${item.railKey}`
+                : `${item.kind}:${item.id}`;
+        }
+        if (item.kind === 'suggested_follower') {
+            return `suggested-follower:${item.suggestion.userHandle}`;
+        }
+        if (item.kind === 'ad') return `ad:${item.ad.id}`;
+        if (item.kind === 'local_business') {
+            return `local-business:${item.posts.map((p) => p.id).join('-')}`;
+        }
+        if (item.kind === 'suggested_places') {
+            return `suggested-places:${item.bundleKey}`;
+        }
+        return 'feed-row';
+    }, []);
+
+    const feedGetItemType = React.useCallback((item: FeedListRow) => {
+        if (item.kind === 'post') {
+            const post = item.post;
+            if (isTextOnlyPost(post)) return 'post-text';
+            const mediaCount = Array.isArray(post.mediaItems)
+                ? post.mediaItems.filter((m) => m?.type === 'image' || m?.type === 'video').length
+                : 0;
+            if (mediaCount > 1) {
+                return postHasVideoMedia(post) ? 'post-carousel-video' : 'post-carousel';
+            }
+            return postHasVideoMedia(post) ? 'post-video' : 'post-image';
+        }
+        return item.kind;
+    }, []);
+
+    const onFeedEndReached = React.useCallback(() => {
+        if (!hasNextPage || isFetchingNextPage) return;
+        void fetchNextPage();
+    }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
     return (
         <View style={styles.container}>
             <FeedPageLayout
@@ -4480,99 +4616,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }
             >
             <View style={styles.feedListShell}>
-            <FlatList
+            <FlashList
                 ref={flatListRef}
                 style={styles.feedList}
                 data={flatForRender}
                 renderItem={renderItem}
-                keyExtractor={(item) => {
-                    if (item.kind === 'post') return `post:${item.post.id}`;
-                    if (item.kind === 'interests' || item.kind === 'stories24') {
-                        return item.kind === 'stories24'
-                            ? `stories24:${item.railKey}`
-                            : `${item.kind}:${item.id}`;
-                    }
-                    if (item.kind === 'suggested_follower') {
-                        return `suggested-follower:${item.suggestion.userHandle}`;
-                    }
-                    if (item.kind === 'ad') return `ad:${item.ad.id}`;
-                    if (item.kind === 'local_business') {
-                        return `local-business:${item.posts.map((p) => p.id).join('-')}`;
-                    }
-                    if (item.kind === 'suggested_places') {
-                        return `suggested-places:${item.bundleKey}`;
-                    }
-                    return 'feed-row';
-                }}
+                keyExtractor={feedKeyExtractor}
+                getItemType={feedGetItemType}
+                drawDistance={900}
+                estimatedItemSize={560}
+                renderScrollComponent={GHScrollView}
                 extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}-${scenesOverlay?.postId || ''}-${stories24Items.map((i) => i.handle).join('|')}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
-                // Keep the render window tight for max FPS while flinging; clip offscreen cells.
-                initialNumToRender={2}
-                maxToRenderPerBatch={2}
-                windowSize={5}
-                updateCellsBatchingPeriod={50}
-                removeClippedSubviews={!scenesOverlay}
                 scrollEnabled={!scenesOverlay}
-                onScrollBeginDrag={() => {
-                    feedScrollingRef.current = true;
-                    setFeedScrollBusy(true);
-                    if (feedScrollIdleTimerRef.current) {
-                        clearTimeout(feedScrollIdleTimerRef.current);
-                        feedScrollIdleTimerRef.current = null;
-                    }
-                }}
-                onMomentumScrollBegin={() => {
-                    if (feedScrollIdleTimerRef.current) {
-                        clearTimeout(feedScrollIdleTimerRef.current);
-                        feedScrollIdleTimerRef.current = null;
-                    }
-                    feedScrollingRef.current = true;
-                    setFeedScrollBusy(true);
-                }}
-                onMomentumScrollEnd={() => {
-                    feedScrollingRef.current = false;
-                    if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-                    feedScrollIdleTimerRef.current = setTimeout(() => {
-                        // Scroll settle only — never from like/comment re-renders.
-                        if (feedAutoplayOverlayBlocks()) {
-                            requestAnimationFrame(() => setFeedScrollBusy(false));
-                            return;
-                        }
-                        scheduleActiveFeedVideoRef.current(
-                            feedAutoplayAllowedRef.current
-                                ? lastViewableVideoPostIdRef.current
-                                : null,
-                            false,
-                        );
-                        requestAnimationFrame(() => setFeedScrollBusy(false));
-                    }, 80);
-                }}
-                onScrollEndDrag={(e) => {
-                    feedScrollYRef.current = e.nativeEvent.contentOffset.y;
-                    if (e.nativeEvent.velocity && Math.abs(e.nativeEvent.velocity.y) > 0.05) {
-                        // Momentum will follow — keep busy until momentum end.
-                        return;
-                    }
-                    if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-                    feedScrollIdleTimerRef.current = setTimeout(() => {
-                        feedScrollingRef.current = false;
-                        if (feedAutoplayOverlayBlocks()) {
-                            requestAnimationFrame(() => setFeedScrollBusy(false));
-                            return;
-                        }
-                        scheduleActiveFeedVideoRef.current(
-                            feedAutoplayAllowedRef.current
-                                ? lastViewableVideoPostIdRef.current
-                                : null,
-                            false,
-                        );
-                        requestAnimationFrame(() => setFeedScrollBusy(false));
-                    }, 80);
-                }}
-                // Scroll performance
-                onScroll={(e) => {
-                    feedScrollYRef.current = e.nativeEvent.contentOffset.y;
-                }}
+                onScrollBeginDrag={onFeedScrollBeginDrag}
+                onMomentumScrollBegin={onFeedMomentumScrollBegin}
+                onMomentumScrollEnd={onFeedMomentumScrollEnd}
+                onScrollEndDrag={onFeedScrollEndDrag}
+                onScroll={onFeedScroll}
                 scrollEventThrottle={32}
                 decelerationRate={Platform.OS === 'ios' ? 'normal' : 0.985}
                 refreshControl={
@@ -4587,15 +4648,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         progressViewOffset={Platform.OS === 'android' ? 12 : 0}
                     />
                 }
-                onEndReached={() => {
-                    if (!initialLoading && !loadingMore && !end) {
-                        loadMore();
-                    }
-                }}
-                onScrollToIndexFailed={() => {
-                    pinFeedScrollSoon();
-                }}
-                onEndReachedThreshold={0.5}
+                onEndReached={onFeedEndReached}
+                onEndReachedThreshold={1.2}
                 ListFooterComponent={
                     loadingMore ? (
                         <View style={styles.loadingContainer}>

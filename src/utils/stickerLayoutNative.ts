@@ -2,9 +2,9 @@
 export const STICKER_SAFE_ZONE_TOP = 18;
 export const STICKER_SAFE_ZONE_BOTTOM = 82;
 
-/** Story composer — header/footer float on media; allow lower placement. */
-export const STORY_STICKER_SAFE_ZONE_TOP = 10;
-export const STORY_STICKER_SAFE_ZONE_BOTTOM = 90;
+/** Story composer — keep stickers above the footer rail so they stay draggable. */
+export const STORY_STICKER_SAFE_ZONE_TOP = 12;
+export const STORY_STICKER_SAFE_ZONE_BOTTOM = 68;
 
 export function clampStickerY(
     y: number,

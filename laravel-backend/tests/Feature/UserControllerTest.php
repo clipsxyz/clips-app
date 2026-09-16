@@ -599,15 +599,29 @@ class UserControllerTest extends TestCase
             ],
         ]);
 
-        $this->actingAs($donny, 'sanctum')
-            ->getJson('/api/users/' . rawurlencode($owner->handle) . '/audience')
-            ->assertStatus(200)
-            ->assertJson([
-                'handle' => $owner->handle,
-                'followers_count' => 1,
-                'following_count' => 2,
-                'is_following' => true,
-            ]);
+        $response = $this->actingAs($donny, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($owner->handle) . '/audience');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('followers_count', 1)
+            ->assertJsonPath('following_count', 2)
+            ->assertJsonPath('is_following', true)
+            ->assertJsonPath('can_view', true);
+    }
+
+    public function test_audience_for_private_profile_returns_200_with_can_view_false(): void
+    {
+        $private = User::factory()->create(['is_private' => true, 'handle' => 'StevieG@NewtonAbbot']);
+        $viewer = User::factory()->create();
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . rawurlencode($private->handle) . '/audience?userId=' . $viewer->id);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('is_private', true)
+            ->assertJsonPath('can_view', false)
+            ->assertJsonPath('handle', $private->handle)
+            ->assertJsonPath('has_pending_request', false);
     }
 
     public function test_audience_is_following_uses_user_id_query_when_unauthenticated(): void

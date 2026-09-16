@@ -819,8 +819,14 @@ export async function listConversations(forHandle: string): Promise<Conversation
                 return tb - ta;
             });
         } catch (e) {
-            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel listConversations failed, using mock:', e);
+            if (
+                (e as any)?.name === 'ConnectionRefused' ||
+                (e as any)?.message === 'CONNECTION_REFUSED'
+            ) {
+                console.debug('Laravel listConversations offline — using local fallback');
+            } else {
+                console.warn('Laravel listConversations failed, using mock:', e);
+            }
         }
     }
     const summaries = new Map<string, { last?: ChatMessage; unread: number; isRequest?: boolean }>();

@@ -651,7 +651,7 @@ export default function ClipPage() {
         mediaType || undefined,
         // Only pass text/location if no media (for text-only stories)
         selectedMedia ? undefined : (text.trim() || undefined),
-        selectedMedia ? undefined : (storyLocation.trim() || undefined),
+        selectedMedia ? (storyLocation.trim() || undefined) : (storyLocation.trim() || undefined),
         textColor,
         textSize,
         sharedPostInfo?.postId,
@@ -663,7 +663,8 @@ export default function ClipPage() {
         undefined, // poll
         taggedUsers.length > 0 ? taggedUsers.map(tu => ({ handle: tu.handle, x: tu.x, y: tu.y })) : undefined, // taggedUsersPositions
         undefined, // question
-        venue.trim() || undefined, // venue for metadata carousel
+        venue.trim() || storyLocation.trim() || undefined, // venue / location metadata
+        undefined, // videoPosterUrl
         storyAudience
       );
 
@@ -763,6 +764,8 @@ export default function ClipPage() {
           undefined, // poll
           undefined, // taggedUsersPositions
           undefined, // question
+          storyLocation.trim() || undefined, // venue/location
+          undefined, // videoPosterUrl
           storyAudience
         );
 
@@ -1178,6 +1181,7 @@ export default function ClipPage() {
                     undefined, // taggedUsersPositions
                     undefined, // question
                     undefined, // venue
+                    undefined, // videoPosterUrl
                     storyAudience
                   );
 

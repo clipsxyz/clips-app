@@ -230,6 +230,45 @@ class User extends Authenticatable
         return $this->followers()->where('follower_id', $viewer->id)->exists();
     }
 
+    /**
+     * Profile / stories visibility. Newsfeed posts stay public even when private.
+     */
+    public function isVisibleTo(?User $viewer): bool
+    {
+        if (! $this->is_private) {
+            return true;
+        }
+
+        return $viewer instanceof User && $this->canViewProfile($viewer);
+    }
+
+    /**
+     * Constrain a query that has an author user_id column to profiles the viewer may see.
+     * Public authors always; private only for self or accepted followers.
+     * Do not use this on the location newsfeed — those posts remain public.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder  $query
+     * @return \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder
+     */
+    public static function constrainAuthorVisibility($query, ?string $viewerId, string $authorColumn = 'user_id')
+    {
+        return $query->where(function ($outer) use ($viewerId, $authorColumn) {
+            $outer->whereIn($authorColumn, function ($sub) {
+                $sub->select('id')->from('users')->where('is_private', false);
+            });
+
+            if ($viewerId) {
+                $outer->orWhere($authorColumn, $viewerId)
+                    ->orWhereIn($authorColumn, function ($sub) use ($viewerId) {
+                        $sub->select('following_id')
+                            ->from('user_follows')
+                            ->where('follower_id', $viewerId)
+                            ->where('status', 'accepted');
+                    });
+            }
+        });
+    }
+
     public function canSendMessage(User $sender)
     {
         // Users can always message themselves (though this shouldn't happen)

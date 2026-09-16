@@ -10,7 +10,7 @@ import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGrou
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
-import { bottomSheet } from '../utils/swalBottomSheet';
+import { bottomSheet, followRequestAcceptedBottomSheet } from '../utils/swalBottomSheet';
 import { acceptFollowRequest as acceptFollowRequestLocal, denyFollowRequest as denyFollowRequestLocal, removeFollowRequest } from '../api/privacy';
 import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
@@ -1190,11 +1190,7 @@ export default function InboxPage() {
             await deleteNotification(notif.id, user.handle);
             await loadData();
             
-            Swal.fire(bottomSheet({
-                title: 'Follow Request Accepted',
-                message: `You are now following ${notif.fromHandle}`,
-                icon: 'success',
-            }));
+            Swal.fire(followRequestAcceptedBottomSheet(notif.fromHandle));
         } catch (error) {
             console.error('Error accepting follow request:', error);
             Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to accept follow request', icon: 'alert' }));

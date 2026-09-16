@@ -1,9 +1,12 @@
 import {
     DEV_LAN_API_BASE_URL,
+    DEV_LOOPBACK_API_BASE_URL,
     getConfiguredApiEnvUrl,
+    getPreferredRnApiHost,
     getReactNativeDefaultApiBaseUrl,
     isLoopbackApiHost,
     isReactNativeRuntime,
+    rememberSuccessfulApiBaseUrl,
     rewriteLoopbackApiUrlToLan,
 } from '../config/runtimeEnv';
 
@@ -83,23 +86,81 @@ export function getApiBaseUrl(): string {
     const isRn = isReactNativeRuntime() || !browserHost;
 
     // React Native / no real window.location — never touch `.hostname` on undefined location.
-    // Physical phones cannot reach the Mac's localhost. Keep 10.0.2.2 (emulator) and
-    // production hosts as-is; only rewrite loopback env URLs to the LAN IP.
+    // Prefer last successful host this session (adb reverse ↔ LAN).
     if (isRn) {
-        const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
-        if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
-            return trimmedEnv;
+        const preferred = getPreferredRnApiHost();
+        if (preferred === 'loopback') {
+            return DEV_LOOPBACK_API_BASE_URL;
+        }
+        if (preferred === 'lan') {
+            return DEV_LAN_API_BASE_URL;
         }
         const fromMetro = getReactNativeDefaultApiBaseUrl();
-        if (fromMetro) return fromMetro.replace(/\/$/, '');
-        if (trimmedEnv) {
-            return rewriteLoopbackApiUrlToLan(trimmedEnv) || FALLBACK_API;
+        let resolved: string;
+        if (fromMetro && isLoopbackApiHost(fromMetro)) {
+            resolved = fromMetro.replace(/\/$/, '');
+        } else {
+            const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
+            if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
+                resolved = trimmedEnv;
+            } else if (fromMetro) {
+                resolved = fromMetro.replace(/\/$/, '');
+            } else if (trimmedEnv) {
+                resolved = rewriteLoopbackApiUrlToLan(trimmedEnv) || FALLBACK_API;
+            } else {
+                resolved = FALLBACK_API;
+            }
         }
-        return FALLBACK_API;
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            // One-line breadcrumb so "Network request failed" logs show which host was chosen.
+            console.debug('[getApiBaseUrl]', {
+                resolved,
+                fromMetro,
+                envUrl: envUrl || null,
+                lanFallback: FALLBACK_API,
+                preferred,
+            });
+        }
+        return resolved;
     }
 
     return FALLBACK_API;
 }
+
+/**
+ * Ordered API bases for RN: try preferred / Metro host first, then the other
+ * (127.0.0.1 for adb reverse ↔ LAN IP for Wi‑Fi).
+ */
+export function getApiBaseUrlCandidates(): string[] {
+    const primary = getApiBaseUrl().replace(/\/$/, '');
+    if (!isReactNativeRuntime()) return [primary];
+
+    const loopback = DEV_LOOPBACK_API_BASE_URL;
+    const lan = DEV_LAN_API_BASE_URL;
+    const preferred = getPreferredRnApiHost();
+    const ordered: string[] = [];
+    const pushUnique = (url: string) => {
+        const trimmed = url.replace(/\/$/, '');
+        if (trimmed && !ordered.includes(trimmed)) ordered.push(trimmed);
+    };
+
+    if (preferred === 'loopback') {
+        pushUnique(loopback);
+        pushUnique(lan);
+    } else if (preferred === 'lan') {
+        pushUnique(lan);
+        pushUnique(loopback);
+    } else if (isLoopbackApiHost(primary)) {
+        pushUnique(primary);
+        pushUnique(lan);
+    } else {
+        pushUnique(primary);
+        pushUnique(loopback);
+    }
+    return ordered;
+}
+
+export { rememberSuccessfulApiBaseUrl };
 
 function currentApiOrigin(): string {
     const apiBase = getApiBaseUrl().replace(/\/$/, '');

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
-    Image,
     Pressable,
     StyleSheet,
     type StyleProp,
@@ -11,7 +10,9 @@ import {
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 import PassportTravelingBorder from './PassportTravelingBorder.native';
+import CachedImage from './CachedImage.native';
 import { resolveAvatarImageUri } from '../api/users';
+import { prefetchUserProfile, prefetchStoryGroup } from '../utils/prefetchNative';
 
 export default function Avatar({
     src,
@@ -33,14 +34,25 @@ export default function Avatar({
         setImageFailed(false);
     }, [imageUri]);
 
+    const warmNextScreen = () => {
+        if (handleHint) {
+            prefetchUserProfile(handleHint);
+            if (hasStory) prefetchStoryGroup(handleHint);
+        }
+    };
+
     const inner = (
         <View style={[styles.innerClip, { width: dim, height: dim, borderRadius: dim / 2 }]}>
             {showImage ? (
-                <Image
-                    source={{ uri: imageUri }}
+                <CachedImage
+                    uri={imageUri}
+                    width={dim}
+                    height={dim}
                     style={StyleSheet.absoluteFill}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    recyclingKey={imageUri || undefined}
                     onError={() => setImageFailed(true)}
+                    priority="high"
                 />
             ) : null}
             <View
@@ -77,7 +89,9 @@ export default function Avatar({
         return (
             <Pressable
                 onPress={() => onClick()}
+                onPressIn={warmNextScreen}
                 style={({ pressed }) => [rootStyle, pressed && styles.pressed]}
+                accessibilityRole="button"
             >
                 {body}
             </Pressable>

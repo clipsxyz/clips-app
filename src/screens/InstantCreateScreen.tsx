@@ -240,6 +240,25 @@ export default function InstantCreateScreen({ navigation, route }: any) {
         const socialFormat = mode === 'feed' ? clipStudioFormatRef.current : undefined;
         clipStudioFormatRef.current = undefined;
         if (!assets.length) return;
+
+        // Stories skip the feed GalleryPreview (caption/settings) and open the story composer.
+        if (mode === 'story24') {
+            const asset = assets[0];
+            if (!asset?.uri) return;
+            const isVideo = assetIsVideo(asset);
+            const duration = Number(asset.duration || 0);
+            navigation.navigate('Story24Composer', {
+                mediaUrl: asset.uri,
+                mediaType: isVideo ? 'video' : 'image',
+                videoCoverTime: isVideo ? 0 : undefined,
+                videoDurationSec:
+                    isVideo && Number.isFinite(duration) && duration > 0
+                        ? Math.max(0.1, Math.floor(duration * 10) / 10)
+                        : undefined,
+            });
+            return;
+        }
+
         if (carousel && assets.length >= 2) {
             const items = assets
                 .filter((a) => a.uri)
@@ -264,7 +283,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                     }
                     return slide;
                 });
-            navigation.navigate('GalleryPreview', { carouselItems: items, story24: mode === 'story24', socialFormat });
+            navigation.navigate('GalleryPreview', { carouselItems: items, socialFormat });
             return;
         }
         const asset = assets[0];
@@ -272,7 +291,6 @@ export default function InstantCreateScreen({ navigation, route }: any) {
         navigation.navigate('GalleryPreview', {
             mediaUrl: asset.uri,
             mediaType: assetIsVideo(asset) ? 'video' : 'image',
-            story24: mode === 'story24',
             socialFormat,
         });
     };
@@ -280,7 +298,8 @@ export default function InstantCreateScreen({ navigation, route }: any) {
     const pickGalleryMedia = useCallback(
         async (mode: PickerMode = 'feed') => {
             try {
-                const picked = await pickFromFullGallery(MAX_GALLERY_ITEMS);
+                const maxItems = mode === 'story24' ? 1 : MAX_GALLERY_ITEMS;
+                const picked = await pickFromFullGallery(maxItems);
                 if (picked === 'denied') {
                     setHubAlert({
                         title: 'Gallery access needed',
@@ -304,11 +323,11 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                 }
 
                 const proceed = () => {
-                    const items = supported.slice(0, MAX_GALLERY_ITEMS);
-                    navigateFromAssets(items, mode, items.length >= 2);
+                    const items = supported.slice(0, maxItems);
+                    navigateFromAssets(items, mode, mode === 'feed' && items.length >= 2);
                 };
 
-                if (supported.length > MAX_GALLERY_ITEMS) {
+                if (mode === 'feed' && supported.length > MAX_GALLERY_ITEMS) {
                     setHubAlert({
                         title: 'Too Many Items',
                         message: `You can select up to ${MAX_GALLERY_ITEMS} items for a carousel.`,

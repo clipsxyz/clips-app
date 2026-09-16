@@ -17,7 +17,21 @@ export function buildStoryComposerStickers(options: {
     const textColor = options.textColor || '#FFFFFF';
     const textSize = options.textSize || 'medium';
 
-    if (caption) {
+    const hasMatchingTextSticker = (label: string) => {
+        const normalized = label.trim().toLowerCase();
+        return all.some((s) => {
+            const content = String(s.textContent || s.sticker?.name || '')
+                .trim()
+                .toLowerCase();
+            return content === normalized;
+        });
+    };
+
+    const hasLocationSticker = all.some(
+        (s) => String(s.sticker?.category || '').toLowerCase() === 'location',
+    );
+
+    if (caption && !hasMatchingTextSticker(caption)) {
         const id = `text-sticker-${Date.now()}`;
         all.push({
             id,
@@ -39,7 +53,9 @@ export function buildStoryComposerStickers(options: {
         });
     }
 
-    if (location) {
+    // Location metadata is still stored on the story row; only add a sticker
+    // when the composer did not already place one (avoids a stuck bottom duplicate).
+    if (location && !hasLocationSticker && !hasMatchingTextSticker(location)) {
         const id = `location-sticker-${Date.now()}`;
         all.push({
             id,
@@ -51,7 +67,7 @@ export function buildStoryComposerStickers(options: {
                 isTrending: false,
             },
             x: 50,
-            y: 85,
+            y: 50,
             scale: 0.9,
             rotation: 0,
             opacity: 1,
@@ -89,7 +105,7 @@ export async function publishMediaStory24(options: {
         options.mediaUrl,
         options.mediaType,
         undefined,
-        undefined,
+        options.location,
         undefined,
         undefined,
         undefined,
@@ -100,7 +116,7 @@ export async function publishMediaStory24(options: {
         undefined,
         options.taggedUsersPositions?.length ? options.taggedUsersPositions : undefined,
         undefined,
-        options.venue,
+        options.venue || options.location,
         undefined,
         options.audience ?? 'public',
     );
