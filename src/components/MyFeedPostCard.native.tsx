@@ -133,6 +133,7 @@ function MyFeedPostCard({
                     onDoubleLike={() => {
                         onLikePress?.();
                     }}
+                    onLocationPress={handleLocationPress}
                     onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (

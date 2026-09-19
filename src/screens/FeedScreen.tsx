@@ -1282,6 +1282,7 @@ const FeedCard = React.memo(function FeedCard({
                     onOpenDM={onOpenDM}
                     onProfileMenuPress={openProfileMenu}
                     onOverflowPress={onOverflowPress}
+                    onLocationPress={onLocationPress}
                     onDoubleLike={() => {
                         void onLike();
                     }}

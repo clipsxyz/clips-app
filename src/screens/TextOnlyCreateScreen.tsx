@@ -23,6 +23,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar.native';
+import VerifiedBadge from '../components/VerifiedBadge.native';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { saveDraft } from '../api/drafts.native';
@@ -45,14 +46,9 @@ import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNativ
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { ox } from '../constants/nativeOpticalScale';
 import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
+import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 
 type TagUser = { handle: string; displayName?: string; avatarUrl?: string };
-
-function templateFontSize(size: TextStoryTemplate['textSize']): number {
-  if (size === 'small') return 12;
-  if (size === 'large') return 16;
-  return 14;
-}
 
 function TemplateComposerBackground({
   template,
@@ -61,7 +57,7 @@ function TemplateComposerBackground({
   template?: TextStoryTemplate;
   children: React.ReactNode;
 }) {
-  const background = template?.background || '#000000';
+  const background = template?.background || '#0b0b0d';
   const colors = gradientColorsFromCss(background);
   const isGradient = background.includes('gradient');
   if (isGradient && colors.length >= 2) {
@@ -72,7 +68,7 @@ function TemplateComposerBackground({
     );
   }
   return (
-    <View style={[styles.composerSurface, { backgroundColor: colors[0] || '#000000' }]}>
+        <View style={[styles.composerSurface, { backgroundColor: colors[0] || '#0b0b0d' }]}>
       {children}
     </View>
   );
@@ -343,7 +339,8 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   };
 
   const inputColor = activeTemplate?.textColor || '#FFFFFF';
-  const inputFontSize = activeTemplate ? templateFontSize(activeTemplate.textSize) : 14;
+  const inputFontSize = 16;
+  const composerHandle = (user?.handle || user?.name || 'You').replace(/^@+/, '');
 
   return (
     <View style={styles.root}>
@@ -418,52 +415,65 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.composerRow}>
-            <View style={styles.avatarCol}>
+          <TemplateComposerBackground template={activeTemplate}>
+            <View style={styles.previewAvatarRing}>
               <Avatar
                 src={user?.avatarUrl}
                 name={user?.name || user?.handle || 'User'}
-                size={ox(40)}
+                handle={user?.handle}
+                size={ox(88)}
               />
             </View>
-            <View style={styles.composerCol}>
-              <TemplateComposerBackground template={activeTemplate}>
-                <TextInput
-                  value={text}
-                  onChangeText={setText}
-                  placeholder={
-                    isLinkPost
-                      ? 'Paste a YouTube, TikTok, Instagram, or web link'
-                      : "What's up?"
-                  }
-                  placeholderTextColor="#9CA3AF"
-                  style={[styles.textInput, { color: inputColor, fontSize: inputFontSize }]}
-                  multiline
-                  maxLength={TEXT_POST_BODY_MAX_LENGTH}
-                  autoFocus
-                  textAlignVertical="top"
-                />
-              </TemplateComposerBackground>
-              <ComposerLinkPreview text={text} />
-              {isLinkPost ? (
-                <Text style={styles.linkHint}>
-                  We’ll fetch a cover, title, and source badge for your story.
-                </Text>
-              ) : null}
-              <View style={styles.counterRow}>
-                <Text
-                  style={[
-                    styles.counterText,
-                    text.length > TEXT_POST_BODY_MAX_LENGTH - 50
-                      ? text.length >= TEXT_POST_BODY_MAX_LENGTH
-                        ? styles.counterDanger
-                        : styles.counterWarn
-                      : null,
-                  ]}
-                >
-                  {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
-                </Text>
-              </View>
+            <View style={styles.previewHandleRow}>
+              <Text style={[styles.previewHandle, { color: inputColor }]} numberOfLines={1}>
+                {composerHandle}
+              </Text>
+              <VerifiedBadge accountType={resolveVerifiedAccountType(user?.accountType)} size={16} />
+            </View>
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              placeholder={
+                isLinkPost
+                  ? 'Paste a YouTube, TikTok, Instagram, or web link'
+                  : "What's up?"
+              }
+              placeholderTextColor={inputColor === '#FFFFFF' || !activeTemplate ? '#9CA3AF' : `${inputColor}99`}
+              style={[
+                styles.textInput,
+                {
+                  color: inputColor,
+                  fontSize: inputFontSize,
+                  lineHeight: Math.round(inputFontSize * 1.38),
+                },
+              ]}
+              multiline
+              maxLength={TEXT_POST_BODY_MAX_LENGTH}
+              autoFocus
+              textAlign="center"
+              textAlignVertical="top"
+            />
+          </TemplateComposerBackground>
+          <View style={styles.previewMeta}>
+            <ComposerLinkPreview text={text} />
+            {isLinkPost ? (
+              <Text style={styles.linkHint}>
+                We’ll fetch a cover, title, and source badge for your story.
+              </Text>
+            ) : null}
+            <View style={styles.counterRow}>
+              <Text
+                style={[
+                  styles.counterText,
+                  text.length > TEXT_POST_BODY_MAX_LENGTH - 50
+                    ? text.length >= TEXT_POST_BODY_MAX_LENGTH
+                      ? styles.counterDanger
+                      : styles.counterWarn
+                    : null,
+                ]}
+              >
+                {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
+              </Text>
             </View>
           </View>
         </ScrollView>
@@ -776,32 +786,49 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   scrollContent: {
-    paddingHorizontal: ox(16),
-    paddingTop: ox(16),
     paddingBottom: ox(24),
   },
-  composerRow: {
+  previewAvatarRing: {
+    padding: 2,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF',
+  },
+  previewHandleRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: ox(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: ox(6),
+    marginTop: ox(16),
+    marginBottom: ox(12),
+    maxWidth: '100%',
+    paddingHorizontal: ox(8),
   },
-  avatarCol: {
-    paddingTop: ox(4),
-  },
-  composerCol: {
-    flex: 1,
-    minWidth: 0,
+  previewHandle: {
+    fontSize: ox(17),
+    fontWeight: '700',
+    maxWidth: '80%',
   },
   composerSurface: {
-    paddingHorizontal: ox(12),
-    paddingVertical: ox(8),
-    minHeight: ox(96),
+    width: '100%',
+    alignItems: 'center',
+    paddingHorizontal: ox(28),
+    paddingTop: ox(28),
+    paddingBottom: ox(32),
+    minHeight: ox(280),
+    overflow: 'hidden',
   },
   textInput: {
-    minHeight: ox(80),
-    lineHeight: ox(22),
+    width: '100%',
+    minHeight: ox(88),
     padding: 0,
     margin: 0,
+    fontWeight: '400',
+  },
+  previewMeta: {
+    paddingHorizontal: ox(16),
+    paddingTop: ox(8),
   },
   counterRow: {
     alignItems: 'flex-end',
