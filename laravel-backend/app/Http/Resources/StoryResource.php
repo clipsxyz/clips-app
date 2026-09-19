@@ -72,6 +72,12 @@ class StoryResource extends JsonResource
         $data['reactions_count'] = (int) ($story->reactions_count ?? $data['reactions_count'] ?? 0);
         $data['replies_count'] = (int) ($story->replies_count ?? $data['replies_count'] ?? 0);
 
+        $poster = is_string($data['video_poster_url'] ?? null) ? trim((string) $data['video_poster_url']) : '';
+        if ($poster === '' && $story->relationLoaded('sharedFromPost') && $story->sharedFromPost) {
+            $poster = (string) ($story->sharedFromPost->resolvedThumbnailUrl() ?? '');
+        }
+        $data['video_poster_url'] = $poster !== '' ? $poster : null;
+
         return $data;
     }
 }

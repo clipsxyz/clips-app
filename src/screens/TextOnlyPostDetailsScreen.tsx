@@ -34,6 +34,7 @@ import {
     getNativeTextStoryTemplate,
     NATIVE_TEXT_STORY_TEMPLATES,
 } from '../utils/textStoryTemplatesNative';
+import { TEXT_ONLY_FEED_TEMPLATE_IDS } from '../textStoryTemplates';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -59,9 +60,19 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
     route.params?.textTemplateId || route.params?.templateId || 'broadcast-blue',
   );
 
+  const pickerTemplates = useMemo(
+    () =>
+      isStory24
+        ? NATIVE_TEXT_STORY_TEMPLATES
+        : NATIVE_TEXT_STORY_TEMPLATES.filter((t) =>
+            (TEXT_ONLY_FEED_TEMPLATE_IDS as readonly string[]).includes(t.id),
+          ),
+    [isStory24],
+  );
+
   const activeTemplate = useMemo(
-    () => getNativeTextStoryTemplate(selectedTemplateId) || NATIVE_TEXT_STORY_TEMPLATES[0],
-    [selectedTemplateId],
+    () => getNativeTextStoryTemplate(selectedTemplateId) || pickerTemplates[0],
+    [selectedTemplateId, pickerTemplates],
   );
 
   const previewTextStyle = useMemo(() => {
@@ -326,7 +337,7 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
 
           <Text style={styles.sectionLabel}>Style</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.templateRow}>
-            {NATIVE_TEXT_STORY_TEMPLATES.map((template) => {
+            {pickerTemplates.map((template) => {
               const active = selectedTemplateId === template.id;
               return (
                 <TouchableOpacity

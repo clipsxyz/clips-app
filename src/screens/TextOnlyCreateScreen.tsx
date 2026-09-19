@@ -37,7 +37,7 @@ import {
 import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
 import { navigateMainTab } from '../navigation/mainTabs';
-import { TEXT_STORY_TEMPLATES, type TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, type TextStoryTemplate } from '../textStoryTemplates';
 import { publishTextStory24 } from '../utils/publishStoryNative';
 import { gradientColorsFromCss } from '../utils/storyTextStyleNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
@@ -430,6 +430,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
               </Text>
               <VerifiedBadge accountType={resolveVerifiedAccountType(user?.accountType)} size={16} />
             </View>
+            <View style={styles.bodyFrame}>
             <TextInput
               value={text}
               onChangeText={setText}
@@ -453,6 +454,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
               textAlign="center"
               textAlignVertical="top"
             />
+            </View>
           </TemplateComposerBackground>
           <View style={styles.previewMeta}>
             <ComposerLinkPreview text={text} />
@@ -608,7 +610,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
               </TouchableOpacity>
             </View>
             <FlatList
-              data={TEXT_STORY_TEMPLATES}
+              data={isStory24 ? TEXT_STORY_TEMPLATES : TEXT_ONLY_FEED_TEMPLATES}
               keyExtractor={(item) => item.id}
               numColumns={2}
               columnWrapperStyle={styles.templateGridRow}
@@ -809,6 +811,14 @@ const styles = StyleSheet.create({
     fontSize: ox(17),
     fontWeight: '700',
     maxWidth: '80%',
+  },
+  bodyFrame: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: ox(12),
+    paddingVertical: ox(10),
   },
   composerSurface: {
     width: '100%',

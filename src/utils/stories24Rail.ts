@@ -1,15 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFollowedUsersStoryGroups } from '../api/stories';
 import { getFollowedUsers, getPostById, posts as localPosts } from '../api/posts';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import {
     resolveStoryMediaUrl,
     resolveStoryVideoPlaybackUrl,
     isStoryVideo,
     isVideoUrl,
     getPostMediaUrl,
+    getStoryVideoPosterFallback,
 } from './storyMediaNative';
+import { getStoryTextContent, getTextStoryStyle } from './storyTextStyleNative';
 import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
 import { formatTextOnlyFeedByline } from './feedTextBubble';
+import type { Post, Story } from '../types';
 
 export type Stories24RailItem = {
     handle: string;
@@ -19,7 +23,68 @@ export type Stories24RailItem = {
     previewVideoUrl?: string;
     avatarUrl?: string;
     displayName?: string;
+    /** Mini 9:16 canvas when the story has no photo/video still. */
+    previewGradient?: string[];
+    previewTextColor?: string;
 };
+
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|bmp|avif)(\?|#|$)/i;
+
+function looksLikeImageUri(url: string, allowUnknownStill = false): boolean {
+    if (!url || url.startsWith('#') || isVideoUrl(url) || /^data:video\//i.test(url)) {
+        return false;
+    }
+    if (/^data:image\//i.test(url)) return true;
+    if (IMAGE_EXT.test(url)) return true;
+    if (/^file:|^content:|^ph:/i.test(url)) return true;
+    return allowUnknownStill;
+}
+
+/** Loadable still for a Stories 24 card — never an MP4, guessed sibling JPEG, hex, or avatar. */
+export function asStories24StillUri(
+    url?: string | null,
+    allowUnknownStill = false,
+): string | undefined {
+    const raw = (url || '').trim();
+    if (!raw || raw.startsWith('#')) return undefined;
+    const resolved =
+        resolveStoryMediaUrl(raw) || resolvePublicMediaUrl(raw) || raw;
+    if (!resolved || !looksLikeImageUri(resolved, allowUnknownStill)) return undefined;
+    return resolved;
+}
+
+function stillFromStory(story: Story, sharedPost?: Post): string | undefined {
+    const storyImage =
+        story.mediaType === 'image' && !isVideoUrl(story.mediaUrl)
+            ? story.mediaUrl
+            : undefined;
+    const postMedia = sharedPost ? getPostMediaUrl(sharedPost) : undefined;
+    const postImage =
+        postMedia && !isVideoUrl(postMedia) && sharedPost?.mediaType !== 'video'
+            ? postMedia
+            : undefined;
+    return (
+        asStories24StillUri(story.videoPosterUrl, true) ||
+        asStories24StillUri(storyImage, true) ||
+        asStories24StillUri(getStoryVideoPosterFallback(story.mediaUrl, sharedPost), true) ||
+        asStories24StillUri(sharedPost?.videoPosterUrl, true) ||
+        asStories24StillUri(sharedPost?.thumbnailUrl, true) ||
+        asStories24StillUri(
+            (sharedPost as { thumbnail_url?: string } | undefined)?.thumbnail_url,
+            true,
+        ) ||
+        asStories24StillUri(
+            sharedPost?.mediaItems?.find((m) => m?.posterUrl && !isVideoUrl(m.posterUrl))
+                ?.posterUrl,
+        ) ||
+        asStories24StillUri(
+            sharedPost?.mediaItems?.find(
+                (m) => m?.type === 'image' && m.url && !isVideoUrl(m.url),
+            )?.url,
+        ) ||
+        asStories24StillUri(postImage)
+    );
+}
 
 export function stories24DisplayName(handle: string, name?: string): string {
     const trimmed = (name || '').trim();
@@ -171,8 +236,6 @@ export async function buildStories24RailItems(
         const latest = sortedStories[0];
         if (!latest) continue;
 
-        const latestMediaUrl = resolveStoryMediaUrl(latest.mediaUrl);
-        const latestMediaType = latest.mediaType;
         const sharedPost = latest.sharedFromPost
             ? localPosts.find((p) => String(p.id) === String(latest.sharedFromPost))
             : undefined;
@@ -184,36 +247,36 @@ export async function buildStories24RailItems(
         const avatarUrl =
             resolveAvatarImageUri(group.avatarUrl, group.userHandle) ||
             getAvatarForHandle(group.userHandle);
-        const storyImage =
-            latestMediaType === 'image' && latestMediaUrl && !isVideoUrl(latestMediaUrl)
-                ? latestMediaUrl
-                : undefined;
-        const storyPoster = resolveStoryMediaUrl(latest.videoPosterUrl);
-        const postPoster = resolveStoryMediaUrl(
-            sharedPost?.videoPosterUrl ||
-                sharedPost?.thumbnailUrl ||
-                (sharedPost as { thumbnail_url?: string } | undefined)?.thumbnail_url ||
-                sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
-        );
-        const postImage = resolveStoryMediaUrl(
-            sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url && !isVideoUrl(m.url))
-                ?.url,
-        );
-        // Thumb must be THIS story's still — never an avatar or another person's media.
-        let thumb = storyImage || storyPoster || postPoster || postImage;
-        if (thumb && isVideoUrl(thumb)) {
-            thumb = postPoster || postImage || undefined;
-        }
+        // This story's still only — never an avatar. JPEG sibling for videos; same-group image as last resort.
+        const sameGroupImage = sortedStories
+            .map((story) =>
+                story.mediaType === 'image' && !isVideoUrl(story.mediaUrl)
+                    ? asStories24StillUri(story.mediaUrl)
+                    : undefined,
+            )
+            .find(Boolean);
+        const thumb =
+            stillFromStory(latest, sharedPost) ||
+            (isVideo ? sameGroupImage : undefined);
         const displayName = stories24DisplayName(
             group.userHandle,
             (group as { name?: string }).name,
         );
+        const sharedCaption = (
+            sharedPost?.text ||
+            sharedPost?.caption ||
+            (sharedPost as { text_content?: string } | undefined)?.text_content ||
+            ''
+        ).trim();
         const text =
-            (latest.text || (latest as { text_content?: string }).text_content || '').trim() ||
-            (latest.poll?.question || '').trim() ||
+            getStoryTextContent(latest) ||
+            sharedCaption ||
             (latest.sharedFromPost ? 'Shared a post' : 'New story');
         const title = text.length > 90 ? `${text.slice(0, 90)}...` : text;
         const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
+        const hasPreviewBody = Boolean(getStoryTextContent(latest) || sharedCaption);
+        const textStyle =
+            !thumb && hasPreviewBody ? getTextStoryStyle(latest, sharedPost) : undefined;
 
         nextItems.push({
             handle: group.userHandle,
@@ -223,6 +286,8 @@ export async function buildStories24RailItems(
             previewVideoUrl,
             avatarUrl,
             displayName,
+            previewGradient: textStyle?.gradientColors,
+            previewTextColor: textStyle?.color,
         });
         if (nextItems.length >= 12) break;
     }

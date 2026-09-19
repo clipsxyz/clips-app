@@ -30,7 +30,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
-import PassportTravelingBorder from '../components/PassportTravelingBorder.native';
 import { PASSPORT_ABYSS, PASSPORT_CANVAS_WASH, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
@@ -133,7 +132,6 @@ import FeedPageLayout, {
     FEED_CARD_UPLOAD_OVERLAY,
     FEED_CARD_UPLOAD_SUBTITLE,
     FEED_CARD_UPLOAD_TITLE,
-    FEED_HEADER_ACTIVE_DOT,
     FEED_HEADER_CENTER,
     FEED_HEADER_DROPDOWN_MENU,
     FEED_HEADER_DROPDOWN_MENU_ITEM,
@@ -166,6 +164,7 @@ import FeedPageLayout, {
     FEED_EMPTY_NOTIFY_GRADIENT,
     FEED_EMPTY_SUBTITLE,
     FEED_EMPTY_TITLE,
+    FeedHeaderActivePulseDot,
 } from '../components/FeedPageLayout.native';
 import FeedPostProfileQuickMenu, {
     type ProfileQuickMenuAnchor,
@@ -747,8 +746,7 @@ function PillTabs({
                                 </View>
                             </Animated.View>
                         ) : null}
-                        <PassportTravelingBorder borderRadius={10} borderWidth={2}>
-                            <TouchableOpacity
+                        <TouchableOpacity
                                 onPress={() => {
                                     haltFeedPlayback();
                                     setMenuOpen((prev) => !prev);
@@ -762,7 +760,7 @@ function PillTabs({
                                     size={FEED_UI.icon.headerLocation}
                                     color="#FFFFFF"
                                 />
-                                <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: activeIndicatorColor }]} />
+                                <FeedHeaderActivePulseDot color={activeIndicatorColor} />
                                 <Text
                                     style={FEED_HEADER_LOCATION_TITLE}
                                     numberOfLines={1}
@@ -772,7 +770,6 @@ function PillTabs({
                                 </Text>
                                 <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
                             </TouchableOpacity>
-                        </PassportTravelingBorder>
                     </View>
 
                     <Modal

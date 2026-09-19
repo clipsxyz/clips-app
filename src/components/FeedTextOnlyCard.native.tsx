@@ -207,20 +207,22 @@ export default function FeedTextOnlyCard({
                 <VerifiedBadge accountType={verifiedAccountType} size={16} />
             </Pressable>
 
-            <Text
-                style={[
-                    styles.body,
-                    {
-                        color: textColor,
-                        fontSize: BODY_FONT_SIZE,
-                        lineHeight: BODY_LINE_HEIGHT,
-                    },
-                    fontFamily ? { fontFamily } : null,
-                ]}
-                numberOfLines={expanded ? undefined : COLLAPSED_LINES}
-            >
-                {text}
-            </Text>
+            <View style={styles.bodyFrame}>
+                <Text
+                    style={[
+                        styles.body,
+                        {
+                            color: textColor,
+                            fontSize: BODY_FONT_SIZE,
+                            lineHeight: BODY_LINE_HEIGHT,
+                        },
+                        fontFamily ? { fontFamily } : null,
+                    ]}
+                    numberOfLines={expanded ? undefined : COLLAPSED_LINES}
+                >
+                    {text}
+                </Text>
+            </View>
             {canExpand ? (
                 <Pressable
                     onPress={(e) => {
@@ -314,6 +316,14 @@ const styles = StyleSheet.create({
         fontSize: 17,
         fontWeight: '700',
         maxWidth: '80%',
+    },
+    bodyFrame: {
+        width: '100%',
+        borderWidth: 1,
+        borderColor: '#FFFFFF',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
     },
     body: {
         fontWeight: '400',

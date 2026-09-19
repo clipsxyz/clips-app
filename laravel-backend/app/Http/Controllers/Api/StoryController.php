@@ -43,7 +43,12 @@ class StoryController extends Controller
         $hasViewer = !empty($userId);
 
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url,is_private', 'reactions', 'replies'])
+            ->with([
+                'user:id,handle,display_name,avatar_url,is_private',
+                'reactions',
+                'replies',
+                'sharedFromPost:id,thumbnail_url,media_url,media_type,media_items',
+            ])
             ->withCount(['reactions', 'replies', 'views']);
         User::constrainAuthorVisibility($query, $userId);
         $query->visibleToAudience($userId);
@@ -96,7 +101,12 @@ class StoryController extends Controller
         $userId = $this->resolveViewerId($request);
         $hasViewer = !empty($userId);
         $query = Story::active()
-            ->with(['user:id,handle,display_name,avatar_url,is_private', 'reactions', 'replies'])
+            ->with([
+                'user:id,handle,display_name,avatar_url,is_private',
+                'reactions',
+                'replies',
+                'sharedFromPost:id,thumbnail_url,media_url,media_type,media_items',
+            ])
             ->withCount(['reactions', 'replies', 'views']);
         User::constrainAuthorVisibility($query, $userId);
         $query->visibleToAudience($userId);
@@ -154,7 +164,11 @@ class StoryController extends Controller
 
         $query = Story::where('user_id', $user->id)
             ->active()
-            ->with(['reactions', 'replies'])
+            ->with([
+                'reactions',
+                'replies',
+                'sharedFromPost:id,thumbnail_url,media_url,media_type,media_items',
+            ])
             ->withCount(['reactions', 'replies', 'views'])
             ->orderBy('created_at', 'desc');
         $query->visibleToAudience($userId);
@@ -370,6 +384,7 @@ class StoryController extends Controller
         ]);
 
         $story->loadCount(['reactions', 'replies', 'views']);
+        $story->load(['sharedFromPost:id,thumbnail_url,media_url,media_type,media_items']);
 
         return response()->json(StoryResource::payload($story, false), 201);
     }

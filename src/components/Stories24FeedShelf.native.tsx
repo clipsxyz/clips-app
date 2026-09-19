@@ -35,6 +35,7 @@ import StorySafeVideo from './stories/StorySafeVideo.native';
 import Avatar from './Avatar';
 import type { Stories24RailItem, Stories24RailReturnPayload } from '../utils/stories24Rail';
 import {
+    asStories24StillUri,
     STORIES24_ADD_YOURS_HANDLE,
     getStories24RailHandles,
     isStories24AddYoursHandle,
@@ -42,7 +43,7 @@ import {
     stories24DisplayName,
 } from '../utils/stories24Rail';
 import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
-import { storyVideoSource } from '../utils/storyMediaNative';
+import { isVideoUrl, storyVideoSource } from '../utils/storyMediaNative';
 
 /** 9:16 story thumbnail. */
 const CARD_W = 126;
@@ -89,8 +90,9 @@ function visibleCardRange(scrollX: number, viewportW: number, count: number): { 
 }
 
 function stillUri(uri?: string | null): string | undefined {
-    if (!uri || uri.startsWith('#')) return undefined;
-    return uri;
+    const resolved = asStories24StillUri(uri);
+    if (!resolved || resolved.startsWith('#') || isVideoUrl(resolved)) return undefined;
+    return resolved;
 }
 
 export type Stories24FeedShelfHandle = {
@@ -109,7 +111,13 @@ const PREVIEW_LOOP_SECONDS = 2;
 /** ColorOS TextureView ignores clip — a rail player paints into the post below (top-left). */
 const ANDROID_FEED_RAIL_POSTERS_ONLY = Platform.OS === 'android';
 
-function StoryPreviewPoster({ posterUri }: { posterUri?: string }) {
+function StoryPreviewPoster({
+    posterUri,
+    onError,
+}: {
+    posterUri?: string;
+    onError?: () => void;
+}) {
     const posterSource = stillUri(posterUri) ? { uri: stillUri(posterUri)! } : undefined;
     if (posterSource) {
         return (
@@ -118,10 +126,82 @@ function StoryPreviewPoster({ posterUri }: { posterUri?: string }) {
                 style={styles.previewFrame}
                 resizeMode="cover"
                 pointerEvents="none"
+                onError={onError}
             />
         );
     }
     return <View style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />;
+}
+
+function StoryTextPreview({ item }: { item: Stories24RailItem }) {
+    const colors =
+        item.previewGradient && item.previewGradient.length >= 2
+            ? item.previewGradient
+            : ['#1e3a8a', '#2563eb', '#172554'];
+    const color = item.previewTextColor || '#FFFFFF';
+    const body = (item.title || '').trim();
+    return (
+        <LinearGradient
+            colors={colors}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.previewFrame, styles.textPreviewCanvas]}
+            pointerEvents="none"
+        >
+            {body ? (
+                <Text style={[styles.textPreviewBody, { color }]} numberOfLines={8}>
+                    {body}
+                </Text>
+            ) : null}
+        </LinearGradient>
+    );
+}
+
+function StoryCardFill({
+    item,
+    poster,
+    playPreviewVideo,
+    previewVideosPaused,
+}: {
+    item: Stories24RailItem;
+    poster?: string;
+    playPreviewVideo: boolean;
+    previewVideosPaused: boolean;
+}) {
+    const [stillFailed, setStillFailed] = useState(false);
+    useEffect(() => {
+        setStillFailed(false);
+    }, [poster]);
+
+    if (poster && !stillFailed) {
+        return (
+            <Image
+                source={{ uri: poster }}
+                style={styles.previewFrame}
+                resizeMode="cover"
+                pointerEvents="none"
+                onError={() => setStillFailed(true)}
+            />
+        );
+    }
+    if (playPreviewVideo && item.previewVideoUrl) {
+        return (
+            <StoryPreviewVideo
+                uri={item.previewVideoUrl}
+                posterUri={undefined}
+                paused={previewVideosPaused}
+            />
+        );
+    }
+    if (item.previewGradient?.length || item.title) {
+        return <StoryTextPreview item={item} />;
+    }
+    return (
+        <View
+            pointerEvents="none"
+            style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
+        />
+    );
 }
 
 function StoryPreviewVideo({
@@ -134,30 +214,18 @@ function StoryPreviewVideo({
     paused: boolean;
 }) {
     const videoRef = useRef<VideoRef>(null);
-    // ColorOS ignores clip: a rail TextureView paints into the post below (top-left).
-    if (ANDROID_FEED_RAIL_POSTERS_ONLY) {
-        return <StoryPreviewPoster posterUri={posterUri} />;
+    const still = stillUri(posterUri);
+    if (still) {
+        return <StoryPreviewPoster posterUri={still} />;
     }
     const source = storyVideoSource(uri) || { uri };
-    const posterSource = stillUri(posterUri) ? { uri: stillUri(posterUri)! } : undefined;
 
     return (
-        <View style={styles.previewFrame} pointerEvents="none" collapsable={false}>
-            {posterSource ? (
-                <Image
-                    source={posterSource}
-                    style={styles.previewFrame}
-                    resizeMode="cover"
-                    pointerEvents="none"
-                />
-            ) : (
-                <View style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />
-            )}
+        <View style={styles.previewVideoHost} pointerEvents="none" collapsable={false}>
             <View style={styles.previewVideoClip} pointerEvents="none" collapsable={false}>
                 <StorySafeVideo
                     videoRef={videoRef}
                     source={source}
-                    posterSource={posterSource}
                     boxWidth={CARD_W}
                     boxHeight={CARD_H}
                     muted
@@ -209,8 +277,10 @@ function RankedShelfCard({
     const isAddYours = isStories24AddYoursHandle(item.handle);
     const poster = stillUri(item.thumb);
     const rankLabel = String(index + 1);
+    const allowScale = !(Platform.OS === 'android' && playPreviewVideo && !poster);
 
     const cardAnimStyle = useAnimatedStyle(() => {
+        if (!allowScale) return { transform: [{ scale: 1 }] };
         const offset = index * ITEM_STRIDE;
         const scale = interpolate(
             scrollX.value,
@@ -242,7 +312,14 @@ function RankedShelfCard({
             >
                 {rankLabel}
             </Animated.Text>
-            <Animated.View style={[styles.cardLift, cardAnimStyle]} collapsable={false}>
+            <Animated.View
+                style={[
+                    styles.cardLift,
+                    playPreviewVideo && !poster && styles.cardLiftVideoSafe,
+                    cardAnimStyle,
+                ]}
+                collapsable={false}
+            >
                 {isAddYours ? (
                     <TouchableOpacity
                         style={styles.card}
@@ -265,7 +342,13 @@ function RankedShelfCard({
                         </View>
                     </TouchableOpacity>
                 ) : (
-                    <View style={styles.card} collapsable={false}>
+                    <View
+                        style={[
+                            styles.card,
+                            playPreviewVideo && !poster && styles.cardVideoSafe,
+                        ]}
+                        collapsable={false}
+                    >
                         <TouchableOpacity
                             style={styles.cardPress}
                             onPress={onPress}
@@ -273,25 +356,12 @@ function RankedShelfCard({
                             accessibilityRole="button"
                             accessibilityLabel={stories24DisplayName(item.handle, item.displayName)}
                         >
-                            {playPreviewVideo && item.previewVideoUrl ? (
-                                <StoryPreviewVideo
-                                    uri={item.previewVideoUrl}
-                                    posterUri={poster}
-                                    paused={previewVideosPaused}
-                                />
-                            ) : poster ? (
-                                <Image
-                                    source={{ uri: poster }}
-                                    style={styles.previewFrame}
-                                    resizeMode="cover"
-                                    pointerEvents="none"
-                                />
-                            ) : (
-                                <View
-                                    pointerEvents="none"
-                                    style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
-                                />
-                            )}
+                            <StoryCardFill
+                                item={item}
+                                poster={poster}
+                                playPreviewVideo={playPreviewVideo}
+                                previewVideosPaused={previewVideosPaused}
+                            />
                             <LinearGradient
                                 colors={['transparent', 'rgba(0,0,0,0.85)']}
                                 style={styles.gradient}
@@ -431,15 +501,16 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
                 index={index}
                 scrollX={scrollX}
                 playPreviewVideo={
-                    !ANDROID_FEED_RAIL_POSTERS_ONLY &&
                     !!item.previewVideoUrl &&
-                    index === activePreviewIndex
+                    !stillUri(item.thumb) &&
+                    index >= visibleRange.start &&
+                    index <= visibleRange.end
                 }
                 previewVideosPaused={previewsPaused}
                 onPress={() => onPressItem(item)}
             />
         ),
-        [activePreviewIndex, onPressItem, previewsPaused, scrollX],
+        [onPressItem, previewsPaused, scrollX, visibleRange.end, visibleRange.start],
     );
 
     const getItemLayout = useCallback(
@@ -566,6 +637,9 @@ const styles = StyleSheet.create({
         zIndex: 2,
         elevation: 5,
     },
+    cardLiftVideoSafe: {
+        elevation: 0,
+    },
     card: {
         width: CARD_W,
         height: CARD_H,
@@ -575,6 +649,10 @@ const styles = StyleSheet.create({
         position: 'relative',
         zIndex: 2,
         elevation: 5,
+    },
+    cardVideoSafe: {
+        backgroundColor: 'transparent',
+        elevation: 0,
     },
     cardPress: {
         width: CARD_W,
@@ -590,6 +668,26 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         backgroundColor: PREVIEW_POSTER_FALLBACK,
         position: 'relative',
+    },
+    previewVideoHost: {
+        width: CARD_W,
+        height: CARD_H,
+        overflow: 'hidden',
+        backgroundColor: 'transparent',
+        position: 'relative',
+    },
+    textPreviewCanvas: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 10,
+        paddingTop: 14,
+        paddingBottom: 42,
+    },
+    textPreviewBody: {
+        fontSize: 12,
+        fontWeight: '700',
+        textAlign: 'center',
+        lineHeight: 16,
     },
     previewVideoClip: {
         position: 'absolute',

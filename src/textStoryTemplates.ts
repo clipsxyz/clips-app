@@ -24,6 +24,14 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
+    id: 'text-black',
+    name: 'Black',
+    background: '#0b0b0d',
+    textColor: '#ffffff',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
     id: 'cobalt',
     name: 'Cobalt',
     background: '#1e40af',
@@ -512,4 +520,11 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
 ];
+
+/** Feed text-only posts: blue or black only. Stories keep the full template list. */
+export const TEXT_ONLY_FEED_TEMPLATE_IDS = ['broadcast-blue', 'text-black'] as const;
+
+export const TEXT_ONLY_FEED_TEMPLATES: TextStoryTemplate[] = TEXT_ONLY_FEED_TEMPLATE_IDS.map(
+  (id) => TEXT_STORY_TEMPLATES.find((t) => t.id === id)!,
+);
 

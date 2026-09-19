@@ -11,7 +11,7 @@ import Swal from 'sweetalert2';
 import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
 import { FiX, FiSearch, FiLayers } from 'react-icons/fi';
 import { MdOutlineShareLocation } from 'react-icons/md';
-import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
@@ -558,7 +558,7 @@ export default function TextOnlyPostPage() {
                             </button>
                         </div>
                         <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                            {TEXT_STORY_TEMPLATES.map((tpl) => {
+                            {(isStory24 ? TEXT_STORY_TEMPLATES : TEXT_ONLY_FEED_TEMPLATES).map((tpl) => {
                                 const isSelected = selectedTemplateId === tpl.id;
                                 return (
                                     <button
