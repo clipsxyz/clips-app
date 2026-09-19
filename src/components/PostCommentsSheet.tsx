@@ -10,9 +10,6 @@ import {
     TextInput,
     Alert,
     Dimensions,
-    KeyboardAvoidingView,
-    Keyboard,
-    Platform,
     type ListRenderItem,
     type NativeSyntheticEvent,
     type NativeScrollEvent,
@@ -87,7 +84,19 @@ type Props = {
     onCommentCountChange?: (comments: number) => void;
     /** `scenesEmbed` — no Modal; parent positions sheet (Scenes viewer). */
     variant?: 'modal' | 'scenesEmbed';
+    /** Drive parent video-card interpolations (Scenes TikTok shrink). */
+    animatedIndex?: import('react-native-reanimated').SharedValue<number>;
+    animatedPosition?: import('react-native-reanimated').SharedValue<number>;
+    backdropOpacity?: number;
+    snapPoints?: (string | number)[];
 };
+
+function isCommentsAbortError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const name = String((err as { name?: string }).name || '');
+    const message = String((err as { message?: string }).message || '');
+    return name === 'AbortError' || message.includes('Aborted');
+}
 
 function formatTime(timestamp: number): string {
     const diff = Date.now() - timestamp;
@@ -491,6 +500,10 @@ export default function PostCommentsSheet({
     onAfterClose,
     onCommentCountChange,
     variant = 'modal',
+    animatedIndex,
+    animatedPosition,
+    backdropOpacity,
+    snapPoints,
 }: Props) {
     const isScenesEmbed = variant === 'scenesEmbed';
     const { user } = useAuth();
@@ -522,6 +535,7 @@ export default function PostCommentsSheet({
     const postPropRef = useRef(postProp);
     postPropRef.current = postProp;
     const loadGenRef = useRef(0);
+    const commentsAbortRef = useRef<AbortController | null>(null);
     const onCommentCountChangeRef = useRef(onCommentCountChange);
     onCommentCountChangeRef.current = onCommentCountChange;
 
@@ -557,6 +571,9 @@ export default function PostCommentsSheet({
 
         let cancelled = false;
         const req = ++loadGenRef.current;
+        commentsAbortRef.current?.abort();
+        const controller = new AbortController();
+        commentsAbortRef.current = controller;
         setComments([]);
         (async () => {
             setLoading(true);
@@ -569,7 +586,7 @@ export default function PostCommentsSheet({
                     getPostById(postId, user?.id),
                     fetchCommentsPage(postId, null, 30, 5, user?.id),
                 ]);
-                if (cancelled || req !== loadGenRef.current) return;
+                if (cancelled || controller.signal.aborted || req !== loadGenRef.current) return;
                 setPost(fetchedPost ?? postPropRef.current ?? null);
                 setComments((prev) => {
                     const temps = prev.filter((c) => String(c.id).startsWith('temp-'));
@@ -587,18 +604,31 @@ export default function PostCommentsSheet({
                 emitCommentCount(
                     Number.isFinite(apiCount) ? Math.max(apiCount, listCount) : listCount,
                 );
-            } catch (err) {
+            } catch (err: unknown) {
+                if (
+                    cancelled ||
+                    controller.signal.aborted ||
+                    isCommentsAbortError(err)
+                ) {
+                    return;
+                }
                 console.error('Failed to load comments sheet:', err);
-                if (!cancelled && req === loadGenRef.current) {
+                if (req === loadGenRef.current) {
                     setPost(postPropRef.current ?? null);
                 }
             } finally {
-                if (!cancelled && req === loadGenRef.current) setLoading(false);
+                if (!cancelled && !controller.signal.aborted && req === loadGenRef.current) {
+                    setLoading(false);
+                }
             }
         })();
 
         return () => {
             cancelled = true;
+            controller.abort();
+            if (commentsAbortRef.current === controller) {
+                commentsAbortRef.current = null;
+            }
         };
     }, [isOpen, postId, canLoadComments, user?.id, emitCommentCount]);
 
@@ -643,7 +673,8 @@ export default function PostCommentsSheet({
             }
             setCommentsCursor(page.nextCursor);
             setCommentsHasMore(page.hasMore);
-        } catch (err) {
+        } catch (err: unknown) {
+            if (isCommentsAbortError(err)) return;
             console.error('Failed to load more comments:', err);
         } finally {
             setCommentsLoadingMore(false);
@@ -955,7 +986,7 @@ export default function PostCommentsSheet({
         />
     );
 
-    const listHeader = loading ? null : (
+    const listHeader = loading || isScenesEmbed ? null : (
         <>
             <View style={styles.authorRow}>
                 <CommentAvatarRing size="md">
@@ -1041,7 +1072,7 @@ export default function PostCommentsSheet({
     );
 
     const sheetMediaPreview =
-        post && (post.mediaUrl || isVideoPost(post) || authorHandle) ? (
+        isScenesEmbed || !post || !(post.mediaUrl || isVideoPost(post) || authorHandle) ? null : (
             <View style={styles.mediaPreviewRow}>
                 <View style={styles.mediaPreviewThumb}>
                     {(() => {
@@ -1104,7 +1135,7 @@ export default function PostCommentsSheet({
                     </Text>
                 ) : null}
             </View>
-        ) : null;
+        );
 
     const sheetChromeHeader = (
         <>
@@ -1203,6 +1234,7 @@ export default function PostCommentsSheet({
                         isLoading={submitting || submittingReply}
                         replyingToHandle={replyingTo?.handle}
                         onCancelReply={cancelReply}
+                        useSheetTextInput={!isScenesEmbed}
                         autoFocus={Boolean(replyingTo)}
                     />
                 </View>
@@ -1212,28 +1244,14 @@ export default function PostCommentsSheet({
 
     if (isScenesEmbed) {
         if (!isOpen) return null;
-        // Android: rely on adjustResize / Modal resize only. KAV `height` was
-        // fighting the soft keyboard and collapsing the list (blank sheet) or
-        // bouncing focus (keyboard pop then drop).
-        if (Platform.OS === 'android') {
-            return <View style={styles.scenesEmbedRoot}>{sheetBody}</View>;
-        }
-        return (
-            <KeyboardAvoidingView
-                style={styles.scenesEmbedRoot}
-                behavior="padding"
-                keyboardVerticalOffset={12}
-            >
-                {sheetBody}
-            </KeyboardAvoidingView>
-        );
+        return <View style={styles.scenesEmbedRoot}>{sheetBody}</View>;
     }
 
     return (
         <GazetteerBottomSheetModal
             visible={isOpen}
             onDismiss={handleClose}
-            snapPoints={['75%']}
+            snapPoints={snapPoints ?? ['75%']}
             horizontalInset={0}
             backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
             handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
@@ -1241,6 +1259,9 @@ export default function PostCommentsSheet({
             keyboardBehavior="interactive"
             keyboardBlurBehavior="restore"
             android_keyboardInputMode="adjustResize"
+            animatedIndex={animatedIndex}
+            animatedPosition={animatedPosition}
+            backdropOpacity={backdropOpacity}
         >
             <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
                 <BottomSheetFlatList
@@ -1281,6 +1302,7 @@ export default function PostCommentsSheet({
 const styles = StyleSheet.create({
     scenesEmbedRoot: {
         flex: 1,
+        minHeight: 0,
     },
     sheetCanvas: {
         flex: 1,
@@ -1301,6 +1323,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(6, 13, 22, 0.92)',
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: P.border,
+        flexShrink: 0,
     },
     modalOverlay: {
         flex: 1,

@@ -2,19 +2,24 @@ import { CommonActions } from '@react-navigation/native';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
 
 type Nav = {
+    navigate?: (name: string, params?: Record<string, unknown>) => void;
     reset: (state: {
         index: number;
         routes: Array<{ name: string; params?: Record<string, unknown>; state?: unknown }>;
     }) => void;
 };
 
-/** Clear create stack and land on Home feed after posting (Story24 / gallery parity). */
-export function resetToHomeFeed(
-    navigation: Nav,
-    params?: { forceRefreshAt?: number },
-): void {
-    const homeParams = params ?? { forceRefreshAt: Date.now() };
-    const resetState = {
+function homeNavParams(params?: { forceRefreshAt?: number }): Record<string, unknown> {
+    if (params && typeof params.forceRefreshAt === 'number') {
+        return { screen: 'Home', params };
+    }
+    return { screen: 'Home' };
+}
+
+function resetState(params?: { forceRefreshAt?: number }) {
+    const homeParams =
+        params && typeof params.forceRefreshAt === 'number' ? params : undefined;
+    return {
         index: 0,
         routes: [
             {
@@ -26,15 +31,35 @@ export function resetToHomeFeed(
             },
         ],
     };
+}
+
+/** Land on the existing Home feed after posting. Prefer pop-to-MainTabs so the list does not remount. */
+export function resetToHomeFeed(
+    navigation: Nav,
+    params?: { forceRefreshAt?: number },
+): void {
+    const navParams = homeNavParams(params);
 
     try {
-        navigation.reset(resetState);
+        navigation.navigate?.('MainTabs', navParams);
+        return;
+    } catch (err) {
+        console.warn('resetToHomeFeed: navigate failed, trying reset', err);
+    }
+
+    try {
+        navigation.reset(resetState(params));
         return;
     } catch (err) {
         console.warn('resetToHomeFeed: screen reset failed, trying root ref', err);
     }
 
-    if (rootNavigationRef.isReady()) {
-        rootNavigationRef.dispatch(CommonActions.reset(resetState));
+    if (!rootNavigationRef.isReady()) return;
+    try {
+        rootNavigationRef.navigate('MainTabs' as never, navParams as never);
+        return;
+    } catch {
+        /* fall through */
     }
+    rootNavigationRef.dispatch(CommonActions.reset(resetState(params)));
 }

@@ -2,6 +2,7 @@ package com.clipsapp
 
 import android.app.Activity
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
@@ -65,7 +66,7 @@ class GalleryRollPickerModule(private val reactContext: ReactApplicationContext)
             val uris = collectUris(data)
             val result = Arguments.createArray()
             for (uri in uris) {
-                val copied = copyToCache(activity, uri) ?: continue
+                val copied = copyToCache(uri) ?: continue
                 result.pushMap(copied)
             }
             promise.resolve(result)
@@ -75,6 +76,80 @@ class GalleryRollPickerModule(private val reactContext: ReactApplicationContext)
     }
 
     override fun onNewIntent(intent: Intent) {}
+
+    @ReactMethod
+    fun copyUriToCache(uriString: String, promise: Promise) {
+        try {
+            val trimmed = uriString.trim()
+            if (trimmed.isEmpty()) {
+                promise.reject("E_COPY", "Empty URI")
+                return
+            }
+            val uri = Uri.parse(trimmed)
+            if (uri.scheme == "file" || trimmed.startsWith("/")) {
+                val file = fileFromUri(trimmed)
+                val map = Arguments.createMap()
+                map.putString(
+                    "uri",
+                    if (trimmed.startsWith("file://")) trimmed else "file://${file.absolutePath}",
+                )
+                map.putDouble("fileSize", if (file.exists()) file.length().toDouble() else 0.0)
+                promise.resolve(map)
+                return
+            }
+            val copied = copyToCache(uri)
+            if (copied == null) {
+                promise.reject("E_COPY", "Could not copy URI")
+                return
+            }
+            promise.resolve(copied)
+        } catch (error: Exception) {
+            promise.reject("E_COPY", error)
+        }
+    }
+
+    @ReactMethod
+    fun statUri(uriString: String, promise: Promise) {
+        try {
+            val map = Arguments.createMap()
+            val trimmed = uriString.trim()
+            if (trimmed.isEmpty()) {
+                map.putBoolean("exists", false)
+                map.putDouble("size", 0.0)
+                promise.resolve(map)
+                return
+            }
+            val uri = Uri.parse(trimmed)
+            if (uri.scheme == "file" || uri.scheme.isNullOrEmpty() || trimmed.startsWith("/")) {
+                val file = fileFromUri(trimmed)
+                val exists = file.exists()
+                map.putBoolean("exists", exists)
+                map.putDouble("size", if (exists) file.length().toDouble() else 0.0)
+                promise.resolve(map)
+                return
+            }
+            reactContext.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                val length = afd.length
+                map.putBoolean("exists", length >= 0)
+                map.putDouble("size", if (length >= 0) length.toDouble() else 0.0)
+            } ?: run {
+                map.putBoolean("exists", false)
+                map.putDouble("size", 0.0)
+            }
+            promise.resolve(map)
+        } catch (error: Exception) {
+            promise.reject("E_STAT", error)
+        }
+    }
+
+    private fun fileFromUri(uriString: String): File {
+        val trimmed = uriString.trim()
+        if (trimmed.startsWith("file://")) {
+            val path = Uri.parse(trimmed).path ?: trimmed.removePrefix("file://")
+            return File(path)
+        }
+        return File(trimmed)
+    }
 
     private fun buildGalleryIntent(activity: Activity, mediaType: String?, multiple: Boolean): Intent {
         val dataTypes = when (mediaType) {
@@ -120,8 +195,8 @@ class GalleryRollPickerModule(private val reactContext: ReactApplicationContext)
         return uris
     }
 
-    private fun copyToCache(activity: Activity, uri: Uri): com.facebook.react.bridge.WritableMap? {
-        val resolver = activity.contentResolver
+    private fun copyToCache(uri: Uri): com.facebook.react.bridge.WritableMap? {
+        val resolver = reactContext.contentResolver
         val mime = resolver.getType(uri) ?: guessMime(uri)
         val isVideo = mime.startsWith("video")
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
@@ -135,7 +210,33 @@ class GalleryRollPickerModule(private val reactContext: ReactApplicationContext)
         map.putString("uri", "file://${outFile.absolutePath}")
         map.putString("type", mime)
         map.putString("fileName", outFile.name)
+        // Instant client validation: size + duration before JS compression/upload.
+        map.putDouble("fileSize", outFile.length().toDouble())
+        if (isVideo) {
+            val durationSec = readVideoDurationSec(outFile.absolutePath)
+            if (durationSec != null && durationSec > 0) {
+                map.putDouble("duration", durationSec)
+            }
+        }
         return map
+    }
+
+    private fun readVideoDurationSec(path: String): Double? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(path)
+            val raw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val ms = raw?.toLongOrNull() ?: return null
+            if (ms <= 0L) null else ms / 1000.0
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+                /* ignore */
+            }
+        }
     }
 
     private fun guessMime(uri: Uri): String {

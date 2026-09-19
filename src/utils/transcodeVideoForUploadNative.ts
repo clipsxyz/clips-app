@@ -4,6 +4,7 @@ import {
     buildInstagramDeliveryEncodeArgs,
     buildInstagramDeliveryVideoFilterChain,
 } from './instagramVideoDeliveryNative';
+import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 
 export type TranscodeVideoForUploadOptions = {
     /** Instant filter baked into the same pass as compression (Instagram-style single transcode). */
@@ -18,10 +19,11 @@ export async function transcodeVideoForUploadNative(
     inputUri: string,
     options: TranscodeVideoForUploadOptions = {},
 ): Promise<string> {
+    const resolvedInput = await resolveLocalMediaUriForFfmpeg(inputUri);
     const colorFilter = options.filterName ? getFfmpegVideoFilter(options.filterName) : null;
     const vf = buildInstagramDeliveryVideoFilterChain(colorFilter);
-    const inputPath = toFfmpegPath(inputUri);
-    const outputPath = makeSiblingOutputPath(inputUri, 'upload', 'mp4');
+    const inputPath = toFfmpegPath(resolvedInput);
+    const outputPath = makeSiblingOutputPath(resolvedInput, 'upload', 'mp4');
     const encodeArgs = buildInstagramDeliveryEncodeArgs();
 
     const command = [
@@ -40,8 +42,9 @@ export async function transcodeVideoForUploadNative(
  * Downscale stills before upload so camera JPEGs stay under the Laravel payload cap.
  */
 export async function compressImageForUploadNative(inputUri: string): Promise<string> {
-    const inputPath = toFfmpegPath(inputUri);
-    const outputPath = makeSiblingOutputPath(inputUri, 'upload', 'jpg');
+    const resolvedInput = await resolveLocalMediaUriForFfmpeg(inputUri);
+    const inputPath = toFfmpegPath(resolvedInput);
+    const outputPath = makeSiblingOutputPath(resolvedInput, 'upload', 'jpg');
     const command = [
         '-y',
         `-i "${inputPath}"`,

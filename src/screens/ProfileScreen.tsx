@@ -266,6 +266,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             await setGlobalVideoMutedNative(false);
             if (!cancelled) setMyFeedVideoMuted(false);
         })();
+        // Header mute icon only — cards subscribe themselves (no FeedCard re-render).
         const unsub = subscribeGlobalVideoMuted(setMyFeedVideoMuted);
         return () => {
             cancelled = true;
@@ -2090,7 +2091,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     ) + ox(56),
                             },
                         ]}
-                        extraData={`${myFeedActiveVideoPostId}:${myFeedVideoMuted ? '1' : '0'}`}
+                        extraData={myFeedActiveVideoPostId}
                         viewabilityConfig={myFeedViewabilityConfig}
                         onViewableItemsChanged={onMyFeedViewableItemsChanged}
                         removeClippedSubviews={false}
@@ -2105,7 +2106,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     postHasVideoMedia(item) &&
                                     String(myFeedActiveVideoPostId) === String(item.id)
                                 }
-                                feedVideoMuted={myFeedVideoMuted}
                                 onLike={async () => {
                                     if (!user?.id) return;
                                     const updated = await toggleLike(user.id, item.id, item);

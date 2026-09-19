@@ -51,6 +51,7 @@ import EditPostModal from './EditPostModal.native';
 import CreateGroupModal from './CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal.native';
 import ScenesMediaPlayer, { ScenesMediaProgressBar } from './ScenesMediaPlayer.native';
+import PostHeaderOverlay from './PostHeaderOverlay.native';
 import { applyUniqueSavesCount, getCollectionsForPost } from '../api/collections';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
@@ -1266,6 +1267,11 @@ export default function ScenesViewer({
                     <View style={styles.chromeCircle} />
                 )}
             </View>
+            {activePost && !commentsOpen ? (
+                <View style={styles.metaUnderProgress} pointerEvents="box-none">
+                    <PostHeaderOverlay dock="inline" post={activePost} />
+                </View>
+            ) : null}
             </View>
             </View>
 
@@ -1703,6 +1709,12 @@ const styles = StyleSheet.create({
         flex: 1,
         marginHorizontal: 12,
         justifyContent: 'center',
+    },
+    metaUnderProgress: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 8,
+        paddingHorizontal: 24,
     },
     bottomBlock: {
         width: '100%',

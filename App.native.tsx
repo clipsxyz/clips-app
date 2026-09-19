@@ -25,6 +25,7 @@ import {
 } from './src/navigation/mainTabStacks.native';
 import MainTabBar from './src/components/MainTabBar.native';
 import { runAfterInteractions } from './src/utils/runAfterInteractionsNative';
+import { clearPendingFeedUploadsOnBoot } from './src/utils/pendingFeedUploadNative';
 
 // Import screens
 import BoostScreen from './src/screens/BoostScreen';
@@ -201,22 +202,14 @@ function MainTabs() {
       )}
     >
       <Tab.Screen name="Home" component={HomeTabStack} options={{ title: 'Home' }} />
-      <Tab.Screen
-        name="Boost"
-        component={BoostTabStack}
-        options={{ title: 'Boost', lazy: false }}
-      />
+      <Tab.Screen name="Boost" component={BoostTabStack} options={{ title: 'Boost' }} />
       <Tab.Screen
         name="Create"
         component={CreateTabPlaceholder}
         options={{ title: 'Create' }}
       />
       <Tab.Screen name="Search" component={SearchTabStack} options={{ title: 'Search' }} />
-      <Tab.Screen
-        name="Inbox"
-        component={InboxTabStack}
-        options={{ title: 'Inbox', lazy: false }}
-      />
+      <Tab.Screen name="Inbox" component={InboxTabStack} options={{ title: 'Inbox' }} />
     </Tab.Navigator>
   );
 }
@@ -230,6 +223,11 @@ function App(): React.JSX.Element {
 
   React.useEffect(() => {
     void hydrateAuthTokenFromStorage();
+  }, []);
+
+  React.useEffect(() => {
+    // Drop abandoned / failed upload jobs so they cannot loop after Fast Refresh.
+    clearPendingFeedUploadsOnBoot();
   }, []);
 
   React.useEffect(() => {
@@ -305,8 +303,8 @@ function App(): React.JSX.Element {
             component={ScenesScreen as React.ComponentType}
             options={{
               presentation: 'fullScreenModal',
-              animation: 'fade_from_bottom',
-              animationDuration: 200,
+              animation: 'fade',
+              animationDuration: 80,
               contentStyle: { backgroundColor: '#000000' },
             }}
           />

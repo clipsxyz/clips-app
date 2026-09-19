@@ -97,9 +97,12 @@ export function isMockMode(): boolean {
 export const DEV_LAN_API_HOST = '192.168.1.12';
 export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
 export const DEV_LOOPBACK_API_BASE_URL = 'http://127.0.0.1:8000/api';
+/** Android emulator alias for the host machine loopback. */
+export const DEV_ANDROID_EMULATOR_API_HOST = '10.0.2.2';
+export const DEV_ANDROID_EMULATOR_API_BASE_URL = `http://${DEV_ANDROID_EMULATOR_API_HOST}:8000/api`;
 
-/** Remember which API host last worked on this RN session (adb reverse vs LAN). */
-export type RnApiHostPreference = 'loopback' | 'lan';
+/** Remember which API host last worked on this RN session (adb reverse ↔ LAN ↔ emulator). */
+export type RnApiHostPreference = 'loopback' | 'lan' | 'emulator';
 let preferredRnApiHost: RnApiHostPreference | null = null;
 
 export function getPreferredRnApiHost(): RnApiHostPreference | null {
@@ -115,6 +118,8 @@ export function rememberSuccessfulApiBaseUrl(apiBaseUrl: string): void {
     const host = new URL(String(apiBaseUrl || '').trim()).hostname;
     if (host === '127.0.0.1' || host === 'localhost') {
       preferredRnApiHost = 'loopback';
+    } else if (host === DEV_ANDROID_EMULATOR_API_HOST) {
+      preferredRnApiHost = 'emulator';
     } else if (host === DEV_LAN_API_HOST || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
       preferredRnApiHost = 'lan';
     }
@@ -194,7 +199,7 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
   if (typeof require === 'undefined') return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { NativeModules, Platform } = require('react-native') as typeof import('react-native');
+    const { NativeModules } = require('react-native') as typeof import('react-native');
     const port = '8000';
 
     const scriptUrl = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
@@ -204,11 +209,10 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
         const host = parsed.hostname;
         const protocol = String(parsed.protocol || '').replace(/:$/, '');
         if (protocol === 'file' || !host) return null;
-        // Metro via adb reverse uses localhost — API can use the same reverse on :8000.
+        // Metro via adb reverse uses localhost. Do NOT pin Android API to
+        // 127.0.0.1 — wireless ADB / physical devices often refuse that connection.
+        // Fall through to LAN (and candidates also try 10.0.2.2 for emulators).
         if (host === 'localhost' || host === '127.0.0.1') {
-          if (Platform.OS === 'android') {
-            return `http://127.0.0.1:${port}/api`;
-          }
           return null;
         }
         if (host !== 'localhost' && host !== '127.0.0.1') {

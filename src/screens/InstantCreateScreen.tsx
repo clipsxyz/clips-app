@@ -27,6 +27,7 @@ import {
     ensureCameraCapturePermission,
 } from '../utils/galleryMediaPermissionsNative';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { MAX_FEED_VIDEO_DURATION_SEC } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 type PickerMode = 'feed' | 'story24';
@@ -236,14 +237,21 @@ export default function InstantCreateScreen({ navigation, route }: any) {
         });
     }, [stepOrbitMode]);
 
-    const navigateFromAssets = (assets: ImagePicker.Asset[], mode: PickerMode, carousel: boolean) => {
+    const navigateFromAssets = async (
+        assets: ImagePicker.Asset[],
+        mode: PickerMode,
+        carousel: boolean,
+    ) => {
         const socialFormat = mode === 'feed' ? clipStudioFormatRef.current : undefined;
         clipStudioFormatRef.current = undefined;
         if (!assets.length) return;
 
+        const accepted = assets.filter((asset) => !!asset.uri);
+        if (accepted.length === 0) return;
+
         // Stories skip the feed GalleryPreview (caption/settings) and open the story composer.
         if (mode === 'story24') {
-            const asset = assets[0];
+            const asset = accepted[0];
             if (!asset?.uri) return;
             const isVideo = assetIsVideo(asset);
             const duration = Number(asset.duration || 0);
@@ -259,8 +267,8 @@ export default function InstantCreateScreen({ navigation, route }: any) {
             return;
         }
 
-        if (carousel && assets.length >= 2) {
-            const items = assets
+        if (carousel && accepted.length >= 2) {
+            const items = accepted
                 .filter((a) => a.uri)
                 .slice(0, 10)
                 .map((a) => {
@@ -286,11 +294,17 @@ export default function InstantCreateScreen({ navigation, route }: any) {
             navigation.navigate('GalleryPreview', { carouselItems: items, socialFormat });
             return;
         }
-        const asset = assets[0];
+        const asset = accepted[0];
         if (!asset?.uri) return;
+        const isVideo = assetIsVideo(asset);
+        const duration = Number(asset.duration || 0);
         navigation.navigate('GalleryPreview', {
             mediaUrl: asset.uri,
-            mediaType: assetIsVideo(asset) ? 'video' : 'image',
+            mediaType: isVideo ? 'video' : 'image',
+            videoDuration:
+                isVideo && Number.isFinite(duration) && duration > 0
+                    ? Math.max(0.1, Math.floor(duration * 10) / 10)
+                    : undefined,
             socialFormat,
         });
     };
@@ -324,7 +338,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
 
                 const proceed = () => {
                     const items = supported.slice(0, maxItems);
-                    navigateFromAssets(items, mode, mode === 'feed' && items.length >= 2);
+                    void navigateFromAssets(items, mode, mode === 'feed' && items.length >= 2);
                 };
 
                 if (mode === 'feed' && supported.length > MAX_GALLERY_ITEMS) {
@@ -375,7 +389,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                     quality: capture === 'video' ? 0.8 : 0.9,
                     saveToPhotos: true,
                     cameraType: 'back',
-                    durationLimitSec: capture === 'video' ? 60 : 0,
+                    durationLimitSec: capture === 'video' ? MAX_FEED_VIDEO_DURATION_SEC : 0,
                 },
                 (response) => {
                     if (response.didCancel) return;
@@ -402,7 +416,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                         });
                         return;
                     }
-                    navigateFromAssets(supported.slice(0, 1), mode, false);
+                    void navigateFromAssets(supported.slice(0, 1), mode, false);
                 },
             );
         },

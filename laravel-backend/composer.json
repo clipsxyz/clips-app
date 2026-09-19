@@ -69,7 +69,8 @@
         ],
         "serve": [
             "Composer\\Config::disableProcessTimeout",
-            "@php -d upload_max_filesize=256M -d post_max_size=280M -d memory_limit=512M artisan serve --host=0.0.0.0 --port=8000"
+            "@php -r \"echo '';\"",
+            "bash serve-dev.sh 8000 0.0.0.0"
         ]
     },
     "extra": {

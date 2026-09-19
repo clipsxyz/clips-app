@@ -56,6 +56,7 @@ import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNativ
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
+import { filterValidVideoAssets } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
 import type { LocationSuggestion } from '../api/locations';
@@ -413,7 +414,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 return;
             }
             if (picked === 'cancel') return;
-            const assets = picked;
+            const { accepted: assets } = await filterValidVideoAssets(picked);
             if (assets.length === 0) {
                 Alert.alert('Media error', 'No media was selected.');
                 return;
@@ -431,6 +432,9 @@ export default function CreateScreen({ navigation, route }: any) {
                 normalizeMediaUri(asset.uri),
                 assetIsVideo(asset) ? 'video' : 'image',
             );
+            if (assetIsVideo(asset) && Number(asset.duration) > 0) {
+                setVideoDurationSec(Math.max(0.1, Number(asset.duration)));
+            }
         } catch (err: any) {
             Alert.alert('Media error', err?.message || 'Could not open your photo library.');
         }
@@ -567,7 +571,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         : 'Posting to Gazetteer…',
             });
             hapticLight();
-            resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
+            resetToHomeFeed(navigation);
             setIsUploading(false);
             startBackgroundFeedUpload(tempId);
             return;

@@ -1,17 +1,12 @@
-import { convertToProxyURL, isVideoCacheProxyUri } from './videoCacheProxyNative';
-
 /**
  * Shared ExoPlayer / AVPlayer buffer settings for feed MP4s.
- * Tuned for Instant Start: begin playback as soon as ~1s is buffered.
- *
- * Remote URIs are rewritten via `convertToProxyURL` (react-native-video-cache
- * LRU disk proxy) so Range prebuffer + the active player share one cache.
+ * Tuned for Instant Start: begin playback as soon as ~200ms is buffered.
  */
 export const FEED_VIDEO_BUFFER_CONFIG = {
-    minBufferMs: 1500,
-    maxBufferMs: 12000,
-    bufferForPlaybackMs: 1000,
-    bufferForPlaybackAfterRebufferMs: 500,
+    minBufferMs: 400,
+    maxBufferMs: 8000,
+    bufferForPlaybackMs: 200,
+    bufferForPlaybackAfterRebufferMs: 200,
     /** Fallback ExoPlayer SimpleCache when the HTTP proxy is unavailable. */
     cacheSizeMB: 150,
 } as const;
@@ -38,19 +33,15 @@ export function withFeedVideoCache<T extends VideoSourceLike | number>(source: T
     const uri = source.uri;
     if (!isRemoteHttpUri(uri)) return source;
 
-    const proxied = convertToProxyURL(uri);
-    const usingProxy = isVideoCacheProxyUri(proxied) && proxied !== uri;
-
+    // Origin URL, no SimpleCache / AndroidVideoCache. Those caches blocked the
+    // first byte on ColorOS (first-postcard multi-second stall).
     return {
         ...source,
-        uri: proxied,
-        // Proxy owns the shared disk LRU — avoid double-caching into ExoPlayer SimpleCache.
-        // When proxy is unavailable, keep shouldCache so SimpleCache still helps re-scrolls.
-        shouldCache: usingProxy ? false : true,
+        uri,
+        shouldCache: false,
         bufferConfig: {
             ...FEED_VIDEO_BUFFER_CONFIG,
             ...(source.bufferConfig || {}),
-            // Always enforce Instant-Start playback thresholds.
             minBufferMs: FEED_VIDEO_BUFFER_CONFIG.minBufferMs,
             bufferForPlaybackMs: FEED_VIDEO_BUFFER_CONFIG.bufferForPlaybackMs,
         },

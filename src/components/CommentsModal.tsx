@@ -395,6 +395,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const [submittingReply, setSubmittingReply] = React.useState(false);
     const [followBusy, setFollowBusy] = React.useState(false);
     const commentsScrollRef = React.useRef<HTMLDivElement | null>(null);
+    const commentsAbortRef = React.useRef<AbortController | null>(null);
     const filteredComments = React.useMemo(() => {
         const ordered = [...comments];
         if (sortMode === 'newest') {
@@ -421,6 +422,9 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         }
         if (!postId || !canLoadComments) return;
         let cancelled = false;
+        commentsAbortRef.current?.abort();
+        const controller = new AbortController();
+        commentsAbortRef.current = controller;
         (async () => {
             setLoading(true);
             setPost(null);
@@ -433,7 +437,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     getPostById(postId, user?.id),
                     fetchCommentsPage(postId, null, 30, 5, user?.id),
                 ]);
-                if (cancelled) return;
+                if (cancelled || controller.signal.aborted) return;
                 setPost(fetchedPost);
                 setComments(fetchedCommentsPage.items);
                 setCommentsCursor(fetchedCommentsPage.nextCursor);
@@ -441,18 +445,27 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 requestAnimationFrame(() => {
                     commentsScrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
                 });
-            } catch (error) {
+            } catch (error: unknown) {
+                const name = error && typeof error === 'object' ? String((error as { name?: string }).name || '') : '';
+                const message = error && typeof error === 'object' ? String((error as { message?: string }).message || '') : '';
+                if (cancelled || controller.signal.aborted || name === 'AbortError' || message.includes('Aborted')) {
+                    return;
+                }
                 console.error('Failed to load comments sheet:', error);
                 if (!cancelled) {
                     setPost(null);
                     setComments([]);
                 }
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!cancelled && !controller.signal.aborted) setLoading(false);
             }
         })();
         return () => {
             cancelled = true;
+            controller.abort();
+            if (commentsAbortRef.current === controller) {
+                commentsAbortRef.current = null;
+            }
         };
     }, [isOpen, postId, canLoadComments]);
 
@@ -476,7 +489,10 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             }
             setCommentsCursor(page.nextCursor);
             setCommentsHasMore(page.hasMore);
-        } catch (error) {
+        } catch (error: unknown) {
+            const name = error && typeof error === 'object' ? String((error as { name?: string }).name || '') : '';
+            const message = error && typeof error === 'object' ? String((error as { message?: string }).message || '') : '';
+            if (name === 'AbortError' || message.includes('Aborted')) return;
             console.error('Failed to load more comments:', error);
         } finally {
             setCommentsLoadingMore(false);

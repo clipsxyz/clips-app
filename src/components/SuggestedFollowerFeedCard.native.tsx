@@ -1,12 +1,13 @@
 import React from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Image,
-  ActivityIndicator,
-  LayoutChangeEvent,
+    View,
+    Text,
+    TouchableOpacity,
+    StyleSheet,
+    Image,
+    ActivityIndicator,
+    LayoutChangeEvent,
+    Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -187,7 +188,7 @@ export default function SuggestedFollowerFeedCard({
                 },
               ]}
             >
-              {videoUrl ? (
+              {videoUrl && Platform.OS !== 'android' ? (
                 <SuggestedThumbPreviewVideo url={videoUrl} posterUri={posterUri} />
               ) : posterUri ? (
                 <Image

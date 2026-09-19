@@ -11,7 +11,6 @@ import {
     Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
@@ -22,7 +21,10 @@ import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import Avatar from '../components/Avatar.native';
 import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
-import { clearPendingLocationFeed } from '../utils/pendingLocationNative';
+import {
+    clearPendingLocationFeed,
+    writePendingLocationFeed,
+} from '../utils/pendingLocationNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 const POPULAR = [
@@ -123,34 +125,28 @@ export default function DiscoverScreen({ navigation }: any) {
         };
     }, [query]);
 
-    const openFeedSelection = async (selection: PlaceFeedSelection) => {
-        try {
-            await AsyncStorage.setItem('pendingLocation', selection.filter);
-            await AsyncStorage.setItem('pendingLocationLabel', selection.label);
-            await AsyncStorage.setItem('pendingLocationScope', selection.scope);
-            await AsyncStorage.setItem('pendingFilterType', 'location');
-            if (selection.placeId) {
-                await AsyncStorage.setItem('pendingLocationPlaceId', selection.placeId);
-            } else {
-                await AsyncStorage.removeItem('pendingLocationPlaceId');
-            }
-            // Discover is a root stack screen — "Home" lives under MainTabs → Feed.
-            // Explicitly null out resetHomeFeedAt so a prior Home-tab reset doesn't
-            // win the param merge and wipe this Discover/Local location.
-            navigateMainTab(navigation, 'Home', {
-                screen: 'Feed',
-                params: {
-                    location: selection.filter,
-                    locationLabel: selection.label,
-                    locationScope: selection.scope,
-                    filterType: 'location',
-                    placeId: selection.placeId || undefined,
-                    resetHomeFeedAt: null,
-                },
-            });
-        } catch (err) {
-            console.error('Error saving location:', err);
-        }
+    const openFeedSelection = (selection: PlaceFeedSelection) => {
+        writePendingLocationFeed({
+            filter: selection.filter,
+            label: selection.label,
+            scope: selection.scope,
+            placeId: selection.placeId || null,
+            filterType: 'location',
+        });
+        // Discover is a root stack screen — "Home" lives under MainTabs → Feed.
+        // Explicitly null out resetHomeFeedAt so a prior Home-tab reset doesn't
+        // win the param merge and wipe this Discover/Local location.
+        navigateMainTab(navigation, 'Home', {
+            screen: 'Feed',
+            params: {
+                location: selection.filter,
+                locationLabel: selection.label,
+                locationScope: selection.scope,
+                filterType: 'location',
+                placeId: selection.placeId || undefined,
+                resetHomeFeedAt: null,
+            },
+        });
     };
 
     const dismissSuggestionList = () => {
@@ -166,12 +162,12 @@ export default function DiscoverScreen({ navigation }: any) {
             setScopePicker(suggestion);
             return;
         }
-        void openFeedSelection(resolvePlaceFeedSelection(suggestion));
+        openFeedSelection(resolvePlaceFeedSelection(suggestion));
     };
 
     const selectPopularCity = (name: string) => {
         dismissSuggestionList();
-        void openFeedSelection(
+        openFeedSelection(
             resolvePlaceFeedSelection({
                 name,
                 type: 'location',
@@ -203,12 +199,8 @@ export default function DiscoverScreen({ navigation }: any) {
         selectPopularCity(trimmed);
     };
 
-    const goHomeFeed = async () => {
-        try {
-            await clearPendingLocationFeed();
-        } catch {
-            // ignore
-        }
+    const goHomeFeed = () => {
+        void clearPendingLocationFeed();
         navigateMainTab(navigation, 'Home', {
             screen: 'Feed',
             params: {
@@ -256,7 +248,7 @@ export default function DiscoverScreen({ navigation }: any) {
             {/* Web TopBar discover chrome: Home · Local · Avatar */}
             <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 8) }]}>
                 <TouchableOpacity
-                    onPress={() => void goHomeFeed()}
+                    onPress={() => goHomeFeed()}
                     style={styles.topBarBtn}
                     accessibilityLabel="Back to Feed"
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -408,7 +400,7 @@ export default function DiscoverScreen({ navigation }: any) {
                 }}
                 onSelectScope={(scope) => {
                     if (!scopePicker) return;
-                    void openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope));
+                    openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope));
                     setScopePicker(null);
                 }}
             />

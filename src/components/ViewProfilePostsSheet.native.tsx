@@ -22,10 +22,7 @@ import type { Post } from '../types';
 import { incrementViews, toggleLike } from '../api/posts';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
-import {
-    getGlobalVideoMutedNative,
-    subscribeGlobalVideoMuted,
-} from '../utils/globalVideoMuteNative';
+import { getGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 
 type Props = {
     visible: boolean;
@@ -59,7 +56,6 @@ export default function ViewProfilePostsSheet({
     const [commentsPost, setCommentsPost] = useState<Post | null>(null);
     const [sharePost, setSharePost] = useState<Post | null>(null);
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
-    const [feedVideoMuted, setFeedVideoMuted] = useState(false);
     const activeVideoPostIdRef = useRef<string | null>(null);
     activeVideoPostIdRef.current = activeVideoPostId;
 
@@ -82,15 +78,7 @@ export default function ViewProfilePostsSheet({
 
     useEffect(() => {
         if (!visible) return;
-        let cancelled = false;
-        void getGlobalVideoMutedNative().then((muted) => {
-            if (!cancelled) setFeedVideoMuted(muted);
-        });
-        const unsub = subscribeGlobalVideoMuted(setFeedVideoMuted);
-        return () => {
-            cancelled = true;
-            unsub();
-        };
+        void getGlobalVideoMutedNative();
     }, [visible]);
 
     useEffect(() => {
@@ -200,7 +188,7 @@ export default function ViewProfilePostsSheet({
                     <FlatList
                         ref={listRef}
                         data={feedPosts}
-                        extraData={`${activeVideoPostId}:${feedVideoMuted ? '1' : '0'}`}
+                        extraData={activeVideoPostId}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         viewabilityConfig={viewabilityConfig}
@@ -222,7 +210,6 @@ export default function ViewProfilePostsSheet({
                                         postHasVideoMedia(item) &&
                                         String(activeVideoPostId) === String(item.id)
                                     }
-                                    feedVideoMuted={feedVideoMuted}
                                     onLike={() => handleLike(item)}
                                     onView={async () => {
                                         if (!user?.id) return;

@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import Video, { ViewType, type OnProgressData, type VideoRef } from 'react-native-video';
 import { withFeedVideoCache } from '../../utils/feedVideoSourceNative';
-import { withFeedVideoCache, FEED_VIDEO_BUFFER_CONFIG } from '../../utils/feedVideoSourceNative';
 
 type Props = {
     source: { uri: string };

@@ -1,6 +1,7 @@
 import {
     DEV_LAN_API_BASE_URL,
     DEV_LOOPBACK_API_BASE_URL,
+    DEV_ANDROID_EMULATOR_API_BASE_URL,
     getConfiguredApiEnvUrl,
     getPreferredRnApiHost,
     getReactNativeDefaultApiBaseUrl,
@@ -92,13 +93,17 @@ export function getApiBaseUrl(): string {
         if (preferred === 'loopback') {
             return DEV_LOOPBACK_API_BASE_URL;
         }
+        if (preferred === 'emulator') {
+            return DEV_ANDROID_EMULATOR_API_BASE_URL;
+        }
         if (preferred === 'lan') {
             return DEV_LAN_API_BASE_URL;
         }
         const fromMetro = getReactNativeDefaultApiBaseUrl();
         let resolved: string;
         if (fromMetro && isLoopbackApiHost(fromMetro)) {
-            resolved = fromMetro.replace(/\/$/, '');
+            // Should be rare after Android localhost→null change; prefer LAN.
+            resolved = FALLBACK_API;
         } else {
             const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
             if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
@@ -128,8 +133,8 @@ export function getApiBaseUrl(): string {
 }
 
 /**
- * Ordered API bases for RN: try preferred / Metro host first, then the other
- * (127.0.0.1 for adb reverse ↔ LAN IP for Wi‑Fi).
+ * Ordered API bases for RN: LAN / emulator host / adb-reverse loopback.
+ * Physical Oppo phones often refuse localhost; emulators need 10.0.2.2.
  */
 export function getApiBaseUrlCandidates(): string[] {
     const primary = getApiBaseUrl().replace(/\/$/, '');
@@ -137,6 +142,7 @@ export function getApiBaseUrlCandidates(): string[] {
 
     const loopback = DEV_LOOPBACK_API_BASE_URL;
     const lan = DEV_LAN_API_BASE_URL;
+    const emulator = DEV_ANDROID_EMULATOR_API_BASE_URL;
     const preferred = getPreferredRnApiHost();
     const ordered: string[] = [];
     const pushUnique = (url: string) => {
@@ -144,17 +150,27 @@ export function getApiBaseUrlCandidates(): string[] {
         if (trimmed && !ordered.includes(trimmed)) ordered.push(trimmed);
     };
 
+    pushUnique(primary);
+
     if (preferred === 'loopback') {
         pushUnique(loopback);
         pushUnique(lan);
-    } else if (preferred === 'lan') {
+        pushUnique(emulator);
+    } else if (preferred === 'emulator') {
+        pushUnique(emulator);
         pushUnique(lan);
         pushUnique(loopback);
-    } else if (isLoopbackApiHost(primary)) {
-        pushUnique(primary);
+    } else if (preferred === 'lan') {
         pushUnique(lan);
+        pushUnique(emulator);
+        pushUnique(loopback);
+    } else if (isLoopbackApiHost(primary)) {
+        pushUnique(lan);
+        pushUnique(emulator);
+        pushUnique(loopback);
     } else {
-        pushUnique(primary);
+        pushUnique(lan);
+        pushUnique(emulator);
         pushUnique(loopback);
     }
     return ordered;

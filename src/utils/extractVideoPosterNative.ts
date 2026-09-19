@@ -1,4 +1,5 @@
 import { executeFfmpeg, makeSiblingOutputPath, toFfmpegPath, toFileUri } from './ffmpegNative';
+import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 
 /** Square poster size — center-cropped so 9:16 thumbs keep faces in frame. */
 const POSTER_SIZE = 320;
@@ -21,8 +22,9 @@ export async function extractVideoPosterFrame(
     videoUri: string,
     timeSec = 0,
 ): Promise<string> {
-    const inputPath = toFfmpegPath(videoUri);
-    const outputPath = makeSiblingOutputPath(videoUri, 'poster', 'jpg');
+    const resolved = await resolveLocalMediaUriForFfmpeg(videoUri);
+    const inputPath = toFfmpegPath(resolved);
+    const outputPath = makeSiblingOutputPath(resolved, 'poster', 'jpg');
     const seek = posterSeekSeconds(timeSec);
     const vf = videoPosterCenterCropFilter();
     const command = [

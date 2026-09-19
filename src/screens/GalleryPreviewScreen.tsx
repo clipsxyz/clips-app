@@ -45,6 +45,10 @@ import { ensureCameraCapturePermission } from '../utils/galleryMediaPermissionsN
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { launchNativeCamera } from '../utils/launchNativeCamera';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
+import {
+    filterValidVideoAssets,
+    MAX_FEED_VIDEO_DURATION_SEC,
+} from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 import {
     failedToSaveSheet,
@@ -224,7 +228,8 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             try {
                 const picked = await pickFromFullGallery(remaining);
                 if (picked === 'denied' || picked === 'cancel') return;
-                const toAdd = assetsToCarouselItems(picked, remaining);
+                const { accepted } = await filterValidVideoAssets(picked);
+                const toAdd = assetsToCarouselItems(accepted, remaining);
                 if (toAdd.length === 0) return;
                 setCarouselItems((prev) => {
                     const existingUris = new Set(prev.map((item) => item.uri));
@@ -254,8 +259,9 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
     );
 
     const applyAssets = useCallback(
-        (assets: ImagePicker.Asset[]) => {
-            const next = assetsToCarouselItems(assets, CAROUSEL_MAX);
+        async (assets: ImagePicker.Asset[]) => {
+            const { accepted } = await filterValidVideoAssets(assets);
+            const next = assetsToCarouselItems(accepted, CAROUSEL_MAX);
             if (next.length === 0) return false;
             // Story flow: skip feed caption/settings and open the story composer.
             if (story24) {
@@ -291,7 +297,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                         navigation.goBack();
                         return;
                     }
-                    const ok = applyAssets(picked);
+                    const ok = await applyAssets(picked);
                     if (!ok) navigation.goBack();
                 } catch (err: any) {
                     Alert.alert('Media error', err?.message || 'Could not open your library.');
@@ -320,7 +326,7 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                         mediaType,
                         quality: mediaType === 'video' ? 0.8 : 0.9,
                         saveToPhotos: true,
-                        durationLimitSec: mediaType === 'video' ? 60 : 0,
+                        durationLimitSec: mediaType === 'video' ? MAX_FEED_VIDEO_DURATION_SEC : 0,
                     },
                     (response) => {
                         if (response.didCancel) {
@@ -332,8 +338,10 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
                             navigation.goBack();
                             return;
                         }
-                        const ok = applyAssets(response.assets || []);
-                        if (!ok) navigation.goBack();
+                        void (async () => {
+                            const ok = await applyAssets(response.assets || []);
+                            if (!ok) navigation.goBack();
+                        })();
                     },
                 );
             })();
@@ -445,12 +453,12 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             location: locationLabel,
             localMediaUri: first.uri,
             localThumbUri: first.uri,
-            localMediaItems: isCarousel ? carouselItems : undefined,
+            localMediaItems: carouselItems,
             mediaType: first.type,
             videoCoverTime:
                 first.type === 'video'
                     ? first.videoCoverTime ?? 0
-                    : carouselItems.find((i) => i.type === 'video')?.videoCoverTime ?? 0,
+                    : carouselItems.find((item) => item.type === 'video')?.videoCoverTime ?? 0,
             filterForExport,
             userLocal: user.local,
             userRegional: user.regional,
@@ -468,13 +476,14 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             jobId: tempId,
             thumbUri: first.uri,
             thumbType: first.type === 'video' ? 'video' : 'image',
-            initialMessage: 'Posting to Gazetteer…',
-            uploadingTitle: 'Posting…',
+            initialMessage:
+                first.type === 'video' ? 'This may take a moment.' : 'Posting to Gazetteer…',
+            uploadingTitle: first.type === 'video' ? 'Posting your clip…' : 'Posting…',
             successTitle: 'Posted!',
         });
         hapticLight();
+        resetToHomeFeed(navigation);
         setIsUploading(false);
-        resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
         startBackgroundFeedUpload(tempId);
     };
 

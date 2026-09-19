@@ -106,6 +106,23 @@ type Props = {
 };
 
 const PREVIEW_LOOP_SECONDS = 2;
+/** ColorOS TextureView ignores clip — a rail player paints into the post below (top-left). */
+const ANDROID_FEED_RAIL_POSTERS_ONLY = Platform.OS === 'android';
+
+function StoryPreviewPoster({ posterUri }: { posterUri?: string }) {
+    const posterSource = stillUri(posterUri) ? { uri: stillUri(posterUri)! } : undefined;
+    if (posterSource) {
+        return (
+            <Image
+                source={posterSource}
+                style={styles.previewFrame}
+                resizeMode="cover"
+                pointerEvents="none"
+            />
+        );
+    }
+    return <View style={[styles.previewFrame, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />;
+}
 
 function StoryPreviewVideo({
     uri,
@@ -117,6 +134,10 @@ function StoryPreviewVideo({
     paused: boolean;
 }) {
     const videoRef = useRef<VideoRef>(null);
+    // ColorOS ignores clip: a rail TextureView paints into the post below (top-left).
+    if (ANDROID_FEED_RAIL_POSTERS_ONLY) {
+        return <StoryPreviewPoster posterUri={posterUri} />;
+    }
     const source = storyVideoSource(uri) || { uri };
     const posterSource = stillUri(posterUri) ? { uri: stillUri(posterUri)! } : undefined;
 
@@ -367,7 +388,7 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
     }, [visibleVideoKey]);
 
     useEffect(() => {
-        if (visibleVideoIndexes.length <= 1) return;
+        if (ANDROID_FEED_RAIL_POSTERS_ONLY || visibleVideoIndexes.length <= 1) return;
         const id = setInterval(() => {
             setPreviewTurn((n) => n + 1);
         }, PREVIEW_LOOP_SECONDS * 1000);
@@ -409,7 +430,11 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
                 item={item}
                 index={index}
                 scrollX={scrollX}
-                playPreviewVideo={!!item.previewVideoUrl && index === activePreviewIndex}
+                playPreviewVideo={
+                    !ANDROID_FEED_RAIL_POSTERS_ONLY &&
+                    !!item.previewVideoUrl &&
+                    index === activePreviewIndex
+                }
                 previewVideosPaused={previewsPaused}
                 onPress={() => onPressItem(item)}
             />

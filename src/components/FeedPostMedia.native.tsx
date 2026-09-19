@@ -23,10 +23,12 @@ import Video, { type VideoRef } from 'react-native-video';
 import {
     getActiveFeedVideoPostId,
     subscribeActiveFeedVideo,
+    registerFeedVideoPlayer,
 } from '../utils/feedActiveVideoNative';
+import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { consumeFeedVideoHandoff, peekFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
-import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { androidListSafeVideoProps, hasValidVideoFrame } from '../utils/androidSafeVideoNative';
 import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
 import {
     getTextOnlyBackgroundColor,
@@ -49,7 +51,6 @@ import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 
 const ANDROID_FEED_VIDEO_PROPS = androidListSafeVideoProps();
-const DOUBLE_TAP_MS = 320;
 
 function firstMediaUri(...vals: unknown[]): string | undefined {
     for (const v of vals) {
@@ -65,7 +66,7 @@ const FEED_VIDEO_SOURCE_CACHE = new Map<string, object>();
 
 function buildFeedVideoSource(uri: string, rawUrl?: string): object {
     const sourceUri = uri || rawUrl || '';
-    const cacheKey = `${rawUrl || ''}|${sourceUri}`;
+    const cacheKey = `v4|${rawUrl || ''}|${sourceUri}`;
     const cached = FEED_VIDEO_SOURCE_CACHE.get(cacheKey);
     if (cached) return cached;
 
@@ -142,6 +143,40 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     onProgressRef.current = onProgress;
     onErrorRef.current = onError;
 
+    const [frameReady, setFrameReady] = useState(false);
+    const notifiedReadyRef = useRef(false);
+
+    useEffect(() => {
+        setFrameReady(false);
+        notifiedReadyRef.current = false;
+    }, [remountEpoch]);
+
+    useEffect(() => {
+        const node = videoRef as { current?: { pause: () => void; setVolume: (n: number) => void } | null };
+        let unreg = () => {};
+        const id = requestAnimationFrame(() => {
+            const player = node?.current;
+            if (!player) return;
+            unreg = registerFeedVideoPlayer(player);
+        });
+        return () => {
+            cancelAnimationFrame(id);
+            unreg();
+        };
+    }, [remountEpoch, videoRef]);
+
+    useEffect(() => {
+        if (!paused) return;
+        const player = (videoRef as { current?: { pause: () => void; setVolume: (n: number) => void } | null })
+            ?.current;
+        try {
+            player?.pause();
+            player?.setVolume(0);
+        } catch {
+            /* ignore */
+        }
+    }, [paused, videoRef]);
+
     const poster = useMemo(
         () =>
             posterUri
@@ -154,6 +189,13 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
         width: boxWidth,
         height: boxHeight,
         overflow: 'hidden' as const,
+    };
+
+    const markReady = () => {
+        if (notifiedReadyRef.current) return;
+        notifiedReadyRef.current = true;
+        setFrameReady(true);
+        onReadyRef.current();
     };
 
     return (
@@ -170,19 +212,36 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
                 volume={volume}
                 repeat={repeat}
                 playInBackground={false}
+                playWhenInactive={false}
                 ignoreSilentSwitch="ignore"
-                useTextureView
+                mixWithOthers="mix"
                 hideShutterView
+                useTextureView
                 poster={poster}
                 {...ANDROID_FEED_VIDEO_PROPS}
-                playWhenInactive
                 pointerEvents="none"
                 onLoadStart={() => onLoadStartRef.current()}
-                onReadyForDisplay={() => onReadyRef.current()}
+                onReadyForDisplay={() => {
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(markReady);
+                    });
+                }}
                 onLoad={(meta) => onLoadRef.current(meta)}
-                onProgress={(e) => onProgressRef.current(e)}
+                onProgress={(e) => {
+                    const t = e?.currentTime;
+                    if (typeof t === 'number' && t > 0.12) markReady();
+                    onProgressRef.current(e);
+                }}
                 onError={(e) => onErrorRef.current(e)}
             />
+            {posterUri && !frameReady ? (
+                <Image
+                    source={{ uri: posterUri }}
+                    style={[videoBox, StyleSheet.absoluteFillObject]}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
+            ) : null}
         </View>
     );
 }, (prev, next) => (
@@ -314,6 +373,7 @@ const FeedPostMedia = React.memo(
     const [playFailed, setPlayFailed] = useState(false);
     const pendingSeekRef = useRef<number | null>(null);
     const playbackTimeRef = useRef(0);
+    const lastHandoffAtRef = useRef(0);
     /** Don't fade the poster until ExoPlayer has seeked to the Scenes resume time. */
     const waitingForResumeFrameRef = useRef<number | null>(null);
     /** Per-raw-URL remote fallback after local/demo path fails (mirrors web Media). */
@@ -340,16 +400,25 @@ const FeedPostMedia = React.memo(
     const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() =>
         getActiveFeedVideoPostId(),
     );
-    const [isLandscapeMedia, setIsLandscapeMedia] = useState(false);
+    const [feedScrolling, setFeedScrolling] = useState(() => getFeedScrollBusy());
+    const [isLandscapeMedia, setIsLandscapeMedia] = useState(
+        () => width > 0 && height > 0 && width > height * 1.15,
+    );
     const onNaturalSizeRef = useRef(onNaturalSize);
     onNaturalSizeRef.current = onNaturalSize;
 
     const applyNaturalSize = useCallback((w: number, h: number) => {
         if (!(Number(w) > 0 && Number(h) > 0)) return;
         const nextLandscape = Number(w) > Number(h);
-        setIsLandscapeMedia((prev) => (prev === nextLandscape ? prev : nextLandscape));
-        onNaturalSizeRef.current?.(Number(w), Number(h));
-    }, []);
+        const playing =
+            mode === 'feed' && String(getActiveFeedVideoPostId()) === String(post.id);
+        setIsLandscapeMedia((prev) => {
+            if (prev === nextLandscape) return prev;
+            if (playing) return prev;
+            return nextLandscape;
+        });
+        if (!playing) onNaturalSizeRef.current?.(Number(w), Number(h));
+    }, [mode, post.id]);
 
     const resetPosterCover = useCallback(() => {
         mediaRevealRef.current?.stop();
@@ -364,35 +433,50 @@ const FeedPostMedia = React.memo(
         setVideoSurfaceReady((prev) => {
             if (prev) return prev;
             mediaRevealRef.current?.stop();
-            mediaRevealRef.current = Animated.parallel([
-                Animated.timing(videoOpacity, {
-                    toValue: 1,
-                    duration: 200,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(posterOpacity, {
-                    toValue: 0,
-                    duration: 200,
-                    useNativeDriver: true,
-                }),
-            ]);
-            mediaRevealRef.current.start(({ finished }) => {
-                if (finished) setPosterMounted(false);
-                mediaRevealRef.current = null;
+            videoOpacity.setValue(1);
+            mediaRevealRef.current = Animated.timing(posterOpacity, {
+                toValue: 0,
+                duration: 180,
+                useNativeDriver: true,
             });
+            mediaRevealRef.current.start();
             return true;
         });
     }, [posterOpacity, videoOpacity]);
 
     useEffect(() => {
         if (mode !== 'feed') return;
+        if (!postHasVideoMedia(post)) return;
         return subscribeActiveFeedVideo(setStoreActivePostId);
+    }, [mode, post.id]);
+
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedScrollBusy(setFeedScrolling);
     }, [mode]);
 
     const isViewable =
         mode === 'feed' &&
         !suspendNativeVideo &&
         String(storeActivePostId) === String(post.id);
+
+    if (mode === 'feed' && !isViewable) {
+        posterOpacity.setValue(1);
+    }
+
+    // ColorOS TextureView ignores clip/overflow — a paused player still
+    // paints and can keep audio. Unmount as soon as this card is not active.
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        if (isViewable) return;
+        resetPosterCover();
+        try {
+            feedVideoRef.current?.pause?.();
+            feedVideoRef.current?.setVolume?.(0);
+        } catch {
+            /* ignore */
+        }
+    }, [mode, isViewable, resetPosterCover]);
     const isFeedAutoplayActive = isViewable;
 
     // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
@@ -432,17 +516,32 @@ const FeedPostMedia = React.memo(
         setLoadingByUrl((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
     }, []);
 
+    const applyCarouselIndex = useCallback(
+        (rawIndex: number) => {
+            if (!hasCarousel || !slideWidth) return;
+            const clamped = Math.max(0, Math.min(rawIndex, maxCarouselIndex));
+            if (clamped === lastEmittedIndexRef.current) return;
+            lastEmittedIndexRef.current = clamped;
+            setCurrentIndex(clamped);
+            onCarouselIndexChange?.(clamped);
+        },
+        [hasCarousel, maxCarouselIndex, onCarouselIndexChange, slideWidth],
+    );
+
+    const onCarouselScroll = useCallback(
+        (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            if (!hasCarousel || !slideWidth) return;
+            applyCarouselIndex(Math.round(e.nativeEvent.contentOffset.x / slideWidth));
+        },
+        [applyCarouselIndex, hasCarousel, slideWidth],
+    );
+
     const onCarouselScrollEnd = useCallback(
         (e: NativeSyntheticEvent<NativeScrollEvent>) => {
             if (!hasCarousel || !slideWidth) return;
-            const next = Math.round(e.nativeEvent.contentOffset.x / slideWidth);
-            const clamped = Math.max(0, Math.min(next, maxCarouselIndex));
-            if (clamped === currentIndex) return;
-            lastEmittedIndexRef.current = clamped;
-            setCurrentIndex(clamped);
-            requestAnimationFrame(() => onCarouselIndexChange?.(clamped));
+            applyCarouselIndex(Math.round(e.nativeEvent.contentOffset.x / slideWidth));
         },
-        [currentIndex, hasCarousel, maxCarouselIndex, onCarouselIndexChange, slideWidth],
+        [applyCarouselIndex, hasCarousel, slideWidth],
     );
 
     useEffect(() => {
@@ -453,7 +552,10 @@ const FeedPostMedia = React.memo(
         lastEmittedIndexRef.current = 0;
         setPlayFailed(false);
         setVideoUrlFallbackByRaw({});
-        setIsLandscapeMedia(false);
+        setIsLandscapeMedia(width > 0 && height > 0 && width > height * 1.15);
+        // FlashList recycles this card — destroy the native TextureView or the
+        // previous post's picture stays pinned in the top-left.
+        setPlayerEpoch((n) => n + 1);
     }, [post.id]);
 
     // Prefetch video posters so placeholders paint instantly on re-scroll.
@@ -516,13 +618,17 @@ const FeedPostMedia = React.memo(
 
     useEffect(() => {
         if (!posterUriForSize) return;
+        let cancelled = false;
         Image.getSize(
             posterUriForSize,
             (w, h) => {
-                applyNaturalSize(w, h);
+                if (!cancelled) applyNaturalSize(w, h);
             },
             () => {},
         );
+        return () => {
+            cancelled = true;
+        };
     }, [posterUriForSize, applyNaturalSize]);
     const showScenesCta =
         mode === 'feed' &&
@@ -550,7 +656,6 @@ const FeedPostMedia = React.memo(
         }, 900);
     }, []);
 
-    const lastTapAtRef = useRef(0);
     const pendingMuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const cancelPendingMediaTap = useCallback(() => {
@@ -558,7 +663,6 @@ const FeedPostMedia = React.memo(
             clearTimeout(pendingMuteTimerRef.current);
             pendingMuteTimerRef.current = null;
         }
-        lastTapAtRef.current = 0;
     }, []);
 
     useImperativeHandle(
@@ -618,7 +722,12 @@ const FeedPostMedia = React.memo(
         }
 
         if (!isFeedAutoplayActive) {
-            setPaused((wasPaused) => (wasPaused ? wasPaused : true));
+            setPaused(true);
+            try {
+                feedVideoRef.current?.pause?.();
+            } catch {
+                /* ignore */
+            }
             const scrolledToAnotherPost =
                 storeActivePostId != null && String(storeActivePostId) !== String(post.id);
             if (scrolledToAnotherPost) {
@@ -627,11 +736,6 @@ const FeedPostMedia = React.memo(
                 stickyResumeTimeRef.current = null;
                 playbackTimeRef.current = 0;
                 resetPosterCover();
-                try {
-                    feedVideoRef.current?.seek?.(0);
-                } catch {
-                    /* ignore */
-                }
             }
             return;
         }
@@ -727,64 +831,51 @@ const FeedPostMedia = React.memo(
         [fireBurstAt, height, onDoubleLike, width],
     );
 
-    const handleMediaTap = useCallback(
-        (localX: number, localY: number, _absX: number, _absY: number) => {
+    const handleMediaTapSingle = useCallback(
+        (localX: number, localY: number) => {
             const tapX = Number.isFinite(localX) ? localX : 0;
             const tapY = Number.isFinite(localY) ? localY : 0;
             const frameW = width > 0 ? width : 1;
             const aspect = isLandscapeMedia ? 16 / 9 : 4 / 5;
             const frameH = width > 0 ? Math.min(width / aspect, height > 0 ? height : width / aspect) : 1;
-            // Mute control (bottom-right) and Scenes CTA (bottom-left) must not toggle mute.
             if (tapY > frameH - 56 && (tapX > frameW - 56 || tapX < 160)) {
                 return;
             }
-            const now = Date.now();
-            if (lastTapAtRef.current > 0 && now - lastTapAtRef.current < DOUBLE_TAP_MS) {
-                cancelPendingMediaTap();
-                handleDoubleLikeAt(tapX, tapY);
-                return;
-            }
-            lastTapAtRef.current = now;
-            if (pendingMuteTimerRef.current) {
-                clearTimeout(pendingMuteTimerRef.current);
-            }
-            pendingMuteTimerRef.current = setTimeout(() => {
-                pendingMuteTimerRef.current = null;
-                handleFullscreen();
-            }, DOUBLE_TAP_MS);
+            handleFullscreen();
         },
-        [cancelPendingMediaTap, handleDoubleLikeAt, handleFullscreen, height, isLandscapeMedia, width],
-    );
-
-    useEffect(
-        () => () => {
-            if (pendingMuteTimerRef.current) {
-                clearTimeout(pendingMuteTimerRef.current);
-            }
-        },
-        [],
+        [handleFullscreen, height, isLandscapeMedia, width],
     );
 
     const mediaTapGesture = useMemo(() => {
-        // One Tap recognizer — Exclusive(double, single) fires mute on the first tap on Android.
-        // Wrapper CONTAINS the video (StorySwipeLayer pattern). An overlay with elevation
-        // casts a halo and hides TextureView on ColorOS.
-        const tap = Gesture.Tap()
+        const doubleTap = Gesture.Tap()
             .enabled(feedTapCapture)
-            .numberOfTaps(1)
-            .maxDuration(500)
-            .maxDistance(28)
+            .numberOfTaps(2)
+            .maxDuration(420)
+            .maxDistance(36)
             .shouldCancelWhenOutside(false)
             .onEnd((e, success) => {
                 'worklet';
                 if (!success) return;
-                runOnJS(handleMediaTap)(e.x, e.y, e.absoluteX, e.absoluteY);
+                runOnJS(handleDoubleLikeAt)(e.x, e.y);
             });
+        const singleTap = Gesture.Tap()
+            .enabled(feedTapCapture)
+            .numberOfTaps(1)
+            .maxDuration(420)
+            .maxDistance(36)
+            .shouldCancelWhenOutside(false)
+            .requireExternalGestureToFail(doubleTap)
+            .onEnd((e, success) => {
+                'worklet';
+                if (!success) return;
+                runOnJS(handleMediaTapSingle)(e.x, e.y);
+            });
+        const taps = Gesture.Exclusive(doubleTap, singleTap);
         if (hasCarousel) {
-            return Gesture.Simultaneous(Gesture.Native(), tap);
+            return Gesture.Simultaneous(Gesture.Native(), taps);
         }
-        return tap;
-    }, [feedTapCapture, handleMediaTap, hasCarousel]);
+        return taps;
+    }, [feedTapCapture, handleDoubleLikeAt, handleMediaTapSingle, hasCarousel]);
 
     const handleOpenScenesPress = useCallback(() => {
         onOpenScenes?.();
@@ -870,20 +961,17 @@ const FeedPostMedia = React.memo(
               width: '100%' as const,
               height: '100%' as const,
               overflow: 'hidden' as const,
-              backgroundColor: '#000000',
           }
         : {
               width: '100%' as const,
               height,
               overflow: 'hidden' as const,
-              backgroundColor: '#121212',
           };
     const frameStyle = frameBoxStyle;
     const slideBoxStyle = {
         width: slideWidth,
         height: fillViewport ? slideHeight : height,
         overflow: 'hidden' as const,
-        backgroundColor: '#121212' as const,
     };
 
     const renderSlide = (
@@ -906,14 +994,15 @@ const FeedPostMedia = React.memo(
         const slidePosterUri = slidePosterRaw;
 
         const slideIsCurrent = slideIndex === currentIndex;
-        // Keep the player mounted (paused) while the cell is on-screen so the
-        // first frame / poster is ready before autoplay. Unmount only for
-        // overlay suspend (Android TextureView punch-through) or play failure.
+        const slideBoxH = fillViewport ? slideHeight : height;
+        // One TextureView in the feed: the autoplay post. Extra paused surfaces
+        // punch through ColorOS. Pixel-sized in-cell player stays in the postcard.
         const slideMountVideo =
             slideVideo &&
             slideIsCurrent &&
             !playFailed &&
-            (mode === 'detail' || (mode === 'feed' && !suspendNativeVideo));
+            hasValidVideoFrame(slideWidth, slideBoxH) &&
+            (mode === 'detail' || (mode === 'feed' && isViewable));
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
@@ -943,7 +1032,6 @@ const FeedPostMedia = React.memo(
         }
 
         // Poster stays fully visible until first decoded frame — covers buffer/black frames.
-        const showBufferCover = !slideMountVideo || posterMounted || !videoSurfaceReady;
         const onFirstFrameReady = () => {
             markUrlLoaded(slideRawUrl);
             fadeOutPosterCover();
@@ -954,12 +1042,13 @@ const FeedPostMedia = React.memo(
             <View style={styles.slideFill} collapsable={false}>
                 {slideMountVideo ? (
                     <FeedPlayingVideo
+                        key={String(post.id)}
                         remountEpoch={playerEpoch}
                         source={cachedVideoSource}
-                        paused={mode === 'detail' ? paused : !isViewable}
-                        muted={mode === 'feed' ? !soundOn : false}
-                        volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
-                        repeat={mode === 'feed'}
+                        paused={mode === 'detail' ? paused : !isViewable || feedScrolling}
+                        muted={mode === 'feed' ? !isViewable || !soundOn || feedScrolling : false}
+                        volume={mode === 'detail' ? 1 : isViewable && soundOn && !feedScrolling ? 1 : 0}
+                        repeat={mode === 'feed' && isViewable}
                         posterUri={slidePosterUri}
                         resizeMode={fillViewport ? 'contain' : mediaFit}
                         boxWidth={slideWidth}
@@ -990,14 +1079,13 @@ const FeedPostMedia = React.memo(
                                     feedVideoRef.current.seek(seekTo);
                                 } catch {
                                     waitingForResumeFrameRef.current = null;
-                                    onFirstFrameReady();
                                 }
-                            } else {
-                                onFirstFrameReady();
                             }
-                            const ns = meta?.naturalSize;
-                            if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
-                                applyNaturalSize(Number(ns.width), Number(ns.height));
+                            if (mode !== 'feed') {
+                                const ns = meta?.naturalSize;
+                                if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
+                                    applyNaturalSize(Number(ns.width), Number(ns.height));
+                                }
                             }
                         }}
                         onProgress={(e) => {
@@ -1019,24 +1107,30 @@ const FeedPostMedia = React.memo(
                             ) {
                                 waitingForResumeFrameRef.current = null;
                                 onFirstFrameReady();
+                            } else if (t > 0.08 && Platform.OS !== 'android') {
+                                // Android: ColorOS shows a black/half frame if we lift
+                                // the still before onReadyForDisplay. Bluesky keeps the
+                                // thumbnail up until the player reports ready.
+                                onFirstFrameReady();
                             }
-                            setFeedVideoHandoff(String(post.id), {
-                                currentTime: t,
-                                muted: !soundOn,
-                                mediaUrl: slideRawUrl,
-                            });
+                            const now = Date.now();
+                            if (now - lastHandoffAtRef.current >= 250) {
+                                lastHandoffAtRef.current = now;
+                                setFeedVideoHandoff(String(post.id), {
+                                    currentTime: t,
+                                    muted: !soundOn,
+                                    mediaUrl: slideRawUrl,
+                                });
+                            }
                         }}
                         onError={(e) => onVideoError(slideRawUrl, e)}
                     />
                 ) : null}
 
-                {slidePosterUri && showBufferCover ? (
+                {slidePosterUri ? (
                     <Animated.Image
                         source={{ uri: slidePosterUri }}
-                        style={[
-                            styles.posterCover,
-                            { opacity: slideMountVideo ? posterOpacity : 1 },
-                        ]}
+                        style={[styles.posterCover, { opacity: posterOpacity }]}
                         resizeMode={mediaFit}
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         pointerEvents="none"
@@ -1077,9 +1171,10 @@ const FeedPostMedia = React.memo(
                     snapToInterval={slideWidth}
                     snapToAlignment="start"
                     scrollEventThrottle={16}
+                    onScroll={onCarouselScroll}
                     onMomentumScrollEnd={onCarouselScrollEnd}
                     keyExtractor={(item, index) => `${post.id}-carousel-${index}-${item.url}`}
-                    extraData={`${currentIndex}-${isViewable}-${suspendNativeVideo}-${playerEpoch}`}
+                    extraData={`${currentIndex}-${suspendNativeVideo}-${playerEpoch}`}
                     getItemLayout={(_, index) => ({
                         length: slideWidth,
                         offset: slideWidth * index,
@@ -1218,14 +1313,12 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         overflow: 'hidden',
-        backgroundColor: '#121212',
         position: 'relative',
     },
     mediaFrame: {
         width: '100%',
         alignSelf: 'stretch',
         overflow: 'hidden',
-        backgroundColor: '#121212',
         position: 'relative',
     },
     videoClip: {
@@ -1233,7 +1326,6 @@ const styles = StyleSheet.create({
         height: '100%',
         overflow: 'hidden',
         position: 'relative',
-        backgroundColor: '#121212',
     },
     stillImage: {
         width: '100%',
@@ -1252,7 +1344,6 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         width: '100%',
         height: '100%',
-        zIndex: 2,
     },
     posterPlaceholder: {
         backgroundColor: '#121212',

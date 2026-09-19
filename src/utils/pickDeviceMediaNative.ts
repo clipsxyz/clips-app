@@ -3,7 +3,7 @@ import ImageCropPicker, { type Image as CropImage } from 'react-native-image-cro
 import type { Asset } from 'react-native-image-picker';
 import { ensureGalleryMediaPermission } from './galleryMediaPermissionsNative';
 
-type GalleryRollItem = { uri?: string; type?: string; fileName?: string };
+type GalleryRollItem = { uri?: string; type?: string; fileName?: string; fileSize?: number; duration?: number };
 
 const GalleryRollPicker = NativeModules.GalleryRollPicker as
     | { open: (options: { multiple: boolean; mediaType: string }) => Promise<GalleryRollItem[]> }
@@ -60,6 +60,8 @@ export async function pickFromFullGallery(selectionLimit = 10): Promise<Asset[] 
                     uri: item.uri,
                     type: item.type,
                     fileName: item.fileName,
+                    fileSize: typeof item.fileSize === 'number' ? item.fileSize : undefined,
+                    duration: typeof item.duration === 'number' ? item.duration : undefined,
                 }))
                 .filter((asset) => !!asset.uri) as Asset[];
             return assets.length > 0 ? assets.slice(0, Math.max(1, selectionLimit)) : 'cancel';

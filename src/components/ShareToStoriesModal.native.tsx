@@ -15,6 +15,10 @@ import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import type { Post } from '../types';
+import {
+    isMockDemoVideoPath,
+    resolveMockFeedVideoUrl,
+} from '../constants/mockFeedVideos.native';
 import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import ShareTextStoryCapture, {
     type ShareTextStoryCaptureHandle,
@@ -70,15 +74,20 @@ export default function ShareToStoriesModal({
 
             // Resolve mock slot paths to the same HTTPS clip the newsfeed plays —
             // never leave `/demo-videos/*` to be remapped to bundled BBB in Stories.
+            // Static import (not dynamic) avoids Metro chunk-loader races on reconnect.
             if (payload.mediaUrl && payload.mediaType === 'video') {
-                const { isMockDemoVideoPath, resolveMockFeedVideoUrl } = await import(
-                    '../constants/mockFeedVideos'
-                );
-                if (isMockDemoVideoPath(payload.mediaUrl)) {
-                    payload = {
-                        ...payload,
-                        mediaUrl: resolveMockFeedVideoUrl(payload.mediaUrl),
-                    };
+                try {
+                    if (isMockDemoVideoPath(payload.mediaUrl)) {
+                        payload = {
+                            ...payload,
+                            mediaUrl: resolveMockFeedVideoUrl(payload.mediaUrl),
+                        };
+                    }
+                } catch (mockErr) {
+                    console.warn(
+                        'ShareToStoriesModal: mock video remap skipped after bundle/network glitch',
+                        mockErr,
+                    );
                 }
             }
 

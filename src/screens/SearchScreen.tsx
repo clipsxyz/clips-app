@@ -14,6 +14,7 @@ import type { Post } from '../types';
 import Avatar from '../components/Avatar.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { ox } from '../constants/nativeOpticalScale';
+import { writePendingLocationFeed } from '../utils/pendingLocationNative';
 
 type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
 type SearchRefinement = 'all' | 'local' | 'regional';
@@ -278,24 +279,18 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const hasQuery = searchQuery.trim().length > 0;
     const isCurrentQuerySaved = savedSearches.some((x) => x.q.toLowerCase() === searchQuery.trim().toLowerCase() && x.mode === searchMode);
 
-    const openFeedSelection = async (
+    const openFeedSelection = (
         selection: PlaceFeedSelection,
         kind: 'location' | 'venue' | 'landmark' = 'location'
     ) => {
         addRecentSearch(selection.label, searchMode);
-        try {
-            await AsyncStorage.setItem('pendingLocation', selection.filter);
-            await AsyncStorage.setItem('pendingLocationLabel', selection.label);
-            await AsyncStorage.setItem('pendingLocationScope', selection.scope);
-            await AsyncStorage.setItem('pendingFilterType', kind);
-            if (selection.placeId) {
-                await AsyncStorage.setItem('pendingLocationPlaceId', selection.placeId);
-            } else {
-                await AsyncStorage.removeItem('pendingLocationPlaceId');
-            }
-        } catch {
-            // ignore storage errors and still navigate
-        }
+        writePendingLocationFeed({
+            filter: selection.filter,
+            label: selection.label,
+            scope: selection.scope,
+            placeId: selection.placeId || null,
+            filterType: kind,
+        });
         // Prefer nested MainTabs → Home → Feed so this works from tab or root stacks.
         navigation.navigate('MainTabs', {
             screen: 'Home',

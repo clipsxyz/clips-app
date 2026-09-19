@@ -5,11 +5,19 @@ import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPost
 import { prepareMediaForPostNative } from './prepareMediaForPostNative';
 import {
     completePendingFeedUpload,
+    dismissPendingFeedUpload,
     failPendingFeedUpload,
     getPendingFeedUpload,
+    isCorruptPendingFeedUpload,
     type PendingFeedUploadJob,
 } from './pendingFeedUploadNative';
 import { getUploadOverlayForJob } from './uploadOverlayNative';
+import { validateLocalVideoForUpload } from './validateLocalVideoNative';
+import { assertLocalVideoUnderUploadLimit } from './autoTrimVideoNative';
+import { runAfterInteractions } from './runAfterInteractionsNative';
+
+/** Prevents double-start / retry loops for the same temp id. */
+const inFlightTempIds = new Set<string>();
 
 function isLocalDeviceMediaUrl(url?: string | null): boolean {
     if (!url) return false;
@@ -27,6 +35,14 @@ function messageForUploadError(err: unknown): string {
     ) {
         return 'This clip is too large to upload. Try a shorter video.';
     }
+    if (
+        /Network request failed/i.test(raw) ||
+        /Failed to fetch/i.test(raw) ||
+        name === 'ConnectionRefused' ||
+        /CONNECTION_REFUSED/i.test(raw)
+    ) {
+        return 'Could not reach the upload server. Check Wi‑Fi / adb reverse and that Laravel is running on port 8000.';
+    }
     if (raw) return raw;
     return 'Failed to create post. Please try again.';
 }
@@ -39,6 +55,33 @@ function assertRemoteMediaForLive(url: string | undefined, label: string): void 
             `${label} is still a local device file. Upload to the server failed — check Laravel is reachable (adb reverse tcp:8000) and try again.`,
         );
     }
+}
+
+/** Auto-trim / size-gate local videos before any network or heavy compress work. */
+async function preflightLocalVideoUri(
+    uri: string,
+    durationSec?: number,
+): Promise<{ uri: string; durationSec?: number }> {
+    const check = await validateLocalVideoForUpload(
+        uri,
+        { durationSec },
+        { notifyTrim: false },
+    );
+    if (!check.ok) {
+        const err = new Error(check.message);
+        if (check.reason === 'size') err.name = 'UploadTooLarge';
+        throw err;
+    }
+    const nextUri = check.uri || check.bounds.uri || uri;
+    const nextDuration = check.bounds.durationSec ?? durationSec;
+    await assertLocalVideoUnderUploadLimit(nextUri, {
+        durationSec: nextDuration,
+        stage: 'runBackgroundFeedUploadNative:preflight',
+    });
+    return {
+        uri: nextUri,
+        durationSec: nextDuration,
+    };
 }
 
 async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void> {
@@ -100,7 +143,20 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
                 job.localMediaItems.some((i) => i.type === 'video')
                     ? job.filterForExport
                     : null;
-            const prepared = await prepareCarouselMediaForPostNative(job.localMediaItems, {
+            const preflightItems = [];
+            for (const item of job.localMediaItems) {
+                if (item.type === 'video') {
+                    const next = await preflightLocalVideoUri(item.uri, item.durationSec);
+                    preflightItems.push({
+                        ...item,
+                        uri: next.uri,
+                        durationSec: next.durationSec,
+                    });
+                } else {
+                    preflightItems.push(item);
+                }
+            }
+            const prepared = await prepareCarouselMediaForPostNative(preflightItems, {
                 filterInfo: job.filterForExport,
                 videoFilterInfo: videoFilter,
                 videoCoverTime: job.videoCoverTime,
@@ -171,12 +227,24 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
 
     if (live && job.localMediaUri && job.mediaType) {
         const overlay = getUploadOverlayForJob(job.tempId);
+        let localUri = job.localMediaUri;
+        if (job.mediaType === 'video') {
+            const durationSec =
+                job.localMediaItems?.find((item) => item.uri === localUri)?.durationSec ??
+                job.localMediaItems?.[0]?.durationSec;
+            const next = await preflightLocalVideoUri(localUri, durationSec);
+            localUri = next.uri;
+        }
+        let lastStage: string | null = null;
         const preparedMedia = await prepareMediaForPostNative({
-            mediaUrl: job.localMediaUri,
+            mediaUrl: localUri,
             mediaType: job.mediaType,
             filterInfo: job.filterForExport,
             videoCoverTime: job.videoCoverTime,
             onStage: (stage) => {
+                // Deduplicate stage updates — avoid overlay / feed re-render storms.
+                if (stage === lastStage) return;
+                lastStage = stage;
                 if (stage === 'compress') {
                     overlay?.progress('This may take a moment.', 'Posting your clip…');
                 } else if (stage === 'poster') {
@@ -186,14 +254,6 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
                 }
             },
         });
-        if (preparedMedia.filterExportFailed && job.filterForExport) {
-            console.warn('runBackgroundFeedUploadNative: filter bake partially failed');
-        }
-        if (preparedMedia.videoCompressFailed && job.mediaType === 'video') {
-            console.warn(
-                'runBackgroundFeedUploadNative: video compression failed; uploading best-effort file',
-            );
-        }
         mediaUrl = preparedMedia.mediaUrl || mediaUrl;
         mediaType = preparedMedia.mediaType || mediaType;
         videoPosterUrl = preparedMedia.videoPosterUrl;
@@ -240,22 +300,49 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
 }
 
 /**
- * Compress, upload, and createPost in the background after navigating to the feed.
+ * Compress, upload, and createPost after the current navigation/transition settles
+ * so FFmpeg + multipart work do not contend with the UI thread.
  */
 export function startBackgroundFeedUpload(tempId: string): void {
-    const job = getPendingFeedUpload(tempId);
-    if (!job || job.status !== 'uploading') return;
+    if (inFlightTempIds.has(tempId)) return;
 
-    void executePendingFeedUpload(job).catch((err: unknown) => {
-        const message = messageForUploadError(err);
-        console.error('runBackgroundFeedUploadNative:', err);
-        failPendingFeedUpload(tempId, message);
-        getUploadOverlayForJob(tempId)?.error(message);
-        if (
-            err instanceof Error &&
-            (err.name === 'UploadTooLarge' || /\b413\b/.test(err.message) || /too large/i.test(message))
-        ) {
-            Alert.alert('File too large', message);
+    const job = getPendingFeedUpload(tempId);
+    if (!job) return;
+
+    if (isCorruptPendingFeedUpload(job)) {
+        dismissPendingFeedUpload(tempId);
+        getUploadOverlayForJob(tempId)?.dismiss();
+        return;
+    }
+
+    if (job.status !== 'uploading') return;
+
+    inFlightTempIds.add(tempId);
+
+    void runAfterInteractions(async () => {
+        const latest = getPendingFeedUpload(tempId);
+        if (!latest || latest.status !== 'uploading' || isCorruptPendingFeedUpload(latest)) {
+            if (latest && isCorruptPendingFeedUpload(latest)) {
+                dismissPendingFeedUpload(tempId);
+            }
+            return;
         }
-    });
+        await executePendingFeedUpload(latest);
+    })
+        .catch((err: unknown) => {
+            const message = messageForUploadError(err);
+            failPendingFeedUpload(tempId, message);
+            getUploadOverlayForJob(tempId)?.error(message);
+            if (
+                err instanceof Error &&
+                (err.name === 'UploadTooLarge' ||
+                    /\b413\b/.test(err.message) ||
+                    /too large/i.test(message))
+            ) {
+                Alert.alert('File too large', message);
+            }
+        })
+        .finally(() => {
+            inFlightTempIds.delete(tempId);
+        });
 }

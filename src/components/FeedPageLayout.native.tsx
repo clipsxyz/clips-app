@@ -11,8 +11,10 @@
  * not as a full-screen feed background.
  */
 
-import React, { type ReactNode } from 'react';
+import React, { useEffect, useRef, type ReactNode } from 'react';
 import {
+    Animated,
+    Easing,
     Platform,
     StyleSheet,
     Text,
@@ -424,9 +426,11 @@ export const FEED_HEADER_LOCATION_PILL = {
     maxWidth: '100%' as const,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
     backgroundColor: FEED_LOCATION_PILL_BG,
-    overflow: 'hidden' as const,
+    overflow: 'visible' as const,
 };
 
 export const FEED_HEADER_ACTIVE_DOT = {
@@ -434,6 +438,68 @@ export const FEED_HEADER_ACTIVE_DOT = {
     height: 8,
     borderRadius: 999,
 };
+
+/** Solid feed-status dot with a sonar-style pulsing ring. */
+export function FeedHeaderActivePulseDot({ color }: { color: string }) {
+    const pulse = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        pulse.setValue(0);
+        const loop = Animated.loop(
+            Animated.timing(pulse, {
+                toValue: 1,
+                duration: 1500,
+                easing: Easing.out(Easing.quad),
+                useNativeDriver: true,
+            }),
+        );
+        loop.start();
+        return () => loop.stop();
+    }, [pulse]);
+
+    return (
+        <View style={feedActiveDotStyles.wrap} pointerEvents="none">
+            <Animated.View
+                style={[
+                    feedActiveDotStyles.ring,
+                    {
+                        borderColor: color,
+                        opacity: pulse.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.85, 0],
+                        }),
+                        transform: [
+                            {
+                                scale: pulse.interpolate({
+                                    inputRange: [0, 1],
+                                    outputRange: [1, 2.15],
+                                }),
+                            },
+                        ],
+                    },
+                ]}
+            />
+            <View style={[FEED_HEADER_ACTIVE_DOT, { backgroundColor: color }]} />
+        </View>
+    );
+}
+
+const feedActiveDotStyles = StyleSheet.create({
+    wrap: {
+        width: 16,
+        height: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    ring: {
+        position: 'absolute',
+        width: 12,
+        height: 12,
+        borderRadius: 999,
+        borderWidth: 1.5,
+        backgroundColor: 'transparent',
+    },
+});
 
 export const FEED_HEADER_LOCATION_TITLE = {
     flexShrink: 1,

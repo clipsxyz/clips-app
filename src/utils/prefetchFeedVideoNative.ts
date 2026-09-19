@@ -6,8 +6,6 @@ import {
     postHasVideoMedia,
     resolvePostPlaybackUri,
 } from './postMedia';
-import { getFeedScrollBusy } from './feedScrollBusyNative';
-import { convertToProxyURL } from './videoCacheProxyNative';
 
 /** First ~1.5–2MB of each upcoming MP4 — enough for Instant Start without hogging bandwidth. */
 export const FEED_VIDEO_PREBUFFER_BYTES = 1.75 * 1024 * 1024;
@@ -140,30 +138,22 @@ export function collectFeedVideoPrefetchUris(posts: Post[]): string[] {
 }
 
 /**
- * Download the first FEED_VIDEO_PREBUFFER_BYTES via the local video-cache proxy
- * so the active player and prebuffer share one LRU disk cache.
+ * Download the first FEED_VIDEO_PREBUFFER_BYTES from the same origin URL
+ * ExoPlayer plays. Do not route through AndroidVideoCache — that URI is not
+ * what the player uses, so warming it cannot help first-play.
  * All network failures are swallowed — never reject into the JS host.
  */
 async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
-    let proxyUri = uri;
+    const originUri = String(uri || '').trim();
     let claimed = false;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     try {
-        try {
-            proxyUri = convertToProxyURL(uri) || uri;
-        } catch {
-            proxyUri = uri;
-        }
-
-        if (prebufferedUris.has(proxyUri) || inFlightUris.has(proxyUri)) return;
-        inFlightUris.add(proxyUri);
+        if (!originUri || prebufferedUris.has(originUri) || inFlightUris.has(originUri)) return;
+        inFlightUris.add(originUri);
         claimed = true;
 
-        if (getFeedScrollBusy()) return;
-
-        // Re-check connectivity right before the Range GET (network can drop mid-batch).
         if (!(await canPrebufferFeedVideo())) return;
 
         timer = setTimeout(() => {
@@ -176,7 +166,7 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
 
         let res: Response;
         try {
-            res = await fetch(proxyUri, {
+            res = await fetch(originUri, {
                 method: 'GET',
                 headers: {
                     Range: `bytes=0-${Math.max(0, Math.floor(maxBytes) - 1)}`,
@@ -201,14 +191,6 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
             if (reader) {
                 let received = 0;
                 while (received < maxBytes) {
-                    if (getFeedScrollBusy()) {
-                        try {
-                            await reader.cancel();
-                        } catch {
-                            /* ignore */
-                        }
-                        break;
-                    }
                     let chunk: { done: boolean; value?: Uint8Array };
                     try {
                         chunk = await reader.read();
@@ -229,7 +211,7 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
             return;
         }
 
-        prebufferedUris.add(proxyUri);
+        prebufferedUris.add(originUri);
         if (prebufferedUris.size > 80) {
             const first = prebufferedUris.values().next().value;
             if (first) prebufferedUris.delete(first);
@@ -238,7 +220,7 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
         // Best-effort only — never surface to the UI thread.
     } finally {
         if (timer) clearTimeout(timer);
-        if (claimed) inFlightUris.delete(proxyUri);
+        if (claimed) inFlightUris.delete(originUri);
     }
 }
 
@@ -251,10 +233,6 @@ async function runLimited(
     const runWorker = async () => {
         while (index < uris.length) {
             try {
-                if (getFeedScrollBusy()) {
-                    await new Promise((r) => setTimeout(r, 100));
-                    continue;
-                }
                 const next = uris[index];
                 index += 1;
                 if (!next) break;
@@ -277,8 +255,8 @@ async function runLimited(
 }
 
 /**
- * Pre-buffer the first 1–2MB of upcoming feed videos through the proxy cache.
- * Caller must invoke inside InteractionManager.runAfterInteractions.
+ * Pre-buffer the first 1–2MB of upcoming feed videos from the origin URL.
+ * Safe to call while scrolling so the next cell is warm before it is active.
  * No-ops when offline or (by default) on cellular.
  */
 export async function prebufferFeedVideos(uris: string[]): Promise<void> {

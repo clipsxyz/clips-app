@@ -192,6 +192,8 @@ type Props = {
     keyboardBlurBehavior?: BottomSheetModalProps['keyboardBlurBehavior'];
     android_keyboardInputMode?: BottomSheetModalProps['android_keyboardInputMode'];
     enableDynamicSizing?: boolean;
+    animatedIndex?: BottomSheetModalProps['animatedIndex'];
+    animatedPosition?: BottomSheetModalProps['animatedPosition'];
 };
 
 /**
@@ -212,6 +214,8 @@ export default function GazetteerBottomSheetModal({
     keyboardBlurBehavior,
     android_keyboardInputMode,
     enableDynamicSizing = false,
+    animatedIndex,
+    animatedPosition,
 }: Props) {
     const ref = useRef<BottomSheetModal>(null);
     const insets = useSafeAreaInsets();
@@ -259,6 +263,8 @@ export default function GazetteerBottomSheetModal({
             keyboardBehavior={keyboardBehavior}
             keyboardBlurBehavior={keyboardBlurBehavior}
             android_keyboardInputMode={android_keyboardInputMode}
+            animatedIndex={animatedIndex}
+            animatedPosition={animatedPosition}
             bottomInset={Math.max(insets.bottom, 16)}
             containerStyle={[styles.container, { marginHorizontal: horizontalInset }]}
         >
