@@ -571,7 +571,7 @@ export default function SearchPage() {
     };
 
     return (
-        <div className="min-h-full bg-black">
+        <div className="min-h-full bg-[#151D28]">
             <div className="mx-auto w-full max-w-md px-4 pb-6 space-y-3">
 
             {/* Header */}
@@ -729,7 +729,7 @@ export default function SearchPage() {
             </div>
 
             {/* Outer card */}
-            <div className="mt-1 rounded-3xl bg-[#050505] border border-[#181818] shadow-[0_18px_60px_rgba(0,0,0,0.85)] overflow-hidden">
+            <div className="mt-1 rounded-3xl bg-[#151D28] border border-[#181818] shadow-[0_18px_60px_rgba(0,0,0,0.85)] overflow-hidden">
 
             {/* Empty query states: saved + recent searches */}
             {!query && (
@@ -809,7 +809,7 @@ export default function SearchPage() {
 
             {/* Popular landmarks when Landmark mode is active */}
             {searchMode === 'landmarks' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#050505]">
+                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#151D28]">
                     <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
                             Popular landmarks
@@ -847,7 +847,7 @@ export default function SearchPage() {
 
             {/* Popular venues when Venue mode is active */}
             {searchMode === 'venues' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#050505]">
+                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#151D28]">
                     <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
                             Popular venues

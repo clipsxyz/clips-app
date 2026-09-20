@@ -470,7 +470,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
 
     return (
         <>
-        <GazetteerScreenShell ambient={false} edges={['top']} contentStyle={styles.shell}>
+        <GazetteerScreenShell ambient={false} edges={['top']} style={styles.shell} contentStyle={styles.shell}>
             <View style={styles.header}>
                 <View style={styles.headerTop}>
                     <TouchableOpacity
@@ -875,7 +875,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
     shell: {
-        backgroundColor: '#000',
+        backgroundColor: '#151D28',
     },
     header: {
         paddingHorizontal: ox(16),
@@ -1068,7 +1068,7 @@ const styles = StyleSheet.create({
     },
     historyCard: {
         borderRadius: ox(24),
-        backgroundColor: '#050505',
+        backgroundColor: '#151D28',
         borderWidth: 1,
         borderColor: '#181818',
         paddingHorizontal: ox(12),
@@ -1192,7 +1192,7 @@ const styles = StyleSheet.create({
     },
     usersCard: {
         borderRadius: ox(24),
-        backgroundColor: '#050505',
+        backgroundColor: '#151D28',
         borderWidth: 1,
         borderColor: '#181818',
         padding: ox(12),
