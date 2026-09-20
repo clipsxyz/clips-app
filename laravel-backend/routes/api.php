@@ -331,6 +331,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::get('/', [NotificationController::class, 'index']);
         Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
         Route::post('/{id}/read', [NotificationController::class, 'markRead']);
+        Route::delete('/{id}', [NotificationController::class, 'destroy']);
         Route::post('/mark-all-read', [NotificationController::class, 'markAllRead']);
         // FCM token and preferences routes
         Route::post('/fcm-token', [NotificationController::class, 'saveFCMToken']);

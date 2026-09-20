@@ -1742,8 +1742,11 @@ export default function StoriesPage() {
         );
     }
 
-    // Feed rail → Stories: popping Stories icon (share-sheet style) while stories load (~2.6s min).
-    if (showStories24HoldScreen) {
+    // Feed rail / profile “View stories”: popping Stories icon while stories load.
+    if (
+        showStories24HoldScreen ||
+        (openUserHandle && !stories24OpenFromFeedRail && (loading || autoOpeningStory))
+    ) {
         return (
             <div
                 className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
@@ -1756,23 +1759,6 @@ export default function StoriesPage() {
                     <StoriesPopIcon size={80} />
                     <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>
                     <p className="mt-1 text-[11px] text-white/35">Stories 24</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (loading && openUserHandle && !stories24OpenFromFeedRail) {
-        return (
-            <div
-                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
-                role="status"
-                aria-live="polite"
-                aria-label="Opening story"
-            >
-                <DiscoverAmbientCanvas variant="passport" />
-                <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
-                    <div className="w-10 h-10 border-2 border-[#3d9b8f] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                    <p className="text-sm font-medium text-white/70">Opening story...</p>
                 </div>
             </div>
         );
@@ -4598,13 +4584,20 @@ export default function StoriesPage() {
         );
     }
 
-    {/* Non–feed-rail opens: show spinner while auto-open / closing. Feed rail uses plain black above (no second loader). */}
+    {/* Non–feed-rail opens: keep the Stories 24 splash until the viewer is up. */}
     if (openUserHandle && (autoOpeningStory || !viewingStories) && !stories24OpenFromFeedRail) {
         return (
-            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-10 h-10 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                    <p className="text-sm text-gray-300">{autoOpeningStory ? 'Opening story...' : 'Closing story...'}</p>
+            <div
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
+                role="status"
+                aria-live="polite"
+                aria-label="Opening stories"
+            >
+                <DiscoverAmbientCanvas variant="passport" />
+                <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
+                    <StoriesPopIcon size={80} />
+                    <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>
+                    <p className="mt-1 text-[11px] text-white/35">Stories 24</p>
                 </div>
             </div>
         );

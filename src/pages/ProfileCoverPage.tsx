@@ -95,7 +95,7 @@ export default function ProfileCoverPage() {
   }, [saveCoverUrl]);
 
   return (
-    <div className="min-h-screen bg-[#030712] text-white">
+    <div className="min-h-screen bg-[#151D28] text-white">
       <div className="sticky top-0 z-20 border-b border-white/10 bg-black/75 backdrop-blur-md">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
           <button

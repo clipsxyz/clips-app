@@ -16,7 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
 import { getUnreadNotificationCount } from './src/api/notifications';
-import { queryClient, queryKeys } from './src/api/queryClient';
+import { queryClient } from './src/api/queryClient';
 import {
   HomeTabStack,
   BoostTabStack,
@@ -104,7 +104,7 @@ class AppErrorBoundary extends React.Component<
 }
 
 const TAB_BAR_STYLE = {
-  backgroundColor: '#030712',
+  backgroundColor: '#151D28',
   borderTopColor: 'rgba(255, 255, 255, 0.1)',
   borderTopWidth: 1,
 } as const;
@@ -127,14 +127,8 @@ function MainTabs() {
     const refresh = async () => {
       try {
         const [notificationUnread, messageUnread] = await Promise.all([
-          queryClient.fetchQuery({
-            queryKey: [...queryKeys.unreadBadge(handle), 'notifications'],
-            queryFn: () => getUnreadNotificationCount(handle),
-          }),
-          queryClient.fetchQuery({
-            queryKey: [...queryKeys.unreadBadge(handle), 'messages'],
-            queryFn: () => getUnreadTotal(handle),
-          }),
+          getUnreadNotificationCount(handle),
+          getUnreadTotal(handle),
         ]);
         if (mounted) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
       } catch {
@@ -255,7 +249,10 @@ function App(): React.JSX.Element {
     <AuthProvider>
       <BottomSheetModalProvider>
       <SafeAreaProvider>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <StatusBar
+          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          backgroundColor="#151D28"
+        />
         <UploadProgressToast />
         <NavigationContainer ref={navigationRef}>
           <Stack.Navigator
@@ -398,7 +395,7 @@ function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
-    backgroundColor: '#030712',
+    backgroundColor: '#151D28',
   },
   createTabPlaceholder: {
     flex: 1,

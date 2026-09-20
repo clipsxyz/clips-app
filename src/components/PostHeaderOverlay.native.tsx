@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
+import { FeedHeaderActivePulseDot } from './FeedPageLayout.native';
 
 export type PostCarouselMeta = {
     venue?: string;
@@ -111,31 +112,18 @@ export default function PostHeaderOverlay({
         return () => clearInterval(t);
     }, [items.length, itemsKey]);
 
-    const pulse = useRef(new Animated.Value(1)).current;
-
-    useEffect(() => {
-        const loop = Animated.loop(
-            Animated.sequence([
-                Animated.timing(pulse, {
-                    toValue: 0.35,
-                    duration: 700,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(pulse, {
-                    toValue: 1,
-                    duration: 700,
-                    useNativeDriver: true,
-                }),
-            ]),
-        );
-        loop.start();
-        return () => loop.stop();
-    }, [pulse]);
-
     const active = items[index] ?? items[0] ?? null;
     if (!active && !onOverflowPress) return null;
 
     const canPress = Boolean(onLocationPress && active?.feedFilter);
+    const iconName =
+        active?.key === 'time'
+            ? 'time-outline'
+            : active?.key === 'venue'
+              ? 'home-outline'
+              : active?.key === 'landmark'
+                ? 'flag-outline'
+                : 'location-outline';
 
     return (
         <View style={styles.row} pointerEvents="box-none">
@@ -154,25 +142,8 @@ export default function PostHeaderOverlay({
                         canPress ? `Switch feed to ${active.label}` : active.label
                     }
                 >
-                    <View style={styles.liveDotWrap}>
-                        <Animated.View
-                            style={[
-                                styles.liveDotHalo,
-                                {
-                                    opacity: pulse,
-                                    transform: [
-                                        {
-                                            scale: pulse.interpolate({
-                                                inputRange: [0.35, 1],
-                                                outputRange: [1.8, 1],
-                                            }),
-                                        },
-                                    ],
-                                },
-                            ]}
-                        />
-                        <Animated.View style={[styles.liveDot, { opacity: pulse }]} />
-                    </View>
+                    <FeedHeaderActivePulseDot color="#EF4444" />
+                    <Icon name={iconName} size={ox(12)} color="#FFFFFF" />
                     <Text style={styles.locationText} numberOfLines={1}>
                         {active.label.toUpperCase()}
                     </Text>
@@ -225,25 +196,6 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(18, 24, 27, 0.85)',
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: 'rgba(255,255,255,0.22)',
-    },
-    liveDotWrap: {
-        width: ox(12),
-        height: ox(12),
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    liveDotHalo: {
-        position: 'absolute',
-        width: ox(10),
-        height: ox(10),
-        borderRadius: ox(999),
-        backgroundColor: 'rgba(0, 242, 254, 0.45)',
-    },
-    liveDot: {
-        width: ox(8),
-        height: ox(8),
-        borderRadius: ox(999),
-        backgroundColor: '#00f2fe',
     },
     locationText: {
         flexShrink: 1,

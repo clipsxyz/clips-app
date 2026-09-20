@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
     },
     avatarSlot: {
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#151D28',
         borderRadius: 12,
         overflow: 'hidden',
     },

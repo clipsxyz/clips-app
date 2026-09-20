@@ -25,7 +25,7 @@ import {
   buildSuggestedFollowerFromPosts,
   type SuggestedFollowerSuggestion,
 } from './utils/suggestedFollowerFeed';
-import { resolveStories24OpenTarget } from './utils/stories24Rail';
+import { resolveStories24OpenTarget, stories24RailHasUnviewed } from './utils/stories24Rail';
 import {
   getFeedNewPostsPollMs,
   getHeaderCountsPollMs,
@@ -49,7 +49,7 @@ import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addC
 import { isMockMode } from './api/apiMode';
 import { fetchPostLikers, toggleFollowFromLikesSheet, type PostLiker } from './api/postLikers';
 import { updatePost, checkFollowsMe } from './api/client';
-import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
+import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups, isStoryUnviewed } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { loadFeed, saveFeed, clearFeed } from './utils/feedCache';
 import { MOCK_FEED_VIDEO_REMOTE_FALLBACK, resolveMockFeedVideoUrl } from './constants/mockFeedVideos';
@@ -160,12 +160,16 @@ function BottomNav({ onCreateClick, onInboxClick }: { onCreateClick: () => void;
     };
     window.addEventListener('notificationsUpdated', onUpdate as EventListener);
     window.addEventListener('notificationCreated', onUpdate as EventListener);
+    window.addEventListener('conversationUpdated', onUpdate as EventListener);
+    window.addEventListener('inboxUnreadChanged', onUpdate as EventListener);
     window.addEventListener('focus', onUpdate as EventListener);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener('notificationsUpdated', onUpdate as EventListener);
       window.removeEventListener('notificationCreated', onUpdate as EventListener);
+      window.removeEventListener('conversationUpdated', onUpdate as EventListener);
+      window.removeEventListener('inboxUnreadChanged', onUpdate as EventListener);
       window.removeEventListener('focus', onUpdate as EventListener);
     };
   }, [user?.handle]);
@@ -394,7 +398,7 @@ export default function App() {
               ? 'h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col pb-[calc(56px+theme(spacing.safe))]'
               : 'min-h-screen pb-[calc(56px+theme(spacing.safe))]'
         }`}
-        style={{ backgroundColor: '#030712' }}
+        style={{ backgroundColor: '#151D28' }}
       >
         {loc.pathname !== '/login'
           && loc.pathname !== '/feed'
@@ -510,6 +514,7 @@ function PillTabs(props: {
   userNational?: string;
   clipsCount?: number;
   onOpenStories24?: () => void;
+  stories24HasUnviewed?: boolean;
 }) {
   type HeaderSuggestion = {
     name: string;
@@ -632,17 +637,7 @@ function PillTabs(props: {
   const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
   const activeLabel = props.customLocationLabel || props.customLocation || (props.active === local ? 'Nearby' : props.active);
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-  const activeHeaderDotClass = props.customLocation
-    ? 'bg-red-500'
-    : props.active === local
-    ? 'bg-[#34D399]'
-    : props.active === regional
-      ? 'bg-[#7A8AF0]'
-      : props.active === national
-        ? 'bg-[#93C5FD]'
-        : props.active === 'Following'
-          ? 'bg-pink-400'
-          : 'bg-white/85';
+  const activeHeaderDotClass = 'bg-red-500';
 
   React.useEffect(() => {
     const timeout = window.setTimeout(() => setShowGazetteerTitle(false), 2000);
@@ -908,7 +903,7 @@ function PillTabs(props: {
             onClick={() => props.onOpenStories24?.()}
             className="inline-flex flex-col items-center justify-center gap-1 shrink-0 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
           >
-            <Stories24HeaderIcon size={32} />
+            <Stories24HeaderIcon size={32} hasUnviewedStory={props.stories24HasUnviewed} />
             <span className="text-[10px] leading-none font-medium text-white">Stories</span>
           </button>
 
@@ -1411,6 +1406,7 @@ function PostHeader({
   const navigate = useNavigate();
   const [hasStory, setHasStory] = React.useState(false);
   const [hasAnyStory, setHasAnyStory] = React.useState(false);
+  const [hasUnviewedStory, setHasUnviewedStory] = React.useState(false);
   const titleId = `post-title-${post.id}`;
   const userId = getStableUserId(user);
   const isReclippedPost =
@@ -1432,17 +1428,14 @@ function PostHeader({
   React.useEffect(() => {
     async function checkStory() {
       try {
-        let result;
         const anyStory = await userHasStoriesByHandle(profileTargetHandle);
         setHasAnyStory(anyStory);
+        setHasStory(anyStory);
         if (isCurrentUser) {
-          // For current user, check if they have any stories at all
-          result = anyStory;
+          setHasUnviewedStory(false);
         } else {
-          // For other users, check if current user has unviewed stories
-          result = await userHasUnviewedStoriesByHandle(profileTargetHandle);
+          setHasUnviewedStory(await userHasUnviewedStoriesByHandle(profileTargetHandle));
         }
-        setHasStory(result);
       } catch (error) {
         console.error('Error checking story:', error);
       }
@@ -1457,10 +1450,13 @@ function PostHeader({
       if (event.detail?.userHandle === profileTargetHandle) {
         // Re-check if user still has unviewed stories
         userHasUnviewedStoriesByHandle(profileTargetHandle)
-          .then(setHasStory)
+          .then((unviewed) => setHasUnviewedStory(!isCurrentUser && unviewed))
           .catch(console.error);
         userHasStoriesByHandle(profileTargetHandle)
-          .then(setHasAnyStory)
+          .then((anyStory) => {
+            setHasAnyStory(anyStory);
+            setHasStory(anyStory);
+          })
           .catch(console.error);
       }
     }
@@ -1468,11 +1464,14 @@ function PostHeader({
     function handleStoryCreated(event: CustomEvent) {
       // Re-check story status when a new story is created
       if (event.detail?.userHandle === profileTargetHandle) {
-        userHasStoriesByHandle(profileTargetHandle).then(setHasAnyStory).catch(console.error);
+        userHasStoriesByHandle(profileTargetHandle).then((anyStory) => {
+          setHasAnyStory(anyStory);
+          setHasStory(anyStory);
+        }).catch(console.error);
         if (isCurrentUser) {
-          userHasStoriesByHandle(profileTargetHandle).then(setHasStory).catch(console.error);
+          setHasUnviewedStory(false);
         } else {
-          userHasUnviewedStoriesByHandle(profileTargetHandle).then(setHasStory).catch(console.error);
+          userHasUnviewedStoriesByHandle(profileTargetHandle).then(setHasUnviewedStory).catch(console.error);
         }
       }
     }
@@ -1624,6 +1623,7 @@ function PostHeader({
           name={post.userHandle.split("@")[0]}
           size="sm"
           hasStory={hasStory}
+          hasUnviewedStory={hasUnviewedStory}
           onClick={(e) => {
             e?.stopPropagation();
             e?.preventDefault();
@@ -1912,6 +1912,7 @@ function PostHeader({
               name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
               size="sm"
               hasStory={hasStory}
+          hasUnviewedStory={hasUnviewedStory}
               onClick={(e) => {
                 e?.stopPropagation();
                 e?.preventDefault();
@@ -4460,7 +4461,7 @@ function EngagementBar({
 
   if (variant === 'boost') {
     return (
-      <div className="px-3 pb-3 pt-2 border-t min-w-0" style={{ borderColor: '#030712' }}>
+      <div className="px-3 pb-3 pt-2 border-t min-w-0" style={{ borderColor: '#151D28' }}>
         <div className="flex items-center gap-3">
           {showBoostButton && onBoost && (
             <BoostButton postId={post.id} onBoost={onBoost} stretch knownBoosted={knownBoosted} />
@@ -4491,7 +4492,7 @@ function EngagementBar({
 
   return (
     <>
-      <div className="px-3 pb-2.5 pt-2 border-t min-w-0" style={{ borderColor: '#030712' }}>
+      <div className="px-3 pb-2.5 pt-2 border-t min-w-0" style={{ borderColor: '#151D28' }}>
         <div className="flex items-center justify-between min-w-0">
         {/* Left group: Like, Comment, Share to Stories, Reclip, Save */}
         <div className={`flex items-center min-w-0 flex-shrink ${rowGap}`}>
@@ -4639,6 +4640,7 @@ function EngagementBar({
             <div className="flex items-center justify-center mb-3 flex-shrink-0">
               <div className="w-10 h-1 rounded-full bg-white/30" />
             </div>
+            <div className="-mx-4 px-4 mb-2 flex-shrink-0 bg-[#151D28]">
             <div className="flex items-center justify-between mb-3 flex-shrink-0">
               <span className="text-xs uppercase tracking-[0.16em] text-white/55">
                 Likes and plays
@@ -4652,17 +4654,11 @@ function EngagementBar({
               </button>
             </div>
 
-            <div className="flex items-center justify-between mb-4 text-sm text-[#e8eef2] flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <FiThumbsUp className="w-4 h-4 text-pink-400" />
-                <span className="text-xs text-white/55">Likes</span>
-                <span className="font-semibold text-sm">{sheetLikes.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <FiEye className="w-4 h-4 text-blue-400" />
-                <span className="text-xs text-white/55">Views</span>
-                <span className="font-semibold text-sm">{sheetViews.toLocaleString()}</span>
-              </div>
+            <div className="flex items-center justify-center gap-2.5 mb-4 text-[#e8eef2] flex-shrink-0">
+              <FiEye className="w-6 h-6 text-white" />
+              <span className="font-bold text-2xl leading-none">{sheetViews.toLocaleString()}</span>
+              <span className="text-base font-semibold text-white/55">Views</span>
+            </div>
             </div>
 
             <div className="border-t border-white/10 -mx-4 mb-2 flex-shrink-0" />
@@ -5250,7 +5246,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           ? 'w-full overflow-hidden aspect-square rounded-xl mb-0'
           : 'overflow-visible border-b mb-2'
       }`}
-      style={{ backgroundColor: '#030712' }}
+      style={{ backgroundColor: '#151D28' }}
     >
       {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
       {/* Text-only: author chrome sits in a narrow column beside the bubble (see below). */}
@@ -5760,7 +5756,7 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
   };
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-4 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-4 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#151D28' }}>
       {/* Ad Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -5807,6 +5803,7 @@ type Stories24RailItem = {
   subtitle?: string;
   thumb?: string;
   previewVideoUrl?: string;
+  hasUnviewed?: boolean;
 };
 
 const STORIES24_RAIL_RETURN_KEY = 'clips:stories24RailReturn';
@@ -8316,6 +8313,7 @@ function FeedPageWrapper() {
             subtitle,
             thumb,
             previewVideoUrl: latestMediaType === 'video' ? latestMediaUrl : undefined,
+            hasUnviewed: sortedStories.some((story) => isStoryUnviewed(story)),
           });
           if (nextItems.length >= 12) break;
         }
@@ -8761,6 +8759,7 @@ function FeedPageWrapper() {
           }).length;
         })()}
         onOpenStories24={openStories24FromHeader}
+        stories24HasUnviewed={stories24RailHasUnviewed(stories24Items)}
       />
       <div className="h-4" />
 
@@ -10077,7 +10076,7 @@ function BoostPageWrapper() {
   return (
     <div className="flex flex-col min-h-0 flex-1 pb-2">
       {/* Pinned header â€“ posts scroll underneath (z-30 above card overlays) */}
-      <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-[#030712] border-b border-gray-800/50 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
+      <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-[#151D28] border-b border-gray-800/50 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people.</p>
         <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">

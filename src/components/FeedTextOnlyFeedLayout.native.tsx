@@ -17,6 +17,7 @@ type Props = {
     onOpenDM?: (handle: string, postId: string) => void;
     onProfileMenuPress?: () => void;
     onOverflowPress?: () => void;
+    onHasStoryChange?: (hasStory: boolean) => void;
     onLocationPress?: (
         location: string,
         filterType?: 'location' | 'venue' | 'landmark',
@@ -38,6 +39,7 @@ export default function FeedTextOnlyFeedLayout({
     onOpenDM,
     onProfileMenuPress,
     onOverflowPress,
+    onHasStoryChange,
     onLocationPress,
     onDoubleLike,
     onRegisterDmAnchor,
@@ -67,6 +69,7 @@ export default function FeedTextOnlyFeedLayout({
                     onOpenDM={onOpenDM}
                     onProfileMenuPress={onProfileMenuPress}
                     onOverflowPress={onOverflowPress}
+                    onHasStoryChange={onHasStoryChange}
                     onLocationPress={onLocationPress}
                     onRegisterDmAnchor={onRegisterDmAnchor}
                     menuAnchorRef={menuAnchorRef}

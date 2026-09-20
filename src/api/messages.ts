@@ -70,6 +70,7 @@ const conversations = new Map<ConversationId, ChatMessage[]>();
 const unreadByHandle = new Map<string, number>();
 // UI-level unread overrides per thread: `${user}::${other}` => forced unread count
 const unreadOverrideByThread = new Map<string, number>();
+const hiddenConversationKeys = new Set<string>();
 // Track per-thread last read timestamps per user: `${user}::${other}` => timestamp
 const lastReadByThread = new Map<string, number>();
 // Track pinned conversations per user: userHandle => Set<otherHandle>
@@ -510,7 +511,28 @@ export async function getUnreadTotal(handle: string): Promise<number> {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
             const items = res?.items ?? [];
-            return items.reduce((s: number, i: { unread_count?: number }) => s + (Number(i.unread_count) || 0), 0);
+            return items.reduce((s: number, i: {
+                type?: string;
+                unread_count?: number;
+                chat_group_id?: string;
+                other_user?: { handle?: string };
+            }) => {
+                const apiUnread = Number(i.unread_count) || 0;
+                if (i.type === 'group') {
+                    const groupId = String(i.chat_group_id || '').trim();
+                    if (groupId && hiddenConversationKeys.has(`${handle}::group:${groupId}`)) return s;
+                    const override = groupId
+                        ? unreadOverrideByThread.get(`${handle}::group:${groupId}`)
+                        : undefined;
+                    return s + (override !== undefined ? override : apiUnread);
+                }
+                const other = String(i.other_user?.handle || '').trim();
+                if (other && hiddenConversationKeys.has(`${handle}::${other}`)) return s;
+                const override = other
+                    ? unreadOverrideByThread.get(`${handle}::${other}`)
+                    : undefined;
+                return s + (override !== undefined ? override : apiUnread);
+            }, 0);
         } catch (e: any) {
             if (e?.name === 'ConnectionRefused' || e?.message === 'CONNECTION_REFUSED') throw e;
             if (e?.status === 401) return unreadByHandle.get(handle) || 0;
@@ -520,12 +542,41 @@ export async function getUnreadTotal(handle: string): Promise<number> {
     return unreadByHandle.get(handle) || 0;
 }
 
+export function hideConversationFromInbox(
+    selfHandle: string,
+    opts: { otherHandle?: string; chatGroupId?: string },
+): void {
+    const self = String(selfHandle || '').trim();
+    if (!self) return;
+    if (opts.chatGroupId) {
+        const groupKey = `${self}::group:${opts.chatGroupId}`;
+        hiddenConversationKeys.add(groupKey);
+        unreadOverrideByThread.set(groupKey, 0);
+    }
+    if (opts.otherHandle) {
+        const key = `${self}::${opts.otherHandle}`;
+        hiddenConversationKeys.add(key);
+        unreadOverrideByThread.set(key, 0);
+    }
+    emitInboxUnreadForHandle(self);
+}
+
+function emitInboxUnreadForHandle(selfHandle: string, unread?: number): void {
+    dispatchBrowserEvent('conversationUpdated');
+    dispatchBrowserEvent('inboxUnreadChanged', {
+        handle: selfHandle,
+        ...(unread != null ? { unread } : {}),
+    });
+}
+
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
     unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
+    emitInboxUnreadForHandle(selfHandle);
     if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             await apiClient.markConversationRead(otherHandle);
+            emitInboxUnreadForHandle(selfHandle);
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel markConversationRead failed:', e);
@@ -536,8 +587,9 @@ export async function markConversationRead(selfHandle: string, otherHandle: stri
     lastReadByThread.set(key, Date.now());
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
     const { emitInboxUnreadChanged } = await import('../services/socketio');
-    emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
-    dispatchBrowserEvent('inboxUnreadChanged', { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 });
+    const unread = unreadByHandle.get(selfHandle) || 0;
+    emitInboxUnreadChanged(selfHandle, unread);
+    emitInboxUnreadForHandle(selfHandle, unread);
 }
 
 export async function markConversationUnread(selfHandle: string, otherHandle: string): Promise<void> {
@@ -745,6 +797,8 @@ export async function appendGroupChatMessage(
 }
 
 export async function markGroupConversationReadById(groupId: string, viewerHandle?: string): Promise<void> {
+    const v = viewerHandle?.trim();
+    if (v) unreadOverrideByThread.set(`${v}::group:${groupId}`, 0);
     if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
@@ -753,12 +807,14 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel markGroupConversationRead failed:', e);
         }
+        if (viewerHandle) emitInboxUnreadForHandle(viewerHandle);
+        else dispatchBrowserEvent('conversationUpdated');
         return;
     }
     const msgs = mockGroupMessageLists.get(groupId) ?? [];
     const t = msgs.length ? Math.max(...msgs.map((m) => m.timestamp)) : Date.now();
-    const v = viewerHandle?.trim();
-    if (v) mockGroupLastReadByUser.set(`${v}::${groupId}`, t);
+    const viewerHandleClean = viewerHandle?.trim();
+    if (viewerHandleClean) mockGroupLastReadByUser.set(`${viewerHandleClean}::${groupId}`, t);
     dispatchBrowserEvent('conversationUpdated');
 }
 
@@ -768,17 +824,15 @@ export async function listConversations(forHandle: string): Promise<Conversation
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
             const items = res?.items ?? [];
-            const { userHasUnviewedStoriesByHandle } = await import('./stories');
-            const summaries: ConversationSummary[] = await Promise.all(
-                items.map(
-                    async (row: {
-                        type?: string;
-                        chat_group_id?: string;
-                        group?: { id: string; name: string; avatar_url?: string | null; avatarUrl?: string | null; creator_id?: string };
-                        other_user?: { handle: string };
-                        latest_message?: any;
-                        unread_count?: number;
-                    }) => {
+            const summaries: ConversationSummary[] = items.map(
+                (row: {
+                    type?: string;
+                    chat_group_id?: string;
+                    group?: { id: string; name: string; avatar_url?: string | null; avatarUrl?: string | null; creator_id?: string };
+                    other_user?: { handle: string };
+                    latest_message?: any;
+                    unread_count?: number;
+                }) => {
                         if (row.type === 'group' && row.chat_group_id) {
                             const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
                             const unread = Number(row.unread_count) || 0;
@@ -789,7 +843,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
                                 groupAvatarUrl: row.group?.avatar_url || row.group?.avatarUrl || null,
                                 otherHandle: '',
                                 lastMessage,
-                                unread,
+                                unread: unreadOverrideByThread.get(`${forHandle}::group:${row.chat_group_id}`) ?? unread,
                                 isPinned: false,
                                 isRequest: false,
                                 hasUnviewedStories: false,
@@ -799,7 +853,6 @@ export async function listConversations(forHandle: string): Promise<Conversation
                         const otherHandle = row.other_user?.handle ?? '';
                         const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
                         const unread = Number(row.unread_count) || 0;
-                        const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
                         return {
                             kind: 'dm' as const,
                             otherHandle,
@@ -807,13 +860,19 @@ export async function listConversations(forHandle: string): Promise<Conversation
                             unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? unread,
                             isPinned: false,
                             isRequest: false,
-                            hasUnviewedStories,
+                            hasUnviewedStories: false,
                             isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
                         };
-                    },
-                ),
+                },
             );
-            return summaries.sort((a, b) => {
+            return summaries
+                .filter((row) => {
+                    if (row.kind === 'group' && row.chatGroupId) {
+                        return !hiddenConversationKeys.has(`${forHandle}::group:${row.chatGroupId}`);
+                    }
+                    return !hiddenConversationKeys.has(`${forHandle}::${row.otherHandle}`);
+                })
+                .sort((a, b) => {
                 const ta = a.lastMessage?.timestamp ?? 0;
                 const tb = b.lastMessage?.timestamp ?? 0;
                 return tb - ta;
@@ -848,26 +907,15 @@ export async function listConversations(forHandle: string): Promise<Conversation
         summaries.set(other, { last: betterLast, unread, isRequest });
     });
     
-    // Check for unviewed stories and follow status for each conversation
-    const { userHasUnviewedStoriesByHandle } = await import('./stories');
-    const { getFollowedUsers } = await import('./posts');
-    
-    // Get current user's followed users (need userId - will be passed from component)
-    // For now, we'll check follow status in the component where we have userId
-    const allConversations = await Promise.all(
-        Array.from(summaries.entries()).map(async ([otherHandle, v]) => {
-            const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
-            return {
-                otherHandle,
-                lastMessage: v.last,
-                unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? v.unread,
-                isPinned: pinned.has(otherHandle),
-                isRequest: v.isRequest || false,
-                hasUnviewedStories,
-                isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
-            };
-        })
-    );
+    const allConversations = Array.from(summaries.entries()).map(([otherHandle, v]) => ({
+            otherHandle,
+            lastMessage: v.last,
+            unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? v.unread,
+            isPinned: pinned.has(otherHandle),
+            isRequest: v.isRequest || false,
+            hasUnviewedStories: false,
+            isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
+        }));
     
     const mockGroupRows = buildMockGroupConversationSummaries(forHandle);
     const merged = [...mockGroupRows, ...allConversations];
@@ -999,8 +1047,7 @@ export async function isUserBlocked(userHandle: string, otherHandle: string): Pr
 export async function deleteConversation(userHandle: string, otherHandle: string): Promise<void> {
     const id = getConversationId(userHandle, otherHandle);
     conversations.delete(id);
-    unreadOverrideByThread.delete(`${userHandle}::${otherHandle}`);
-    unreadOverrideByThread.delete(`${otherHandle}::${userHandle}`);
+    hideConversationFromInbox(userHandle, { otherHandle });
     
     // Remove from pinned if pinned
     const pinned = pinnedConversations.get(userHandle);

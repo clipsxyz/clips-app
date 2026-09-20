@@ -237,13 +237,13 @@ export default function TopBar({ activeTab: _activeTab, onLocationChange }: TopB
                   {/* Overlay that covers border initially, then rotates to reveal it */}
                   <div
                     ref={localBorderOverlayRef}
-                    className="absolute inset-0 bg-[#030712] rounded-lg"
+                    className="absolute inset-0 bg-[#151D28] rounded-lg"
                     style={{
                       maskImage: 'conic-gradient(from 0deg, black 360deg)',
                       WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
                     }}
                   />
-                  <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
+                  <div className="w-full h-full rounded-lg bg-[#151D28] relative z-10" />
                 </div>
                 {/* Content */}
                 <span className="relative z-10">{user?.local || 'Local'}</span>

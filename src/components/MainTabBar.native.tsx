@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingHorizontal: 8,
     paddingTop: 6,
-    backgroundColor: '#030712',
+    backgroundColor: '#151D28',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
     overflow: 'visible',
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: '#030712',
+    borderColor: '#151D28',
     zIndex: 5,
   },
   badgeText: {

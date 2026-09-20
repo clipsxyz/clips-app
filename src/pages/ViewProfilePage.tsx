@@ -2877,9 +2877,9 @@ export default function ViewProfilePage() {
 
             {/* Followers / Following Modal */}
             {showConnectionsModal && (
-                <div className="fixed inset-0 z-[70] bg-black/95 text-white">
+                <div className="fixed inset-0 z-[70] bg-[#151D28] text-white">
                     <div className="h-full w-full max-w-2xl mx-auto flex flex-col">
-                        <div className={`sticky top-0 z-10 border-b border-white/10 bg-black/90 backdrop-blur ${compactConnectionsPhone ? 'px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2.5' : 'px-4 pt-[max(10px,env(safe-area-inset-top))] pb-3'}`}>
+                        <div className={`sticky top-0 z-10 border-b border-white/10 bg-[#151D28] ${compactConnectionsPhone ? 'px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2.5' : 'px-4 pt-[max(10px,env(safe-area-inset-top))] pb-3'}`}>
                             <div className="flex items-center justify-between gap-3">
                                 <h2 className={`${compactConnectionsPhone ? 'text-base' : 'text-lg'} font-semibold`}>
                                     {connectionsScope === 'mutual'
@@ -3215,7 +3215,7 @@ export default function ViewProfilePage() {
 
             {/* Post viewer: vertical snap-scrolling feed through all grid posts (Instagram-style) */}
             {selectedPost && filteredPosts.length > 0 && (
-                <div className="fixed inset-0 z-50 flex flex-col bg-[#030712] isolate">
+                <div className="fixed inset-0 z-50 flex flex-col bg-[#151D28] isolate">
                     {/*
                       FeedCard PostHeader uses z-20–z-50 (avatars/menus up to z-[200]). Keep chrome above so the X stays tappable while scrolling.
                     */}

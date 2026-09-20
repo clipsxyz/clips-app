@@ -1,7 +1,6 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
 import FeedScreen from '../screens/FeedScreen';
 import BoostScreen from '../screens/BoostScreen';
 import SearchScreen from '../screens/SearchScreen';
@@ -12,7 +11,8 @@ const Stack = createNativeStackNavigator();
 
 const stackScreenOptions = {
     headerShown: false,
-    contentStyle: { backgroundColor: GAZETTEER_ABYSS },
+    contentStyle: { backgroundColor: '#151D28' },
+    statusBarBackgroundColor: '#151D28',
     freezeOnBlur: true,
 } as const;
 
@@ -89,7 +89,7 @@ export const InboxTabStack = createMainTabStack('InboxMain', InboxScreen);
 const styles = StyleSheet.create({
     homeTabRoot: {
         flex: 1,
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         overflow: 'hidden',
     },
     feedErrorRoot: {

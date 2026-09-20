@@ -279,7 +279,7 @@ export default function ViewProfileConnectionsModal({
 const styles = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
     },
     header: {
         flexDirection: 'row',

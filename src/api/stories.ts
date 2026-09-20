@@ -27,6 +27,34 @@ export function invalidateStoryPresenceCache(userHandle?: string): void {
     }
 }
 
+/** Session-local viewed ids so avatar rings drop immediately (API/cache can lag). */
+const locallyViewedStoryIds = new Set<string>();
+
+export function rememberStoryViewed(storyId: string): void {
+    const id = String(storyId || '').trim();
+    if (!id) return;
+    locallyViewedStoryIds.add(id);
+    for (const [key, entry] of storyGroupCache) {
+        const group = entry.group;
+        if (!group?.stories?.some((s) => String(s.id) === id)) continue;
+        storyGroupCache.set(key, {
+            at: entry.at,
+            group: {
+                ...group,
+                stories: group.stories.map((s) =>
+                    String(s.id) === id ? { ...s, hasViewed: true } : s,
+                ),
+            },
+        });
+    }
+}
+
+export function isStoryUnviewed(story: { id?: string | number; hasViewed?: boolean } | null | undefined): boolean {
+    if (!story) return false;
+    if (story.hasViewed) return false;
+    return !locallyViewedStoryIds.has(String(story.id));
+}
+
 // Mock stories data – tuned to showcase the new Instagram-style story types
 let stories: Story[] = [
     // John – mix of text-only and photo stories
@@ -1298,6 +1326,7 @@ export async function markStoryViewed(
     _userId: string,
     viewerHandle?: string,
 ): Promise<StoryViewMetrics | void> {
+    rememberStoryViewed(storyId);
     const applyMock = (): StoryViewMetrics | void => {
         const story = stories.find((s) => s.id === storyId);
         if (story) {
@@ -1652,7 +1681,7 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string, viewerU
         try {
             const group = await fetchStoryGroupByHandle(target, viewerUserId);
             if (!group) return false;
-            return group.stories.some((s) => !s.hasViewed);
+            return group.stories.some((s) => isStoryUnviewed(s));
         } catch (error) {
             console.warn('userHasUnviewedStoriesByHandle API failed, falling back to mock:', error);
         }
@@ -1665,7 +1694,8 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string, viewerU
     const unviewedStories = stories.filter(s =>
         (s.userHandle || '').trim().toLowerCase() === needle &&
         s.expiresAt > now &&
-        !s.hasViewed
+        !s.hasViewed &&
+        !locallyViewedStoryIds.has(String(s.id))
     );
     return unviewedStories.length > 0;
 }

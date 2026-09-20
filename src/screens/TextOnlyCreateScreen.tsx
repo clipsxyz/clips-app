@@ -37,7 +37,7 @@ import {
 import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
 import { navigateMainTab } from '../navigation/mainTabs';
-import { TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, type TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_ONLY_CANVAS_BG, TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, type TextStoryTemplate } from '../textStoryTemplates';
 import { publishTextStory24 } from '../utils/publishStoryNative';
 import { gradientColorsFromCss } from '../utils/storyTextStyleNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
@@ -57,7 +57,7 @@ function TemplateComposerBackground({
   template?: TextStoryTemplate;
   children: React.ReactNode;
 }) {
-  const background = template?.background || '#0b0b0d';
+  const background = template?.background || TEXT_ONLY_CANVAS_BG;
   const colors = gradientColorsFromCss(background);
   const isGradient = background.includes('gradient');
   if (isGradient && colors.length >= 2) {
@@ -68,7 +68,7 @@ function TemplateComposerBackground({
     );
   }
   return (
-        <View style={[styles.composerSurface, { backgroundColor: colors[0] || '#0b0b0d' }]}>
+        <View style={[styles.composerSurface, { backgroundColor: colors[0] || TEXT_ONLY_CANVAS_BG }]}>
       {children}
     </View>
   );
@@ -209,7 +209,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         fontFamily: activeTemplate.fontFamily,
       };
     }
-    return { color: '#ffffff', size: 'medium' as const, background: '#000000' };
+    return { color: '#ffffff', size: 'medium' as const, background: TEXT_ONLY_CANVAS_BG };
   }, [activeTemplate]);
 
   const handleSaveToDrafts = async () => {
@@ -301,7 +301,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
     showUploadOverlayNative({
       jobId: tempId,
       initialMessage: 'Posting to Gazetteer…',
-      textThumbBackground: previewColors[0] || '#000000',
+      textThumbBackground: previewColors[0] || TEXT_ONLY_CANVAS_BG,
       textThumbLabel: activeTemplate?.name?.charAt(0).toUpperCase() || 'Aa',
     });
     hapticLight();
@@ -668,7 +668,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: TEXT_ONLY_CANVAS_BG,
   },
   flex: { flex: 1 },
   header: {
@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
     paddingBottom: ox(12),
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: TEXT_ONLY_CANVAS_BG,
     overflow: 'visible',
     zIndex: 10,
   },
@@ -866,7 +866,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '85%',
-    backgroundColor: '#000000',
+    backgroundColor: TEXT_ONLY_CANVAS_BG,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 1,
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
   },
   templateSheet: {
     maxHeight: '75%',
-    backgroundColor: '#020617',
+    backgroundColor: TEXT_ONLY_CANVAS_BG,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 1,
@@ -917,7 +917,7 @@ const styles = StyleSheet.create({
     borderRadius: ox(10),
     paddingHorizontal: ox(12),
     paddingVertical: ox(10),
-    backgroundColor: '#000000',
+    backgroundColor: TEXT_ONLY_CANVAS_BG,
   },
   tagSearchInput: {
     flex: 1,

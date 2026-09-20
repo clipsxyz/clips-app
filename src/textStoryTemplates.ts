@@ -13,6 +13,9 @@ export interface TextStoryTemplate {
 export const TEXT_STORY_TEMPLATE_FONT =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
+/** Feed / text-only canvas — same as Gazetteer `#151D28`. */
+export const TEXT_ONLY_CANVAS_BG = '#151D28';
+
 export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
   // Blues, golds & jewel tones — listed first in create template picker
   {
@@ -25,8 +28,8 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
   },
   {
     id: 'text-black',
-    name: 'Black',
-    background: '#0b0b0d',
+    name: 'Canvas',
+    background: TEXT_ONLY_CANVAS_BG,
     textColor: '#ffffff',
     textSize: 'medium',
     fontFamily: TEXT_STORY_TEMPLATE_FONT,
@@ -521,7 +524,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
   },
 ];
 
-/** Feed text-only posts: blue or black only. Stories keep the full template list. */
+/** Feed text-only posts: blue or canvas only. Stories keep the full template list. */
 export const TEXT_ONLY_FEED_TEMPLATE_IDS = ['broadcast-blue', 'text-black'] as const;
 
 export const TEXT_ONLY_FEED_TEMPLATES: TextStoryTemplate[] = TEXT_ONLY_FEED_TEMPLATE_IDS.map(

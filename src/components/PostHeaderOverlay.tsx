@@ -134,9 +134,9 @@ export default function PostHeaderOverlay({
                     disabled={!canPress}
                     aria-label={canPress ? `Switch feed to ${active.label}` : active.label}
                 >
-                    <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center" aria-hidden>
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00f2fe]/40" />
-                        <span className="relative inline-flex h-2 w-2 animate-pulse rounded-full bg-[#00f2fe] shadow-[0_0_8px_rgba(0,242,254,0.85)]" />
+                    <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                        <span className="absolute h-3 w-3 animate-ping rounded-full border-[1.5px] border-[#EF4444] bg-transparent" />
+                        <span className="relative h-2 w-2 rounded-full bg-[#EF4444]" />
                     </span>
                     <span className="truncate text-[10px] font-extrabold uppercase tracking-[0.14em] text-white">
                         {active.label}

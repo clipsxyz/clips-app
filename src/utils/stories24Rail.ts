@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchFollowedUsersStoryGroups } from '../api/stories';
+import { fetchFollowedUsersStoryGroups, isStoryUnviewed } from '../api/stories';
 import { getFollowedUsers, getPostById, posts as localPosts } from '../api/posts';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import {
@@ -26,6 +26,7 @@ export type Stories24RailItem = {
     /** Mini 9:16 canvas when the story has no photo/video still. */
     previewGradient?: string[];
     previewTextColor?: string;
+    hasUnviewed?: boolean;
 };
 
 const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|bmp|avif)(\?|#|$)/i;
@@ -144,6 +145,10 @@ export function getStories24RailHandles(items: Stories24RailItem[]): string[] {
 export function isStories24AddYoursHandle(handle: string | undefined | null): boolean {
     if (!handle) return false;
     return normalizeStories24Handle(handle) === normalizeStories24Handle(STORIES24_ADD_YOURS_HANDLE);
+}
+
+export function stories24RailHasUnviewed(items: Stories24RailItem[]): boolean {
+    return items.some((item) => !isStories24AddYoursHandle(item.handle) && item.hasUnviewed);
 }
 
 /** First real story card in the rail (same order as feed strip; skips Add yours). */
@@ -288,6 +293,7 @@ export async function buildStories24RailItems(
             displayName,
             previewGradient: textStyle?.gradientColors,
             previewTextColor: textStyle?.color,
+            hasUnviewed: sortedStories.some((story) => isStoryUnviewed(story)),
         });
         if (nextItems.length >= 12) break;
     }

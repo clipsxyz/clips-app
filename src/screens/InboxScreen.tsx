@@ -11,10 +11,8 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { queryClient, queryKeys } from '../api/queryClient';
-import { runAfterInteractions } from '../utils/runAfterInteractionsNative';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import LinearGradient from 'react-native-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
@@ -29,8 +27,9 @@ import {
     markAllNotificationsRead,
     deleteNotification,
 } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle, fetchFollowedUsersStoryGroups } from '../api/stories';
+import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle, fetchFollowedUsersStoryGroups, isStoryUnviewed } from '../api/stories';
 import type { StoryGroup } from '../types';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { fetchUserProfile } from '../api/client';
@@ -48,6 +47,7 @@ import {
     muteConversation,
     unmuteConversation,
     deleteConversation,
+    hideConversationFromInbox,
     acceptMessageRequest,
     type ConversationSummary,
 } from '../api/messages';
@@ -85,6 +85,10 @@ function normalizeHandleKey(handle?: string): string {
     return value.replace(/^@/, '').toLowerCase();
 }
 
+function storyGroupHasUnviewed(group: StoryGroup): boolean {
+    return (group.stories || []).some((story) => isStoryUnviewed(story));
+}
+
 function canRenderStoryThumb(url?: string): boolean {
     if (!url) return false;
     const value = url.trim();
@@ -116,6 +120,7 @@ export default function InboxScreen({ navigation, route }: any) {
         icon: 'success' | 'alert';
     } | null>(null);
     const avatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
+    const storyGroupsRef = React.useRef<StoryGroup[]>([]);
     const resolveInsightAvatar = React.useCallback((handle?: string): string => {
         const raw = (handle || '').trim();
         if (!raw) return '';
@@ -194,24 +199,12 @@ export default function InboxScreen({ navigation, route }: any) {
     );
 
     useEffect(() => {
-        void runAfterInteractions(() => {
-            void loadData();
-            if (user?.handle) {
-                void loadSeenInsights(user.handle);
-            }
-        });
-    }, [user?.handle]);
-
-    // Refresh when returning to Inbox (e.g. after sending a feed DM to Ava).
-    // Keep existing rows visible — full skeleton only on first load.
-    useFocusEffect(
-        useCallback(() => {
-            if (!user?.handle) return;
-            void runAfterInteractions(() => {
-                void loadData({ silent: true });
-            });
-        }, [user?.handle])
-    );
+        if (user?.handle && user?.avatarUrl) {
+            setAvatarForHandle(user.handle, user.avatarUrl);
+            setDmAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
+            setInsightAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
+        }
+    }, [user?.handle, user?.avatarUrl]);
 
     useEffect(() => {
         const requestedTab = route?.params?.initialTab;
@@ -227,14 +220,6 @@ export default function InboxScreen({ navigation, route }: any) {
         setOpenSwipeHandle(null);
         setInboxChatInfo(null);
     }, [activeTab]);
-
-    useEffect(() => {
-        if (user?.handle && user?.avatarUrl) {
-            setAvatarForHandle(user.handle, user.avatarUrl);
-            setDmAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
-            setInsightAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
-        }
-    }, [user?.handle, user?.avatarUrl]);
 
     useEffect(() => {
         const handles = Array.from(
@@ -300,80 +285,116 @@ export default function InboxScreen({ navigation, route }: any) {
         });
     }, [notifications, conversations, dmAvatarMap, user?.id]);
 
-    const loadData = async (opts?: { silent?: boolean }) => {
+    const applyStoryRingFlags = useCallback((groups: StoryGroup[]) => {
+        const unviewed = new Set(
+            groups.filter(storyGroupHasUnviewed).map((group) => normalizeHandleKey(group.userHandle)),
+        );
+        setConversations((prev) =>
+            prev.map((c) => {
+                if (c.kind === 'group' || !c.otherHandle) return c;
+                const next = unviewed.has(normalizeHandleKey(c.otherHandle));
+                return c.hasUnviewedStories === next ? c : { ...c, hasUnviewedStories: next };
+            }),
+        );
+    }, []);
+
+    const loadStoryGroups = useCallback(async () => {
+        if (!user?.id) {
+            setStoryGroups([]);
+            return;
+        }
+        try {
+            const followed = await getFollowedUsers(user.id).catch(() => [] as string[]);
+            const groups = await fetchFollowedUsersStoryGroups(user.id, followed);
+            const mapped = groups.map((group) => {
+                if (group.userId === user.id && user.avatarUrl) {
+                    return { ...group, avatarUrl: user.avatarUrl };
+                }
+                return {
+                    ...group,
+                    avatarUrl: group.avatarUrl || getAvatarForHandle(group.userHandle),
+                };
+            });
+            setStoryGroups(mapped);
+            applyStoryRingFlags(mapped);
+        } catch (e) {
+            console.warn('Failed to load inbox story groups:', e);
+            setStoryGroups([]);
+        }
+    }, [applyStoryRingFlags, user?.avatarUrl, user?.id]);
+
+    storyGroupsRef.current = storyGroups;
+
+    const loadData = useCallback(async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
             setLoading(false);
             return;
         }
+        const handle = user.handle;
         const silent = opts?.silent === true;
-        if (!silent) {
-            setLoading(true);
-        }
-        try {
-            const [notifs, storyInsights] = await Promise.all([
-                queryClient.fetchQuery({
-                    queryKey: queryKeys.notifications(user.handle),
-                    queryFn: () => getNotifications(user.handle),
-                }),
-                getStoryInsightsForUser(user.handle),
-            ]);
-            const storyReplyNotifs = notifs.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
-            if (storyReplyNotifs.length > 0) {
-                const handles = Array.from(new Set(storyReplyNotifs.map((n) => n.fromHandle)));
-                const groups = await Promise.all(
-                    handles.map(async (handle) => {
-                        try {
-                            const g = await fetchStoryGroupByHandle(handle);
-                            return { handle, group: g };
-                        } catch {
-                            return { handle, group: null };
-                        }
-                    })
-                );
-                const activeStoryIdsByHandle = new Map<string, Set<string>>();
-                groups.forEach(({ handle, group }) => {
-                    activeStoryIdsByHandle.set(handle, new Set((group?.stories || []).map((s) => s.id)));
-                });
-                const unavailable = new Set<string>();
-                storyReplyNotifs.forEach((n) => {
-                    if (!n.storyId) return;
-                    const activeIds = activeStoryIdsByHandle.get(n.fromHandle);
-                    if (!activeIds || !activeIds.has(n.storyId)) unavailable.add(n.storyId);
-                });
-                setUnavailableStoryIds(unavailable);
-            } else {
-                setUnavailableStoryIds(new Set());
-            }
-            setNotifications(notifs);
-            setInsights(storyInsights);
-            const convs = await queryClient.fetchQuery({
-                queryKey: queryKeys.conversations(user.handle),
-                queryFn: () => listConversations(user.handle),
-            });
-            setConversations(convs);
+        const cachedNotifs = queryClient.getQueryData<Notification[]>(queryKeys.notifications(handle));
+        const cachedConvs = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations(handle));
+        if (Array.isArray(cachedNotifs) && cachedNotifs.length > 0) setNotifications(cachedNotifs);
+        if (Array.isArray(cachedConvs) && cachedConvs.length > 0) setConversations(cachedConvs);
+        const hasCache =
+            (Array.isArray(cachedNotifs) && cachedNotifs.length > 0) ||
+            (Array.isArray(cachedConvs) && cachedConvs.length > 0);
+        if (!silent && !hasCache) setLoading(true);
+        else setLoading(false);
 
-            if (user?.id) {
+        try {
+            const [notifs, convs] = await Promise.all([
+                queryClient.fetchQuery({
+                    queryKey: queryKeys.notifications(handle),
+                    queryFn: () => getNotifications(handle),
+                    staleTime: 20_000,
+                }),
+                queryClient.fetchQuery({
+                    queryKey: queryKeys.conversations(handle),
+                    queryFn: () => listConversations(handle),
+                    staleTime: 20_000,
+                }),
+            ]);
+            setNotifications(notifs);
+            setConversations(convs);
+            setLoading(false);
+
+            void (async () => {
                 try {
-                    const followed = await getFollowedUsers(user.id).catch(() => [] as string[]);
-                    const groups = await fetchFollowedUsersStoryGroups(user.id, followed);
-                    setStoryGroups(
-                        groups.map((group) => {
-                            if (group.userId === user.id && user.avatarUrl) {
-                                return { ...group, avatarUrl: user.avatarUrl };
-                            }
-                            return {
-                                ...group,
-                                avatarUrl: group.avatarUrl || getAvatarForHandle(group.userHandle),
-                            };
-                        })
-                    );
-                } catch (e) {
-                    console.warn('Failed to load inbox story groups:', e);
-                    setStoryGroups([]);
+                    const storyInsights = await getStoryInsightsForUser(handle);
+                    setInsights(storyInsights);
+                } catch {
+                    /* insights are not required to show inbox */
                 }
-            } else {
-                setStoryGroups([]);
-            }
+                const storyReplyNotifs = notifs.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
+                if (storyReplyNotifs.length > 0) {
+                    const handles = Array.from(new Set(storyReplyNotifs.map((n) => n.fromHandle)));
+                    const groups = await Promise.all(
+                        handles.map(async (storyHandle) => {
+                            try {
+                                const g = await fetchStoryGroupByHandle(storyHandle);
+                                return { handle: storyHandle, group: g };
+                            } catch {
+                                return { handle: storyHandle, group: null };
+                            }
+                        }),
+                    );
+                    const activeStoryIdsByHandle = new Map<string, Set<string>>();
+                    groups.forEach(({ handle: storyHandle, group }) => {
+                        activeStoryIdsByHandle.set(storyHandle, new Set((group?.stories || []).map((s) => s.id)));
+                    });
+                    const unavailable = new Set<string>();
+                    storyReplyNotifs.forEach((n) => {
+                        if (!n.storyId) return;
+                        const activeIds = activeStoryIdsByHandle.get(n.fromHandle);
+                        if (!activeIds || !activeIds.has(n.storyId)) unavailable.add(n.storyId);
+                    });
+                    setUnavailableStoryIds(unavailable);
+                } else {
+                    setUnavailableStoryIds(new Set());
+                }
+                await loadStoryGroups();
+            })();
         } catch (error: any) {
             if (
                 error?.name === 'ConnectionRefused' ||
@@ -384,10 +405,30 @@ export default function InboxScreen({ navigation, route }: any) {
             } else {
                 console.warn('Error loading inbox:', error);
             }
-        } finally {
             setLoading(false);
         }
-    };
+    }, [user?.handle, loadStoryGroups]);
+
+    useEffect(() => {
+        const unsub = subscribeStoriesRefresh(() => {
+            const groups = storyGroupsRef.current;
+            setStoryGroups(groups.map((group) => ({ ...group })));
+            applyStoryRingFlags(groups);
+            void loadStoryGroups();
+        });
+        return unsub;
+    }, [applyStoryRingFlags, loadStoryGroups]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!user?.handle) {
+                setLoading(false);
+                return;
+            }
+            void loadSeenInsights(user.handle);
+            void loadData({ silent: conversations.length > 0 || notifications.length > 0 });
+        }, [loadData, loadSeenInsights, user?.handle]),
+    );
 
     const refreshData = async () => {
         setRefreshing(true);
@@ -473,6 +514,7 @@ export default function InboxScreen({ navigation, route }: any) {
         if (!notif.read && user?.handle && !isSyntheticConvNotif) {
             await markNotificationRead(notif.id, user.handle);
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+            void queryClient.invalidateQueries({ queryKey: queryKeys.notifications(user.handle) });
         }
 
         // Instagram-style: comment / comment-reply → open post comments (not Messages).
@@ -546,6 +588,7 @@ export default function InboxScreen({ navigation, route }: any) {
         try {
             await markAllNotificationsRead(user.handle);
             setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+            void queryClient.invalidateQueries({ queryKey: queryKeys.notifications(user.handle) });
         } catch (error) {
             console.error('Failed to mark all notifications read:', error);
         }
@@ -556,6 +599,7 @@ export default function InboxScreen({ navigation, route }: any) {
         try {
             await deleteNotification(notifId, user.handle);
             setNotifications((prev) => prev.filter((n) => n.id !== notifId));
+            void queryClient.invalidateQueries({ queryKey: queryKeys.notifications(user.handle) });
         } catch (error) {
             console.error('Failed to delete notification:', error);
         }
@@ -910,6 +954,7 @@ export default function InboxScreen({ navigation, route }: any) {
                             try {
                                 if (isGroup && item.chatGroupId) {
                                     await leaveChatGroup(item.chatGroupId);
+                                    hideConversationFromInbox(user.handle, { chatGroupId: item.chatGroupId });
                                 } else {
                                     await deleteConversation(user.handle, item.otherHandle);
                                 }
@@ -988,34 +1033,21 @@ export default function InboxScreen({ navigation, route }: any) {
                     contentContainerStyle={styles.storiesRail}
                 >
                     {storyGroups.map((group) => {
-                        const hasUnviewed = (group.stories || []).some((s) => !s.hasViewed);
-                        const ring = (
-                            <View style={styles.storyRingInner}>
-                                <Avatar
-                                    src={group.avatarUrl || getAvatarForHandle(group.userHandle)}
-                                    name={group.userHandle}
-                                    size={ox(48)}
-                                />
-                            </View>
-                        );
+                        const hasUnviewed = storyGroupHasUnviewed(group);
                         return (
                             <TouchableOpacity
                                 key={group.userId || group.userHandle}
                                 style={styles.storyRailItem}
                                 onPress={() => openFollowedStoryFromRail(group)}
                             >
-                                {hasUnviewed ? (
-                                    <LinearGradient
-                                        colors={['#2DD4BF', '#0EA5E9', '#D946EF']}
-                                        start={{ x: 0, y: 1 }}
-                                        end={{ x: 1, y: 0 }}
-                                        style={styles.storyRing}
-                                    >
-                                        {ring}
-                                    </LinearGradient>
-                                ) : (
-                                    <View style={[styles.storyRing, styles.storyRingSeen]}>{ring}</View>
-                                )}
+                                <Avatar
+                                    src={group.avatarUrl || getAvatarForHandle(group.userHandle)}
+                                    name={group.userHandle}
+                                    handle={group.userHandle}
+                                    size={ox(48)}
+                                    hasStory
+                                    hasUnviewedStory={hasUnviewed}
+                                />
                                 <Text style={styles.storyRailLabel} numberOfLines={1}>
                                     {group.userHandle}
                                 </Text>
@@ -1552,7 +1584,7 @@ export default function InboxScreen({ navigation, route }: any) {
 
 const styles = StyleSheet.create({
     pageShell: {
-        backgroundColor: '#070a12',
+        backgroundColor: '#151D28',
     },
     loadingShell: {
         flex: 1,
@@ -1597,26 +1629,6 @@ const styles = StyleSheet.create({
         width: ox(72),
         alignItems: 'center',
         gap: ox(4),
-    },
-    storyRing: {
-        width: ox(56),
-        height: ox(56),
-        borderRadius: ox(28),
-        padding: 2,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    storyRingSeen: {
-        backgroundColor: 'rgba(255,255,255,0.2)',
-    },
-    storyRingInner: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 999,
-        backgroundColor: '#000',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
     },
     storyRailLabel: {
         maxWidth: ox(72),
@@ -1720,7 +1732,7 @@ const styles = StyleSheet.create({
         marginHorizontal: ox(8),
         marginBottom: ox(2),
         borderRadius: ox(8),
-        backgroundColor: '#070a12',
+        backgroundColor: '#151D28',
         gap: ox(10),
     },
     conversationRowUnread: {
@@ -1831,7 +1843,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-        borderColor: '#070a12',
+        borderColor: '#151D28',
     },
     followRequestActions: {
         flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -13,6 +13,8 @@ import { useResolvedAuthorAvatar } from '../hooks/useResolvedAuthorAvatar';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { getReclipDisplay } from '../utils/feedPostMeta';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
+import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { getEffectiveTextStyleForPost } from '../utils/effectiveTextPostStyle';
 import { isLikelyLightTextColor } from '../utils/feedTextBubble';
@@ -44,6 +46,7 @@ type Props = {
     onOpenDM?: (handle: string, postId: string) => void;
     onProfileMenuPress?: () => void;
     onOverflowPress?: () => void;
+    onHasStoryChange?: (hasStory: boolean) => void;
     onLocationPress?: (
         location: string,
         filterType?: 'location' | 'venue' | 'landmark',
@@ -61,6 +64,7 @@ export default function FeedTextOnlyCard({
     onFollow,
     onOpenDM,
     onProfileMenuPress,
+    onHasStoryChange,
     onLocationPress,
     onRegisterDmAnchor,
     menuAnchorRef,
@@ -109,6 +113,35 @@ export default function FeedTextOnlyCard({
         viewerHandle: viewer,
         viewerAvatarUrl: user?.avatarUrl,
     });
+    const [hasStory, setHasStory] = useState(false);
+    const [hasUnviewedStory, setHasUnviewedStory] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function checkStory() {
+            try {
+                const anyStory = await userHasStoriesByHandle(safeProfileHandle);
+                const unviewed = isCurrentUser
+                    ? false
+                    : await userHasUnviewedStoriesByHandle(safeProfileHandle, user?.id);
+                if (!cancelled) {
+                    setHasStory(anyStory);
+                    setHasUnviewedStory(unviewed);
+                    onHasStoryChange?.(anyStory);
+                }
+            } catch {
+                /* ignore */
+            }
+        }
+        checkStory();
+        const unsub = subscribeStoriesRefresh(() => {
+            void checkStory();
+        });
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, [safeProfileHandle, isCurrentUser, onHasStoryChange, user?.id]);
 
     const resolveLocalTap = (e: GestureResponderEvent): { x: number; y: number } => {
         const { locationX, locationY } = e.nativeEvent;
@@ -161,12 +194,14 @@ export default function FeedTextOnlyCard({
                 collapsable={false}
             >
                 <Pressable onPress={onProfileMenuPress} accessibilityLabel="Open profile">
-                    <View style={styles.avatarRing}>
+                    <View style={hasStory || hasUnviewedStory ? undefined : styles.avatarRing}>
                         <Avatar
                             src={avatarSrc}
                             name={safeHandle.split('@')[0] || 'User'}
                             handle={safeProfileHandle}
                             size={AVATAR_SIZE}
+                            hasStory={hasStory}
+                            hasUnviewedStory={hasUnviewedStory}
                         />
                     </View>
                 </Pressable>

@@ -71,6 +71,7 @@ import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { peekFeedMediaSize, rememberFeedMediaSize, prefetchFeedMediaSizes } from '../utils/feedMediaSizeNative';
 import { FEED_UI, feedCardMediaHeight } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import FeedMediaRoundFrame from '../components/FeedMediaRoundFrame.native';
 import PostHeaderOverlay from '../components/PostHeaderOverlay.native';
 import FeedScenesMediaExpand, {
     type FeedScenesOrigin,
@@ -209,6 +210,7 @@ import {
     isStories24AddYoursHandle,
     normalizeStories24Handle,
     resolveStories24OpenTarget,
+    stories24RailHasUnviewed,
     snapshotStories24FeedScroll,
     takeStories24RailReturnSync,
     STORIES24_RAIL_RETURN_KEY,
@@ -328,6 +330,7 @@ function PillTabs({
     userRegional = 'Dublin',
     userNational = 'Ireland',
     hasNotifications = false,
+    stories24HasUnviewed = false,
     onOpenStories24,
     onOpenPassport,
     onOpenDiscover,
@@ -345,6 +348,7 @@ function PillTabs({
     userRegional?: string;
     userNational?: string;
     hasNotifications?: boolean;
+    stories24HasUnviewed?: boolean;
     onOpenStories24?: () => void;
     onOpenPassport: () => void;
     onOpenDiscover: () => void;
@@ -447,18 +451,7 @@ function PillTabs({
     );
     const activeLabel = customLocationLabel || customLocation || (active === userLocal ? 'Nearby' : active);
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-    const activeIndicatorColor =
-        customLocation
-            ? '#EF4444'
-            : active === userLocal
-            ? '#34D399'
-            : active === userRegional
-                ? '#7A8AF0'
-                : active === userNational
-                    ? '#93C5FD'
-                    : active === 'Following'
-                        ? '#F472B6'
-                        : '#E5E7EB';
+    const activeIndicatorColor = '#EF4444';
 
     const menuItems = [
         {
@@ -708,7 +701,10 @@ function PillTabs({
                     accessibilityLabel="Stories 24"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Stories24HeaderIcon size={FEED_UI.icon.headerStories} />
+                        <Stories24HeaderIcon
+                            size={FEED_HEADER_PASSPORT_AVATAR.width}
+                            hasUnviewedStory={stories24HasUnviewed}
+                        />
                         <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
                     </View>
                 </TouchableOpacity>
@@ -1111,12 +1107,18 @@ const FeedCard = React.memo(function FeedCard({
             : undefined;
     const isLandscapeMedia =
         typeof mediaWidthOverHeight === 'number' && mediaWidthOverHeight > 1;
-    const mediaFrameHeight = feedCardMediaHeight(
-        cardMediaWidth,
-        safePositiveLayoutNumber(windowHeight, 720),
-        postHasVideoMedia(post),
-        isLandscapeMedia,
-        mediaWidthOverHeight,
+    const isVideoPostCard = postHasVideoMedia(post) && !scenesExpanding;
+    const mediaInset = isVideoPostCard ? FEED_UI.media.videoInset : 0;
+    const mediaRadius = isVideoPostCard ? FEED_UI.media.videoRadius : 0;
+    const innerMediaWidth = Math.max(1, cardMediaWidth - mediaInset * 2);
+    const mediaFrameHeight = Math.round(
+        feedCardMediaHeight(
+            innerMediaWidth,
+            safePositiveLayoutNumber(windowHeight, 720),
+            postHasVideoMedia(post),
+            isLandscapeMedia,
+            mediaWidthOverHeight,
+        ),
     );
 
     const handleNaturalSize = React.useCallback((w: number, h: number) => {
@@ -1171,6 +1173,7 @@ const FeedCard = React.memo(function FeedCard({
 
     React.useEffect(() => {
         setCarouselIndex(0);
+        setHeaderHasStory(false);
         postViewRecordedRef.current = false;
         setNaturalMediaSize(peekFeedMediaSize(String(post.id)));
     }, [post.id]);
@@ -1279,6 +1282,7 @@ const FeedCard = React.memo(function FeedCard({
                     onOpenDM={onOpenDM}
                     onProfileMenuPress={openProfileMenu}
                     onOverflowPress={onOverflowPress}
+                    onHasStoryChange={setHeaderHasStory}
                     onLocationPress={onLocationPress}
                     onDoubleLike={() => {
                         void onLike();
@@ -1318,6 +1322,14 @@ const FeedCard = React.memo(function FeedCard({
                             screenHeight={windowHeight}
                             style={{
                                 ...FEED_CARD_MEDIA_WRAP,
+                                ...(isVideoPostCard
+                                    ? {
+                                          backgroundColor: FEED_PAGE_BG,
+                                          paddingHorizontal: mediaInset,
+                                          paddingTop: 4,
+                                          paddingBottom: 8,
+                                      }
+                                    : null),
                                 ...(scenesExpanding
                                     ? { overflow: 'visible' as const }
                                     : null),
@@ -1325,12 +1337,13 @@ const FeedCard = React.memo(function FeedCard({
                         >
                         <View
                             style={{
-                                width: '100%',
+                                width: isVideoPostCard ? mediaFrameHeight : '100%',
                                 height: mediaFrameHeight,
                                 maxHeight: mediaFrameHeight,
                                 overflow: 'hidden',
                                 backgroundColor: '#000000',
-                                alignSelf: 'stretch',
+                                alignSelf: 'center',
+                                borderRadius: mediaRadius,
                             }}
                             ref={mediaWrapRef}
                             collapsable={false}
@@ -1341,7 +1354,7 @@ const FeedCard = React.memo(function FeedCard({
                                 carouselIndex={carouselIndex}
                                 onCarouselIndexChange={setCarouselIndex}
                                 stickers={post.stickers}
-                                width={cardMediaWidth}
+                                width={isVideoPostCard ? mediaFrameHeight : cardMediaWidth}
                                 height={mediaFrameHeight}
                                 onNaturalSize={handleNaturalSize}
                                 onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
@@ -1368,6 +1381,15 @@ const FeedCard = React.memo(function FeedCard({
                                         : undefined
                                 }
                             />
+                            {isVideoPostCard ? (
+                                <FeedMediaRoundFrame
+                                    width={mediaFrameHeight}
+                                    height={mediaFrameHeight}
+                                    radius={mediaRadius}
+                                    color={FEED_PAGE_BG}
+                                    maskId={String(post.id)}
+                                />
+                            ) : null}
                             {!scenesExpanding && !isClientUploading ? (
                                 <PostHeaderOverlay
                                     post={post}
@@ -1863,8 +1885,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const viewabilityConfigRef = useRef({
         // Bluesky: the clip is active when half of *the postcard* is on screen.
         // Viewport-% kept a tall 4:5 card "viewable" after you'd already moved on.
-        itemVisiblePercentThreshold: 50,
-        minimumViewTime: 120,
+        itemVisiblePercentThreshold: 65,
+        minimumViewTime: 180,
     });
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2072,7 +2094,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, []);
 
     const restoreFeedVideoAfterOverlay = useCallback(() => {
-        const resumeId = overlayResumeVideoPostIdRef.current;
+        const resumeId =
+            overlayResumeVideoPostIdRef.current ||
+            peekScenesReturnHandoff()?.postId ||
+            lastViewableVideoPostIdRef.current;
         if (!resumeId || !feedAutoplayAllowedRef.current) {
             if (!feedAutoplayOverlayBlocks()) {
                 overlayResumeVideoPostIdRef.current = null;
@@ -2080,20 +2105,37 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             return;
         }
         // Another overlay still open (e.g. comments under image fullscreen) — keep resume id.
-        if (feedAutoplayOverlayBlocks()) return;
-        overlayResumeVideoPostIdRef.current = null;
+        if (feedAutoplayOverlayBlocks()) {
+            overlayResumeVideoPostIdRef.current = resumeId;
+            return;
+        }
+        overlayResumeVideoPostIdRef.current = resumeId;
         lastViewableVideoPostIdRef.current = resumeId;
-        // Force a clean remount — suspend unmounts TextureView and leaves a blank frame
-        // if we only flip suspend without re-arming the active id.
+        // Pin-scroll after Scenes must not look like a user fling (that leaves the card paused).
+        suppressFeedViewabilityRef.current = true;
+        feedScrollingRef.current = false;
+        setFeedScrollBusy(false);
         activeVideoPostIdRef.current = null;
         setActiveFeedVideoPostId(null);
-        requestAnimationFrame(() => {
+
+        const play = () => {
             if (feedAutoplayOverlayBlocks()) {
                 overlayResumeVideoPostIdRef.current = resumeId;
                 return;
             }
             if (!feedAutoplayAllowedRef.current) return;
+            overlayResumeVideoPostIdRef.current = null;
+            lastViewableVideoPostIdRef.current = resumeId;
+            feedScrollingRef.current = false;
+            setFeedScrollBusy(false);
             scheduleActiveFeedVideoRef.current(resumeId, true);
+            setTimeout(() => {
+                suppressFeedViewabilityRef.current = false;
+            }, 220);
+        };
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(play);
         });
     }, []);
 
@@ -2259,6 +2301,27 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setFeedScrollBusy(false);
             suppressFeedViewabilityRef.current = false;
             isFeedFocusedRef.current = true;
+
+            const incomingPlaceFeed =
+                (typeof route?.params?.location === 'string' && route.params.location.trim()) ||
+                null;
+            if (incomingPlaceFeed) {
+                lastViewableVideoPostIdRef.current = null;
+                overlayResumeVideoPostIdRef.current = null;
+                activeVideoPostIdRef.current = null;
+                haltFeedPlayback();
+                setFeedPlaybackAllowed(true);
+                return () => {
+                    if (autoplayTimerRef.current) {
+                        clearTimeout(autoplayTimerRef.current);
+                        autoplayTimerRef.current = null;
+                    }
+                    activeVideoPostIdRef.current = null;
+                    isFeedFocusedRef.current = false;
+                    setFeedPlaybackAllowed(false);
+                };
+            }
+
             setFeedPlaybackAllowed(true);
 
             const scenesReturn = peekScenesReturnHandoff();
@@ -2269,23 +2332,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
 
             const restoreId =
-                scenesReturn?.postId ?? lastViewableVideoPostIdRef.current;
+                scenesReturn?.postId ??
+                overlayResumeVideoPostIdRef.current ??
+                lastViewableVideoPostIdRef.current;
+            if (restoreId) overlayResumeVideoPostIdRef.current = restoreId;
             const pinnedY = scenesReturnScrollYRef.current;
             scenesReturnScrollYRef.current = null;
 
             const finishRestore = () => {
-                if (feedAutoplayOverlayBlocks()) return;
-                if (restoreId && feedAutoplayAllowedRef.current) {
-                    // Force so blur→focus with the same post still remounts/plays.
-                    activeVideoPostIdRef.current = null;
-                    scheduleActiveFeedVideoRef.current(restoreId, true);
-                }
-                setTimeout(() => {
-                    suppressFeedViewabilityRef.current = false;
-                }, 160);
+                restoreFeedVideoAfterOverlay();
             };
 
-            if (scenesReturn?.postId || pinnedY != null) {
+            if (scenesReturn?.postId || pinnedY != null || restoreId) {
                 suppressFeedViewabilityRef.current = true;
                 pinFeedScrollSoon(pinnedY ?? feedScrollYRef.current);
                 requestAnimationFrame(() => {
@@ -2293,8 +2351,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     finishRestore();
                 });
             } else {
-                // Resume autoplay immediately — do not wait for FlatList viewability
-                // (that caused multi-second Scenes→feed MP4 lag).
                 finishRestore();
             }
             return () => {
@@ -2306,7 +2362,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 isFeedFocusedRef.current = false;
                 setFeedPlaybackAllowed(false);
             };
-        }, [pinFeedScrollSoon])
+        }, [pinFeedScrollSoon, restoreFeedVideoAfterOverlay, route?.params?.location])
     );
 
     useEffect(() => {
@@ -2835,6 +2891,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Drop in-flight Dublin/search results before they can apply under the USA header.
         feedLoadGenRef.current += 1;
         syncFeedFetchCtx(nextFilter);
+        lastViewableVideoPostIdRef.current = null;
+        overlayResumeVideoPostIdRef.current = null;
+        activeVideoPostIdRef.current = null;
+        haltFeedPlayback();
         setShowFollowingFeed(false);
         setActive(nextFilter);
         setCustomLocation(null);
@@ -2882,6 +2942,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (!requestedLocation || typeof requestedLocation !== 'string') return;
         const next = requestedLocation.trim();
         if (!next) return;
+        lastViewableVideoPostIdRef.current = null;
+        overlayResumeVideoPostIdRef.current = null;
+        activeVideoPostIdRef.current = null;
+        haltFeedPlayback();
         const label =
             typeof requestedLabel === 'string' && requestedLabel.trim()
                 ? requestedLabel.trim()
@@ -3364,6 +3428,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const handleTabChange = (tab: Tab) => {
         setError(null);
+        lastViewableVideoPostIdRef.current = null;
+        overlayResumeVideoPostIdRef.current = null;
+        activeVideoPostIdRef.current = null;
+        haltFeedPlayback();
         const nextFilter = tab === 'Following' ? 'discover' : tab;
         if (tab === 'Following') {
             setShowFollowingFeed(true);
@@ -3631,6 +3699,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const showSuggestedFollowerCard = Boolean(suggestedFollowerSuggestion);
 
     const showStories24Rail = !customLocation && !showFollowingFeed && stories24Items.length > 0;
+    const stories24HasUnviewed = React.useMemo(
+        () => stories24RailHasUnviewed(stories24Items),
+        [stories24Items],
+    );
 
     React.useEffect(() => {
         const pending = pendingStories24CollapseRef.current;
@@ -3817,6 +3889,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         didArmFirstVideoRef.current = false;
         feedViewabilitySeenRef.current = false;
         lastViewableVideoPostIdRef.current = null;
+        overlayResumeVideoPostIdRef.current = null;
+        activeVideoPostIdRef.current = null;
+        haltFeedPlayback();
     }, [feedHasPosts]);
     React.useEffect(() => {
         if (!isFeedFocusedRef.current || scenesViewerActive || Boolean(imageFullscreenPost) || commentsModalOpen) {
@@ -4558,7 +4633,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const onFeedMomentumScrollEnd = React.useCallback(() => {
         feedScrollingRef.current = false;
         if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-        feedScrollIdleTimerRef.current = setTimeout(startSettledFeedVideo, 32);
+        feedScrollIdleTimerRef.current = setTimeout(startSettledFeedVideo, 80);
     }, [startSettledFeedVideo]);
 
     const onFeedScrollEndDrag = React.useCallback((e: any) => {
@@ -4571,12 +4646,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         feedScrollIdleTimerRef.current = setTimeout(() => {
             feedScrollingRef.current = false;
             startSettledFeedVideo();
-        }, 32);
+        }, 80);
     }, [startSettledFeedVideo]);
 
     const onFeedScroll = React.useCallback((e: any) => {
         const y = e.nativeEvent.contentOffset.y;
         feedScrollYRef.current = y;
+        if (suppressFeedViewabilityRef.current) return;
         if (haltFeedPlaybackIfScrolled(y)) {
             feedScrollingRef.current = true;
             activeVideoPostIdRef.current = null;
@@ -4644,6 +4720,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         userRegional={defaultRegional}
                         userNational={defaultNational}
                         hasNotifications={hasInbox || unreadCount > 0}
+                        stories24HasUnviewed={stories24HasUnviewed}
                         onOpenStories24={openStories24FromHeader}
                         onOpenPassport={() => navigation.navigate('Profile')}
                         onOpenDiscover={() => navigation.navigate('Discover')}
@@ -4682,7 +4759,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         }}
                         tintColor="#FFFFFF"
                         colors={['#FFFFFF']}
-                        progressBackgroundColor="#030712"
+                        progressBackgroundColor="#151D28"
                         progressViewOffset={Platform.OS === 'android' ? 12 : 0}
                     />
                 }
@@ -5473,7 +5550,8 @@ const styles = StyleSheet.create({
         flexGrow: 1,
     },
     tabContainer: {
-        backgroundColor: 'transparent',
+        backgroundColor: FEED_PAGE_BG,
+        alignSelf: 'stretch',
     },
     feedHeaderNotifWrap: {
         alignItems: 'center',

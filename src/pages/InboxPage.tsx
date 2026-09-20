@@ -6,8 +6,8 @@ import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
-import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
+import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, isStoryUnviewed } from '../api/stories';
+import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, hideConversationFromInbox, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
 import { bottomSheet, followRequestAcceptedBottomSheet } from '../utils/swalBottomSheet';
@@ -48,6 +48,10 @@ function normalizeHandleKey(handle?: string): string {
 function inboxConversationRowId(conv: ConversationSummary): string {
     if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
     return conv.otherHandle;
+}
+
+function storyGroupHasUnviewed(group: StoryGroup): boolean {
+    return (group.stories || []).some((story) => isStoryUnviewed(story));
 }
 
 function StoryReplyThumb({ imageUrl }: { imageUrl: string }) {
@@ -624,6 +628,28 @@ export default function InboxPage() {
         });
     }, [notifications, items, dmAvatarMap, user?.id]);
 
+    const loadInboxStoryGroups = React.useCallback(async () => {
+        if (!user?.id) {
+            setStoryGroups([]);
+            return;
+        }
+        try {
+            const followedUsers = await getFollowedUsers(user.id).catch(() => [] as string[]);
+            const groups = await fetchFollowedUsersStoryGroups(user.id, followedUsers);
+            const groupsWithAvatars = groups.map((group) => {
+                if (group.userId === user.id && user.avatarUrl) {
+                    return { ...group, avatarUrl: user.avatarUrl };
+                }
+                const avatarUrl = group.avatarUrl || getAvatarForHandle(group.userHandle);
+                return { ...group, avatarUrl };
+            });
+            setStoryGroups(groupsWithAvatars);
+        } catch (e) {
+            console.warn('Failed to load story groups for inbox header:', e);
+            setStoryGroups([]);
+        }
+    }, [user?.avatarUrl, user?.id]);
+
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
         try {
@@ -736,26 +762,7 @@ export default function InboxPage() {
             setInsights(storyInsights);
             setItems(conversationsWithFollowStatus);
 
-            // Load story groups for followed users (for the horizontal stories row)
-            if (user?.id) {
-                try {
-                    const groups = await fetchFollowedUsersStoryGroups(user.id, followedUsers as string[]);
-                    // Enrich with avatar URLs (use current user's avatar or mock avatars from getAvatarForHandle)
-                    const groupsWithAvatars = groups.map((group) => {
-                        if (group.userId === user.id && user.avatarUrl) {
-                            return { ...group, avatarUrl: user.avatarUrl };
-                        }
-                        const avatarUrl = group.avatarUrl || getAvatarForHandle(group.userHandle);
-                        return { ...group, avatarUrl };
-                    });
-                    setStoryGroups(groupsWithAvatars);
-                } catch (e) {
-                    console.warn('Failed to load story groups for inbox header:', e);
-                    setStoryGroups([]);
-                }
-            } else {
-                setStoryGroups([]);
-            }
+            await loadInboxStoryGroups();
             setLoading(false);
         } catch (error) {
             console.error('Error loading inbox data:', error);
@@ -764,7 +771,7 @@ export default function InboxPage() {
             setItems([]);
             setLoading(false);
         }
-    }, [user?.handle, user?.id]);
+    }, [user?.handle, user?.id, loadInboxStoryGroups]);
 
     React.useEffect(() => {
         if (!user?.handle) return;
@@ -779,6 +786,13 @@ export default function InboxPage() {
 
         window.addEventListener('notificationsUpdated', onNotificationUpdate as any);
         window.addEventListener('conversationUpdated', onConversationUpdate as any);
+        const refreshStoryRings = () => {
+            setStoryGroups((prev) => prev.map((group) => ({ ...group })));
+            void loadInboxStoryGroups();
+        };
+        window.addEventListener('storiesViewed', refreshStoryRings);
+        window.addEventListener('storiesUpdated', refreshStoryRings);
+        window.addEventListener('storyCreated', refreshStoryRings);
         
         // Also listen to Socket.IO events if connected
         const socket = getSocket();
@@ -794,6 +808,9 @@ export default function InboxPage() {
             return () => {
                 window.removeEventListener('notificationsUpdated', onNotificationUpdate as any);
                 window.removeEventListener('conversationUpdated', onConversationUpdate as any);
+                window.removeEventListener('storiesViewed', refreshStoryRings);
+                window.removeEventListener('storiesUpdated', refreshStoryRings);
+                window.removeEventListener('storyCreated', refreshStoryRings);
                 socket.off('conversationUpdated', handleSocketUpdate);
                 socket.off('inboxUnreadChanged');
             };
@@ -802,8 +819,11 @@ export default function InboxPage() {
         return () => {
             window.removeEventListener('notificationsUpdated', onNotificationUpdate as any);
             window.removeEventListener('conversationUpdated', onConversationUpdate as any);
+            window.removeEventListener('storiesViewed', refreshStoryRings);
+            window.removeEventListener('storiesUpdated', refreshStoryRings);
+            window.removeEventListener('storyCreated', refreshStoryRings);
         };
-    }, [user?.handle, loadData]);
+    }, [user?.handle, loadData, loadInboxStoryGroups]);
 
     const handleFollow = React.useCallback(async (handle: string) => {
         if (!user?.handle || !user?.id) return;
@@ -968,6 +988,7 @@ export default function InboxPage() {
         try {
             if (isGroup && conv.chatGroupId) {
                 await leaveChatGroup(conv.chatGroupId);
+                hideConversationFromInbox(user.handle, { chatGroupId: conv.chatGroupId });
                 showToast?.('Left group');
             } else {
                 await deleteConversation(user.handle, conv.otherHandle);
@@ -1315,7 +1336,7 @@ export default function InboxPage() {
                     <div className="flex items-center gap-3 px-0.5">
                         {storyGroups.map((group) => (
                             (() => {
-                                const hasUnviewedStories = (group.stories || []).some((s) => !s.hasViewed);
+                                const hasUnviewedStories = storyGroupHasUnviewed(group);
                                 return (
                             <button
                                 key={group.userId || group.userHandle}
@@ -1347,24 +1368,14 @@ export default function InboxPage() {
                                 }}
                                 className="flex flex-col items-center gap-1 flex-shrink-0"
                             >
-                                <div className="relative">
-                                    {/* Story ring */}
-                                    <div
-                                        className={`w-14 h-14 rounded-full p-[2px] ${
-                                            hasUnviewedStories
-                                                ? 'bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500'
-                                                : 'bg-white/20'
-                                        }`}
-                                    >
-                                        <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
-                                            <Avatar
-                                                name={group.userHandle}
-                                                src={group.avatarUrl}
-                                                size="md"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
+                                <Avatar
+                                    name={group.userHandle}
+                                    src={group.avatarUrl}
+                                    handle={group.userHandle}
+                                    size={56}
+                                    hasStory
+                                    hasUnviewedStory={hasUnviewedStories}
+                                />
                                 <span className="max-w-[72px] text-[11px] text-gray-300 truncate">
                                     {group.userHandle}
                                 </span>

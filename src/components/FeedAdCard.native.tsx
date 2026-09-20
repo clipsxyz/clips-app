@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(55, 65, 81, 0.9)',
-    backgroundColor: '#030712',
+    backgroundColor: '#151D28',
   },
   header: {
     flexDirection: 'row',

@@ -303,7 +303,7 @@ export default React.memo(MyFeedPostCard, (prev, next) => {
 
 const styles = StyleSheet.create({
     card: {
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         borderRadius: 12,
         marginBottom: 16,
         overflow: 'hidden',

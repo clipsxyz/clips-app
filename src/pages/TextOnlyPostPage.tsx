@@ -11,7 +11,7 @@ import Swal from 'sweetalert2';
 import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
 import { FiX, FiSearch, FiLayers } from 'react-icons/fi';
 import { MdOutlineShareLocation } from 'react-icons/md';
-import { TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_ONLY_CANVAS_BG, TEXT_ONLY_FEED_TEMPLATES, TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
@@ -210,7 +210,7 @@ export default function TextOnlyPostPage() {
         // (Do not navigate before createPost finishes — that races postCreated clearing an empty cursor=0 feed.)
         const overlay = showUploadOverlay({
             initialMessage: isStory24 ? 'Posting to your story…' : 'Posting to Gazetteer…',
-            background: activeTemplate ? activeTemplate.background : '#000000',
+            background: activeTemplate ? activeTemplate.background : TEXT_ONLY_CANVAS_BG,
             label: activeTemplate ? activeTemplate.name?.charAt(0).toUpperCase() || 'Aa' : 'Aa',
         });
 
@@ -225,7 +225,7 @@ export default function TextOnlyPostPage() {
                     size: selectedTemplate.textSize,
                     background: selectedTemplate.background,
                 }
-                : { color: '#ffffff', size: 'medium', background: '#000000' };
+                : { color: '#ffffff', size: 'medium', background: TEXT_ONLY_CANVAS_BG };
 
             if (isStory24) {
                 await createStory(
@@ -311,9 +311,9 @@ export default function TextOnlyPostPage() {
     const canPost = text.trim().length > 0;
 
     return (
-        <div className="min-h-screen bg-black flex flex-col pt-14" style={{ pointerEvents: 'auto' }}>
+        <div className="min-h-screen flex flex-col pt-14" style={{ pointerEvents: 'auto', backgroundColor: TEXT_ONLY_CANVAS_BG }}>
             {/* Header: Cancel + Template picker (left) | Location + Drafts + Post (right) */}
-            <div className="fixed top-0 left-0 right-0 z-30 bg-black/95 backdrop-blur border-b border-white/10">
+            <div className="fixed top-0 left-0 right-0 z-30 border-b border-white/10" style={{ backgroundColor: TEXT_ONLY_CANVAS_BG }}>
                 <div className="flex items-center justify-between px-4 h-14">
                     <div className="flex items-center gap-3">
                         <button
@@ -378,7 +378,7 @@ export default function TextOnlyPostPage() {
                         <div
                             className="px-3 py-2"
                             style={{
-                                background: activeTemplate ? activeTemplate.background : '#000000',
+                                background: activeTemplate ? activeTemplate.background : TEXT_ONLY_CANVAS_BG,
                             }}
                         >
                             <textarea
@@ -425,10 +425,11 @@ export default function TextOnlyPostPage() {
             {showLocationSheet && (
                 <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setShowLocationSheet(false)}>
                     <div
-                        className="w-full max-h-[85vh] overflow-y-auto overflow-x-visible bg-black rounded-t-2xl border-t border-white/10"
+                        className="w-full max-h-[85vh] overflow-y-auto overflow-x-visible rounded-t-2xl border-t border-white/10"
+                        style={{ backgroundColor: TEXT_ONLY_CANVAS_BG }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 bg-black border-b border-white/10 px-4 py-3 flex items-center justify-between">
+                        <div className="sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between" style={{ backgroundColor: TEXT_ONLY_CANVAS_BG }}>
                             <h2 className="text-lg font-semibold text-white">Add details</h2>
                             <button
                                 onClick={() => setShowLocationSheet(false)}
@@ -544,10 +545,11 @@ export default function TextOnlyPostPage() {
             {showTemplatePicker && (
                 <div className="fixed inset-0 z-40 flex items-end bg-black/60" onClick={() => setShowTemplatePicker(false)}>
                     <div
-                        className="w-full max-h-[75vh] overflow-y-auto bg-[#020617] rounded-t-2xl border-t border-white/10"
+                        className="w-full max-h-[75vh] overflow-y-auto rounded-t-2xl border-t border-white/10"
+                        style={{ backgroundColor: TEXT_ONLY_CANVAS_BG }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 bg-[#020617] border-b border-white/10 px-4 py-3 flex items-center justify-between">
+                        <div className="sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between" style={{ backgroundColor: TEXT_ONLY_CANVAS_BG }}>
                             <h2 className="text-lg font-semibold text-white">Choose a template</h2>
                             <button
                                 onClick={() => setShowTemplatePicker(false)}

@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.6)',
     },
     sheet: {
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         borderWidth: 1,

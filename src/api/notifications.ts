@@ -32,6 +32,44 @@ export interface Notification {
 }
 
 const notifications = new Map<string, Notification[]>(); // key: user handle, value: notifications array
+const locallyReadNotificationIds = new Set<string>();
+const locallyDeletedNotificationIds = new Set<string>();
+const locallyDeletedInviteIds = new Set<string>();
+const locallyMarkedAllReadAt = new Map<string, number>();
+
+function rememberNotificationRead(id: string): void {
+    const key = String(id || '').trim();
+    if (key) locallyReadNotificationIds.add(key);
+}
+
+function rememberNotificationDeleted(notification: Pick<Notification, 'id' | 'chatGroupInviteId'> | string): void {
+    if (typeof notification === 'string') {
+        const key = notification.trim();
+        if (key) locallyDeletedNotificationIds.add(key);
+        if (key.startsWith('group-invite-')) {
+            locallyDeletedInviteIds.add(key.slice('group-invite-'.length));
+        }
+        return;
+    }
+    const key = String(notification.id || '').trim();
+    if (key) locallyDeletedNotificationIds.add(key);
+    const inviteId = String(notification.chatGroupInviteId || '').trim();
+    if (inviteId) locallyDeletedInviteIds.add(inviteId);
+    if (key.startsWith('group-invite-')) {
+        locallyDeletedInviteIds.add(key.slice('group-invite-'.length));
+    }
+}
+
+function applyLocalNotificationFlags(item: Notification, forHandle?: string): Notification | null {
+    if (locallyDeletedNotificationIds.has(item.id)) return null;
+    if (item.chatGroupInviteId && locallyDeletedInviteIds.has(item.chatGroupInviteId)) return null;
+    const markedAllAt = forHandle ? locallyMarkedAllReadAt.get(forHandle) : undefined;
+    const readByMarkAll = markedAllAt != null && item.timestamp <= markedAllAt;
+    if (locallyReadNotificationIds.has(item.id) || item.read || readByMarkAll) {
+        return item.read ? item : { ...item, read: true };
+    }
+    return item;
+}
 
 // Check if a message is a sticker (emoji only)
 export function isStickerMessage(text: string): boolean {
@@ -164,13 +202,18 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                 read: !!n.read,
             }));
             const local = notifications.get(forHandle) || [];
-            const merged = [...local, ...normalized].sort((a, b) => b.timestamp - a.timestamp);
+            // Local read/delete must win — Laravel still returns stale unread rows after inbox actions.
+            const merged = [...normalized, ...local].sort((a, b) => b.timestamp - a.timestamp);
             const byId = new Map<string, Notification>();
-            for (const n of merged) byId.set(n.id, n);
+            for (const n of merged) {
+                const next = applyLocalNotificationFlags(n, forHandle);
+                if (next) byId.set(next.id, next);
+            }
             try {
                 const { fetchPendingGroupInvites } = await import('./chatGroups');
                 const pending = await fetchPendingGroupInvites();
                 for (const invite of pending) {
+                    if (locallyDeletedInviteIds.has(invite.id)) continue;
                     const fromHandle = invite.inviter?.handle || '';
                     const groupName = invite.chat_group?.name || 'a community';
                     const mapped: Notification = {
@@ -189,16 +232,19 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                         (n) => n.chatGroupInviteId === invite.id || n.id === mapped.id
                     );
                     if (existing) {
-                        byId.set(existing.id, {
+                        const patched = applyLocalNotificationFlags({
                             ...existing,
                             type: 'group_invite',
                             chatGroupId: existing.chatGroupId || mapped.chatGroupId,
                             groupName: existing.groupName || mapped.groupName,
                             chatGroupInviteId: invite.id,
                             message: existing.message || mapped.message,
-                        });
+                        }, forHandle);
+                        if (patched) byId.set(existing.id, patched);
+                        else byId.delete(existing.id);
                     } else {
-                        byId.set(mapped.id, mapped);
+                        const patched = applyLocalNotificationFlags(mapped, forHandle);
+                        if (patched) byId.set(mapped.id, patched);
                     }
                 }
             } catch (pendingError: any) {
@@ -244,7 +290,7 @@ export async function getNotifications(forHandle: string): Promise<Notification[
             return filterNotificationsByPreferences(forHandle, [
                 ...(notifications.get(forHandle) || []),
                 ...fallback,
-            ]);
+            ].map((n) => applyLocalNotificationFlags(n, forHandle)).filter((n): n is Notification => n != null));
         } catch (pendingError: any) {
             if (
                 pendingError?.name === 'ConnectionRefused' ||
@@ -256,10 +302,21 @@ export async function getNotifications(forHandle: string): Promise<Notification[
             }
         }
     }
-    return filterNotificationsByPreferences(forHandle, notifications.get(forHandle) || []);
+    return filterNotificationsByPreferences(
+        forHandle,
+        (notifications.get(forHandle) || [])
+            .map((n) => applyLocalNotificationFlags(n, forHandle))
+            .filter((n): n is Notification => n != null),
+    );
 }
 
 export async function markNotificationRead(notificationId: string, forHandle: string): Promise<void> {
+    rememberNotificationRead(notificationId);
+    const userNotifications = notifications.get(forHandle) || [];
+    const notif = userNotifications.find(n => n.id === notificationId);
+    if (notif) notif.read = true;
+    dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
+
     const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
     if (isLaravelApiEnabled()) {
         try {
@@ -271,16 +328,17 @@ export async function markNotificationRead(notificationId: string, forHandle: st
             console.warn('Failed to mark notification read via API, falling back to local store:', error);
         }
     }
-
-    const userNotifications = notifications.get(forHandle) || [];
-    const notif = userNotifications.find(n => n.id === notificationId);
-    if (notif) {
-        notif.read = true;
-        dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
-    }
 }
 
 export async function markAllNotificationsRead(forHandle: string): Promise<void> {
+    const userNotifications = notifications.get(forHandle) || [];
+    userNotifications.forEach((n) => {
+        n.read = true;
+        rememberNotificationRead(n.id);
+    });
+    locallyMarkedAllReadAt.set(forHandle, Date.now());
+    dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
+
     const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
     if (isLaravelApiEnabled()) {
         try {
@@ -292,10 +350,6 @@ export async function markAllNotificationsRead(forHandle: string): Promise<void>
             console.warn('Failed to mark all notifications read via API, falling back to local store:', error);
         }
     }
-
-    const userNotifications = notifications.get(forHandle) || [];
-    userNotifications.forEach(n => n.read = true);
-    dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
 }
 
 export async function getUnreadNotificationCount(forHandle: string): Promise<number> {
@@ -305,9 +359,21 @@ export async function getUnreadNotificationCount(forHandle: string): Promise<num
 
 export async function deleteNotification(notificationId: string, forHandle: string): Promise<void> {
     const userNotifications = notifications.get(forHandle) || [];
-    const filtered = userNotifications.filter(n => n.id !== notificationId);
-    notifications.set(forHandle, filtered);
+    const existing = userNotifications.find((n) => n.id === notificationId);
+    rememberNotificationDeleted(existing || notificationId);
+    notifications.set(forHandle, userNotifications.filter((n) => n.id !== notificationId));
     dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
+
+    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
+    if (isLaravelApiEnabled() && !notificationId.startsWith('group-invite-') && !notificationId.startsWith('conv-notif-')) {
+        try {
+            const apiClient = await import('./client');
+            await apiClient.deleteNotificationApi(notificationId);
+            dispatchBrowserEvent('notificationsUpdated', { handle: forHandle });
+        } catch (error) {
+            console.warn('Failed to delete notification via API; keeping local removal:', error);
+        }
+    }
 }
 
 

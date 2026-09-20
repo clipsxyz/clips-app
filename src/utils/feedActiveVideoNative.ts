@@ -15,15 +15,17 @@ function notify(listeners: Set<IdListener>, id: string | null): void {
     listeners.forEach((fn) => fn(id));
 }
 
+function silencePlayer(player: FeedPlayer): void {
+    try {
+        player.setVolume(0);
+        player.pause();
+    } catch {
+        /* ColorOS ExoPlayer can already be released */
+    }
+}
+
 function haltAllPlayers(): void {
-    players.forEach((player) => {
-        try {
-            player.pause();
-            player.setVolume(0);
-        } catch {
-            /* ColorOS ExoPlayer can already be released */
-        }
-    });
+    players.forEach(silencePlayer);
 }
 
 /** Native ExoPlayer handles — pause these directly; JS props can lag a recycle. */
@@ -31,12 +33,7 @@ export function registerFeedVideoPlayer(player: FeedPlayer | null | undefined): 
     if (!player || typeof player.pause !== 'function') return () => {};
     players.add(player);
     return () => {
-        try {
-            player.pause();
-            player.setVolume(0);
-        } catch {
-            /* ignore */
-        }
+        silencePlayer(player);
         players.delete(player);
     };
 }
@@ -77,7 +74,9 @@ export function setActiveFeedVideoPostId(postId: string | null): void {
     const next = postId ? String(postId) : null;
     if (next && !playbackAllowed) return;
     if (activePostId === next) return;
-    if (activePostId) haltAllPlayers();
+    // Always mute every registered ExoPlayer before the next card starts.
+    // ColorOS will keep the previous clip's audio if we only pause the active id.
+    haltAllPlayers();
     activePostId = next;
     notify(activeListeners, activePostId);
 }
@@ -91,7 +90,7 @@ export function notifyActiveFeedVideoListeners(): void {
 export function forceActiveFeedVideoPostId(postId: string | null): void {
     const next = postId ? String(postId) : null;
     if (next && !playbackAllowed) return;
-    if (next !== activePostId && activePostId) {
+    if (next !== activePostId) {
         haltAllPlayers();
     }
     activePostId = next;

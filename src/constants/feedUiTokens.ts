@@ -16,10 +16,16 @@ const FEED_UI_BY_MODE = {
       minAspect: 3 / 4,
       /** 4:5 portrait video/image (height/width). */
       maxAspect: 5 / 4,
+      /** Square MP4 postcard (height/width). */
+      videoSquareAspect: 1,
       /** 16:9 landscape video (height/width). */
       videoLandscapeAspect: 9 / 16,
       /** Cap media so header + video + action bar fit in one screen. */
       maxViewportFraction: 0.58,
+      /** Bluesky-style inset around the MP4 card. */
+      videoInset: 16,
+      /** Softer Bluesky-like corners on the square video card. */
+      videoRadius: 24,
     },
     spacing: {
       inset: 12,
@@ -51,9 +57,9 @@ const FEED_UI_BY_MODE = {
       avatar: 28,
       tab: 16,
       tabSquare: 28,
-      headerStories: 32,
+      headerStories: 36,
       headerLocation: 16,
-      headerPassport: 32,
+      headerPassport: 36,
     },
   },
   comfortable: {
@@ -61,10 +67,16 @@ const FEED_UI_BY_MODE = {
       minAspect: 3 / 4,
       /** 4:5 portrait video/image (height/width). */
       maxAspect: 5 / 4,
+      /** Square MP4 postcard (height/width). */
+      videoSquareAspect: 1,
       /** 16:9 landscape video (height/width). */
       videoLandscapeAspect: 9 / 16,
       /** Cap media so header + video + action bar fit in one screen. */
       maxViewportFraction: 0.58,
+      /** Bluesky-style inset around the MP4 card. */
+      videoInset: 16,
+      /** Softer Bluesky-like corners on the square video card. */
+      videoRadius: 24,
     },
     spacing: {
       inset: 14,
@@ -90,9 +102,9 @@ const FEED_UI_BY_MODE = {
       avatar: 28,
       tab: 16,
       tabSquare: 28,
-      headerStories: 32,
+      headerStories: 36,
       headerLocation: 16,
-      headerPassport: 32,
+      headerPassport: 36,
     },
   },
 } as const;
@@ -103,8 +115,7 @@ export const FEED_UI = FEED_UI_BY_MODE[FEED_UI_MODE];
 
 /**
  * Media frame height from the feed card width.
- * `widthOverHeight` is the media's width/height (e.g. 16/9). When omitted, videos
- * default to 4:5 portrait unless `isLandscape` is set (then 16:9).
+ * Videos are a square postcard. Images keep 4:5 / landscape rules.
  */
 export function feedCardMediaHeight(
   width: number,
@@ -114,7 +125,9 @@ export function feedCardMediaHeight(
   widthOverHeight?: number,
 ): number {
   let heightOverWidth = FEED_UI.media.maxAspect;
-  if (typeof widthOverHeight === 'number' && Number.isFinite(widthOverHeight) && widthOverHeight > 0) {
+  if (isVideo) {
+    heightOverWidth = FEED_UI.media.videoSquareAspect;
+  } else if (typeof widthOverHeight === 'number' && Number.isFinite(widthOverHeight) && widthOverHeight > 0) {
     const natural = 1 / widthOverHeight;
     if (widthOverHeight > 1) {
       heightOverWidth = natural;
@@ -124,7 +137,7 @@ export function feedCardMediaHeight(
         FEED_UI.media.maxAspect,
       );
     }
-  } else if (isVideo && isLandscape) {
+  } else if (isLandscape) {
     heightOverWidth = FEED_UI.media.videoLandscapeAspect;
   }
   const byAspect = width * heightOverWidth;

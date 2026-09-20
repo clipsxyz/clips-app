@@ -2,7 +2,10 @@ import React from 'react';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 import { resolveAvatarImageUri } from '../api/users';
-import { PASSPORT_TRAVELING_BORDER_COLORS } from '../utils/discoverAmbientPalette';
+import {
+    STORIES_24_AVATAR_RING_COLORS,
+    STORIES_24_AVATAR_RING_SEEN,
+} from '../constants/stories24Ring';
 
 export default function Avatar({
     src,
@@ -10,6 +13,7 @@ export default function Avatar({
     size = 'md',
     className = '',
     hasStory = false,
+    hasUnviewedStory = false,
     onClick,
     handle,
 }: AvatarProps) {
@@ -62,14 +66,22 @@ export default function Avatar({
         ? (e: React.MouseEvent<HTMLButtonElement>) => onClick(e)
         : undefined;
 
-    const storyRingStyle = {
-        background: `conic-gradient(${PASSPORT_TRAVELING_BORDER_COLORS.join(', ')})`,
-        animation: 'gazetteer-story-ring-spin 9s linear infinite',
-    };
+    const showRing = hasStory || hasUnviewedStory;
+    const unviewed = Boolean(hasUnviewedStory);
+    const storyRingStyle = unviewed
+        ? {
+              background: `linear-gradient(to top right, ${STORIES_24_AVATAR_RING_COLORS.join(', ')})`,
+          }
+        : {
+              background: STORIES_24_AVATAR_RING_SEEN,
+          };
 
-    const inner = hasStory ? (
+    const inner = showRing ? (
         <>
-            <div className="gazetteer-story-ring absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
+            <div
+                className={`absolute -inset-0.5 rounded-full p-[2px] ${unviewed ? 'stories24-ring-pulse' : ''}`}
+                style={storyRingStyle}
+            >
                 <div className="w-full h-full rounded-full bg-black" />
             </div>
             <div
@@ -90,8 +102,8 @@ export default function Avatar({
 
     const outerStyle = isNumericSize
         ? {
-              width: hasStory ? dim + 4 : dim,
-              height: hasStory ? dim + 4 : dim,
+              width: showRing ? dim + 4 : dim,
+              height: showRing ? dim + 4 : dim,
           }
         : undefined;
 
@@ -100,7 +112,7 @@ export default function Avatar({
             <button
                 type="button"
                 onClick={handleClick}
-                className={`${baseClassName} relative rounded-full ${hasStory ? 'overflow-visible' : 'overflow-hidden'}`}
+                className={`${baseClassName} relative rounded-full ${showRing ? 'overflow-visible' : 'overflow-hidden'}`}
                 style={outerStyle}
             >
                 {inner}
@@ -110,7 +122,7 @@ export default function Avatar({
 
     return (
         <div
-            className={`${baseClassName} relative rounded-full ${hasStory ? 'overflow-visible' : 'overflow-hidden'}`}
+            className={`${baseClassName} relative rounded-full ${showRing ? 'overflow-visible' : 'overflow-hidden'}`}
             style={outerStyle}
         >
             {inner}

@@ -1744,6 +1744,7 @@ const styles = StyleSheet.create({
     },
     form: {
         ...glassPanel,
+        backgroundColor: '#151D28',
         borderRadius: ox(20),
         maxWidth: 400,
         width: '100%',
@@ -1752,12 +1753,12 @@ const styles = StyleSheet.create({
     loginFormShell: {
         borderRadius: ox(16),
         padding: ox(2),
-        backgroundColor: '#d4af37',
+        backgroundColor: '#FFFFFF',
         borderWidth: 0,
     },
     loginFormInner: {
         borderRadius: ox(14),
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
         overflow: 'hidden',
     },
     tagline: {
@@ -2208,7 +2209,7 @@ const styles = StyleSheet.create({
         maxWidth: 400,
         width: '100%',
         alignSelf: 'center',
-        backgroundColor: '#000',
+        backgroundColor: '#151D28',
     },
     swalFooter: {
         width: '100%',
@@ -2220,7 +2221,7 @@ const styles = StyleSheet.create({
         paddingTop: ox(6),
         paddingBottom: ox(10),
         gap: ox(6),
-        backgroundColor: '#0f2430',
+        backgroundColor: '#151D28',
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: 'rgba(255,255,255,0.14)',
@@ -2265,7 +2266,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: '#163540',
+        backgroundColor: '#151D28',
     },
     swalCheckLabel: {
         flex: 1,
@@ -2326,7 +2327,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: '#163540',
+        backgroundColor: '#151D28',
     },
     swalCheckLabelCompact: {
         flexShrink: 1,
@@ -2456,7 +2457,7 @@ const styles = StyleSheet.create({
     forgotModalCard: {
         margin: ox(24),
         marginTop: '40%',
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         borderRadius: ox(16),
         borderWidth: 1,
         borderColor: '#374151',

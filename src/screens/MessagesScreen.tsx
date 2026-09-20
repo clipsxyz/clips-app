@@ -62,8 +62,6 @@ import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
-import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import DmMessageActionsSheet, { type DmMessageAction } from '../components/DmMessageActionsSheet.native';
 import DmReactionFlyOverlay, {
@@ -3012,7 +3010,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         { paddingBottom: Math.max(insets.bottom, 16) },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetCanvasInner}>
+                    <View style={styles.sheetCanvasInner}>
                         <Text style={styles.sheetTitle}>Create group</Text>
                         <Text style={styles.sheetLabel}>Group name</Text>
                         <TextInput
@@ -3061,7 +3059,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </Text>
                             </TouchableOpacity>
                         </View>
-                    </PassportSheetCanvas>
+                    </View>
                 </View>
             </View>
 
@@ -3072,7 +3070,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         { paddingBottom: Math.max(insets.bottom, 16) },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetCanvasInner}>
+                    <View style={styles.sheetCanvasInner}>
                         <Text style={styles.sheetTitle}>Invite member</Text>
                         <Text style={styles.sheetLabel}>Handle</Text>
                         <TextInput
@@ -3130,7 +3128,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </Text>
                             </TouchableOpacity>
                         </View>
-                    </PassportSheetCanvas>
+                    </View>
                 </View>
             </View>
 
@@ -3146,7 +3144,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         { paddingBottom: Math.max(insets.bottom, 16) },
                     ]}
                 >
-                    <PassportSheetCanvas style={styles.chatInfoCanvas}>
+                    <View style={styles.chatInfoCanvas}>
                         <View style={styles.chatInfoHeader}>
                             <Text style={styles.chatInfoTitle}>Chat Info</Text>
                             <TouchableOpacity onPress={() => setShowChatInfo(false)}>
@@ -3290,7 +3288,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 </TouchableOpacity>
                             </ScrollView>
                         )}
-                    </PassportSheetCanvas>
+                    </View>
                 </View>
             </View>
 
@@ -3345,7 +3343,7 @@ export default function MessagesScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
     pageShell: {
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
     },
     threadLoadingWrap: {
         flexGrow: 1,
@@ -3359,7 +3357,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: ox(12),
         paddingVertical: ox(10),
-        backgroundColor: 'rgba(0,0,0,0.95)',
+        backgroundColor: '#151D28',
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.08)',
     },
@@ -3390,7 +3388,7 @@ const styles = StyleSheet.create({
         height: ox(18),
         borderRadius: ox(9),
         borderWidth: 2,
-        borderColor: '#000000',
+        borderColor: '#151D28',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 2,
@@ -3667,7 +3665,7 @@ const styles = StyleSheet.create({
         paddingBottom: 0,
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
     },
     inputRow: {
         flexDirection: 'row',
@@ -3683,7 +3681,7 @@ const styles = StyleSheet.create({
         paddingBottom: ox(6),
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255, 255, 255, 0.12)',
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
     },
     composerContextBar: {
         width: 2,
@@ -4094,7 +4092,7 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     chatInfoSheet: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: '#151D28',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         borderWidth: 1,
@@ -4226,7 +4224,7 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     sheetCard: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: '#151D28',
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
         borderWidth: 1,

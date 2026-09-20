@@ -246,8 +246,29 @@ video {
   }
 }
 
+@keyframes stories24-ring-pulse-white {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+    filter: brightness(1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 1);
+    filter: brightness(1.35);
+  }
+}
+
+.stories24-ring-pulse {
+  animation: stories24-ring-pulse-white 1.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gazetteer-story-ring {
+    animation: none !important;
+  }
+
+  .stories24-ring-pulse {
     animation: none !important;
   }
 }

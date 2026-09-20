@@ -42,24 +42,22 @@ export function prefetchStoryGroup(handle?: string | null): void {
 export function prefetchInbox(handle?: string | null): void {
     const h = String(handle || '').trim();
     if (!h) return;
-    void runAfterInteractions(async () => {
-        await Promise.all([
-            queryClient.prefetchQuery({
-                queryKey: queryKeys.notifications(h),
-                queryFn: async () => {
-                    const { getNotifications } = await import('../api/notifications');
-                    return getNotifications(h);
-                },
-            }),
-            queryClient.prefetchQuery({
-                queryKey: queryKeys.conversations(h),
-                queryFn: async () => {
-                    const { listConversations } = await import('../api/messages');
-                    return listConversations(h);
-                },
-            }),
-        ]);
-    });
+    void Promise.all([
+        queryClient.prefetchQuery({
+            queryKey: queryKeys.notifications(h),
+            queryFn: async () => {
+                const { getNotifications } = await import('../api/notifications');
+                return getNotifications(h);
+            },
+        }),
+        queryClient.prefetchQuery({
+            queryKey: queryKeys.conversations(h),
+            queryFn: async () => {
+                const { listConversations } = await import('../api/messages');
+                return listConversations(h);
+            },
+        }),
+    ]);
 }
 
 /** Collect still/poster/avatar URLs for a feed batch (images only — not MP4s). */

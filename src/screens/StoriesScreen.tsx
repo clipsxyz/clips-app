@@ -52,6 +52,8 @@ import {
 } from '../api/stories';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import StoryPollOverlay from '../components/stories/StoryPollOverlay.native';
+import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
+import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 import {
     STORIES24_LOADING_HOLD_MS,
     clearStories24RailOpenHandle,
@@ -211,6 +213,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const currentGroupIndexRef = useRef(0);
     const storyGroupsRef = useRef(storyGroups);
     const recordedStoryViewIdsRef = useRef(new Set<string>());
+    const viewedHandleRef = useRef<string | undefined>(undefined);
     currentStoryIndexRef.current = currentStoryIndex;
     currentGroupIndexRef.current = currentGroupIndex;
     storyGroupsRef.current = storyGroups;
@@ -751,7 +754,14 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     nextStoryRef.current = () => goToNextStory('timer');
 
+    viewedHandleRef.current =
+        storyGroups[currentGroupIndex]?.userHandle || normalizedOpenUserHandle;
+
     const finalizeCloseNavigation = useCallback(() => {
+        emitStoriesRefresh();
+        dispatchBrowserEvent('storiesViewed', {
+            userHandle: viewedHandleRef.current,
+        });
         setViewingStories(false);
         setProgress(0);
         setPaused(false);
@@ -1387,7 +1397,22 @@ export default function StoriesScreen({ route, navigation }: any) {
         };
     }, [viewingStories, paused, currentGroupIndex, currentStoryIndex]);
 
-    if (showStories24HoldScreen) {
+    const openUserTargetReady =
+        !!normalizedOpenUserHandle &&
+        storyGroups.some(
+            (g) =>
+                String(g.userHandle || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^@/, '') ===
+                normalizedOpenUserHandle.trim().toLowerCase().replace(/^@/, ''),
+        );
+    const showOpenUserSplash =
+        !!normalizedOpenUserHandle &&
+        !stories24OpenFromFeedRail &&
+        (loading || (openUserTargetReady && !viewingStories));
+
+    if (showStories24HoldScreen || showOpenUserSplash) {
         return (
             <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="passport">
                 <StoriesPopIcon size={ox(80)} />
@@ -1398,21 +1423,12 @@ export default function StoriesScreen({ route, navigation }: any) {
     }
 
     if (loading) {
-        const fromProfile =
-            Boolean(normalizedOpenUserHandle) && !stories24OpenFromFeedRail;
         return (
             <GazetteerScreenShell
                 contentStyle={styles.loadingShell}
                 ambientVariant="passport"
             >
-                {fromProfile ? (
-                    <>
-                        <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
-                        <Text style={styles.storiesOpeningText}>Opening story...</Text>
-                    </>
-                ) : (
-                    <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
-                )}
+                <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
             </GazetteerScreenShell>
         );
     }
@@ -2350,7 +2366,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(14),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
-        backgroundColor: 'rgba(3, 7, 18, 0.92)',
+        backgroundColor: 'rgba(21, 29, 40, 0.92)',
         padding: ox(8),
     },
     inlineReplyInput: {
@@ -2484,7 +2500,7 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     replyModalContent: {
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         padding: ox(20),

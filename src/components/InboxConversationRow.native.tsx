@@ -180,6 +180,7 @@ function InboxConversationRow({
                             name={title}
                             size={ox(44)}
                             hasStory={!isGroup && !!conv.hasUnviewedStories}
+                            hasUnviewedStory={!isGroup && !!conv.hasUnviewedStories}
                         />
                     </TouchableOpacity>
                     <Pressable
@@ -265,7 +266,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: ox(6),
         paddingVertical: ox(10),
-        backgroundColor: '#070a12',
+        backgroundColor: '#151D28',
         gap: ox(10),
         borderRadius: ox(8),
     },

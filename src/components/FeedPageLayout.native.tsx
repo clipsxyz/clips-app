@@ -2,12 +2,12 @@
  * Feed page shell — mirrors web FeedPageWrapper + App `/feed` layout (src/App.tsx).
  *
  * Web source of truth:
- * - App shell: bg #030712, h-[100dvh], overflow-hidden, flex-col, bottom tab padding
+ * - App shell: bg #151D28, h-[100dvh], overflow-hidden, flex-col, bottom tab padding
  * - FeedPageWrapper: flex-col h-full min-h-0
  * - Pinned chrome (non-scrolling): safe-area + 16px spacer + offline + PillTabs + 16px + error
  * - Scroll region: flex-1 min-h-0 overflow-y-auto pb-2
  *
- * Note: Web main feed is flat #030712 — ambient canvas only appears inside cards (Stories 24, etc.),
+ * Note: Web main feed is flat #151D28 — ambient canvas only appears inside cards (Stories 24, etc.),
  * not as a full-screen feed background.
  */
 
@@ -26,11 +26,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
 
-/** Web `main` / feed shell background (App.tsx style={{ backgroundColor: '#030712' }}). */
-export const FEED_PAGE_BG = '#030712';
+/** Web `main` / feed shell background (App.tsx style={{ backgroundColor: '#151D28' }}). */
+export const FEED_PAGE_BG = '#151D28';
 
 /** Web post card / article background (FeedCard style). */
-export const FEED_CARD_BG = '#030712';
+export const FEED_CARD_BG = '#151D28';
 
 /** Media column + loading frame (black letterbox). */
 export const FEED_CARD_MEDIA_BG = '#000000';
@@ -96,7 +96,7 @@ export const FEED_CARD_CAPTION_TEXT_SLOT = {
     minWidth: 0,
 } as const;
 
-/** Web EngagementBar shell: `px-3 pt-2 pb-2.5 border-t` with borderColor #030712. */
+/** Web EngagementBar shell: `px-3 pt-2 pb-2.5 border-t` with borderColor #151D28. */
 export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
     paddingHorizontal: 12,
     paddingTop: 8,
@@ -370,11 +370,11 @@ export const FEED_EMPTY_GRADIENT_BTN_TEXT = {
 export const FEED_EMPTY_NOTIFY_GRADIENT = ['#0EA5E9', '#6366F1', '#A855F7'] as const;
 export const FEED_EMPTY_CREATE_GRADIENT = ['#EF4444', '#FACC15', '#EF4444'] as const;
 
-/** Web PillTabs container: `bg-black py-1`. */
-export const FEED_PILL_TABS_BG = '#000000';
+/** Header canvas — same as feed page (`#151D28`). */
+export const FEED_PILL_TABS_BG = FEED_PAGE_BG;
 
-/** Web location pill: `bg-[#36454F]`. */
-export const FEED_LOCATION_PILL_BG = '#36454F';
+/** Location pill fill — same as feed canvas. */
+export const FEED_LOCATION_PILL_BG = FEED_PAGE_BG;
 
 /** Web header title typography (PillTabs location label — 18px / 700). */
 export const FEED_HEADER_TITLE = {
@@ -393,6 +393,7 @@ export const FEED_HEADER_PICKER_ROW = {
     minHeight: 44,
     gap: 8,
     zIndex: 30,
+    backgroundColor: FEED_PAGE_BG,
 };
 
 export const FEED_HEADER_SIDE_ACTION = {
@@ -736,10 +737,12 @@ const styles = StyleSheet.create({
         height: 16, // web h-4
     },
     pillTabsHost: {
-        backgroundColor: FEED_PILL_TABS_BG,
+        backgroundColor: '#151D28',
         paddingVertical: 4, // web py-1
         position: 'relative',
         zIndex: 140,
+        alignSelf: 'stretch',
+        width: '100%',
     },
     scrollHost: {
         flex: 1,

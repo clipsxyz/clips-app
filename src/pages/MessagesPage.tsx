@@ -2759,16 +2759,16 @@ export default function MessagesPage() {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-black text-white flex items-center justify-center">
+            <div className="min-h-screen bg-[#151D28] text-white flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-black text-white flex flex-col">
+        <div className="min-h-screen bg-[#151D28] text-white flex flex-col">
             {/* Header */}
-            <div className="sticky top-0 z-[120] isolate bg-black/95 backdrop-blur-md border-b border-white/[0.08]">
+            <div className="sticky top-0 z-[120] isolate bg-[#151D28] border-b border-white/[0.08]">
                 <div className={`relative z-10 flex items-center ${compactPhone ? 'px-2.5 py-2.5' : 'px-4 py-3'}`}>
                     <button
                         onClick={() => navigate(-1)}
@@ -3787,7 +3787,7 @@ export default function MessagesPage() {
                     const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
                     const isVideoReply = replyPost?.mediaType === 'video' || isLikelyVideoUrl(replyThumbUrl);
                     return (
-                        <div className={`${compactPhone ? 'px-2.5 pt-2 pb-1.5' : 'px-4 pt-2 pb-1.5'} border-t border-white/10 bg-black`}>
+                        <div className={`${compactPhone ? 'px-2.5 pt-2 pb-1.5' : 'px-4 pt-2 pb-1.5'} border-t border-white/10 bg-[#151D28]`}>
                             <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
                                     <div
@@ -3830,7 +3830,7 @@ export default function MessagesPage() {
                 })()}
                 {/* Edit Preview */}
                 {editingMessage && (
-                    <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-black`}>
+                    <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-[#151D28]`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
                                 <span className="text-[11px] uppercase tracking-wide text-neutral-500">Editing message</span>
@@ -3847,7 +3847,7 @@ export default function MessagesPage() {
                 )}
                 {/* Image compose: preview + caption before sending */}
                 {imageCompose && (
-                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
+                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-[#151D28]`}>
                         <div className="flex items-center gap-3">
                             <div className="flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-950">
                                 <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
@@ -3884,7 +3884,7 @@ export default function MessagesPage() {
                     </div>
                 )}
                 {ENABLE_VOICE_NOTES && voiceDraft ? (
-                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
+                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-[#151D28]`}>
                         <p className="text-[11px] font-semibold text-neutral-500 mb-2 ml-1">Review before sending</p>
                         <div className="flex items-center gap-2 min-h-[44px] px-2.5 py-2 rounded-[24px] border-2 border-white bg-[#09090b]">
                             <button
@@ -4420,11 +4420,11 @@ export default function MessagesPage() {
                     onClick={() => setShowChatInfo(false)}
                 >
                     <div
-                        className="relative w-full max-w-md max-h-[80vh] overflow-hidden rounded-t-3xl border border-white/10 border-b-0 bg-[#060d16]"
+                        className="relative w-full max-w-md max-h-[80vh] overflow-hidden rounded-t-3xl border border-white/10 border-b-0 bg-[#151D28]"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <DiscoverAmbientCanvas fixed={false} variant="passport" />
-                        <div className="relative z-[2] sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between bg-[#060d16]/70 backdrop-blur-sm">
+                        <div className="relative z-[2] sticky top-0 border-b border-white/10 px-4 py-3 flex items-center justify-between bg-[#151D28]/70 backdrop-blur-sm">
                             <h3 className="text-white font-semibold">Chat Info</h3>
                             <button
                                 onClick={() => setShowChatInfo(false)}

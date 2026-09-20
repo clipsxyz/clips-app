@@ -2188,6 +2188,12 @@ export async function markAllNotificationsReadApi() {
     });
 }
 
+export async function deleteNotificationApi(notificationId: string) {
+    return apiRequest(`/notifications/${encodeURIComponent(notificationId)}`, {
+        method: 'DELETE',
+    });
+}
+
 export async function fetchConversation(otherHandle: string) {
     const encoded = encodeURIComponent(otherHandle);
     return apiRequest(`/messages/conversation/${encoded}`);

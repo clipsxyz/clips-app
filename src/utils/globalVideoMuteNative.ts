@@ -35,8 +35,10 @@ export async function getGlobalVideoMutedNative(): Promise<boolean> {
 
 export async function setGlobalVideoMutedNative(muted: boolean): Promise<void> {
     cachedMuted = muted;
-    // Notify first so UI (icon / ExoPlayer) updates without waiting on disk.
-    listeners.forEach((fn) => fn(muted));
+    // Defer so a mute toggle during ScenesViewer render cannot setState on FeedScreen.
+    queueMicrotask(() => {
+        listeners.forEach((fn) => fn(muted));
+    });
     try {
         await AsyncStorage.setItem(GLOBAL_VIDEO_MUTED_KEY, muted ? '1' : '0');
     } catch {

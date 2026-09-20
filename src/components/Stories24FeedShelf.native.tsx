@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
         paddingTop: 4,
         paddingBottom: 8,
         overflow: 'visible',
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         position: 'relative',
         zIndex: 8,
     },

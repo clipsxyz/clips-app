@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const GAZETTEER_SHEET_DARK = {
     background: {
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         borderWidth: 1,

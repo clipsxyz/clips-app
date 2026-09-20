@@ -102,7 +102,7 @@ function scrollToFeedPost(
       'ring-2',
       'ring-cyan-400/90',
       'ring-offset-2',
-      'ring-offset-[#030712]',
+      'ring-offset-[#151D28]',
       'shadow-[0_0_0_1px_rgba(34,211,238,0.35)]',
     ] as const;
     el.classList.add(...highlight);

@@ -52,6 +52,7 @@ export default function FeedPostHeader({
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
+    const [hasUnviewedStory, setHasUnviewedStory] = useState(false);
     const { isReclip, displayHandle, profileHandle, originalHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const originalDisplayHandle = String(originalHandle || post.originalUserHandle || '').trim();
     const originalAvatarSrc = resolveAvatarImageUri(post.originalUserAvatarUrl, originalDisplayHandle);
@@ -89,12 +90,12 @@ export default function FeedPostHeader({
         async function checkStory() {
             try {
                 const anyStory = await userHasStoriesByHandle(safeProfileHandle);
-                let ring = anyStory;
-                if (!isCurrentUser) {
-                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle, user?.id);
-                }
+                const unviewed = isCurrentUser
+                    ? false
+                    : await userHasUnviewedStoriesByHandle(safeProfileHandle, user?.id);
                 if (!cancelled) {
-                    setHasStory(ring);
+                    setHasStory(anyStory);
+                    setHasUnviewedStory(unviewed);
                     onHasStoryChange?.(anyStory);
                 }
             } catch {
@@ -129,6 +130,7 @@ export default function FeedPostHeader({
                     handle={safeProfileHandle}
                     size={FEED_UI.icon.avatar}
                     hasStory={hasStory}
+                    hasUnviewedStory={hasUnviewedStory}
                 />
             </TouchableOpacity>
             {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
@@ -275,7 +277,7 @@ const styles = StyleSheet.create({
         paddingTop: 12,
         paddingBottom: 8,
         justifyContent: 'center',
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
         overflow: 'hidden',
     },
     wrapOverlaid: {
@@ -347,7 +349,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#151D28',
     },
     requestedPill: {
         position: 'absolute',
@@ -361,7 +363,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#151D28',
     },
     requestedPillText: {
         color: '#FFFFFF',
@@ -393,7 +395,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#151D28',
     },
     reclipRow: {
         flexDirection: 'row',

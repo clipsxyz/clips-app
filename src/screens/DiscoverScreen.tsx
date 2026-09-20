@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -25,6 +25,8 @@ import {
     clearPendingLocationFeed,
     writePendingLocationFeed,
 } from '../utils/pendingLocationNative';
+import { useFocusEffect } from '@react-navigation/native';
+import { haltFeedPlayback } from '../utils/feedActiveVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 const POPULAR = [
@@ -62,6 +64,12 @@ export default function DiscoverScreen({ navigation }: any) {
     const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
     const keyboardLayout = keyboardOpen;
     const placeholderLabel = `Discover · ${ROTATING_CITIES[placeholderCityIndex]}`;
+
+    useFocusEffect(
+        useCallback(() => {
+            haltFeedPlayback();
+        }, []),
+    );
 
     useEffect(() => {
         if (hasSearchQuery) return;
@@ -122,6 +130,7 @@ export default function DiscoverScreen({ navigation }: any) {
     }, [query]);
 
     const openFeedSelection = (selection: PlaceFeedSelection) => {
+        haltFeedPlayback();
         writePendingLocationFeed({
             filter: selection.filter,
             label: selection.label,

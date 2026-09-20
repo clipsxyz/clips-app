@@ -1363,7 +1363,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <View style={styles.tabsCueColumn} pointerEvents="box-none" collapsable={false}>
                             <LinearGradient
                                 pointerEvents="none"
-                                colors={['rgba(3,7,18,0)', '#030712']}
+                                colors={['rgba(21,29,40,0)', '#151D28']}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 0 }}
                                 style={StyleSheet.absoluteFill}
@@ -2817,7 +2817,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(9),
         backgroundColor: '#f472b6',
         borderWidth: 2,
-        borderColor: '#030712',
+        borderColor: '#151D28',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -3290,7 +3290,7 @@ const styles = StyleSheet.create({
         height: 320,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
     },
     myFeedVideoPlaceholderText: {
         marginTop: ox(8),

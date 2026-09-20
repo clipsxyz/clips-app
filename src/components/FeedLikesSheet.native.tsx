@@ -8,11 +8,11 @@ import {
     type PostLiker,
 } from '../api/postLikers';
 import Avatar from './Avatar';
-import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import GazetteerBottomSheetModal, {
     GAZETTEER_SHEET_PASSPORT,
 } from './GazetteerBottomSheetModal.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
+import { FEED_PAGE_BG } from './FeedPageLayout.native';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 
 const P = {
@@ -46,7 +46,6 @@ export default function FeedLikesSheet({
     onVisitProfile,
 }: Props) {
     const [likers, setLikers] = useState<PostLiker[]>([]);
-    const [sheetLikes, setSheetLikes] = useState(likeCount);
     const [sheetViews, setSheetViews] = useState(viewCount);
     const [following, setFollowing] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
@@ -66,7 +65,6 @@ export default function FeedLikesSheet({
             .then((result) => {
                 if (cancelled) return;
                 setLikers(result.items);
-                setSheetLikes(result.likes_count);
                 setSheetViews(result.views_count);
                 const next = new Set<string>();
                 result.items.forEach((row) => {
@@ -77,7 +75,6 @@ export default function FeedLikesSheet({
             .catch(() => {
                 if (!cancelled) {
                     setLikers([]);
-                    setSheetLikes(likeCount);
                     setSheetViews(viewCount);
                 }
             })
@@ -146,23 +143,16 @@ export default function FeedLikesSheet({
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.statsRow}>
-                    <View style={styles.stat}>
-                        <FeedLikeThumbsIcon size={16} color="#F472B6" />
-                        <Text style={styles.statLabel}>Likes</Text>
-                        <Text style={styles.statValue}>{sheetLikes.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.stat}>
-                        <Icon name="eye-outline" size={16} color="#60A5FA" />
-                        <Text style={styles.statLabel}>Views</Text>
-                        <Text style={styles.statValue}>{sheetViews.toLocaleString()}</Text>
-                    </View>
+                <View style={styles.viewsRow}>
+                    <Icon name="eye-outline" size={22} color="#FFFFFF" />
+                    <Text style={styles.viewsValue}>{sheetViews.toLocaleString()}</Text>
+                    <Text style={styles.viewsLabel}>Views</Text>
                 </View>
 
                 <View style={styles.listDivider} />
             </View>
         ),
-        [onClose, sheetLikes, sheetViews],
+        [onClose, sheetViews],
     );
 
     const renderItem = useCallback(
@@ -268,7 +258,7 @@ const styles = StyleSheet.create({
         paddingTop: 4,
         paddingBottom: 4,
         // Slight wash so list items never read through the pinned chrome on overscroll.
-        backgroundColor: 'rgba(6, 13, 22, 0.94)',
+        backgroundColor: FEED_PAGE_BG,
     },
     listFlex: {
         flex: 1,
@@ -277,7 +267,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: 10,
     },
     title: {
         fontSize: 12,
@@ -290,24 +280,21 @@ const styles = StyleSheet.create({
         padding: 6,
         borderRadius: 999,
     },
-    statsRow: {
+    viewsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
+        gap: 10,
         marginBottom: 16,
     },
-    stat: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    statLabel: {
-        fontSize: 12,
+    viewsLabel: {
+        fontSize: 16,
         color: P.muted,
-    },
-    statValue: {
-        fontSize: 14,
         fontWeight: '600',
+    },
+    viewsValue: {
+        fontSize: 24,
+        fontWeight: '700',
         color: P.text,
     },
     listDivider: {

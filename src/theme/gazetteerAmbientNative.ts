@@ -63,8 +63,8 @@ export const gazetteerHeader = {
 
 export const gazetteerTabActiveBorder = '#f472b6';
 
-/** Profile / Passport page — matches web ProfilePage (`bg-[#030712]`, card borders). */
-export const profilePassportPageBg = '#030712';
+/** Profile / Passport page — matches web ProfilePage (`bg-[#151D28]`, card borders). */
+export const profilePassportPageBg = '#151D28';
 export const profilePassportSurface = '#020617';
 export const profilePassportScrollInset = 24;
 export const profilePassportCardsInset = 16;

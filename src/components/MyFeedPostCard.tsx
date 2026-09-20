@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
         height: 320,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#030712',
+        backgroundColor: '#151D28',
     },
     videoPlaceholderText: {
         marginTop: 8,

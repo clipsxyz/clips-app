@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     Animated,
     Dimensions,
@@ -49,6 +49,7 @@ import {
 import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
+import { FEED_UI } from '../constants/feedUiTokens';
 
 const ANDROID_FEED_VIDEO_PROPS = androidListSafeVideoProps();
 
@@ -110,6 +111,7 @@ type FeedPlayingVideoProps = {
     /** Pixel box — ColorOS TextureView ignores % / overflow and paints into the next slide. */
     boxWidth: number;
     boxHeight: number;
+    clipRadius?: number;
 };
 
 /** Isolated so like-burst setState on the card does not rebuild ExoPlayer. */
@@ -131,6 +133,7 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     resizeMode = 'cover',
     boxWidth,
     boxHeight,
+    clipRadius = 0,
 }: FeedPlayingVideoProps) {
     const onLoadStartRef = useRef(onLoadStart);
     const onReadyRef = useRef(onReady);
@@ -154,10 +157,17 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     useEffect(() => {
         const node = videoRef as { current?: { pause: () => void; setVolume: (n: number) => void } | null };
         let unreg = () => {};
-        const id = requestAnimationFrame(() => {
+        const attach = () => {
             const player = node?.current;
-            if (!player) return;
+            if (!player) return false;
             unreg = registerFeedVideoPlayer(player);
+            return true;
+        };
+        if (attach()) {
+            return () => unreg();
+        }
+        const id = requestAnimationFrame(() => {
+            attach();
         });
         return () => {
             cancelAnimationFrame(id);
@@ -189,6 +199,7 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
         width: boxWidth,
         height: boxHeight,
         overflow: 'hidden' as const,
+        borderRadius: clipRadius > 0 ? clipRadius : 0,
     };
 
     const markReady = () => {
@@ -214,7 +225,7 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
                 playInBackground={false}
                 playWhenInactive={false}
                 ignoreSilentSwitch="ignore"
-                mixWithOthers="mix"
+                mixWithOthers="duck"
                 hideShutterView
                 useTextureView
                 poster={poster}
@@ -254,7 +265,8 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     prev.posterUri === next.posterUri &&
     prev.resizeMode === next.resizeMode &&
     prev.boxWidth === next.boxWidth &&
-    prev.boxHeight === next.boxHeight
+    prev.boxHeight === next.boxHeight &&
+    prev.clipRadius === next.clipRadius
 ));
 
 function resolveFeedVideoPosterUri(
@@ -459,6 +471,41 @@ const FeedPostMedia = React.memo(
         mode === 'feed' &&
         !suspendNativeVideo &&
         String(storeActivePostId) === String(post.id);
+
+    // ColorOS drops `pause()` if we unmount TextureView in the same frame.
+    // Keep the player mounted for two frames with paused/muted so the old
+    // clip cannot keep playing under the next postcard.
+    const [keepPlayerMounted, setKeepPlayerMounted] = useState(false);
+    useLayoutEffect(() => {
+        if (mode !== 'feed') {
+            setKeepPlayerMounted(false);
+            return;
+        }
+        if (isViewable) {
+            setKeepPlayerMounted(true);
+            return;
+        }
+        if (!keepPlayerMounted) return;
+        try {
+            feedVideoRef.current?.setVolume?.(0);
+            feedVideoRef.current?.pause?.();
+        } catch {
+            /* ignore */
+        }
+        let inner = 0;
+        const outer = requestAnimationFrame(() => {
+            inner = requestAnimationFrame(() => setKeepPlayerMounted(false));
+        });
+        return () => {
+            cancelAnimationFrame(outer);
+            if (inner) cancelAnimationFrame(inner);
+        };
+    }, [mode, isViewable, keepPlayerMounted]);
+
+    useEffect(() => {
+        if (!isViewable) return;
+        if (!getFeedScrollBusy()) setFeedScrolling(false);
+    }, [isViewable]);
 
     if (mode === 'feed' && !isViewable) {
         posterOpacity.setValue(1);
@@ -836,14 +883,13 @@ const FeedPostMedia = React.memo(
             const tapX = Number.isFinite(localX) ? localX : 0;
             const tapY = Number.isFinite(localY) ? localY : 0;
             const frameW = width > 0 ? width : 1;
-            const aspect = isLandscapeMedia ? 16 / 9 : 4 / 5;
-            const frameH = width > 0 ? Math.min(width / aspect, height > 0 ? height : width / aspect) : 1;
+            const frameH = height > 0 ? height : frameW;
             if (tapY > frameH - 56 && (tapX > frameW - 56 || tapX < 160)) {
                 return;
             }
             handleFullscreen();
         },
-        [handleFullscreen, height, isLandscapeMedia, width],
+        [handleFullscreen, height, width],
     );
 
     const mediaTapGesture = useMemo(() => {
@@ -880,6 +926,30 @@ const FeedPostMedia = React.memo(
     const handleOpenScenesPress = useCallback(() => {
         onOpenScenes?.();
     }, [onOpenScenes]);
+
+    useEffect(() => {
+        const next = width > 0 ? width : windowSlideWidth;
+        setPageWidth((prev) => (Math.abs(prev - next) > 1 ? next : prev));
+        if (!fillViewport && height > 0) {
+            setPageHeight((prev) => (Math.abs(prev - height) > 1 ? height : prev));
+        }
+    }, [fillViewport, height, width, windowSlideWidth]);
+
+    const onFrameLayout = useCallback(
+        (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+            // Parent already passed a locked square — 1px TextureView drift remounts ExoPlayer.
+            if (!fillViewport && width > 1 && height > 1) return;
+            const nextW = Math.round(e.nativeEvent.layout.width);
+            const nextH = Math.round(e.nativeEvent.layout.height);
+            if (nextW > 0) {
+                setPageWidth((prev) => (Math.abs(prev - nextW) > 1 ? nextW : prev));
+            }
+            if (nextH > 0) {
+                setPageHeight((prev) => (Math.abs(prev - nextH) > 1 ? nextH : prev));
+            }
+        },
+        [fillViewport, height, width],
+    );
 
     if (textOnly) {
         return (
@@ -930,32 +1000,9 @@ const FeedPostMedia = React.memo(
     };
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
-    const mediaFit = isLandscapeMedia ? 'contain' : 'cover';
-
-    useEffect(() => {
-        const next = width > 0 ? width : windowSlideWidth;
-        setPageWidth((prev) => (Math.abs(prev - next) > 1 ? next : prev));
-        if (!fillViewport && height > 0) {
-            setPageHeight((prev) => (Math.abs(prev - height) > 1 ? height : prev));
-        }
-    }, [fillViewport, height, width, windowSlideWidth]);
-
-    const onFrameLayout = useCallback(
-        (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
-            const nextW = Math.round(e.nativeEvent.layout.width);
-            const nextH = Math.round(e.nativeEvent.layout.height);
-            if (nextW > 0) {
-                setPageWidth((prev) => (Math.abs(prev - nextW) > 1 ? nextW : prev));
-            }
-            if (nextH > 0) {
-                setPageHeight((prev) => (Math.abs(prev - nextH) > 1 ? nextH : prev));
-            }
-        },
-        [],
-    );
-
-    // Parent (FeedCard) owns the frame height. Numeric slide width — never % —
-    // so Android paging cannot squeeze two slides into one viewport.
+    const isSquareFrame = height > 0 && width > 0 && Math.abs(height - width) < 8;
+    const mediaFit = isSquareFrame || !isLandscapeMedia ? 'cover' : 'contain';
+    const clipRadius = isSquareFrame ? FEED_UI.media.videoRadius : 0;
     const frameBoxStyle = fillViewport
         ? {
               width: '100%' as const,
@@ -966,6 +1013,7 @@ const FeedPostMedia = React.memo(
               width: '100%' as const,
               height,
               overflow: 'hidden' as const,
+              borderRadius: clipRadius,
           };
     const frameStyle = frameBoxStyle;
     const slideBoxStyle = {
@@ -1002,7 +1050,7 @@ const FeedPostMedia = React.memo(
             slideIsCurrent &&
             !playFailed &&
             hasValidVideoFrame(slideWidth, slideBoxH) &&
-            (mode === 'detail' || (mode === 'feed' && isViewable));
+            (mode === 'detail' || (mode === 'feed' && (isViewable || keepPlayerMounted)));
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
@@ -1053,6 +1101,7 @@ const FeedPostMedia = React.memo(
                         resizeMode={fillViewport ? 'contain' : mediaFit}
                         boxWidth={slideWidth}
                         boxHeight={fillViewport ? slideHeight : height}
+                        clipRadius={fillViewport ? 0 : clipRadius}
                         pointerEvents={mediaPointerEvents}
                         videoRef={feedVideoRef}
                         onLoadStart={() => {

@@ -12,6 +12,8 @@ export type AvatarProps = {
     /** Web / NativeWind only; ignored on native. */
     className?: string;
     hasStory?: boolean;
+    /** Unviewed Stories 24 — white pulsing ring on top of the Stories 24 border. */
+    hasUnviewedStory?: boolean;
     /** Web: button click event. Native: `onClick()` is called with no argument. */
     onClick?: (e?: ReactMouseEvent<HTMLButtonElement>) => void;
 };

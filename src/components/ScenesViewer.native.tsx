@@ -237,6 +237,7 @@ export default function ScenesViewer({
 
     const initialIndex = Math.max(0, indexOfPostId(posts, startPostId));
     const [activeIndex, setActiveIndex] = useState(initialIndex);
+    const activePost = posts[activeIndex];
     const userMovedFromInitialRef = useRef(false);
     const [muted, setMuted] = useState(initialMuted ?? true);
     const [paused, setPaused] = useState(false);
@@ -259,7 +260,6 @@ export default function ScenesViewer({
     const [editPost, setEditPost] = useState<Post | null>(null);
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [inviteGroupHandle, setInviteGroupHandle] = useState<string | null>(null);
-    const [lastTapDebug, setLastTapDebug] = useState<string | null>(null);
     const postsRef = useRef(posts);
     const activeIndexRef = useRef(activeIndex);
     const mediaSlideIndexRef = useRef(0);
@@ -284,7 +284,6 @@ export default function ScenesViewer({
     const lastMediaTapRef = useRef(0);
     const singleMediaTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const activePost = posts[activeIndex];
     const caption = activePost ? getPostDisplayCaption(activePost) : '';
     const authorAvatarSrc = useResolvedAuthorAvatar({
         handle: activePost
@@ -532,12 +531,10 @@ export default function ScenesViewer({
     }, [activePost?.id, overflowVisible, viewerUserId]);
 
     const toggleMute = useCallback(() => {
-        setMuted((prev) => {
-            const next = !prev;
-            void setGlobalVideoMutedNative(next);
-            return next;
-        });
-    }, []);
+        const next = !muted;
+        setMuted(next);
+        void setGlobalVideoMutedNative(next);
+    }, [muted]);
 
     const invokeClose = useCallback(() => {
         if (closedOnceRef.current) return;
@@ -890,7 +887,6 @@ export default function ScenesViewer({
         (event?: GestureResponderEvent) => {
             if (isTextOnlyPost) return;
             setTopMetaVisible(true);
-            setLastTapDebug(`tap @ ${new Date().toLocaleTimeString()}`);
 
             const now = Date.now();
             if (now - lastMediaTapRef.current <= SCENES_DOUBLE_TAP_MS) {
@@ -1413,12 +1409,6 @@ export default function ScenesViewer({
             </View>
             ) : null}
 
-            {lastTapDebug && (
-                <View style={styles.tapDebug}>
-                    <Text style={styles.tapDebugText}>{lastTapDebug}</Text>
-                </View>
-            )}
-
             <View style={[styles.fxLayer, { backgroundColor: 'transparent' }]} pointerEvents="none">
                 {burstAt ? (
                     <FeedDoubleTapLikeBurst
@@ -1774,20 +1764,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#121212',
         zIndex: 4,
         elevation: Platform.OS === 'android' ? 4 : 0,
-    },
-    tapDebug: {
-        position: 'absolute',
-        top: 64,
-        left: 12,
-        zIndex: 200,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-    },
-    tapDebugText: {
-        color: '#FDE68A',
-        fontSize: 11,
     },
     fxLayer: {
         ...StyleSheet.absoluteFillObject,

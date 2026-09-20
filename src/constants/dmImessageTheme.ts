@@ -6,8 +6,8 @@ export const DM_SENT_BG = 'bg-[#0A84FF]';
 /** iOS Messages green — classic SMS / outgoing green bubble */
 export const DM_SENT_GREEN_BG = 'bg-[#34C759]';
 export const DM_RECEIVED_BG = 'bg-[#3A3A3C]';
-/** Composer strip: true black (grayscale chrome). */
-export const DM_INPUT_BAR = 'bg-black';
+/** Composer strip — same canvas as feed / inbox. */
+export const DM_INPUT_BAR = 'bg-[#151D28]';
 /** Inset field on black bar — barely lifted for readability */
 export const DM_INPUT_FIELD = 'bg-zinc-950';
 
