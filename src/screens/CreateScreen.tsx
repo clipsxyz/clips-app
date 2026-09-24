@@ -600,6 +600,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 userHandle: user.handle,
                 mediaUrl: preparedMedia.mediaUrl,
                 mediaType: preparedMedia.mediaType,
+                videoPosterUrl: preparedMedia.videoPosterUrl,
                 caption: captionText,
                 location: locationLabel,
                 venue: venue.trim() || undefined,

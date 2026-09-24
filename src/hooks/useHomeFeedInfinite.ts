@@ -27,7 +27,7 @@ export type HomeFeedQueryInput = {
     enabled?: boolean;
 };
 
-const EMPTY_WALK_MAX = 16;
+const EMPTY_WALK_MAX = 6;
 
 async function fetchHomeFeedPage(
     input: HomeFeedQueryInput,
@@ -41,7 +41,7 @@ async function fetchHomeFeedPage(
         userRegional: input.userRegional,
         userNational: input.userNational,
         prefs: input.getPrefs(),
-        limit: 10,
+        limit: 16,
     };
 
     const isFirst =

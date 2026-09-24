@@ -22,7 +22,9 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import Video, { type VideoRef } from 'react-native-video';
 import {
     getActiveFeedVideoPostId,
+    getWarmFeedVideoPostId,
     subscribeActiveFeedVideo,
+    subscribeWarmFeedVideo,
     registerFeedVideoPlayer,
 } from '../utils/feedActiveVideoNative';
 import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
@@ -176,16 +178,22 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
     }, [remountEpoch, videoRef]);
 
     useEffect(() => {
-        if (!paused) return;
         const player = (videoRef as { current?: { pause: () => void; setVolume: (n: number) => void } | null })
             ?.current;
+        if (!player) return;
         try {
-            player?.pause();
-            player?.setVolume(0);
+            if (paused || muted || volume <= 0) {
+                player.setVolume(0);
+                if (paused) player.pause();
+            } else {
+                // Restore audio after haltAllPlayers / warm-mute — ColorOS needs an
+                // explicit setVolume(1) when this card becomes the audible slot.
+                player.setVolume(volume);
+            }
         } catch {
             /* ignore */
         }
-    }, [paused, videoRef]);
+    }, [paused, muted, volume, videoRef]);
 
     const poster = useMemo(
         () =>
@@ -224,6 +232,7 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
                 repeat={repeat}
                 playInBackground={false}
                 playWhenInactive={false}
+                progressUpdateInterval={500}
                 ignoreSilentSwitch="ignore"
                 mixWithOthers="duck"
                 hideShutterView
@@ -233,9 +242,8 @@ const FeedPlayingVideo = React.memo(function FeedPlayingVideo({
                 pointerEvents="none"
                 onLoadStart={() => onLoadStartRef.current()}
                 onReadyForDisplay={() => {
-                    requestAnimationFrame(() => {
-                        requestAnimationFrame(markReady);
-                    });
+                    // One frame is enough to avoid a half-drawn TextureView flash.
+                    requestAnimationFrame(markReady);
                 }}
                 onLoad={(meta) => onLoadRef.current(meta)}
                 onProgress={(e) => {
@@ -408,10 +416,15 @@ const FeedPostMedia = React.memo(
     const posterOpacity = useRef(new Animated.Value(1)).current;
     const videoOpacity = useRef(new Animated.Value(0)).current;
     const mediaRevealRef = useRef<Animated.CompositeAnimation | null>(null);
-    /** Feed autoplay target from FlatList viewability (store). */
-    const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() =>
-        getActiveFeedVideoPostId(),
-    );
+    /** Own id only. Other cards must not setState when the active clip changes. */
+    const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() => {
+        const id = getActiveFeedVideoPostId();
+        return id != null && String(id) === String(post.id) ? id : null;
+    });
+    const [storeWarmPostId, setStoreWarmPostId] = useState<string | null>(() => {
+        const id = getWarmFeedVideoPostId();
+        return id != null && String(id) === String(post.id) ? id : null;
+    });
     const [feedScrolling, setFeedScrolling] = useState(() => getFeedScrollBusy());
     const [isLandscapeMedia, setIsLandscapeMedia] = useState(
         () => width > 0 && height > 0 && width > height * 1.15,
@@ -459,63 +472,83 @@ const FeedPostMedia = React.memo(
     useEffect(() => {
         if (mode !== 'feed') return;
         if (!postHasVideoMedia(post)) return;
-        return subscribeActiveFeedVideo(setStoreActivePostId);
+        const mine = String(post.id);
+        return subscribeActiveFeedVideo((id) => {
+            const next = id != null && String(id) === mine ? id : null;
+            setStoreActivePostId((prev) => (prev === next ? prev : next));
+        });
     }, [mode, post.id]);
 
     useEffect(() => {
         if (mode !== 'feed') return;
-        return subscribeFeedScrollBusy(setFeedScrolling);
-    }, [mode]);
+        if (!postHasVideoMedia(post)) return;
+        const mine = String(post.id);
+        return subscribeWarmFeedVideo((id) => {
+            const next = id != null && String(id) === mine ? id : null;
+            setStoreWarmPostId((prev) => (prev === next ? prev : next));
+        });
+    }, [mode, post.id]);
 
-    const isViewable =
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        const mine = String(post.id);
+        return subscribeFeedScrollBusy((busy) => {
+            setFeedScrolling((prev) => {
+                if (prev === busy) return prev;
+                const involved =
+                    String(getActiveFeedVideoPostId() || '') === mine ||
+                    String(getWarmFeedVideoPostId() || '') === mine;
+                if (!involved) return prev;
+                return busy;
+            });
+        });
+    }, [mode, post.id]);
+
+    // Only `isAudible` may unmute; warm mounts stay silent.
+    const isAudible =
         mode === 'feed' &&
         !suspendNativeVideo &&
         String(storeActivePostId) === String(post.id);
+    const isWarmMount =
+        mode === 'feed' &&
+        !suspendNativeVideo &&
+        String(storeWarmPostId) === String(post.id);
 
-    // ColorOS drops `pause()` if we unmount TextureView in the same frame.
-    // Keep the player mounted for two frames with paused/muted so the old
-    // clip cannot keep playing under the next postcard.
+    // ColorOS TextureView can keep audio after pause() if it stays mounted.
+    // Bluesky tears the inactive player down immediately; we do the same —
+    // keepPlayerMounted only while this card is audible or warm-buffering.
     const [keepPlayerMounted, setKeepPlayerMounted] = useState(false);
     useLayoutEffect(() => {
         if (mode !== 'feed') {
             setKeepPlayerMounted(false);
             return;
         }
-        if (isViewable) {
+        if (isAudible || isWarmMount) {
             setKeepPlayerMounted(true);
             return;
         }
-        if (!keepPlayerMounted) return;
         try {
             feedVideoRef.current?.setVolume?.(0);
             feedVideoRef.current?.pause?.();
         } catch {
             /* ignore */
         }
-        let inner = 0;
-        const outer = requestAnimationFrame(() => {
-            inner = requestAnimationFrame(() => setKeepPlayerMounted(false));
-        });
-        return () => {
-            cancelAnimationFrame(outer);
-            if (inner) cancelAnimationFrame(inner);
-        };
-    }, [mode, isViewable, keepPlayerMounted]);
+        setKeepPlayerMounted(false);
+    }, [mode, isAudible, isWarmMount]);
 
     useEffect(() => {
-        if (!isViewable) return;
+        if (!isAudible) return;
         if (!getFeedScrollBusy()) setFeedScrolling(false);
-    }, [isViewable]);
+    }, [isAudible]);
 
-    if (mode === 'feed' && !isViewable) {
+    if (mode === 'feed' && !isAudible) {
         posterOpacity.setValue(1);
     }
 
-    // ColorOS TextureView ignores clip/overflow — a paused player still
-    // paints and can keep audio. Unmount as soon as this card is not active.
+    // Hard silence whenever this card loses the audible slot (warm mounts stay muted).
     useEffect(() => {
         if (mode !== 'feed') return;
-        if (isViewable) return;
+        if (isAudible) return;
         resetPosterCover();
         try {
             feedVideoRef.current?.pause?.();
@@ -523,8 +556,8 @@ const FeedPostMedia = React.memo(
         } catch {
             /* ignore */
         }
-    }, [mode, isViewable, resetPosterCover]);
-    const isFeedAutoplayActive = isViewable;
+    }, [mode, isAudible, resetPosterCover]);
+    const isFeedAutoplayActive = isAudible;
 
     // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
     const [playerEpoch, setPlayerEpoch] = useState(0);
@@ -968,6 +1001,12 @@ const FeedPostMedia = React.memo(
     }
 
     const setFeedSoundOn = (nextSoundOn: boolean) => {
+        // Flip ExoPlayer volume on the tap. The muted prop catches up on the next render.
+        try {
+            feedVideoRef.current?.setVolume?.(nextSoundOn ? 1 : 0);
+        } catch {
+            /* player already released */
+        }
         setSoundOn(nextSoundOn);
         void setGlobalVideoMutedNative(!nextSoundOn);
     };
@@ -1043,14 +1082,15 @@ const FeedPostMedia = React.memo(
 
         const slideIsCurrent = slideIndex === currentIndex;
         const slideBoxH = fillViewport ? slideHeight : height;
-        // One TextureView in the feed: the autoplay post. Extra paused surfaces
-        // punch through ColorOS. Pixel-sized in-cell player stays in the postcard.
+        // One TextureView in the feed for audible play; warm mounts the next
+        // postcard paused so Instant Start does not wait for scroll-end.
         const slideMountVideo =
             slideVideo &&
             slideIsCurrent &&
             !playFailed &&
             hasValidVideoFrame(slideWidth, slideBoxH) &&
-            (mode === 'detail' || (mode === 'feed' && (isViewable || keepPlayerMounted)));
+            (mode === 'detail' ||
+                (mode === 'feed' && (isAudible || isWarmMount || keepPlayerMounted)));
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
@@ -1085,6 +1125,8 @@ const FeedPostMedia = React.memo(
             fadeOutPosterCover();
         };
         const cachedVideoSource = buildFeedVideoSource(slideUrl, slideRawUrl);
+        // Warm mounts stay paused+muted. Only the audible active card may play.
+        const feedShouldPlay = mode === 'feed' && isAudible && !feedScrolling;
 
         return (
             <View style={styles.slideFill} collapsable={false}>
@@ -1093,10 +1135,10 @@ const FeedPostMedia = React.memo(
                         key={String(post.id)}
                         remountEpoch={playerEpoch}
                         source={cachedVideoSource}
-                        paused={mode === 'detail' ? paused : !isViewable || feedScrolling}
-                        muted={mode === 'feed' ? !isViewable || !soundOn || feedScrolling : false}
-                        volume={mode === 'detail' ? 1 : isViewable && soundOn && !feedScrolling ? 1 : 0}
-                        repeat={mode === 'feed' && isViewable}
+                        paused={mode === 'detail' ? paused : !feedShouldPlay}
+                        muted={mode === 'feed' ? !feedShouldPlay || !soundOn : false}
+                        volume={mode === 'detail' ? 1 : feedShouldPlay && soundOn ? 1 : 0}
+                        repeat={mode === 'feed' && feedShouldPlay}
                         posterUri={slidePosterUri}
                         resizeMode={fillViewport ? 'contain' : mediaFit}
                         boxWidth={slideWidth}
@@ -1138,6 +1180,20 @@ const FeedPostMedia = React.memo(
                             }
                         }}
                         onProgress={(e) => {
+                            // ColorOS watchdog: if this card is not the audible slot, kill audio
+                            // even when React props lag behind the TextureView.
+                            if (
+                                mode === 'feed' &&
+                                String(getActiveFeedVideoPostId()) !== String(post.id)
+                            ) {
+                                try {
+                                    feedVideoRef.current?.setVolume?.(0);
+                                    feedVideoRef.current?.pause?.();
+                                } catch {
+                                    /* ignore */
+                                }
+                                return;
+                            }
                             const t = e?.currentTime;
                             if (typeof t !== 'number' || !Number.isFinite(t)) return;
                             const resumeAt = stickyResumeTimeRef.current;

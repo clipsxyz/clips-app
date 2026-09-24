@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Post;
+use App\Models\Story;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -99,6 +100,34 @@ class VideoThumbnailService
             $post->media_items = $items;
             $post->save();
         }
+    }
+
+    /**
+     * Still for a video story. Reuses a JPEG uploaded beside the clip, otherwise extracts one frame.
+     */
+    public function ensureForStory(Story $story): ?string
+    {
+        $existing = is_string($story->video_poster_url) ? trim($story->video_poster_url) : '';
+        if ($existing !== '') {
+            return $existing;
+        }
+        if ($story->media_type !== 'video') {
+            return null;
+        }
+        $source = is_string($story->media_url) ? trim($story->media_url) : '';
+        if ($source === '') {
+            return null;
+        }
+
+        $poster = $this->siblingJpegUrl($source) ?? $this->extractJpeg($source, 'story-'.$story->id);
+        if (! is_string($poster) || $poster === '') {
+            return null;
+        }
+
+        $story->video_poster_url = $poster;
+        $story->save();
+
+        return $poster;
     }
 
     public function extractJpeg(string $videoUrl, string $postId): ?string

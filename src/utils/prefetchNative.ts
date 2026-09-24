@@ -122,7 +122,8 @@ export function prefetchFeedPostMedia(posts: Post[]): void {
             }
             if (videoUris.length) {
                 try {
-                    await prebufferFeedVideos(videoUris);
+                    // Only warm the first couple — full-page prebuffer fights pagination bandwidth.
+                    await prebufferFeedVideos(videoUris.slice(0, 2));
                 } catch {
                     /* ignore video prebuffer errors */
                 }

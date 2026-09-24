@@ -395,6 +395,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
             try {
                 let remoteUrl = mediaUrl;
                 let remoteType = mediaType;
+                let remotePoster: string | undefined;
 
                 if (!isMockMode()) {
                     const prepared = await prepareMediaForPostNative({
@@ -404,6 +405,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     });
                     remoteUrl = prepared.mediaUrl || mediaUrl;
                     remoteType = prepared.mediaType || mediaType;
+                    remotePoster = prepared.videoPosterUrl;
                 }
 
                 await publishMediaStory24({
@@ -411,6 +413,7 @@ export default function Story24ComposerScreen({ navigation, route }: any) {
                     userHandle: user.handle,
                     mediaUrl: remoteUrl,
                     mediaType: remoteType,
+                    videoPosterUrl: remotePoster,
                     location: locationSnapshot,
                     stickers: stickerSnapshot.length > 0 ? stickerSnapshot : undefined,
                     taggedUsers: handles.length > 0 ? handles : undefined,

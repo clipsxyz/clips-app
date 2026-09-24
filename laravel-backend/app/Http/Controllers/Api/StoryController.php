@@ -11,6 +11,7 @@ use App\Models\StoryView;
 use App\Models\User;
 use App\Models\Post;
 use App\Services\LinkPreviewService;
+use App\Services\VideoThumbnailService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -203,6 +204,7 @@ class StoryController extends Controller
 
         $mediaUrl = $request->input('media_url', $request->input('mediaUrl'));
         $mediaType = $request->input('media_type', $request->input('mediaType', $request->input('type')));
+        $videoPosterUrl = $request->input('video_poster_url', $request->input('videoPosterUrl'));
         $text = $request->input('text');
         $stickers = $request->input('stickers');
         $poll = $request->input('poll');
@@ -257,6 +259,7 @@ class StoryController extends Controller
             'taggedUsers' => is_array($taggedUsers) ? array_values(array_filter($taggedUsers, 'is_string')) : null,
             'taggedUsersPositions' => $normalizedPositions,
             'audience' => is_string($audience) ? strtolower(trim($audience)) : 'public',
+            'video_poster_url' => is_string($videoPosterUrl) ? trim($videoPosterUrl) : '',
         ];
 
         $validator = Validator::make($payload, [
@@ -372,6 +375,10 @@ class StoryController extends Controller
             if (Schema::hasColumn('stories', 'link_preview')) {
                 $attrs['link_preview'] = $linkPreview;
             }
+            if (Schema::hasColumn('stories', 'video_poster_url')) {
+                $poster = is_string($payload['video_poster_url'] ?? null) ? trim($payload['video_poster_url']) : '';
+                $attrs['video_poster_url'] = $poster !== '' ? $poster : null;
+            }
             $story = Story::create($attrs);
 
             return $story->fresh() ?? $story;
@@ -382,6 +389,11 @@ class StoryController extends Controller
             'user_id' => $story->user_id,
             'user_handle' => $story->user_handle,
         ]);
+
+        if ($story->media_type === 'video' && Schema::hasColumn('stories', 'video_poster_url')) {
+            app(VideoThumbnailService::class)->ensureForStory($story);
+            $story->refresh();
+        }
 
         $story->loadCount(['reactions', 'replies', 'views']);
         $story->load(['sharedFromPost:id,thumbnail_url,media_url,media_type,media_items']);

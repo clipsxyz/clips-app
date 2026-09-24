@@ -20,7 +20,6 @@ import {
 import Animated, {
     Extrapolation,
     interpolate,
-    interpolateColor,
     runOnJS,
     useAnimatedScrollHandler,
     useAnimatedStyle,
@@ -45,21 +44,17 @@ import {
 import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
 import { isVideoUrl, storyVideoSource } from '../utils/storyMediaNative';
 
-/** 9:16 story thumbnail. */
+/** 9:16 story thumbnail. Rank sits on the poster, Apple TV top-chart style. */
 const CARD_W = 126;
 const CARD_H = Math.round((CARD_W * 16) / 9);
 const CARD_RADIUS = 18;
-/** Visible numeral to the left of the poster (~70–80% of the glyph). */
-const RANK_PEEK = 78;
-const ITEM_GAP = 6;
-const SLOT_W = RANK_PEEK + CARD_W;
+const ITEM_GAP = 12;
+const SLOT_W = CARD_W;
 const ITEM_STRIDE = SLOT_W + ITEM_GAP;
 const RAIL_PAD_LEFT = 14;
 const RAIL_PAD_RIGHT = 16;
-const RANK_FONT = 176;
-const RANK_FONT_WIDE = 132;
-const RANK_TEAL = '#33B0A6';
-const RANK_WHITE = '#FFFFFF';
+const RANK_FONT = 72;
+const RANK_FONT_WIDE = 52;
 const PREVIEW_POSTER_FALLBACK = '#121212';
 const FOCAL_SCALE = 1;
 const IDLE_SCALE = 0.92;
@@ -107,7 +102,7 @@ type Props = {
     onCollapseHandled?: () => void;
 };
 
-const PREVIEW_LOOP_SECONDS = 2;
+const PREVIEW_LOOP_SECONDS = 3;
 /** ColorOS TextureView ignores clip — a rail player paints into the post below (top-left). */
 const ANDROID_FEED_RAIL_POSTERS_ONLY = Platform.OS === 'android';
 
@@ -173,24 +168,27 @@ function StoryCardFill({
         setStillFailed(false);
     }, [poster]);
 
-    if (poster && !stillFailed) {
+    const showPreview = playPreviewVideo && !!item.previewVideoUrl;
+    if (showPreview || (poster && !stillFailed)) {
         return (
-            <Image
-                source={{ uri: poster }}
-                style={styles.previewFrame}
-                resizeMode="cover"
-                pointerEvents="none"
-                onError={() => setStillFailed(true)}
-            />
-        );
-    }
-    if (playPreviewVideo && item.previewVideoUrl) {
-        return (
-            <StoryPreviewVideo
-                uri={item.previewVideoUrl}
-                posterUri={undefined}
-                paused={previewVideosPaused}
-            />
+            <View style={styles.previewFrame} pointerEvents="none" collapsable={false}>
+                {poster && !stillFailed ? (
+                    <Image
+                        source={{ uri: poster }}
+                        style={styles.previewFrame}
+                        resizeMode="cover"
+                        pointerEvents="none"
+                        onError={() => setStillFailed(true)}
+                    />
+                ) : null}
+                {showPreview ? (
+                    <StoryPreviewVideo
+                        uri={item.previewVideoUrl!}
+                        posterUri={poster}
+                        paused={previewVideosPaused}
+                    />
+                ) : null}
+            </View>
         );
     }
     if (item.previewGradient?.length || item.title) {
@@ -215,9 +213,6 @@ function StoryPreviewVideo({
 }) {
     const videoRef = useRef<VideoRef>(null);
     const still = stillUri(posterUri);
-    if (still) {
-        return <StoryPreviewPoster posterUri={still} />;
-    }
     const source = storyVideoSource(uri) || { uri };
 
     return (
@@ -226,6 +221,7 @@ function StoryPreviewVideo({
                 <StorySafeVideo
                     videoRef={videoRef}
                     source={source}
+                    posterSource={still ? { uri: still } : undefined}
                     boxWidth={CARD_W}
                     boxHeight={CARD_H}
                     muted
@@ -262,6 +258,7 @@ function CardIdentity({ item }: { item: Stories24RailItem }) {
 function RankedShelfCard({
     item,
     index,
+    rank,
     scrollX,
     onPress,
     playPreviewVideo,
@@ -269,6 +266,7 @@ function RankedShelfCard({
 }: {
     item: Stories24RailItem;
     index: number;
+    rank: number;
     scrollX: SharedValue<number>;
     onPress: () => void;
     playPreviewVideo: boolean;
@@ -276,8 +274,8 @@ function RankedShelfCard({
 }) {
     const isAddYours = isStories24AddYoursHandle(item.handle);
     const poster = stillUri(item.thumb);
-    const rankLabel = String(index + 1);
-    const allowScale = !(Platform.OS === 'android' && playPreviewVideo && !poster);
+    const rankLabel = rank > 0 ? String(rank) : '';
+    const allowScale = !(Platform.OS === 'android' && playPreviewVideo);
 
     const cardAnimStyle = useAnimatedStyle(() => {
         if (!allowScale) return { transform: [{ scale: 1 }] };
@@ -291,31 +289,12 @@ function RankedShelfCard({
         return { transform: [{ scale }] };
     });
 
-    const rankAnimStyle = useAnimatedStyle(() => {
-        const offset = index * ITEM_STRIDE;
-        const dist = Math.abs(scrollX.value - offset);
-        const t = interpolate(dist, [0, ITEM_STRIDE * 0.55], [1, 0], Extrapolation.CLAMP);
-        return {
-            color: interpolateColor(t, [0, 1], [RANK_WHITE, RANK_TEAL]),
-        };
-    });
-
     return (
         <View style={styles.itemSlot} collapsable={false}>
-            <Animated.Text
-                style={[
-                    styles.rankNumber,
-                    rankLabel.length > 1 && styles.rankNumberWide,
-                    rankAnimStyle,
-                ]}
-                pointerEvents="none"
-            >
-                {rankLabel}
-            </Animated.Text>
             <Animated.View
                 style={[
                     styles.cardLift,
-                    playPreviewVideo && !poster && styles.cardLiftVideoSafe,
+                    playPreviewVideo && styles.cardLiftVideoSafe,
                     cardAnimStyle,
                 ]}
                 collapsable={false}
@@ -345,7 +324,7 @@ function RankedShelfCard({
                     <View
                         style={[
                             styles.card,
-                            playPreviewVideo && !poster && styles.cardVideoSafe,
+                            playPreviewVideo && styles.cardVideoSafe,
                         ]}
                         collapsable={false}
                     >
@@ -362,6 +341,17 @@ function RankedShelfCard({
                                 playPreviewVideo={playPreviewVideo}
                                 previewVideosPaused={previewVideosPaused}
                             />
+                            {rankLabel ? (
+                                <Text
+                                    style={[
+                                        styles.rankNumber,
+                                        rankLabel.length > 1 && styles.rankNumberWide,
+                                    ]}
+                                    pointerEvents="none"
+                                >
+                                    {rankLabel}
+                                </Text>
+                            ) : null}
                             <LinearGradient
                                 colors={['transparent', 'rgba(0,0,0,0.85)']}
                                 style={styles.gradient}
@@ -499,18 +489,22 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
             <RankedShelfCard
                 item={item}
                 index={index}
+                rank={
+                    isStories24AddYoursHandle(item.handle)
+                        ? 0
+                        : items
+                              .slice(0, index + 1)
+                              .filter((entry) => !isStories24AddYoursHandle(entry.handle)).length
+                }
                 scrollX={scrollX}
                 playPreviewVideo={
-                    !!item.previewVideoUrl &&
-                    !stillUri(item.thumb) &&
-                    index >= visibleRange.start &&
-                    index <= visibleRange.end
+                    !!item.previewVideoUrl && index === activePreviewIndex
                 }
                 previewVideosPaused={previewsPaused}
                 onPress={() => onPressItem(item)}
             />
         ),
-        [onPressItem, previewsPaused, scrollX, visibleRange.end, visibleRange.start],
+        [activePreviewIndex, items, onPressItem, previewsPaused, scrollX],
     );
 
     const getItemLayout = useCallback(
@@ -608,29 +602,30 @@ const styles = StyleSheet.create({
     },
     rankNumber: {
         position: 'absolute',
-        left: 0,
-        bottom: 0,
-        zIndex: 1,
-        elevation: 0,
+        left: 8,
+        top: 2,
+        zIndex: 6,
+        elevation: 6,
         fontSize: RANK_FONT,
-        fontWeight: '900',
+        fontWeight: '800',
         fontFamily: Platform.OS === 'android' ? 'sans-serif-black' : 'System',
-        color: RANK_WHITE,
-        letterSpacing: -10,
+        color: '#FFFFFF',
+        letterSpacing: -2,
         lineHeight: RANK_FONT,
         includeFontPadding: false,
-        textAlignVertical: 'bottom',
+        textShadowColor: 'rgba(0,0,0,0.45)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
     },
     rankNumberWide: {
         fontSize: RANK_FONT_WIDE,
-        letterSpacing: -6,
         lineHeight: RANK_FONT_WIDE,
-        left: 0,
-        bottom: 0,
+        letterSpacing: -1,
+        left: 6,
     },
     cardLift: {
         position: 'absolute',
-        left: RANK_PEEK,
+        left: 0,
         top: 0,
         width: CARD_W,
         height: CARD_H,
@@ -670,11 +665,11 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     previewVideoHost: {
+        ...StyleSheet.absoluteFillObject,
         width: CARD_W,
         height: CARD_H,
         overflow: 'hidden',
         backgroundColor: 'transparent',
-        position: 'relative',
     },
     textPreviewCanvas: {
         alignItems: 'center',

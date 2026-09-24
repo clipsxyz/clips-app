@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\Mp4FaststartService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -103,6 +104,7 @@ class UploadController extends Controller
 
         try {
             $path = $file->storeAs('uploads', $filename, $disk);
+            app(Mp4FaststartService::class)->rewriteStoredUpload($disk, $path);
         } catch (\Throwable $e) {
             \Log::error('Upload storeAs failed: ' . $e->getMessage(), ['disk' => $disk, 'exception' => $e]);
             $hint = 'Check storage permissions and that php artisan storage:link has been run.';
@@ -185,8 +187,9 @@ class UploadController extends Controller
             // Generate unique filename with user ID for organization (or 'guest' if not authenticated)
             $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $file->getClientOriginalExtension();
             
-            // Store file
+            // Store file, then move the moov atom forward for MP4/MOV/M4V.
             $path = $file->storeAs('uploads', $filename, $disk);
+            app(Mp4FaststartService::class)->rewriteStoredUpload($disk, $path);
             
             // Get full URL (works for both local and S3)
             try {

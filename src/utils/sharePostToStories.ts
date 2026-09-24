@@ -1,6 +1,5 @@
 import type { Post } from '../types';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
-import { isTextOnlyPost } from './effectiveTextPostStyleNative';
 
 export type SharePostToStoriesPayload = {
     mediaUrl?: string;
@@ -31,7 +30,21 @@ export function buildSharePostToStoriesPayload(post: Post): SharePostToStoriesPa
     let mediaUrl = firstCarousel?.url || post.mediaUrl;
     let mediaType: 'image' | 'video' = (firstCarousel?.type || post.mediaType || 'image') as 'image' | 'video';
     const hasRealMediaItems = carouselMedia.length > 0 || Boolean(post.mediaUrl);
-    const isTextOnlyShare = isTextOnlyPost(post);
+    const hasTextBody = Boolean(
+        (post.text || (post as { text_content?: string }).text_content || '').trim(),
+    );
+    const hasVisualMedia =
+        Boolean(
+            (typeof post.mediaUrl === 'string' ? post.mediaUrl.trim() : '') ||
+                (post.mediaItems || []).some(
+                    (m) =>
+                        !!m &&
+                        (m.type === 'image' || m.type === 'video') &&
+                        typeof m.url === 'string' &&
+                        m.url.trim().length > 0,
+                ),
+        );
+    const isTextOnlyShare = hasTextBody && !hasVisualMedia;
     const shareText = (truncatedText || 'Shared from feed').trim();
     const videoPosterUrl =
         (typeof post.videoPosterUrl === 'string' && post.videoPosterUrl.trim()) ||

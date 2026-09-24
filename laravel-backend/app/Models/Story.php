@@ -27,6 +27,7 @@ class Story extends Model
         'user_handle',
         'media_url',
         'media_type',
+        'video_poster_url',
         'text',
         'text_color',
         'text_size',

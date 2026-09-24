@@ -3,9 +3,9 @@
  * Tuned for Instant Start: begin playback as soon as ~200ms is buffered.
  */
 export const FEED_VIDEO_BUFFER_CONFIG = {
-    minBufferMs: 400,
+    minBufferMs: 300,
     maxBufferMs: 8000,
-    bufferForPlaybackMs: 200,
+    bufferForPlaybackMs: 150,
     bufferForPlaybackAfterRebufferMs: 200,
     /** Fallback ExoPlayer SimpleCache when the HTTP proxy is unavailable. */
     cacheSizeMB: 150,

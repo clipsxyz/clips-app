@@ -38,8 +38,14 @@ export default function StoryViewerMedia({ story, isMuted, paused }: Props) {
     const leftover = preview ? captionWithoutLinkUrl(text, preview.url) : text;
     const hasOwnMedia = Boolean((story.mediaUrl || '').trim());
     const videoSource = storyVideoSource(story.mediaUrl);
-    const posterSource = hasOwnMedia ? getStoryVideoPosterSource(story.mediaUrl) : undefined;
-    const posterUri = hasOwnMedia ? getStoryVideoPosterFallback(story.mediaUrl) : undefined;
+    const posterUri = hasOwnMedia
+        ? resolveStoryMediaUrl(story.videoPosterUrl) || getStoryVideoPosterFallback(story.mediaUrl)
+        : undefined;
+    const posterSource = posterUri
+        ? { uri: posterUri }
+        : hasOwnMedia
+          ? getStoryVideoPosterSource(story.mediaUrl)
+          : undefined;
     const imageUri = hasOwnMedia ? resolveStoryMediaUrl(story.mediaUrl) || posterUri : undefined;
     const hasMedia = hasOwnMedia && (!!videoSource || !!posterSource || !!imageUri);
     const isVideo = isStoryVideo(story);

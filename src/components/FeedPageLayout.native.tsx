@@ -226,11 +226,11 @@ export const FEED_CARD_BELOW_MEDIA = {
     overflow: 'hidden' as const,
 };
 
-/** Web carousel thumb rail: px-3 py-2 bg-black/95 border-t border-white/10. */
+/** Carousel thumb rail — same canvas as the news feed. */
 export const FEED_CARD_CAROUSEL_WRAP = {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#000000',
+    backgroundColor: FEED_PAGE_BG,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.1)',
     zIndex: 10,

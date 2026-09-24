@@ -1078,6 +1078,19 @@ export default function ScenesViewer({
         resolvePostPlaybackUri(activePost) ||
         activePost.mediaUrl ||
         '';
+    const nextPost = posts[activeIndex + 1];
+    const nextPlaybackRaw = nextPost
+        ? resolvePostPlaybackUri(nextPost) || nextPost.mediaUrl || ''
+        : '';
+    const nextPlaybackSrc = nextPlaybackRaw ? scenesVideoSource(nextPlaybackRaw) : null;
+    const nextPlaybackSource =
+        nextPlaybackSrc &&
+        typeof nextPlaybackSrc !== 'number' &&
+        isPlayableVideoUri(nextPlaybackSrc.uri) &&
+        nextPlaybackRaw !== playbackRaw
+            ? nextPlaybackSrc
+            : null;
+
     const playbackSrc = playbackRaw ? scenesVideoSource(playbackRaw) : null;
     const playbackSource =
         typeof playbackSrc === 'number'
@@ -1210,6 +1223,25 @@ export default function ScenesViewer({
                     </View>
                 </GestureDetector>
                 )}
+
+            {nextPlaybackSource ? (
+                <Video
+                    source={nextPlaybackSource}
+                    style={styles.preloadSlot}
+                    resizeMode="cover"
+                    paused
+                    muted
+                    volume={0}
+                    repeat={false}
+                    pointerEvents="none"
+                    playInBackground={false}
+                    playWhenInactive={false}
+                    {...androidListSafeVideoProps()}
+                    useTextureView
+                    hideShutterView
+                    shutterColor="transparent"
+                />
+            ) : null}
 
             <View
                 pointerEvents="box-none"
@@ -1688,6 +1720,15 @@ export default function ScenesViewer({
 
 const styles = StyleSheet.create({
     root: { flex: 1, width: '100%', height: '100%', backgroundColor: '#000000' },
+    /** Tiny but non-zero so ExoPlayer attaches and fills the shared disk cache. */
+    preloadSlot: {
+        position: 'absolute',
+        width: 2,
+        height: 2,
+        left: -8,
+        top: 0,
+        opacity: 0,
+    },
     emptyRoot: { backgroundColor: '#000000' },
     topHeader: {
         flexDirection: 'row',

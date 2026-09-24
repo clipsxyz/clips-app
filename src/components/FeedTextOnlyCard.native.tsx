@@ -179,12 +179,20 @@ export default function FeedTextOnlyCard({
 
     const cardFillStyle = [
         styles.card,
-        { maxHeight: safeMaxHeight },
+        // Collapsed cards stay within the feed media frame. Expanded text must
+        // grow the card so the next post is pushed down instead of covering it.
+        expanded ? null : { maxHeight: safeMaxHeight },
         gradientColors ? null : { backgroundColor: solidBackground },
     ];
 
     const cardInner = (
         <>
+            <View style={styles.avatarRow}>
+                <View style={styles.lineStack} pointerEvents="none">
+                    <View style={styles.decorLine} />
+                    <View style={styles.decorLine} />
+                    <View style={styles.decorLine} />
+                </View>
             <View
                 style={styles.avatarWrap}
                 ref={(r) => {
@@ -229,6 +237,12 @@ export default function FeedTextOnlyCard({
                         <Icon name="checkmark" size={12} color="#FFFFFF" />
                     </Pressable>
                 ) : null}
+            </View>
+                <View style={styles.lineStack} pointerEvents="none">
+                    <View style={styles.decorLine} />
+                    <View style={styles.decorLine} />
+                    <View style={styles.decorLine} />
+                </View>
             </View>
 
             <Pressable
@@ -327,9 +341,26 @@ const styles = StyleSheet.create({
         paddingBottom: 32,
         overflow: 'hidden',
     },
+    avatarRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        width: '100%',
+        marginBottom: 16,
+        gap: 14,
+    },
+    lineStack: {
+        flex: 1,
+        gap: 7,
+        justifyContent: 'center',
+    },
+    decorLine: {
+        height: 2,
+        borderRadius: 1,
+        backgroundColor: '#FFFFFF',
+        width: '100%',
+    },
     avatarWrap: {
         position: 'relative',
-        marginBottom: 16,
     },
     avatarRing: {
         padding: 2,

@@ -85,6 +85,7 @@ export async function publishMediaStory24(options: {
     userHandle: string;
     mediaUrl: string;
     mediaType: 'image' | 'video';
+    videoPosterUrl?: string;
     caption?: string;
     location?: string;
     venue?: string;
@@ -117,7 +118,7 @@ export async function publishMediaStory24(options: {
         options.taggedUsersPositions?.length ? options.taggedUsersPositions : undefined,
         undefined,
         options.venue || options.location,
-        undefined,
+        options.videoPosterUrl,
         options.audience ?? 'public',
     );
     notifyStoryCreated(options.userHandle);

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Platform, StyleSheet, View } from 'react-native';
 import Video from 'react-native-video';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
+import { extractVideoPosterFrame } from '../utils/extractVideoPosterNative';
 import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { normalizeNativeUploadUri } from '../utils/uploadFileNative';
 
@@ -20,6 +21,8 @@ function asStillUri(raw?: string | null): string | undefined {
     return uri;
 }
 
+const extractedPosterByVideo = new Map<string, string>();
+
 type Props = {
     size: number;
     uri?: string | null;
@@ -35,7 +38,7 @@ type Props = {
 
 /**
  * One JPEG per carousel tile. Never decode the playing MP4 here — a second
- * TextureView on ColorOS blanks the strip or paints the feed video into it.
+ * TextureView on ColorOS paints the feed video into the thumbnail.
  */
 export default function CarouselSlideThumb({
     size,
@@ -57,19 +60,57 @@ export default function CarouselSlideThumb({
         (type !== 'video' ? asStillUri(media) : undefined) ||
         (type === 'image' ? asStillUri(media) : undefined) ||
         (type === 'video' ? asStillUri(siblingJpegFromVideoUrl(media)) : undefined);
+    const [stillFailed, setStillFailed] = useState(false);
+    const [extractedPoster, setExtractedPoster] = useState<string | undefined>(() =>
+        media ? extractedPosterByVideo.get(media) : undefined,
+    );
+    useEffect(() => {
+        setStillFailed(false);
+    }, [stillUri, recoverToken]);
+
+    const needsExtractedPoster =
+        !allowPausedVideo &&
+        type === 'video' &&
+        !!media &&
+        (!stillUri || stillFailed) &&
+        !extractedPoster;
+
+    useEffect(() => {
+        if (!needsExtractedPoster || !media) return;
+        const cached = extractedPosterByVideo.get(media);
+        if (cached) {
+            setExtractedPoster(cached);
+            return;
+        }
+        let cancelled = false;
+        extractVideoPosterFrame(media, 0.2)
+            .then((fileUri) => {
+                extractedPosterByVideo.set(media, fileUri);
+                if (!cancelled) setExtractedPoster(fileUri);
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [media, needsExtractedPoster]);
+
+    const pictureUri = stillUri && !stillFailed ? stillUri : extractedPoster;
 
     let inner: React.ReactNode = <View style={[box, styles.fallback]} />;
 
-    if (stillUri) {
+    if (pictureUri) {
         inner = (
             <Image
-                key={`${stillUri}-${recoverToken}`}
-                source={{ uri: stillUri }}
+                key={`${pictureUri}-${recoverToken}`}
+                source={{ uri: pictureUri }}
                 style={box}
                 resizeMode="cover"
                 resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                 progressiveRenderingEnabled={false}
                 fadeDuration={0}
+                onError={() => {
+                    if (pictureUri === stillUri) setStillFailed(true);
+                }}
             />
         );
     } else if (allowPausedVideo && type === 'video' && isPlayableVideoUri(media)) {

@@ -90,7 +90,7 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { loadFeedVideoPrebufferConfig, collectFeedVideoPrefetchUris, prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, pauseFeedPlayback, setFeedVideoPlayingAtY, setFeedPlaybackAllowed } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
@@ -1838,6 +1838,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [],
     );
     const flatForRenderRef = useRef<FeedListRow[]>([]);
+    const feedPaginationRef = useRef({
+        hasNextPage: false,
+        isFetchingNextPage: false,
+        fetchNextPage: (async () => undefined) as () => Promise<unknown>,
+        rowCount: 0,
+    });
+    /** Furthest FlashList index the user has brought on screen — drives page-ahead prefetch. */
+    const maxViewableIndexRef = useRef(0);
     /** Scroll Y captured when opening Scenes — restored on return to avoid jump. */
     const scenesReturnScrollYRef = useRef<number | null>(null);
     const suppressFeedViewabilityRef = useRef(false);
@@ -1886,7 +1894,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Bluesky: the clip is active when half of *the postcard* is on screen.
         // Viewport-% kept a tall 4:5 card "viewable" after you'd already moved on.
         itemVisiblePercentThreshold: 65,
-        minimumViewTime: 180,
+        // Keep short enough that ExoPlayer can mount+buffer during the last
+        // part of a fling, but long enough to avoid thrashing mid-swipe.
+        minimumViewTime: 60,
     });
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2168,11 +2178,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Overlays / comments: never re-arm from list re-renders or stale viewability.
         if (feedAutoplayOverlayBlocks()) {
             activeVideoPostIdRef.current = null;
+            setWarmFeedVideoPostId(null);
             setActiveFeedVideoPostId(null);
             return;
         }
         if (!feedAutoplayAllowedRef.current || !postId) {
             activeVideoPostIdRef.current = null;
+            setWarmFeedVideoPostId(null);
             setActiveFeedVideoPostId(null);
             return;
         }
@@ -2259,12 +2271,42 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
             lastViewableVideoPostIdRef.current = nextId;
             lastViewabilityYRef.current = y;
-            if (Platform.OS === 'android' && feedScrollingRef.current) {
-                // Finger is moving the list — stay silent. Scroll already
-                // stopped the previous clip; scroll-end starts the one on screen.
+            // Bluesky-style: cut previous audio immediately when the postcard changes,
+            // then warm-mount the next ExoPlayer paused so settle can Instant Start.
+            if (feedScrollingRef.current) {
+                if (nextId && String(activeVideoPostIdRef.current) !== String(nextId)) {
+                    activeVideoPostIdRef.current = null;
+                    clearAudibleFeedVideo();
+                }
+                setWarmFeedVideoPostId(nextId);
             } else {
+                setWarmFeedVideoPostId(null);
                 scheduleActiveFeedVideoRef.current(nextId);
             }
+
+            // Prefetch the next API page before the user hits empty canvas at the tail.
+            let maxViewableIndex = -1;
+            for (const token of viewableItems) {
+                if (!token.isViewable || typeof token.index !== 'number') continue;
+                if (token.index > maxViewableIndex) maxViewableIndex = token.index;
+            }
+            if (maxViewableIndex > maxViewableIndexRef.current) {
+                maxViewableIndexRef.current = maxViewableIndex;
+            }
+            const pageState = feedPaginationRef.current;
+            const runway =
+                pageState.rowCount > 0 && maxViewableIndex >= 0
+                    ? pageState.rowCount - maxViewableIndex
+                    : Number.POSITIVE_INFINITY;
+            if (
+                maxViewableIndex >= 0 &&
+                pageState.hasNextPage &&
+                !pageState.isFetchingNextPage &&
+                runway <= 12
+            ) {
+                void pageState.fetchNextPage();
+            }
+
             if (nextId && nextId === lastWarmedActiveIdRef.current) return;
             lastWarmedActiveIdRef.current = nextId;
             const rows = flatForRenderRef.current;
@@ -2276,14 +2318,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 if (idx >= 0) from = idx;
             }
             const upcoming: Post[] = [];
-            for (let i = from + 1; i < rows.length && upcoming.length < 3; i += 1) {
+            for (let i = from + 1; i < rows.length && upcoming.length < 4; i += 1) {
                 const row = rows[i];
                 if (row.kind === 'post' && postHasVideoMedia(row.post)) {
                     upcoming.push(row.post);
                 }
             }
             const uris = collectFeedVideoPrefetchUris(upcoming);
-            if (!feedScrollingRef.current && uris.length) void prebufferFeedVideos(uris);
+            // Don't fight the next-page download for bandwidth mid-pagination.
+            if (uris.length && !feedPaginationRef.current.isFetchingNextPage) {
+                void prebufferFeedVideos(uris);
+            }
         }
     ).current;
 
@@ -2426,6 +2471,37 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         getPrefs: getFeedPrefs,
         enabled: Boolean(userId),
     });
+    feedPaginationRef.current.hasNextPage = Boolean(hasNextPage);
+    feedPaginationRef.current.isFetchingNextPage = Boolean(isFetchingNextPage);
+    feedPaginationRef.current.fetchNextPage = fetchNextPage;
+
+    // While the user watches the current batch, keep the *next* page loading in
+    // the background — don't wait until they hit the skeleton at the tail.
+    React.useEffect(() => {
+        maxViewableIndexRef.current = 0;
+    }, [homeFeedQueryKey]);
+    React.useEffect(() => {
+        if (!hasNextPage || isFetchingNextPage || feedQueryPending) return;
+        if (!pageBatches.length) return;
+        const loadedRows = pageBatches.reduce((n, batch) => n + (batch?.length || 0), 0);
+        const runway = loadedRows - maxViewableIndexRef.current;
+        // First page: always pull page 2. Later: pull when runway gets thin.
+        const shouldPrefetch = pageBatches.length === 1 || runway <= 12;
+        if (!shouldPrefetch) return;
+        const delayMs = pageBatches.length === 1 ? 450 : 120;
+        const t = setTimeout(() => {
+            const state = feedPaginationRef.current;
+            if (!state.hasNextPage || state.isFetchingNextPage) return;
+            void state.fetchNextPage();
+        }, delayMs);
+        return () => clearTimeout(t);
+    }, [
+        pageBatches,
+        hasNextPage,
+        isFetchingNextPage,
+        feedQueryPending,
+        feedDataUpdatedAt,
+    ]);
 
     const syncFeedFetchCtx = React.useCallback((filter: string) => {
         feedFetchCtxRef.current = {
@@ -3807,19 +3883,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         let postCount = 0;
         let interestsInserted = false;
         let followerInserted = false;
-        let stories24Inserted = false;
         for (const item of flatWithSuggested) {
             if (item.type === 'post') {
                 out.push({ kind: 'post', post: item.item });
                 postCount += 1;
-                if (!stories24Inserted && showStories24Rail && postCount === 1) {
+                // Second row in the feed, then again after every 10 posts.
+                if (showStories24Rail && (postCount === 1 || postCount % 10 === 0)) {
                     out.push({
                         kind: 'stories24',
-                        id: 'stories24-feed-rail',
+                        id: `stories24-feed-rail-${postCount}`,
                         railItems: stories24Items,
                         railKey: stories24Items.map((i) => i.handle).join('|'),
                     });
-                    stories24Inserted = true;
                 }
                 if (
                     previewSuggestedCards &&
@@ -3879,6 +3954,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         previewSuggestedPlaces,
     ]);
     flatForRenderRef.current = flatForRender;
+    feedPaginationRef.current.rowCount = flatForRender.length;
 
     // First-paint bootstrap only. Like/comment patch `pages` → new `flat` identity;
     // that must NEVER re-arm a player. After viewability has spoken, it owns autoplay.
@@ -4143,7 +4219,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 return wrapRow(
                     <Stories24FeedShelf
                         key={item.railKey}
-                        ref={stories24RailRef}
+                        ref={item.id === 'stories24-feed-rail-1' ? stories24RailRef : undefined}
                         items={item.railItems}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('InstantCreate', { openStoryPicker: true })}
@@ -4602,10 +4678,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             clearTimeout(feedScrollIdleTimerRef.current);
             feedScrollIdleTimerRef.current = null;
         }
-        // Pause only — unmounting TextureView on finger-down flashes black
-        // because the JPEG cover is already gone. Real unmount happens after
-        // the list has actually moved (haltFeedPlaybackIfScrolled).
-        pauseFeedPlayback();
+        // Silence now, but keep this ExoPlayer mounted (warm) so settle can resume it.
+        activeVideoPostIdRef.current = null;
+        parkAudibleFeedVideo();
     }, []);
 
     const onFeedMomentumScrollBegin = React.useCallback(() => {
@@ -4615,7 +4690,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         feedScrollingRef.current = true;
         setFeedScrollBusy(true);
-        pauseFeedPlayback();
+        activeVideoPostIdRef.current = null;
+        parkAudibleFeedVideo();
     }, []);
 
     const startSettledFeedVideo = React.useCallback(() => {
@@ -4623,17 +4699,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             requestAnimationFrame(() => setFeedScrollBusy(false));
             return;
         }
-        scheduleActiveFeedVideoRef.current(
-            feedAutoplayAllowedRef.current ? lastViewableVideoPostIdRef.current : null,
-            true,
-        );
-        requestAnimationFrame(() => setFeedScrollBusy(false));
+        const playId = feedAutoplayAllowedRef.current
+            ? lastViewableVideoPostIdRef.current
+            : null;
+        // Clear the scroll flag in the same turn as promotion so the warm player
+        // unpauses on that render instead of waiting another frame.
+        setFeedScrollBusy(false);
+        scheduleActiveFeedVideoRef.current(playId, true);
     }, []);
 
     const onFeedMomentumScrollEnd = React.useCallback(() => {
         feedScrollingRef.current = false;
         if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-        feedScrollIdleTimerRef.current = setTimeout(startSettledFeedVideo, 80);
+        // Player is often already warm-mounted from mid-scroll.
+        feedScrollIdleTimerRef.current = setTimeout(startSettledFeedVideo, 24);
     }, [startSettledFeedVideo]);
 
     const onFeedScrollEndDrag = React.useCallback((e: any) => {
@@ -4646,7 +4725,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         feedScrollIdleTimerRef.current = setTimeout(() => {
             feedScrollingRef.current = false;
             startSettledFeedVideo();
-        }, 80);
+        }, 24);
     }, [startSettledFeedVideo]);
 
     const onFeedScroll = React.useCallback((e: any) => {
@@ -4663,7 +4742,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (item.kind === 'post') return `post:${item.post.id}`;
         if (item.kind === 'interests' || item.kind === 'stories24') {
             return item.kind === 'stories24'
-                ? `stories24:${item.railKey}`
+                ? `stories24:${item.id}`
                 : `${item.kind}:${item.id}`;
         }
         if (item.kind === 'suggested_follower') {
@@ -4738,7 +4817,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 renderItem={renderItem}
                 keyExtractor={feedKeyExtractor}
                 getItemType={feedGetItemType}
-                drawDistance={400}
+                drawDistance={1600}
                 estimatedItemSize={560}
                 renderScrollComponent={GHScrollView}
                 extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${scenesOverlay?.postId || ''}`}
@@ -4764,11 +4843,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     />
                 }
                 onEndReached={onFeedEndReached}
-                onEndReachedThreshold={1.2}
+                onEndReachedThreshold={2.5}
                 ListFooterComponent={
                     loadingMore ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="small" color="#8B5CF6" />
+                        <View style={styles.loadingMoreWrap}>
+                            <FeedPostSkeleton count={2} />
+                            <View style={styles.loadingContainer}>
+                                <ActivityIndicator size="small" color="#FFFFFF" />
+                            </View>
                         </View>
                     ) : null
                 }
@@ -5752,6 +5834,9 @@ const styles = StyleSheet.create({
     loadingContainer: {
         padding: ox(20),
         alignItems: 'center',
+    },
+    loadingMoreWrap: {
+        paddingBottom: ox(8),
     },
     emptyContainer: {
         padding: ox(24),

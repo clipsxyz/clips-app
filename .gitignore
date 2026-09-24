@@ -40,6 +40,10 @@ build/
 # PHPUnit coverage (Laravel backend)
 laravel-backend/coverage/
 laravel-backend/coverage.xml
+laravel-backend/build/coverage/
+
+# Vitest coverage (frontend)
+coverage/
 # Laravel local env and runtime
 laravel-backend/.env
 laravel-backend/database/database.sqlite
