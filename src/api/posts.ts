@@ -2118,14 +2118,13 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       // Only send userId if it looks like a UUID (backend requires uuid|exists:users,id)
       const uuidLike = typeof userId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
       const feedTypeApi = tabToBoostFeedType(t);
-      // Fetch boosted IDs in parallel with posts so "Sponsored" label shows on first page too
-      const boostedPromise = feedTypeApi
-        ? getActiveBoostedPostIds(feedTypeApi).then((ids) => new Set(ids))
-        : t === 'discover'
-          ? Promise.all([getActiveBoostedPostIds('local'), getActiveBoostedPostIds('regional'), getActiveBoostedPostIds('national')]).then(([a, b, c]) => new Set([...a, ...b, ...c]))
-          : Promise.resolve(new Set<string>());
-      const [boostedSetApi, response] = await Promise.all([
-        boostedPromise,
+      // One labels fetch (cached) covers Sponsored badges — do not also call
+      // getActiveBoostedPostIds in parallel (that was 1+3 /active-ids hits per page).
+      const labelsPromise = getAllActiveBoostLabels().catch(
+        () => new Map<string, BoostFeedType>(),
+      );
+      const [allBoostLabels, response] = await Promise.all([
+        labelsPromise,
         apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined) as Promise<{
           items?: any[];
           nextCursor?: string | number | null;
@@ -2133,6 +2132,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
           following_count?: number;
         }>,
       ]);
+      const boostedSetApi = new Set<string>(
+        feedTypeApi
+          ? [...allBoostLabels.entries()]
+              .filter(([, ft]) => ft === feedTypeApi)
+              .map(([id]) => id)
+          : t === 'discover'
+            ? [...allBoostLabels.keys()]
+            : [],
+      );
 
       // Defensive: ensure items is an array (API may return unexpected shape on error)
       const rawItems = Array.isArray(response?.items) ? response.items : [];
@@ -2196,13 +2204,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       items = [...dedupedLocal, ...items];
 
       // Mark ANY actively boosted post as Sponsored (legal disclosure) — not only the current tab's boost tier.
-      let allBoostLabels = new Map<string, BoostFeedType>();
-      try {
-        allBoostLabels = await getAllActiveBoostLabels();
-      } catch {
-        allBoostLabels = new Map();
+      for (const id of boostedSetApi) {
+        if (!allBoostLabels.has(String(id))) {
+          allBoostLabels.set(String(id), (feedTypeApi ?? 'regional') as BoostFeedType);
+        }
       }
-      for (const id of boostedSetApi) allBoostLabels.set(String(id), (feedTypeApi ?? 'regional') as any);
       if (allBoostLabels.size > 0) {
         items = items.map((p) => {
           const label = allBoostLabels.get(String(p.id));

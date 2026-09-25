@@ -10,9 +10,12 @@ let activePostId: string | null = null;
 let warmPostId: string | null = null;
 let playingAtY = 0;
 let playbackAllowed = true;
+/** When false, feed cards must not mount a TextureView (Stories 24 bleed on ColorOS). */
+let textureMountAllowed = true;
 const activeListeners = new Set<IdListener>();
 const warmListeners = new Set<IdListener>();
 const playbackListeners = new Set<(allowed: boolean) => void>();
+const textureMountListeners = new Set<(allowed: boolean) => void>();
 const players = new Set<FeedPlayer>();
 
 function notify(listeners: Set<IdListener>, id: string | null): void {
@@ -95,6 +98,35 @@ export function subscribeFeedPlaybackAllowed(listener: (allowed: boolean) => voi
     playbackListeners.add(listener);
     listener(playbackAllowed);
     return () => playbackListeners.delete(listener);
+}
+
+/**
+ * Hard gate on mounting feed TextureViews. Pause alone is not enough on ColorOS —
+ * a paused TextureView still paints into Stories 24 thumbs underneath the postcard.
+ */
+export function setFeedTextureMountAllowed(allowed: boolean): void {
+    const changed = textureMountAllowed !== allowed;
+    textureMountAllowed = allowed;
+    if (!allowed) {
+        haltAllPlayers();
+        const hadActive = activePostId != null;
+        const hadWarm = warmPostId != null;
+        activePostId = null;
+        warmPostId = null;
+        if (hadActive) notify(activeListeners, null);
+        if (hadWarm) notify(warmListeners, null);
+    }
+    if (changed) textureMountListeners.forEach((fn) => fn(allowed));
+}
+
+export function getFeedTextureMountAllowed(): boolean {
+    return textureMountAllowed;
+}
+
+export function subscribeFeedTextureMountAllowed(listener: (allowed: boolean) => void): () => void {
+    textureMountListeners.add(listener);
+    listener(textureMountAllowed);
+    return () => textureMountListeners.delete(listener);
 }
 
 /** Mute tap: volume only. Pausing here stops the clip the user is watching. */

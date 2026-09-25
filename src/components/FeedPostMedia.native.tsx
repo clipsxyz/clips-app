@@ -23,11 +23,13 @@ import Video, { type VideoRef } from 'react-native-video';
 import {
     getActiveFeedVideoPostId,
     getWarmFeedVideoPostId,
+    getFeedTextureMountAllowed,
     subscribeActiveFeedVideo,
     subscribeWarmFeedVideo,
     registerFeedVideoPlayer,
     setAllFeedPlayerVolumes,
     subscribeFeedPlaybackAllowed,
+    subscribeFeedTextureMountAllowed,
 } from '../utils/feedActiveVideoNative';
 import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { consumeFeedVideoHandoff, peekFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
@@ -520,6 +522,11 @@ const FeedPostMedia = React.memo(
         if (mode !== 'feed') return;
         return subscribeFeedPlaybackAllowed(setFeedPlaybackAllowedState);
     }, [mode]);
+    const [textureMountAllowed, setTextureMountAllowed] = useState(getFeedTextureMountAllowed);
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedTextureMountAllowed(setTextureMountAllowed);
+    }, [mode]);
 
     // ColorOS TextureView can keep audio after pause() if it stays mounted.
     // Bluesky tears the inactive player down immediately; we do the same —
@@ -527,6 +534,16 @@ const FeedPostMedia = React.memo(
     const [keepPlayerMounted, setKeepPlayerMounted] = useState(false);
     useLayoutEffect(() => {
         if (mode !== 'feed') {
+            setKeepPlayerMounted(false);
+            return;
+        }
+        if (!textureMountAllowed) {
+            try {
+                feedVideoRef.current?.setVolume?.(0);
+                feedVideoRef.current?.pause?.();
+            } catch {
+                /* ignore */
+            }
             setKeepPlayerMounted(false);
             return;
         }
@@ -544,7 +561,7 @@ const FeedPostMedia = React.memo(
         // playing, and ColorOS keeps that audio under the next post.
         const timer = setTimeout(() => setKeepPlayerMounted(false), 280);
         return () => clearTimeout(timer);
-    }, [mode, isAudible, isWarmMount]);
+    }, [mode, isAudible, isWarmMount, textureMountAllowed]);
 
     useEffect(() => {
         if (!isAudible) return;
@@ -1118,7 +1135,9 @@ const FeedPostMedia = React.memo(
             !playFailed &&
             hasValidVideoFrame(slideWidth, slideBoxH) &&
             (mode === 'detail' ||
-                (mode === 'feed' && (isAudible || isWarmMount || keepPlayerMounted)));
+                (mode === 'feed' &&
+                    textureMountAllowed &&
+                    (isAudible || isWarmMount || keepPlayerMounted)));
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {

@@ -91,7 +91,7 @@ export async function fetchVisibleFeedPage(
     }
 }
 
-const INITIAL_FEED_PAGE_WALK_MAX = isReactNativeRuntime() ? 6 : 24;
+const INITIAL_FEED_PAGE_WALK_MAX = isReactNativeRuntime() ? 10 : 24;
 
 /** Walk mock/API pages until we find visible posts or hit the end. */
 export async function fetchInitialVisibleFeed(

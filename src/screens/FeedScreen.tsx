@@ -90,7 +90,7 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { loadFeedVideoPrebufferConfig, collectFeedVideoPrefetchUris, prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed, setFeedTextureMountAllowed } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import {
@@ -2417,10 +2417,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     activeVideoPostIdRef.current = null;
                     isFeedFocusedRef.current = false;
                     setFeedPlaybackAllowed(false);
+                    setFeedTextureMountAllowed(true);
                 };
             }
 
             setFeedPlaybackAllowed(true);
+            setFeedTextureMountAllowed(true);
 
             const scenesReturn = peekScenesReturnHandoff();
             // Prefer the post Scenes just closed on — not sticky pre-Scenes autoplay.
@@ -2459,6 +2461,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 activeVideoPostIdRef.current = null;
                 isFeedFocusedRef.current = false;
                 setFeedPlaybackAllowed(false);
+                setFeedTextureMountAllowed(true);
             };
         }, [pinFeedScrollSoon, restoreFeedVideoAfterOverlay, route?.params?.location])
     );
@@ -2468,6 +2471,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (state !== 'active') {
                 activeVideoPostIdRef.current = null;
                 setFeedPlaybackAllowed(false);
+                setFeedTextureMountAllowed(true);
                 return;
             }
             if (!isFeedFocusedRef.current || !feedAutoplayAllowedRef.current) return;
@@ -5701,10 +5705,10 @@ const styles = StyleSheet.create({
         backgroundColor: FEED_PAGE_BG,
     },
     stories24ListRow: {
-        zIndex: 24,
-        elevation: 24,
+        zIndex: 1,
+        elevation: 0,
         backgroundColor: FEED_PAGE_BG,
-        overflow: 'visible',
+        overflow: 'hidden',
     },
     feedListContent: {
         backgroundColor: FEED_PAGE_BG,

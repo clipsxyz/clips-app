@@ -266,35 +266,59 @@ export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<
 
 /**
  * All actively boosted posts → feedType map (for legal Sponsored labeling on any tab).
+ * Short TTL cache so a page walk does not hit /boost/active-ids 3× per empty page.
  */
-export async function getAllActiveBoostLabels(): Promise<Map<string, BoostFeedType>> {
-    const map = new Map<string, BoostFeedType>();
-    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
+let allBoostLabelsCache:
+    | { at: number; promise: Promise<Map<string, BoostFeedType>> }
+    | null = null;
+const ALL_BOOST_LABELS_TTL_MS = 12_000;
 
-    if (isLaravelApiEnabled()) {
-        const feedTypes = ['local', 'regional', 'national'] as BoostFeedType[];
-        const results = await Promise.all(
-            feedTypes.map(async (feedType) => {
-                try {
-                    return { feedType, ids: await apiClient.getActiveBoostedPostIdsApi(feedType) };
-                } catch {
-                    return { feedType, ids: [] as string[] };
-                }
-            }),
-        );
-        for (const { feedType, ids } of results) {
-            for (const id of ids) map.set(String(id), feedType);
+export async function getAllActiveBoostLabels(): Promise<Map<string, BoostFeedType>> {
+    const now = Date.now();
+    if (
+        allBoostLabelsCache &&
+        now - allBoostLabelsCache.at < ALL_BOOST_LABELS_TTL_MS
+    ) {
+        return allBoostLabelsCache.promise;
+    }
+
+    const promise = (async () => {
+        const map = new Map<string, BoostFeedType>();
+        const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
+
+        if (isLaravelApiEnabled()) {
+            const feedTypes = ['local', 'regional', 'national'] as BoostFeedType[];
+            const results = await Promise.all(
+                feedTypes.map(async (feedType) => {
+                    try {
+                        return { feedType, ids: await apiClient.getActiveBoostedPostIdsApi(feedType) };
+                    } catch {
+                        return { feedType, ids: [] as string[] };
+                    }
+                }),
+            );
+            for (const { feedType, ids } of results) {
+                for (const id of ids) map.set(String(id), feedType);
+            }
+            return map;
+        }
+
+        const ts = Date.now();
+        for (const bp of boostedPosts) {
+            if (bp.isActive && bp.expiresAt > ts) {
+                map.set(String(bp.postId), bp.feedType);
+            }
         }
         return map;
-    }
+    })();
 
-    const now = Date.now();
-    for (const bp of boostedPosts) {
-        if (bp.isActive && bp.expiresAt > now) {
-            map.set(String(bp.postId), bp.feedType);
-        }
+    allBoostLabelsCache = { at: now, promise };
+    try {
+        return await promise;
+    } catch (err) {
+        allBoostLabelsCache = null;
+        throw err;
     }
-    return map;
 }
 
 /**

@@ -102,8 +102,10 @@ export function getApiBaseUrl(): string {
         const fromMetro = getReactNativeDefaultApiBaseUrl();
         let resolved: string;
         if (fromMetro && isLoopbackApiHost(fromMetro)) {
-            // Should be rare after Android localhost→null change; prefer LAN.
-            resolved = FALLBACK_API;
+            // Metro served over adb reverse — hit Laravel the same way. Preferring
+            // a hardcoded LAN IP here hung the Ireland feed for 8s+ whenever the
+            // Mac's DHCP address drifted (was 192.168.1.12, now .5).
+            resolved = DEV_LOOPBACK_API_BASE_URL;
         } else {
             const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
             if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
@@ -165,13 +167,15 @@ export function getApiBaseUrlCandidates(): string[] {
         pushUnique(emulator);
         pushUnique(loopback);
     } else if (isLoopbackApiHost(primary)) {
+        pushUnique(loopback);
         pushUnique(lan);
         pushUnique(emulator);
-        pushUnique(loopback);
     } else {
+        // No remembered preference: try adb-reverse loopback first so a stale
+        // LAN IP cannot burn the full request timeout before the feed paints.
+        pushUnique(loopback);
         pushUnique(lan);
         pushUnique(emulator);
-        pushUnique(loopback);
     }
     return ordered;
 }

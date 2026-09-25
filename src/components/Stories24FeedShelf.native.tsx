@@ -45,6 +45,10 @@ import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
 import { isVideoUrl, storyVideoSource } from '../utils/storyMediaNative';
 import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
+import {
+    getActiveFeedVideoPostId,
+    subscribeActiveFeedVideo,
+} from '../utils/feedActiveVideoNative';
 
 /** 9:16 story thumbnail. Rank sits on the poster, Apple TV top-chart style. */
 const CARD_W = 126;
@@ -437,6 +441,15 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
     });
 
     const previewsPaused = railScrolling || !appActive;
+    // ColorOS: one TextureView at a time. While a feed postcard is audible, keep
+    // story thumbs as stills so the post clip cannot paint into them.
+    const [feedAudible, setFeedAudible] = useState(() => !!getActiveFeedVideoPostId());
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        return subscribeActiveFeedVideo((id) => setFeedAudible(!!id));
+    }, []);
+    const effectivelyPaused =
+        previewsPaused || (Platform.OS === 'android' && feedAudible);
 
     const visibleVideoIndexes = useMemo(() => {
         const next: number[] = [];
@@ -515,13 +528,15 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
                 }
                 scrollX={scrollX}
                 playPreviewVideo={
-                    !!item.previewVideoUrl && index === activePreviewIndex
+                    !!item.previewVideoUrl &&
+                    index === activePreviewIndex &&
+                    !(Platform.OS === 'android' && feedAudible)
                 }
-                previewVideosPaused={previewsPaused}
+                previewVideosPaused={effectivelyPaused}
                 onPress={() => onPressItem(item)}
             />
         ),
-        [activePreviewIndex, items, onPressItem, previewsPaused, scrollX],
+        [activePreviewIndex, effectivelyPaused, feedAudible, items, onPressItem, scrollX],
     );
 
     const getItemLayout = useCallback(
@@ -547,7 +562,7 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
                 data={items}
                 keyExtractor={keyExtractor}
                 renderItem={renderItem}
-                extraData={`${activePreviewIndex}-${previewsPaused}-${visibleRange.start}-${visibleRange.end}`}
+                extraData={`${activePreviewIndex}-${effectivelyPaused}-${visibleRange.start}-${visibleRange.end}`}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 nestedScrollEnabled
@@ -579,13 +594,14 @@ const styles = StyleSheet.create({
     wrap: {
         paddingTop: 4,
         paddingBottom: 8,
-        overflow: 'visible',
+        overflow: 'hidden',
         backgroundColor: '#151D28',
         position: 'relative',
-        zIndex: 8,
+        zIndex: 1,
+        elevation: 0,
     },
     rail: {
-        overflow: 'visible',
+        overflow: 'hidden',
     },
     headerRow: {
         flexDirection: 'row',
@@ -614,7 +630,7 @@ const styles = StyleSheet.create({
         width: ITEM_STRIDE,
         height: CARD_H,
         position: 'relative',
-        overflow: 'visible',
+        overflow: 'hidden',
         justifyContent: 'flex-end',
     },
     rankNumber: {
@@ -622,7 +638,7 @@ const styles = StyleSheet.create({
         left: 8,
         top: 2,
         zIndex: 6,
-        elevation: 6,
+        elevation: 0,
         fontSize: RANK_FONT,
         fontWeight: '800',
         fontFamily: Platform.OS === 'android' ? 'sans-serif-black' : 'System',
@@ -647,7 +663,7 @@ const styles = StyleSheet.create({
         width: CARD_W,
         height: CARD_H,
         zIndex: 2,
-        elevation: 5,
+        elevation: 0,
     },
     cardLiftVideoSafe: {
         elevation: 0,
@@ -660,10 +676,10 @@ const styles = StyleSheet.create({
         backgroundColor: PREVIEW_POSTER_FALLBACK,
         position: 'relative',
         zIndex: 2,
-        elevation: 5,
+        elevation: 0,
     },
     cardVideoSafe: {
-        backgroundColor: 'transparent',
+        backgroundColor: PREVIEW_POSTER_FALLBACK,
         elevation: 0,
     },
     cardPress: {
@@ -748,7 +764,7 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 3,
-        elevation: 3,
+        elevation: 0,
         paddingHorizontal: 8,
         paddingBottom: 8,
         paddingTop: 4,
