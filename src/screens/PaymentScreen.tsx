@@ -1,12 +1,17 @@
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { PaymentIntent, useStripe } from '@stripe/stripe-react-native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { activateBoost } from '../api/boost';
+import { createBoostPaymentIntent } from '../api/client';
 import type { BoostDuration, BoostGoal } from '../components/BoostSelectionModal.native';
 import { ox } from '../constants/nativeOpticalScale';
+
+const publishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+const RETURN_URL = 'clipsapp://boost-payment-success';
 
 type PaymentRouteParams = {
   postId?: string;
@@ -30,47 +35,107 @@ function goalLabel(goal?: BoostGoal): string {
 
 export default function PaymentScreen({ route, navigation }: any) {
   const { user } = useAuth();
+  const stripe = useStripe();
   const params = (route?.params || {}) as PaymentRouteParams;
+  const [clientSecret, setClientSecret] = React.useState<string | null>(null);
+  const [isPreparing, setIsPreparing] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   const postId = params.postId;
   const feedType = params.boostFeedType || 'local';
   const amount = Number(params.boostAmount || 0);
   const meta = params.boostMeta;
+  const durationHours = meta?.durationHours ?? 6;
+
+  React.useEffect(() => {
+    if (!postId || !user?.id) return;
+    if (!publishableKey) {
+      setErrorMessage(
+        'Stripe is not configured. Set EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY in .env and rebuild the app.',
+      );
+      return;
+    }
+
+    let cancelled = false;
+    setIsPreparing(true);
+    setErrorMessage(null);
+
+    createBoostPaymentIntent({
+      postId,
+      feedType,
+      userId: user.id,
+      radiusKm: meta?.radiusKm ?? 2,
+      durationHours,
+    })
+      .then(({ clientSecret: secret }) => {
+        if (!cancelled) setClientSecret(secret);
+      })
+      .catch((err) => {
+        if (!cancelled) setErrorMessage(err?.message ?? 'Could not start payment');
+      })
+      .finally(() => {
+        if (!cancelled) setIsPreparing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [postId, feedType, user?.id, meta?.radiusKm, durationHours]);
 
   const handlePay = async () => {
     if (!postId || !user?.id) {
       Alert.alert('Payment error', 'Missing payment details. Please try again from Boost.');
       return;
     }
+    if (!clientSecret) {
+      Alert.alert('Payment error', errorMessage ?? 'Payment is not ready yet. Please try again.');
+      return;
+    }
+    if (!stripe) {
+      Alert.alert('Payment error', 'Stripe is still loading. Please try again in a moment.');
+      return;
+    }
+
     setIsProcessing(true);
+    setErrorMessage(null);
     try {
-      // Mock / offline path — no Stripe SDK on RN. Same as web when Stripe keys are unset.
-      await activateBoost(postId, user.id, feedType, amount, undefined, {
-        goal: meta?.goal,
-        durationHours: meta?.durationHours,
-        estimatedReach: meta?.estimatedReach,
+      const { error: initError } = await stripe.initPaymentSheet({
+        paymentIntentClientSecret: clientSecret,
+        merchantDisplayName: 'ClipsApp',
+        returnURL: RETURN_URL,
+      });
+      if (initError) throw new Error(initError.message);
+
+      const { error: presentError } = await stripe.presentPaymentSheet();
+      if (presentError) {
+        setErrorMessage(presentError.message ?? 'Payment cancelled');
+        return;
+      }
+
+      const { error: confirmError, paymentIntent } = await stripe.confirmPayment(clientSecret);
+      if (confirmError) throw new Error(confirmError.message);
+      if (paymentIntent?.status !== PaymentIntent.Status.Succeeded) {
+        throw new Error('Payment was not completed. Please try again.');
+      }
+
+      await activateBoost(postId, user.id, feedType, amount, paymentIntent.id, {
         radiusKm: meta?.radiusKm,
         eligibleUsersCount: meta?.eligibleUsersCount,
+        durationHours,
         centerLocal: meta?.centerLocal,
-      } as any);
-      navigation.replace('PaymentSuccess', {
-        postId,
-        feedType,
-        amount,
       });
+
+      navigation.replace('PaymentSuccess', { postId, feedType, amount });
     } catch (error: any) {
-      console.error('RN payment failed:', error);
-      Alert.alert(
-        'Payment failed',
-        error?.message
-          ? String(error.message)
-          : 'Could not complete the mock boost. Please try again.',
-      );
+      setErrorMessage(error?.message ?? 'Could not complete the payment. Please try again.');
+      Alert.alert('Payment failed', String(error?.message ?? 'Could not complete the payment.'));
     } finally {
       setIsProcessing(false);
     }
   };
+
+  const canPay = Boolean(postId && user?.id && clientSecret) && !isPreparing && !isProcessing;
 
   return (
     <GazetteerScreenShell>
@@ -130,18 +195,26 @@ export default function PaymentScreen({ route, navigation }: any) {
           <Text style={[styles.label, styles.spaced]}>Total</Text>
           <Text style={styles.amount}>EUR {amount.toFixed(2)}</Text>
 
-          <Text style={[styles.helper, styles.spaced]}>
-            Stripe card checkout is web-only. On this APK build, Confirm runs the mock boost
-            (no real charge) — same path as web when Stripe is not configured.
+          <Text style={styles.helper}>
+            Payments are powered by Stripe. Card details are entered in Stripe's secure sheet and
+            never touch our servers.
           </Text>
+
+          {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
           <TouchableOpacity
             onPress={handlePay}
-            disabled={isProcessing}
-            style={[styles.payButton, isProcessing && styles.payButtonDisabled]}
+            disabled={!canPay}
+            style={[styles.payButton, !canPay && styles.payButtonDisabled]}
           >
             <Text style={styles.payButtonText}>
-              {isProcessing ? 'Processing...' : `Confirm · EUR ${amount.toFixed(2)}`}
+              {isProcessing
+                ? 'Processing...'
+                : isPreparing
+                  ? 'Preparing...'
+                  : canPay
+                    ? `Confirm · EUR ${amount.toFixed(2)}`
+                    : 'Payment unavailable'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -201,6 +274,13 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: ox(13),
     lineHeight: ox(18),
+    marginTop: ox(14),
+  },
+  error: {
+    color: '#FCA5A5',
+    fontSize: ox(13),
+    lineHeight: ox(18),
+    marginTop: ox(10),
   },
   spaced: {
     marginTop: ox(14),

@@ -1,11 +1,27 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { activateBoost } from '../api/boost';
+import { activateBoost, getActiveBoost } from '../api/boost';
 import type { BoostFeedType, BoostDuration } from '../components/BoostSelectionModal';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 
 const STORAGE_KEY = 'boostPaymentPending';
+
+/**
+ * The Stripe webhook is the authoritative activation path — this only covers the
+ * window before Stripe has delivered `payment_intent.succeeded`.
+ */
+async function waitForWebhookActivation(postId: string, attempts = 5): Promise<boolean> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        try {
+            if (await getActiveBoost(postId)) return true;
+        } catch {
+            // keep polling
+        }
+    }
+    return false;
+}
 
 export default function PaymentSuccessPage() {
     const navigate = useNavigate();
@@ -52,9 +68,10 @@ export default function PaymentSuccessPage() {
         })
             .then(() => {
                 const label = data.feedType === 'local' ? 'Local' : data.feedType === 'regional' ? 'Regional' : 'National';
+                const hours = data.durationHours ?? 6;
                 return Swal.fire(bottomSheet({
                     title: 'Payment Complete!',
-                    message: `Your post is boosted for 6 hours in the ${label} feed.`,
+                    message: `Your post is boosted for ${hours} hours in the ${label} feed.`,
                     icon: 'success',
                     confirmButtonText: 'OK',
                 }));
@@ -62,8 +79,23 @@ export default function PaymentSuccessPage() {
             .then(() => {
                 navigate('/boost', { state: { boostSuccess: true, postId: data.postId, feedType: data.feedType } });
             })
-            .catch((err) => {
+            .catch(async (err) => {
                 console.error('Activate boost after redirect:', err);
+
+                // The payment is captured regardless of this request failing, so give the
+                // webhook a moment to land before telling the user anything went wrong.
+                const activatedByWebhook = await waitForWebhookActivation(data.postId);
+                if (activatedByWebhook) {
+                    navigate('/boost', { state: { boostSuccess: true, postId: data.postId, feedType: data.feedType } });
+                    return;
+                }
+
+                await Swal.fire(bottomSheet({
+                    title: 'Payment received',
+                    message: 'Your payment went through and your boost is being activated. It may take a moment to appear in the feed.',
+                    icon: 'info',
+                    confirmButtonText: 'Back to Boost',
+                }));
                 navigate('/boost');
             });
     }, [navigate, handled]);

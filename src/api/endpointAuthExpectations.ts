@@ -47,8 +47,10 @@ export const ENDPOINT_AUTH_EXPECTATIONS: EndpointAuthExpectation[] = [
     { method: 'POST', path: '/collections', auth: 'auth', area: 'collections' },
 
     { method: 'POST', path: '/boost/estimate', auth: 'public', area: 'boost' },
-    { method: 'POST', path: '/boost/create-payment-intent', auth: 'public', area: 'boost' },
-    { method: 'POST', path: '/boost/activate', auth: 'public', area: 'boost' },
+    { method: 'POST', path: '/boost/create-payment-intent', auth: 'auth', area: 'boost' },
+    { method: 'POST', path: '/boost/activate', auth: 'auth', area: 'boost' },
+    // Authenticated by Stripe-Signature verification, not by a bearer token.
+    { method: 'POST', path: '/boost/stripe-webhook', auth: 'public', area: 'boost' },
 
     { method: 'POST', path: '/upload/single', auth: 'public', area: 'upload' },
 ];

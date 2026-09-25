@@ -19,19 +19,27 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
-        'http://localhost:5173',
-        'https://localhost:5173',
-        'http://localhost:3000',
-        'https://localhost:3000',
-        'http://127.0.0.1:5173',
-        'https://127.0.0.1:5173',
-        'http://127.0.0.1:3000',
-        'https://127.0.0.1:3000',
-        'http://192.168.1.3:5173', // Allow network access from phone
-        'https://192.168.1.3:5173', // Allow HTTPS network access from phone
-    ],
-    
+    /*
+    |--------------------------------------------------------------------------
+    | Allowed origins
+    |--------------------------------------------------------------------------
+    | Set CORS_ALLOWED_ORIGINS in .env to a comma-separated list of your
+    | deployed web origins, e.g.
+    |   CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+    |
+    | Required for production: the default list below is local development
+    | only and will not match a real domain. The LAN patterns below cover
+    | phone testing on a local network.
+    */
+
+    'allowed_origins' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env(
+            'CORS_ALLOWED_ORIGINS',
+            'http://localhost:5173,https://localhost:5173,http://localhost:3000,https://localhost:3000,http://127.0.0.1:5173,https://127.0.0.1:5173,http://127.0.0.1:3000,https://127.0.0.1:3000'
+        ))
+    ))),
+
     'allowed_origins_patterns' => [
         '/^https?:\/\/192\.168\.\d+\.\d+:5173$/',
         '/^https?:\/\/10\.\d+\.\d+\.\d+:5173$/',

@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
@@ -80,30 +81,39 @@ Route::get('/dev/boost-test-user', function () {
             'password' => 'password123',
             'handle' => $user->handle,
             'post_id' => $post->id,
-            'steps' => ['1. Log in with the email and password above', '2. Go to Boost tab', '3. Tap Boost on the test post', '4. Choose a tier and Continue to Payment', '5. Fill the form and Pay (mock – no real charge)'],
+            'steps' => ['1. Log in with the email and password above', '2. Go to Boost tab', '3. Tap Boost on the test post', '4. Choose a tier and Continue to Payment', '5. Pay with a Stripe test card (4242 4242 4242 4242)'],
         ]);
     } catch (\Throwable $e) {
-        return response()->json(['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()], 500);
+        report($e);
+        return response()->json(['error' => 'Failed to create dev test user'], 500);
     }
-});
+})->middleware('dev.only');
 
-// Boost prices from config (for display or to keep frontend in sync; no auth)
+// Boost pricing (for display or to keep frontend in sync; no auth)
 Route::get('/boost/prices', function () {
     return response()->json([
         'currency' => config('boost.currency'),
-        'prices' => config('boost.prices'),
-        'amounts_cents' => config('boost.amounts_cents'),
+        'unitPriceCents' => (int) config('boost.unit_price_cents'),
+        'durationMultipliers' => config('boost.duration_multipliers'),
     ]);
 });
 
-// Create Stripe PaymentIntent for boost (no auth required for demo; add auth middleware in production)
-Route::post('/boost/create-payment-intent', [BoostController::class, 'createPaymentIntent']);
+// Create Stripe PaymentIntent for boost (authenticated: boosts are charged to the caller)
+Route::post('/boost/create-payment-intent', [BoostController::class, 'createPaymentIntent'])
+    ->middleware('auth:sanctum');
 
 // Estimate audience-based boost price (no auth required for demo)
 Route::post('/boost/estimate', [BoostController::class, 'estimate']);
 
 // Activate boost after Stripe payment (verifies PaymentIntent with Stripe)
-Route::post('/boost/activate', [BoostController::class, 'activate']);
+Route::post('/boost/activate', [BoostController::class, 'activate'])
+    ->middleware('auth:sanctum');
+
+// Stripe webhook — public by necessity (Stripe sends no auth token); the
+// request is authenticated by verifying the Stripe-Signature header instead.
+// Throttle-exempt so Stripe's retries are never rate-limited into failure.
+Route::post('/boost/stripe-webhook', [BoostController::class, 'stripeWebhook'])
+    ->withoutMiddleware(ThrottleRequests::class);
 
 // Get active boosted post IDs for feed merging (public)
 Route::get('/boost/active-ids', [BoostController::class, 'activeIds']);
@@ -185,7 +195,6 @@ Route::get('/dev/ava-follows-barry', function () {
         return response()->json([
             'ok' => false,
             'message' => 'Need a user with "barry" in handle (e.g. Barry@Cork). Create Barry@Cork in the app first.',
-            'handles' => User::pluck('handle')->toArray(),
         ], 400);
     }
     $alreadyFollows = $barry->followers()->where('follower_id', $ava->id)->exists();
@@ -206,7 +215,7 @@ Route::get('/dev/ava-follows-barry', function () {
         'barry' => $barry->handle,
         'ava' => $ava->handle,
     ]);
-});
+})->middleware('dev.only');
 
 Route::get('/feed', [PostController::class, 'index'])
     ->middleware('throttle:api-feed'); // Alias of GET /api/posts (native / docs)

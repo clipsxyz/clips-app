@@ -5,18 +5,22 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Boost;
 use App\Models\BoostAnalyticsEvent;
+use App\Models\Post;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 
 class BoostController extends Controller
 {
-    /** Boost duration in hours */
-    const BOOST_DURATION_HOURS = 6;
-    const BOOST_UNIT_PRICE_EUR_CENTS = 5; // €0.05 per eligible user
+    /** Price in cents per eligible user reached. Single source of truth: config/boost.php */
+    private function unitPriceCents(): int
+    {
+        return (int) config('boost.unit_price_cents', 5);
+    }
 
     /**
      * Duration multipliers used in the frontend.
@@ -24,13 +28,14 @@ class BoostController extends Controller
      */
     private function durationMultiplier(int $durationHours): float
     {
-        return match ($durationHours) {
-            6 => 1,
+        $multipliers = config('boost.duration_multipliers', [
+            6 => 1.0,
             12 => 1.75,
             24 => 2.8,
             72 => 6.2,
-            default => 1,
-        };
+        ]);
+
+        return (float) ($multipliers[$durationHours] ?? 1.0);
     }
 
     private function haversineKm(float $lat1, float $lon1, float $lat2, float $lon2): float
@@ -137,10 +142,19 @@ class BoostController extends Controller
         $request->validate([
             'feedType' => 'required|string|in:local,regional,national',
             'postId'   => 'required|string|max:255',
-            'userId'   => 'required|string|max:255',
             'radiusKm' => 'required|numeric|min:0.1',
             'durationHours' => 'required|integer|in:6,12,24,72',
         ]);
+
+        $userId = (string) Auth::id();
+        if ($userId === '' || $userId === '0') {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $postId = (string) $request->input('postId');
+        if (!Post::where('id', $postId)->where('user_id', $userId)->exists()) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
 
         $secret = config('services.stripe.secret');
         if (empty($secret)) {
@@ -150,13 +164,12 @@ class BoostController extends Controller
         $feedType = (string) $request->input('feedType');
         $currency = config('boost.currency', 'eur');
 
-        $userId = (string) $request->input('userId');
         $radiusKm = (float) $request->input('radiusKm');
         $durationHours = (int) $request->input('durationHours');
         $multiplier = $this->durationMultiplier($durationHours);
 
         $eligibleUsers = $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm);
-        $priceCents = (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
+        $priceCents = (int) round($eligibleUsers * $this->unitPriceCents() * $multiplier);
 
         if ($priceCents <= 0) {
             return response()->json([
@@ -174,7 +187,7 @@ class BoostController extends Controller
                 'currency' => $currency,
                 'automatic_payment_methods' => ['enabled' => true],
                 'metadata' => [
-                    'post_id'   => $request->input('postId'),
+                    'post_id'   => $postId,
                     'feed_type' => $feedType,
                     'user_id' => $userId,
                     'radius_km' => $radiusKm,
@@ -214,11 +227,11 @@ class BoostController extends Controller
         $multiplier = $this->durationMultiplier($durationHours);
 
         $eligibleUsers = $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm);
-        $priceCents = (int) round($eligibleUsers * self::BOOST_UNIT_PRICE_EUR_CENTS * $multiplier);
+        $priceCents = (int) round($eligibleUsers * $this->unitPriceCents() * $multiplier);
 
         return response()->json([
             'currency' => config('boost.currency', 'eur'),
-            'unitPriceCents' => self::BOOST_UNIT_PRICE_EUR_CENTS,
+            'unitPriceCents' => $this->unitPriceCents(),
             'durationHours' => $durationHours,
             'durationMultiplier' => $multiplier,
             'feedType' => $feedType,
@@ -230,21 +243,76 @@ class BoostController extends Controller
     }
 
     /**
+     * Persist a boost for a verified, succeeded PaymentIntent.
+     *
+     * Idempotent by design: activation can arrive from the client redirect and from
+     * the `payment_intent.succeeded` webhook, and Stripe may retry either. The
+     * `payment_intent_id` unique index is the final backstop.
+     *
+     * Returns ['boost' => Boost, 'created' => bool].
+     */
+    private function persistBoostForIntent(\Stripe\PaymentIntent $intent, array $extra = []): array
+    {
+        $existing = Boost::where('payment_intent_id', $intent->id)->first();
+        if ($existing) {
+            return ['boost' => $existing, 'created' => false];
+        }
+
+        $metadata = $intent->metadata ?? [];
+        $paidCents = (int) ($intent->amount_received ?: $intent->amount);
+        $durationHours = (int) ($metadata->duration_hours ?? config('boost.default_duration_hours', 6));
+        $now = now();
+
+        try {
+            $boost = Boost::create([
+                'post_id'              => (string) $metadata->post_id,
+                'user_id'              => (string) $metadata->user_id,
+                'feed_type'            => (string) $metadata->feed_type,
+                'price'                => round($paidCents / 100, 2),
+                'radius_km'            => $metadata->radius_km ?? null,
+                'center_local'         => $extra['centerLocal'] ?? null,
+                'eligible_users_count' => $metadata->eligible_users_count ?? null,
+                'duration_hours'       => $durationHours,
+                'payment_intent_id'    => $intent->id,
+                'activated_at'         => $now,
+                'expires_at'           => $now->copy()->addHours($durationHours),
+            ]);
+        } catch (QueryException $e) {
+            // Concurrent activation (client redirect + webhook) lost the unique race.
+            $existing = Boost::where('payment_intent_id', $intent->id)->first();
+            if ($existing) {
+                return ['boost' => $existing, 'created' => false];
+            }
+            throw $e;
+        }
+
+        return ['boost' => $boost, 'created' => true];
+    }
+
+    /**
      * Activate a boost after successful Stripe payment. Verifies PaymentIntent with Stripe before persisting.
      */
     public function activate(Request $request)
     {
         $request->validate([
             'paymentIntentId' => 'required|string|max:255',
-            'postId'         => 'required|string|uuid',
+            'postId'         => 'required|string|max:255',
             'feedType'       => 'required|string|in:local,regional,national',
-            'userId'         => 'required|string|uuid',
             'price'          => 'required|numeric|min:0',
             'radiusKm' => 'nullable|numeric|min:0',
             'eligibleUsersCount' => 'nullable|integer|min:0',
             'durationHours' => 'nullable|integer|in:6,12,24,72',
             'centerLocal' => 'nullable|string|max:200',
         ]);
+
+        $userId = (string) Auth::id();
+        if ($userId === '' || $userId === '0') {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        if (!Post::where('id', $request->input('postId'))->where('user_id', $userId)->exists()) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
 
         $secret = config('services.stripe.secret');
         if (empty($secret)) {
@@ -261,7 +329,6 @@ class BoostController extends Controller
 
             $postId = $request->input('postId');
             $feedType = $request->input('feedType');
-            $userId = $request->input('userId');
 
             $radiusKm = $request->input('radiusKm');
             $durationHours = $request->input('durationHours');
@@ -287,22 +354,8 @@ class BoostController extends Controller
                 return response()->json(['error' => 'Payment metadata mismatch'], 400);
             }
 
-            $now = now();
-            $durationHours = (int) ($request->input('durationHours') ?? self::BOOST_DURATION_HOURS);
-            $expiresAt = $now->copy()->addHours($durationHours);
-
-            $boost = Boost::create([
-                'post_id'          => $request->input('postId'),
-                'user_id'          => $request->input('userId'),
-                'feed_type'        => $request->input('feedType'),
-                'price'            => $request->input('price'),
-                'radius_km'        => $request->input('radiusKm'),
-                'center_local'     => $request->input('centerLocal'),
-                'eligible_users_count' => $request->input('eligibleUsersCount'),
-                'duration_hours'   => $durationHours,
-                'payment_intent_id' => $intent->id,
-                'activated_at'     => $now,
-                'expires_at'       => $expiresAt,
+            ['boost' => $boost] = $this->persistBoostForIntent($intent, [
+                'centerLocal' => $request->input('centerLocal'),
             ]);
 
             return response()->json([
@@ -320,6 +373,83 @@ class BoostController extends Controller
         } catch (\Throwable $e) {
             Log::error('Boost activate failed', ['error' => $e->getMessage()]);
             return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Stripe webhook: the authoritative activation path.
+     *
+     * The client redirect is best-effort — if the user closes the tab or the app is
+     * killed after paying, the boost would never activate. Stripe retries failed
+     * webhook deliveries, so this endpoint is what guarantees a paid boost exists.
+     */
+    public function stripeWebhook(Request $request)
+    {
+        $secret = config('services.stripe.secret');
+        $webhookSecret = config('services.stripe.webhook_secret');
+
+        if (empty($secret) || empty($webhookSecret)) {
+            Log::error('Boost webhook called but Stripe webhook secret is not configured');
+            return response()->json(['error' => 'Stripe webhook is not configured'], 500);
+        }
+
+        try {
+            $event = \Stripe\Webhook::constructEvent(
+                $request->getContent(),
+                (string) $request->header('Stripe-Signature'),
+                $webhookSecret,
+                300
+            );
+        } catch (\Stripe\Exception\SignatureVerificationException $e) {
+            Log::warning('Boost webhook signature verification failed', ['error' => $e->getMessage()]);
+            return response()->json(['error' => 'Invalid signature'], 400);
+        } catch (\Throwable $e) {
+            Log::warning('Boost webhook payload rejected', ['error' => $e->getMessage()]);
+            return response()->json(['error' => 'Invalid payload'], 400);
+        }
+
+        if ($event->type !== 'payment_intent.succeeded') {
+            return response()->json(['received' => true, 'handled' => false]);
+        }
+
+        $intent = $event->data->object;
+        $metadata = $intent->metadata ?? [];
+
+        $postId = (string) ($metadata->post_id ?? '');
+        $userId = (string) ($metadata->user_id ?? '');
+        $feedType = (string) ($metadata->feed_type ?? '');
+
+        // Metadata is set by createPaymentIntent, but verify it before trusting it.
+        if ($postId === '' || $userId === '' || !in_array($feedType, ['local', 'regional', 'national'], true)) {
+            Log::warning('Boost webhook missing boost metadata', ['intent' => $intent->id]);
+            return response()->json(['error' => 'Missing boost metadata'], 422);
+        }
+
+        if (!Post::where('id', $postId)->where('user_id', $userId)->exists()) {
+            Log::warning('Boost webhook post ownership mismatch', [
+                'intent' => $intent->id,
+                'postId' => $postId,
+                'userId' => $userId,
+            ]);
+            return response()->json(['error' => 'Post not found'], 404);
+        }
+
+        try {
+            ['boost' => $boost, 'created' => $created] = $this->persistBoostForIntent($intent);
+
+            return response()->json([
+                'received' => true,
+                'handled'  => true,
+                'created'  => $created,
+                'boostId'  => $boost->id,
+            ]);
+        } catch (\Throwable $e) {
+            // Non-2xx makes Stripe retry, which is what we want for transient faults.
+            Log::error('Boost webhook activation failed', [
+                'intent' => $intent->id,
+                'error'  => $e->getMessage(),
+            ]);
+            return response()->json(['error' => 'Activation failed'], 500);
         }
     }
 

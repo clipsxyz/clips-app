@@ -40,6 +40,20 @@ enableScreens(true);
 // import './global.css';
 import { name as appName } from './app.json';
 import { registerBackgroundMessageHandler } from './src/services/notifications';
+import { initStripe } from '@stripe/stripe-react-native';
+
+// Stripe must be initialised once at app entry. Without a key the app still boots —
+// the boost checkout screen surfaces the configuration error instead of crashing.
+const stripePublishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+if (stripePublishableKey) {
+  initStripe({
+    publishableKey: stripePublishableKey,
+    merchantIdentifier: 'merchant.com.clipsapp',
+    urlScheme: 'clipsapp',
+  }).catch((err) => {
+    console.warn('Stripe init failed:', err?.message ?? err);
+  });
+}
 
 LogBox.ignoreLogs([
   'Sending `onAnimatedValueUpdate`',

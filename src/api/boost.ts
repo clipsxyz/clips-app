@@ -56,10 +56,9 @@ export interface BoostAnalytics {
     } | null;
 }
 
-// Mock boosted posts storage (fallback when backend unavailable)
+// Mock-mode boost storage. Only read/written when Laravel API mode is disabled;
+// in live mode the backend is the single source of truth.
 let boostedPosts: BoostedPost[] = [];
-
-// (legacy) boost duration handled dynamically based on selected duration.
 
 function notifyBoostActivated(postId: string, feedType?: BoostFeedType): void {
   try {
@@ -123,39 +122,42 @@ export async function activateBoost(
         centerLocal?: string;
     }
 ): Promise<BoostedPost> {
-    if (paymentIntentId) {
-        try {
-            const res = await apiClient.activateBoostApi({
-                paymentIntentId,
-                postId,
-                feedType,
-                userId,
-                price,
-                radiusKm: meta?.radiusKm,
-                eligibleUsersCount: meta?.eligibleUsersCount,
-                durationHours: meta?.durationHours,
-                centerLocal: meta?.centerLocal,
-            });
-            notifyBoostActivated(postId, feedType);
-            const now = Date.now();
-            const expiresAt =
-                res?.boost?.expiresAt
-                    ? new Date(res.boost.expiresAt).getTime()
-                    : now + (meta?.durationHours ?? 6) * 60 * 60 * 1000;
-            await markPostBoostedLocally(postId, feedType);
-            return {
-                postId,
-                userId,
-                feedType,
-                price,
-                radiusKm: meta?.radiusKm,
-                activatedAt: now,
-                expiresAt,
-                isActive: true,
-            };
-        } catch (err) {
-            throw err;
+    if (!paymentIntentId) {
+        const { isMockMode } = await import('../config/runtimeEnv');
+        if (!isMockMode()) {
+            throw new Error('A verified Stripe payment is required to activate a boost.');
         }
+    }
+
+    if (paymentIntentId) {
+        const res = await apiClient.activateBoostApi({
+            paymentIntentId,
+            postId,
+            feedType,
+            userId,
+            price,
+            radiusKm: meta?.radiusKm,
+            eligibleUsersCount: meta?.eligibleUsersCount,
+            durationHours: meta?.durationHours,
+            centerLocal: meta?.centerLocal,
+        });
+        notifyBoostActivated(postId, feedType);
+        const now = Date.now();
+        const expiresAt =
+            res?.boost?.expiresAt
+                ? new Date(res.boost.expiresAt).getTime()
+                : now + (meta?.durationHours ?? 6) * 60 * 60 * 1000;
+        await markPostBoostedLocally(postId, feedType);
+        return {
+            postId,
+            userId,
+            feedType,
+            price,
+            radiusKm: meta?.radiusKm,
+            activatedAt: now,
+            expiresAt,
+            isActive: true,
+        };
     }
 
     // Mock flow: in-memory only
@@ -193,30 +195,30 @@ export async function activateBoost(
 
 /**
  * Check if a post is currently boosted.
- * Checks in-memory first (for mock boosts), then backend API.
+ * Reads the in-memory store in mock mode, the backend in live mode.
  *
  * @param postId - Post ID to check
  * @returns Boosted post if active, null if not boosted or expired
  */
 export async function getActiveBoost(postId: string): Promise<BoostedPost | null> {
-    const now = Date.now();
     const id = String(postId);
+    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
 
-    // Check in-memory FIRST – mock boosts (e.g. Bob's posts) only exist here
-    const localBoost = boostedPosts.find(
-        (bp) => String(bp.postId) === id && bp.isActive && bp.expiresAt > now
-    );
-    if (localBoost) return localBoost;
+    if (!isLaravelApiEnabled()) {
+        // Mock mode: the in-memory store is the only source of truth.
+        const now = Date.now();
+        const localBoost = boostedPosts.find(
+            (bp) => String(bp.postId) === id && bp.isActive && bp.expiresAt > now
+        );
+        if (localBoost) return localBoost;
 
-    // Mark expired in-memory boosts
-    const expired = boostedPosts.find((bp) => String(bp.postId) === id && bp.expiresAt <= now);
-    if (expired) expired.isActive = false;
+        const expired = boostedPosts.find((bp) => String(bp.postId) === id && bp.expiresAt <= now);
+        if (expired) expired.isActive = false;
 
-    // Skip backend when mock mode — otherwise every Boost tile waits on an 8s API timeout.
-    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
-    if (!useLaravel) return null;
+        return null;
+    }
 
-    // Then try backend API (for real Stripe boosts)
+    // Live mode: the backend is authoritative.
     try {
         const status = await apiClient.getBoostStatusApi(postId);
         if (status.isActive) {
@@ -249,9 +251,12 @@ export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<
         try {
             return (await apiClient.getActiveBoostedPostIdsApi(feedType)).map(String);
         } catch {
-            // Backend down (e.g. ERR_CONNECTION_REFUSED) – use in-memory so feed still loads
+            // Backend down (e.g. ERR_CONNECTION_REFUSED) – fall through to an empty
+            // list in live mode; the feed must still load.
         }
+        return [];
     }
+
     const now = Date.now();
     const active = boostedPosts.filter(
         (bp) => bp.isActive && bp.expiresAt > now && bp.feedType === feedType
@@ -264,14 +269,9 @@ export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<
  */
 export async function getAllActiveBoostLabels(): Promise<Map<string, BoostFeedType>> {
     const map = new Map<string, BoostFeedType>();
-    const now = Date.now();
-    for (const bp of boostedPosts) {
-        if (bp.isActive && bp.expiresAt > now) {
-            map.set(String(bp.postId), bp.feedType);
-        }
-    }
-    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
-    if (useLaravel) {
+    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
+
+    if (isLaravelApiEnabled()) {
         const feedTypes = ['local', 'regional', 'national'] as BoostFeedType[];
         const results = await Promise.all(
             feedTypes.map(async (feedType) => {
@@ -285,33 +285,16 @@ export async function getAllActiveBoostLabels(): Promise<Map<string, BoostFeedTy
         for (const { feedType, ids } of results) {
             for (const id of ids) map.set(String(id), feedType);
         }
+        return map;
+    }
+
+    const now = Date.now();
+    for (const bp of boostedPosts) {
+        if (bp.isActive && bp.expiresAt > now) {
+            map.set(String(bp.postId), bp.feedType);
+        }
     }
     return map;
-}
-
-/**
- * Get all active boosts for a user
- * Filters out expired boosts using epoch time
- * 
- * @param userId - User ID
- * @returns Array of active boosted posts
- */
-export async function getUserActiveBoosts(userId: string): Promise<BoostedPost[]> {
-    const now = Date.now(); // Current epoch timestamp
-
-    // Filter active boosts for this user that haven't expired
-    const activeBoosts = boostedPosts.filter(
-        bp => bp.userId === userId && bp.isActive && bp.expiresAt > now
-    );
-
-    // Mark expired boosts as inactive
-    boostedPosts.forEach(bp => {
-        if (bp.userId === userId && bp.isActive && bp.expiresAt <= now) {
-            bp.isActive = false;
-        }
-    });
-
-    return activeBoosts;
 }
 
 /**
@@ -350,26 +333,6 @@ export async function shouldShowAsBoosted(
     if (feedType === 'national' && boost.feedType === 'national') return true;
 
     return false;
-}
-
-/**
- * Clean up expired boosts
- * Called periodically to remove expired boosts
- */
-export async function cleanupExpiredBoosts(): Promise<void> {
-    const now = Date.now(); // Current epoch timestamp
-
-    boostedPosts.forEach(bp => {
-        if (bp.isActive && bp.expiresAt <= now) {
-            bp.isActive = false;
-        }
-    });
-
-    // Optionally remove old inactive boosts (older than 7 days)
-    const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
-    boostedPosts = boostedPosts.filter(
-        bp => bp.isActive || bp.expiresAt > sevenDaysAgo
-    );
 }
 
 /**
