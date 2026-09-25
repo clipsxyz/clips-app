@@ -20,6 +20,31 @@ const PREBUFFER_TIMEOUT_MS = 12_000;
 const prebufferedUris = new Set<string>();
 const inFlightUris = new Set<string>();
 
+/**
+ * Global slot pool. `runLimited` only bounds concurrency *within* a single
+ * prebufferFeedVideos() call, so overlapping calls could each open their own
+ * workers. This caps the process-wide total.
+ */
+let activePrebuffers = 0;
+const prebufferWaiters: Array<() => void> = [];
+
+async function acquirePrebufferSlot(): Promise<void> {
+    if (activePrebuffers < MAX_CONCURRENT) {
+        activePrebuffers += 1;
+        return;
+    }
+    await new Promise<void>((resolve) => {
+        prebufferWaiters.push(resolve);
+    });
+    activePrebuffers += 1;
+}
+
+function releasePrebufferSlot(): void {
+    activePrebuffers = Math.max(0, activePrebuffers - 1);
+    const next = prebufferWaiters.shift();
+    if (next) next();
+}
+
 export type FeedVideoPrebufferConfig = {
     /**
      * When true, skip heavy Range prebuffer on cellular / metered links.
@@ -146,6 +171,7 @@ export function collectFeedVideoPrefetchUris(posts: Post[]): string[] {
 async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
     const originUri = String(uri || '').trim();
     let claimed = false;
+    let slotHeld = false;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -155,6 +181,9 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
         claimed = true;
 
         if (!(await canPrebufferFeedVideo())) return;
+
+        await acquirePrebufferSlot();
+        slotHeld = true;
 
         timer = setTimeout(() => {
             try {
@@ -190,15 +219,25 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
             const reader = typeof body?.getReader === 'function' ? body.getReader() : null;
             if (reader) {
                 let received = 0;
-                while (received < maxBytes) {
-                    let chunk: { done: boolean; value?: Uint8Array };
-                    try {
-                        chunk = await reader.read();
-                    } catch {
-                        break;
+                try {
+                    while (received < maxBytes) {
+                        let chunk: { done: boolean; value?: Uint8Array };
+                        try {
+                            chunk = await reader.read();
+                        } catch {
+                            break;
+                        }
+                        if (chunk.done) break;
+                        received += chunk.value?.byteLength ?? 0;
                     }
-                    if (chunk.done) break;
-                    received += chunk.value?.byteLength ?? 0;
+                } finally {
+                    // Always release the body. If the server ignored our Range header and
+                    // is still streaming, leaving this open holds the connection alive.
+                    try {
+                        await reader.cancel();
+                    } catch {
+                        /* ignore */
+                    }
                 }
             } else {
                 try {
@@ -221,6 +260,7 @@ async function prebufferVideoUri(uri: string, maxBytes: number): Promise<void> {
     } finally {
         if (timer) clearTimeout(timer);
         if (claimed) inFlightUris.delete(originUri);
+        if (slotHeld) releasePrebufferSlot();
     }
 }
 

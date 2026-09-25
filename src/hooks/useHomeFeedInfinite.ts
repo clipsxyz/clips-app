@@ -67,7 +67,10 @@ async function fetchHomeFeedPage(
         }
         walkCursor = page.nextCursor;
     }
-    return { items: [], nextCursor: null, followingCount };
+    // Walk exhausted. Hand back the advanced cursor rather than null so React Query
+    // resumes from here on the next fetch. Returning null here permanently ends
+    // pagination, stranding the user on a blank tail with no way to load more.
+    return { items: [], nextCursor: walkCursor, followingCount };
 }
 
 export function homeFeedQueryKey(input: Pick<HomeFeedQueryInput, 'filter' | 'viewerUserId' | 'viewerHandle'>) {

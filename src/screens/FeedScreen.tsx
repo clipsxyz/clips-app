@@ -93,6 +93,11 @@ import { loadFeedVideoPrebufferConfig, collectFeedVideoPrefetchUris, prebufferFe
 import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import {
+    isHeavyFeedSheetOpen,
+    shouldSuspendFeedVideo,
+    type FeedOverlayState,
+} from '../utils/feedOverlaySuspension';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 import { setFeedScenesFullscreen } from '../utils/feedScenesFullscreenNative';
 import {
@@ -1734,12 +1739,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [imageFullscreenOrigin, setImageFullscreenOrigin] = useState<ImageFullscreenOrigin | null>(
         null,
     );
-    /** Overlays only — tab blur is handled by halt + setFeedPlaybackAllowed so Inbox is not blocked by a full list remount. */
-    const feedNativeVideoSuspended =
-        commentsModalOpen ||
-        scenesViewerActive ||
-        Boolean(scenesOverlay) ||
-        Boolean(imageFullscreenPost);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
@@ -1759,6 +1758,25 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [dmSheetOpen, setDmSheetOpen] = useState(false);
     const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
     const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
+
+    /**
+     * Overlays only — tab blur is handled by halt + setFeedPlaybackAllowed so Inbox is not
+     * blocked by a full list remount. Policy lives in `feedOverlaySuspension` because the
+     * resume guard below has to agree with it exactly.
+     */
+    const feedOverlayState: FeedOverlayState = {
+        commentsModalOpen,
+        scenesViewerActive,
+        scenesOverlay: Boolean(scenesOverlay),
+        imageFullscreenPost: Boolean(imageFullscreenPost),
+        shareModalOpen,
+        dmSheetOpen,
+        taggedSheetPost: Boolean(taggedSheetPost),
+        gazetteerAlertOpen: Boolean(feedGazetteerAlert),
+        reclipConfirmOpen: Boolean(reclipConfirmPost),
+        likesSheetPost: Boolean(likesSheetPost),
+    };
+    const feedNativeVideoSuspended = shouldSuspendFeedVideo(feedOverlayState);
     const [feedDmDeliveryFx, setFeedDmDeliveryFx] = useState<FeedDmDeliveryFxState | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
     const [headerScopePicker, setHeaderScopePicker] = useState<LocationSuggestion | null>(null);
@@ -1778,8 +1796,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
     const activeVideoPostIdRef = useRef<string | null>(null);
-    const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(true);
-    const [feedVideoMuted, setFeedVideoMuted] = useState(false);
+    // Both start in the safe state so nothing can autoplay (audibly) before the
+    // stored policy and mute preference have actually been read from storage.
+    const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(false);
+    const [feedVideoMuted, setFeedVideoMuted] = useState(true);
     const [pendingUploadTick, setPendingUploadTick] = useState(0);
     const [ads, setAds] = useState<Ad[]>([]);
     const [online, setOnline] = useState(true);
@@ -1909,20 +1929,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const overlayResumeVideoPostIdRef = useRef<string | null>(null);
 
     const feedAutoplayPrefRef = useRef<FeedAutoplayPref>('always');
+    /** Guards against a slower policy resolution overwriting a newer one. */
+    const feedAutoplayGenRef = useRef(0);
+    /** Blocks late resolutions from setting state after this effect tears down. */
+    const feedAutoplayMountedRef = useRef(true);
 
     const syncFeedAutoplayAllowed = useCallback(async (pref: FeedAutoplayPref) => {
         feedAutoplayPrefRef.current = pref;
+        const gen = ++feedAutoplayGenRef.current;
         const allowed = await resolveFeedAutoplayAllowed(pref);
+        if (gen !== feedAutoplayGenRef.current) return;
+        if (!feedAutoplayMountedRef.current) return;
         setFeedAutoplayAllowed(allowed);
     }, []);
 
     useEffect(() => {
+        feedAutoplayMountedRef.current = true;
         let cancelled = false;
         void getFeedAutoplayPref().then((pref) => {
             if (cancelled) return;
             void syncFeedAutoplayAllowed(pref);
         });
         void loadFeedVideoPrebufferConfig();
+        let unsubMute: (() => void) | null = null;
         void (async () => {
             try {
                 const migrated = await AsyncStorage.getItem('clips:feedAudioDefaultUnmuted_v1');
@@ -1935,12 +1964,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             if (cancelled) return;
             const muted = await getGlobalVideoMutedNative();
-            if (!cancelled) setFeedVideoMuted(muted);
+            if (cancelled) return;
+            setFeedVideoMuted(muted);
+            // Subscribe only after hydration: the listener fires synchronously with the
+            // cold-cache default (unmuted), which would clobber the persisted value.
+            unsubMute = subscribeGlobalVideoMuted(setFeedVideoMuted);
         })();
         const unsubPref = subscribeFeedAutoplayPref((pref) => {
             void syncFeedAutoplayAllowed(pref);
         });
-        const unsubMute = subscribeGlobalVideoMuted(setFeedVideoMuted);
         const unsubNet = NetInfo.addEventListener((state) => {
             setOnline(Boolean(state.isConnected));
             void syncFeedAutoplayAllowed(feedAutoplayPrefRef.current);
@@ -1949,8 +1981,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return () => {
             cancelled = true;
             unsubPref();
-            unsubMute();
+            unsubMute?.();
             unsubNet();
+            feedAutoplayMountedRef.current = false;
         };
     }, [syncFeedAutoplayAllowed]);
 
@@ -2081,6 +2114,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const commentsModalOpenRef = useRef(commentsModalOpen);
     commentsModalOpenRef.current = commentsModalOpen;
 
+    /**
+     * Heavy / full-screen sheets, collapsed into one ref. Derived from the same policy
+     * object as `feedNativeVideoSuspended` so the pause and the resume guard can never
+     * disagree. The likes sheet is intentionally excluded (lightweight popover).
+     */
+    const heavyFeedSheetOpenRef = useRef(false);
+    heavyFeedSheetOpenRef.current = isHeavyFeedSheetOpen(feedOverlayState);
+
     /** True after the first viewability pass — list data patches must never invent a player. */
     const feedViewabilitySeenRef = useRef(false);
 
@@ -2088,7 +2129,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         !isFeedFocusedRef.current ||
         scenesViewerActiveRef.current ||
         imageFullscreenOpenRef.current ||
-        commentsModalOpenRef.current;
+        commentsModalOpenRef.current ||
+        heavyFeedSheetOpenRef.current;
 
     const captureOverlayVideoResume = useCallback((fallbackPost?: Post | null) => {
         const active = activeVideoPostIdRef.current;
@@ -2280,7 +2322,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             // Bluesky-style: cut previous audio immediately when the postcard changes,
             // then warm-mount the next ExoPlayer paused so settle can Instant Start.
             if (feedScrollingRef.current) {
-                if (nextId && String(activeVideoPostIdRef.current) !== String(nextId)) {
+                // Release whenever the target changes — including when it becomes null
+                // because no video is over the viewability line any more (a photo or
+                // text post owning the viewport mid-fling). Gating this on `nextId`
+                // left the previous clip playing through the entire scroll, and then
+                // promoted that stale clip again on settle.
+                if (String(activeVideoPostIdRef.current ?? '') !== String(nextId ?? '')) {
                     activeVideoPostIdRef.current = null;
                     clearAudibleFeedVideo();
                 }
@@ -4689,11 +4736,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         parkAudibleFeedVideo();
     }, []);
 
+    const settleRetryRef = useRef(false);
+    const startSettledFeedVideoRef = useRef<() => void>(() => {});
+
     const onFeedMomentumScrollBegin = React.useCallback(() => {
         if (feedScrollIdleTimerRef.current) {
             clearTimeout(feedScrollIdleTimerRef.current);
             feedScrollIdleTimerRef.current = null;
         }
+        settleRetryRef.current = false;
         feedScrollingRef.current = true;
         setFeedScrollBusy(true);
         activeVideoPostIdRef.current = null;
@@ -4711,8 +4762,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Clear the scroll flag in the same turn as promotion so the warm player
         // unpauses on that render instead of waiting another frame.
         setFeedScrollBusy(false);
+        if (!playId && !settleRetryRef.current) {
+            // The last viewability tick can land while no video is over the line, so
+            // there is nothing to promote. onViewableItemsChanged only fires when the
+            // viewable set *changes*, so retry once to pick up the settled clip rather
+            // than stranding the feed paused until the user scrolls again.
+            settleRetryRef.current = true;
+            feedScrollIdleTimerRef.current = setTimeout(
+                startSettledFeedVideoRef.current,
+                140,
+            );
+            return;
+        }
         scheduleActiveFeedVideoRef.current(playId, true);
     }, []);
+
+    startSettledFeedVideoRef.current = startSettledFeedVideo;
 
     const onFeedMomentumScrollEnd = React.useCallback(() => {
         feedScrollingRef.current = false;
@@ -4728,6 +4793,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             return;
         }
         if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
+        settleRetryRef.current = false;
         feedScrollIdleTimerRef.current = setTimeout(() => {
             feedScrollingRef.current = false;
             startSettledFeedVideo();
@@ -4857,6 +4923,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             <View style={styles.loadingContainer}>
                                 <ActivityIndicator size="small" color="#FFFFFF" />
                             </View>
+                        </View>
+                    ) : !hasNextPage && !feedQueryPending && flatForRender.length > 0 ? (
+                        // Every other end-of-feed branch is gated on an *empty* list, so a
+                        // non-empty feed with no next page rendered as bare blank space and
+                        // read as a loading failure.
+                        <View style={styles.feedEndFooter}>
+                            <Text style={styles.feedEndFooterText}>You're all caught up</Text>
                         </View>
                     ) : null
                 }
@@ -5843,6 +5916,15 @@ const styles = StyleSheet.create({
     },
     loadingMoreWrap: {
         paddingBottom: ox(8),
+    },
+    feedEndFooter: {
+        paddingVertical: ox(28),
+        alignItems: 'center',
+    },
+    feedEndFooterText: {
+        color: 'rgba(255,255,255,0.5)',
+        fontSize: 13,
+        fontWeight: '600',
     },
     emptyContainer: {
         padding: ox(24),

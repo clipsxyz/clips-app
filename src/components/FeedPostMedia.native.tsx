@@ -885,6 +885,20 @@ const FeedPostMedia = React.memo(
         resetPosterCover();
     }, [mediaUrl, currentIndex, post.id, resetPosterCover]);
 
+    /** Carousel slides share one Video instance (keyed by post, not slide), so the
+     *  resume/seek refs are component-level. Without this reset, swiping from one
+     *  video slide to another makes onLoad seek the new video to the old slide's
+     *  timestamp. Keyed on mediaUrl so a Scenes resume on the same slide is preserved. */
+    const prevSlideUrlRef = useRef(mediaUrl);
+    useEffect(() => {
+        if (prevSlideUrlRef.current === mediaUrl) return;
+        prevSlideUrlRef.current = mediaUrl;
+        pendingSeekRef.current = null;
+        playbackTimeRef.current = 0;
+        stickyResumeTimeRef.current = null;
+        waitingForResumeFrameRef.current = null;
+    }, [mediaUrl]);
+
     useEffect(() => {
         setSoundOn(!muted);
     }, [muted, post.id]);

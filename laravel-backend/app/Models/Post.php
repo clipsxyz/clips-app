@@ -26,6 +26,46 @@ class Post extends Model
                 $model->public_share_token = Str::random(48);
             }
         });
+
+        // Recomputed on every write so the flag can never drift from the media it
+        // describes. Covers Post::create() and the render pipeline's later
+        // $post->save() calls (VideoThumbnailService).
+        static::saving(function (Post $model) {
+            $model->has_renderable_media = self::computeHasRenderableMedia(
+                $model->media_url,
+                $model->media_items
+            );
+        });
+    }
+
+    /**
+     * True when the feed has something to render: a non-empty media_url, or at
+     * least one media_items entry with a non-empty url. Mirrors
+     * postHasRenderableMedia() in the client's linkPreview.ts — the two must stay
+     * in step or the client will start stripping posts out of a "clean" page.
+     */
+    public static function computeHasRenderableMedia($mediaUrl, $rawMediaItems): bool
+    {
+        if (is_string($mediaUrl) && trim($mediaUrl) !== '') {
+            return true;
+        }
+
+        $items = is_string($rawMediaItems) ? json_decode($rawMediaItems, true) : $rawMediaItems;
+        if (!is_array($items)) {
+            return false;
+        }
+
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $url = $item['url'] ?? null;
+            if (is_string($url) && trim($url) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected $fillable = [
@@ -87,6 +127,7 @@ class Post extends Model
         'reclips_count' => 'integer',
         'saves_count' => 'integer',
         'is_reclipped' => 'boolean',
+        'has_renderable_media' => 'boolean',
         'video_captions_enabled' => 'boolean',
         'subtitles_enabled' => 'boolean',
         'latitude' => 'float',
@@ -275,6 +316,25 @@ class Post extends Model
     public function scopeNotReclipped($query)
     {
         return $query->where('is_reclipped', false);
+    }
+
+    /**
+     * Drop text-only link/share cards from feed listings.
+     *
+     * A post is excluded only when it has a link_preview AND no renderable
+     * media — the same pair isLinkShareFeedPost() checks on the client. Rows
+     * without a link_preview are always kept, so ordinary text posts and
+     * anything else unaffected by this rule are untouched.
+     *
+     * Apply this to every feed listing so each page is already displayable and
+     * the client never has to strip or walk past posts to fill a page.
+     */
+    public function scopeRenderableInFeed($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereNull('link_preview')
+                ->orWhere('has_renderable_media', true);
+        });
     }
 
     public function scopeByLocation($query, $location)

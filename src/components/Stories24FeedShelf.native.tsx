@@ -43,6 +43,8 @@ import {
 } from '../utils/stories24Rail';
 import { getAvatarForHandle, resolveAvatarImageUri } from '../api/users';
 import { isVideoUrl, storyVideoSource } from '../utils/storyMediaNative';
+import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
+import { prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
 
 /** 9:16 story thumbnail. Rank sits on the poster, Apple TV top-chart style. */
 const CARD_W = 126;
@@ -103,8 +105,6 @@ type Props = {
 };
 
 const PREVIEW_LOOP_SECONDS = 3;
-/** ColorOS TextureView ignores clip — a rail player paints into the post below (top-left). */
-const ANDROID_FEED_RAIL_POSTERS_ONLY = Platform.OS === 'android';
 
 function StoryPreviewPoster({
     posterUri,
@@ -169,25 +169,29 @@ function StoryCardFill({
     }, [poster]);
 
     const showPreview = playPreviewVideo && !!item.previewVideoUrl;
-    if (showPreview || (poster && !stillFailed)) {
+    // ColorOS TextureView ignores z-order — a sibling still paints over the MP4 and
+    // the card looks frozen. StorySafeVideo keeps its own poster until the first frame.
+    if (showPreview) {
         return (
             <View style={styles.previewFrame} pointerEvents="none" collapsable={false}>
-                {poster && !stillFailed ? (
-                    <Image
-                        source={{ uri: poster }}
-                        style={styles.previewFrame}
-                        resizeMode="cover"
-                        pointerEvents="none"
-                        onError={() => setStillFailed(true)}
-                    />
-                ) : null}
-                {showPreview ? (
-                    <StoryPreviewVideo
-                        uri={item.previewVideoUrl!}
-                        posterUri={poster}
-                        paused={previewVideosPaused}
-                    />
-                ) : null}
+                <StoryPreviewVideo
+                    uri={item.previewVideoUrl!}
+                    posterUri={poster}
+                    paused={previewVideosPaused}
+                />
+            </View>
+        );
+    }
+    if (poster && !stillFailed) {
+        return (
+            <View style={styles.previewFrame} pointerEvents="none" collapsable={false}>
+                <Image
+                    source={{ uri: poster }}
+                    style={styles.previewFrame}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                    onError={() => setStillFailed(true)}
+                />
             </View>
         );
     }
@@ -212,6 +216,9 @@ function StoryPreviewVideo({
     paused: boolean;
 }) {
     const videoRef = useRef<VideoRef>(null);
+    const [feedScrolling, setFeedScrolling] = useState(getFeedScrollBusy());
+    useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
+    const effectivelyPaused = paused || feedScrolling;
     const still = stillUri(posterUri);
     const source = storyVideoSource(uri) || { uri };
 
@@ -226,7 +233,7 @@ function StoryPreviewVideo({
                     boxHeight={CARD_H}
                     muted
                     repeat
-                    paused={paused}
+                    paused={effectivelyPaused}
                     playWhenInactive
                     resizeMode="cover"
                     progressUpdateInterval={200}
@@ -304,6 +311,7 @@ function RankedShelfCard({
                         style={styles.card}
                         onPress={onPress}
                         activeOpacity={0.9}
+                        delayPressIn={0}
                         accessibilityRole="button"
                         accessibilityLabel="Add yours to Stories 24"
                     >
@@ -332,6 +340,7 @@ function RankedShelfCard({
                             style={styles.cardPress}
                             onPress={onPress}
                             activeOpacity={0.9}
+                            delayPressIn={0}
                             accessibilityRole="button"
                             accessibilityLabel={stories24DisplayName(item.handle, item.displayName)}
                         >
@@ -448,7 +457,7 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
     }, [visibleVideoKey]);
 
     useEffect(() => {
-        if (ANDROID_FEED_RAIL_POSTERS_ONLY || visibleVideoIndexes.length <= 1) return;
+        if (visibleVideoIndexes.length <= 1) return;
         const id = setInterval(() => {
             setPreviewTurn((n) => n + 1);
         }, PREVIEW_LOOP_SECONDS * 1000);
@@ -459,6 +468,14 @@ const Stories24FeedShelf = forwardRef<Stories24FeedShelfHandle, Props>(function 
         visibleVideoIndexes.length === 0
             ? -1
             : visibleVideoIndexes[previewTurn % visibleVideoIndexes.length];
+
+    useEffect(() => {
+        const uris = items
+            .map((item) => item.previewVideoUrl)
+            .filter((uri): uri is string => !!uri)
+            .slice(0, 2);
+        if (uris.length) void prebufferFeedVideos(uris);
+    }, [items]);
 
     const openFirstStory = useCallback(() => {
         const first = pickFirstStories24RailStory(items);

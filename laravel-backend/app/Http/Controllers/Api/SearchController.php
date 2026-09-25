@@ -336,6 +336,7 @@ class SearchController extends Controller
         if (in_array('posts', $types)) {
             $offset = $postsCursor * $postsLimit;
             $posts = Post::query()
+                ->renderableInFeed()
                 ->where(function ($query) use ($q) {
                     $query->whereRaw("LOWER(COALESCE(text_content, '')) LIKE ?", ["%$q%"])
                         ->orWhereRaw("LOWER(COALESCE(location_label, '')) LIKE ?", ["%$q%"])

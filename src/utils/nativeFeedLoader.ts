@@ -120,5 +120,7 @@ export async function fetchInitialVisibleFeed(
         }
         cursor = page.nextCursor;
     }
-    return { items: [], nextCursor: null, followingCount };
+    // Walk exhausted — return the advanced cursor so pagination can continue instead
+    // of reporting the feed as finished while posts still exist server-side.
+    return { items: [], nextCursor: cursor, followingCount };
 }

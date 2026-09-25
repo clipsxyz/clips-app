@@ -164,6 +164,14 @@ export default function ProfileGridPeekSheet({
                                 ) : post.mediaUrl ? (
                                     <>
                                         {isVideoPost(post) ? (
+                                            /*
+                                             * `isActive` is inert here: feed playback is
+                                             * driven by the global single-active-video
+                                             * registry, not this prop, so this preview
+                                             * renders a paused poster. That is deliberate —
+                                             * claiming the registry from a profile sheet
+                                             * would fight the main feed's player. Leave as is.
+                                             */
                                             <FeedPostMedia
                                                 post={post}
                                                 width={previewWidth}

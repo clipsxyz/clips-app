@@ -251,7 +251,10 @@ class PostController extends Controller
             // Eager-load author + reclip source + tags (media_items is a cast column, not a relation).
             $query = Post::query()
                 ->with([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
-                ->withCount(Post::engagementWithCounts());
+                ->withCount(Post::engagementWithCounts())
+                // Applies to every tab (Following + Local/Regional/National): never
+                // hand back a page the client would have to strip link-share cards from.
+                ->renderableInFeed();
 
             if ($isFollowingFeed) {
                 if ($hasViewer) {

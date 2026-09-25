@@ -671,6 +671,7 @@ class UserController extends Controller
         $query = \App\Models\Post::query()
             ->where('posts.user_id', $user->id)
             ->notReclipped()
+            ->renderableInFeed()
             ->with([
                 'user:id,handle,display_name,username,avatar_url,location_local,location_regional,location_national',
             ])

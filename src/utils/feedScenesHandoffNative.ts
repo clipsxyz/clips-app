@@ -6,7 +6,19 @@ export type FeedVideoHandoff = {
     fromScenes?: boolean;
     /** Playback URI at handoff — Scenes reads this if nav params drop mediaUrl. */
     mediaUrl?: string;
+    /** Write timestamp — used to expire stale Scenes focus overrides. */
+    at?: number;
 };
+
+/**
+ * A Scenes return focus override must not outlive the session that produced it.
+ * Both call sites peek non-destructively, so without a TTL an unconsumed entry
+ * would force focus onto a post the user has long since scrolled past.
+ */
+const SCENES_RETURN_TTL_MS = 90_000;
+
+/** Bound memory for long browsing sessions (entries are tiny; this is just a backstop). */
+const MAX_HANDOFF_ENTRIES = 60;
 
 const handoffByPostId = new Map<string, FeedVideoHandoff>();
 
@@ -27,7 +39,15 @@ export function setFeedVideoHandoff(postId: string, state: FeedVideoHandoff): vo
         muted: state.muted,
         fromScenes: state.fromScenes === true,
         mediaUrl: state.mediaUrl ?? existing?.mediaUrl,
+        // Preserve the original Scenes timestamp when guarding against a t≈0 clobber,
+        // so the TTL measures from when Scenes closed rather than from latest progress.
+        at: state.fromScenes === true ? Date.now() : (existing?.at ?? Date.now()),
     });
+    while (handoffByPostId.size > MAX_HANDOFF_ENTRIES) {
+        const first = handoffByPostId.keys().next().value;
+        if (first === undefined) break;
+        handoffByPostId.delete(first);
+    }
 }
 
 export function consumeFeedVideoHandoff(postId: string): FeedVideoHandoff | undefined {
@@ -50,7 +70,12 @@ export function peekScenesReturnHandoff():
     | { postId: string; handoff: FeedVideoHandoff }
     | undefined {
     for (const [postId, handoff] of handoffByPostId) {
-        if (handoff.fromScenes) return { postId, handoff };
+        if (!handoff.fromScenes) continue;
+        if (Date.now() - Number(handoff.at ?? 0) > SCENES_RETURN_TTL_MS) {
+            handoffByPostId.delete(postId);
+            continue;
+        }
+        return { postId, handoff };
     }
     return undefined;
 }

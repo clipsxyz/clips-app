@@ -55,7 +55,6 @@ import StoryPollOverlay from '../components/stories/StoryPollOverlay.native';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
 import {
-    STORIES24_LOADING_HOLD_MS,
     clearStories24RailOpenHandle,
     persistStories24RailReturn,
     readStories24RailOpenHandle,
@@ -450,9 +449,8 @@ export default function StoriesScreen({ route, navigation }: any) {
             setStories24HoldMinReady(false);
             return;
         }
-        setStories24HoldMinReady(false);
-        const t = setTimeout(() => setStories24HoldMinReady(true), STORIES24_LOADING_HOLD_MS);
-        return () => clearTimeout(t);
+        // Feed shelf has no expand morph — skip the 2.6s "Opening stories…" splash.
+        setStories24HoldMinReady(true);
     }, [forceRefreshAt, stories24OpenFromFeedRail, normalizedOpenUserHandle]);
 
     const stories24ContentReady = !loading && viewingStories;

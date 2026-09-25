@@ -69,6 +69,7 @@ class SuggestedPlacesController extends Controller
                 ])
                 ->withCount(['likes', 'comments', 'shares', 'views', 'reclips'])
                 ->notReclipped()
+                ->renderableInFeed()
                 ->where('user_id', '!=', $user->id)
                 ->where(function ($q) {
                     $q->whereNotNull('venue')
