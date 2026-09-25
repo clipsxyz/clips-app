@@ -225,4 +225,72 @@ describe('locationFeedGuard', () => {
         expect(postMatchesLocationTab(countyCork, 'county cork')).toBe(true);
         expect(postMatchesLocationTab(countyCork, 'dublin')).toBe(false);
     });
+    // ---------------------------------------------------------------------
+    // Sponsored boost posts bypass the author-location guard.
+    //
+    // A boost is bought to reach viewers inside a radius, so the boosted post's
+    // author may well be based somewhere else. The server only injects it when
+    // the viewer is inside that radius, so the guard must not remove it - doing
+    // so would undo paid targeting and leave the page short.
+    // ---------------------------------------------------------------------
+    describe('sponsored posts and the location guard', () => {
+        const sponsoredForeignAuthor = post({
+            id: 'boosted-cork-author',
+            userHandle: 'Booster@Cork',
+            locationLabel: 'Cork',
+            userLocal: 'Cork',
+            userRegional: 'Cork',
+            userNational: 'Ireland',
+            isBoosted: true,
+            boostFeedType: 'regional',
+        });
+
+        it('would be dropped by the author-location guard on its own', () => {
+            // Precondition: without the exemption this really is a "leak".
+            expect(postMatchesLocationTab(sponsoredForeignAuthor, 'dublin')).toBe(false);
+        });
+
+        it('is kept in a location feed despite the foreign author', () => {
+            const kept = [berlinAuthor, sponsoredForeignAuthor].filter(
+                (p) => p.isBoosted || postMatchesLocationTab(p, 'dublin'),
+            );
+            expect(kept.map((p) => p.id)).toEqual(['boosted-cork-author']);
+        });
+
+        it('still drops the foreign organic card next to it', () => {
+            const kept = [berlinAuthor, sponsoredForeignAuthor].filter(
+                (p) => p.isBoosted || postMatchesLocationTab(p, 'dublin'),
+            );
+            expect(kept.map((p) => p.id)).not.toContain(berlinAuthor.id);
+        });
+    });
+
+    // ---------------------------------------------------------------------
+    // The feed payload is the source of truth for the Sponsored badge.
+    //
+    // transformLaravelPost used to drop isBoosted/boostFeedType, so a server-
+    // flagged boost arrived unflagged and the badge only appeared via a second
+    // round-trip - and the location guard could not see the flag to spare it.
+    // ---------------------------------------------------------------------
+    describe('transformLaravelPost carries the boost fields', () => {
+        it('preserves isBoosted and boostFeedType from the payload', () => {
+            const transformed = transformLaravelPost({
+                id: 'server-boost-1',
+                user_handle: 'Booster@Cork',
+                location_label: 'Cork',
+                isBoosted: true,
+                boostFeedType: 'regional',
+            });
+            expect(transformed.isBoosted).toBe(true);
+            expect(transformed.boostFeedType).toBe('regional');
+        });
+
+        it('accepts snake_case and integer 0/1 from the driver', () => {
+            expect(transformLaravelPost({ id: 'a', is_boosted: 1, boost_feed_type: 'local' }).isBoosted).toBe(true);
+            expect(transformLaravelPost({ id: 'b', is_boosted: '1' }).isBoosted).toBe(true);
+            expect(transformLaravelPost({ id: 'c', is_boosted: 0 }).isBoosted).toBe(false);
+            expect(transformLaravelPost({ id: 'd' }).isBoosted).toBe(false);
+            expect(transformLaravelPost({ id: 'e' }).boostFeedType).toBeUndefined();
+        });
+    });
 });

@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Boost;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\RenderJob;
 use App\Jobs\ProcessRenderJob;
 use App\Services\BoostAnalyticsService;
+use App\Services\BoostAudienceService;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
 use App\Services\LinkPreviewService;
@@ -17,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Str;
@@ -24,9 +27,40 @@ use Carbon\Carbon;
 
 class PostController extends Controller
 {
+    public function __construct(private BoostAudienceService $audience)
+    {
+    }
+
     /** Author fields the feed needs so Ireland/Dublin tabs can match Cork (etc.) from user location, not handle guessing. */
     private const FEED_USER_WITH = 'user:id,handle,display_name,avatar_url,location_local,location_regional,location_national';
     private const FEED_ORIGINAL_USER_WITH = 'originalUser:id,handle,avatar_url';
+
+    /**
+     * How many active boost rows to examine per page when looking for inventory.
+     * Bounded on purpose: the feed runs this on every request, so a runaway
+     * "thousands of live boosts" table must not turn a page load into a table scan.
+     */
+    private const BOOST_CANDIDATE_SCAN = 24;
+
+    /** Upper bound on boosts spliced into one page. */
+    private const BOOST_MAX_INJECT = 3;
+
+    /**
+     * Organic posts between injected boosts. Mirrors the client cadence
+     * (src/api/posts.ts): the first boost lands at index 1, then every 3rd slot.
+     */
+    private const BOOST_EVERY_N_ORGANIC = 3;
+
+    /**
+     * Inject only on the first page.
+     *
+     * A boost is a "get seen" unit, not a recurring slot: re-splicing the same
+     * paid post into every page of an infinite scroll burns inventory and reads
+     * as spam. The Sponsored *badge* still rides along on later pages for any
+     * boosted post that surfaces organically — that is a disclosure duty, not
+     * inventory. Flip to false if product wants a boost on every page.
+     */
+    private const BOOST_INJECT_FIRST_PAGE_ONLY = true;
 
     private function buildPublicShareUrl(string $token): string
     {
@@ -310,8 +344,42 @@ class PostController extends Controller
                 ->values();
 
             $userModel = $hasViewer ? User::find($userId) : null;
-            $transformedPosts = $posts->map(fn (Post $post) => self::toApiArray($post, $userModel));
 
+            // Phase 2 of the feed: splice paid inventory in.
+            //
+            // Deliberately a *separate* phase. The organic query above is the hot
+            // path — it owns the cursor and, on the National tab, the expensive
+            // OR-of-LIKEs + orWhereHas. Joining boosts into it, or ordering by a
+            // boost rank, would put a correlated subquery on the exact query we
+            // are trying to keep fast, and would make the cursor depend on boost
+            // expiry. So: one bounded, indexed lookup on `boosts`, a tiny
+            // whereIn hydrate, and the merge happens in PHP.
+            $boostPosts = $this->eligibleBoostPostsForFeed(
+                $userModel,
+                $filter,
+                $cursorState,
+                $posts->pluck('id')->all()
+            );
+
+            $mergedPosts = $boostPosts->isEmpty()
+                ? $posts
+                : $this->interleaveBoosted($posts, $boostPosts);
+
+            $boostByPost = self::activeBoostMap($mergedPosts->pluck('id')->all());
+            $transformedPosts = $mergedPosts->map(function (Post $post) use ($userModel, $boostByPost) {
+                $data = self::toApiArray($post, $userModel);
+                $boost = $boostByPost[$post->id] ?? null;
+                // Sponsored disclosure. Injected boosts and any boosted post that
+                // surfaced organically both get flagged here, so the badge is
+                // driven by the server payload rather than a per-post client call.
+                $data['isBoosted'] = $boost !== null;
+                $data['boostFeedType'] = $boost['feed_type'] ?? null;
+                return $data;
+            });
+
+            // Cursor stays on the organic tail. Boosts are spliced in after the
+            // fact and are not part of the ordering stream, so anchoring to one
+            // would either skip organic posts or loop.
             $lastPost = $posts->last();
             $nextCursor = null;
             if ($posts->count() === $limit && $lastPost) {
@@ -331,6 +399,186 @@ class PostController extends Controller
         $normalized = strtolower(trim($filter));
 
         return $normalized === 'following' || $normalized === 'discover';
+    }
+
+    /**
+     * Boosted posts this viewer is actually eligible to see, hydrated and ready
+     * to splice into the page.
+     *
+     * Eligibility is geographic, not author-based: a boost is bought to reach
+     * viewers inside a radius, so a Dublin boost reaching a Dublin viewer is
+     * correct even when the boosted post's author is based in Cork. That is also
+     * why these posts are exempt from the per-tab author-location guard.
+     *
+     * @param  array<int,string>  $organicIds  ids already on this page
+     * @return \Illuminate\Support\Collection<int,Post>
+     */
+    private function eligibleBoostPostsForFeed(
+        ?User $viewer,
+        string $filter,
+        array $cursorState,
+        array $organicIds
+    ): \Illuminate\Support\Collection {
+        // No viewer means no radius to target. This also covers guest Following,
+        // which is an empty feed by design (see buildFeedResponse).
+        if (!$viewer) {
+            return collect();
+        }
+
+        if (!empty($cursorState['created_at']) || !empty($cursorState['page'])) {
+            if (self::BOOST_INJECT_FIRST_PAGE_ONLY) {
+                return collect();
+            }
+        }
+
+        $feedTypes = $this->audience->feedTypesForFilter($filter);
+
+        try {
+            // One indexed read, bounded. `active()` already constrains expires_at.
+            //
+            // A single tier is queried with '=' rather than IN(...) on purpose:
+            // with one value the (feed_type, expires_at) index satisfies both the
+            // filter and the ORDER BY, so the database walks it in order instead
+            // of buffering a temp B-tree. Only the multi-tier Following feed pays
+            // for the sort, and that is three known values.
+            $candidates = Boost::query()
+                ->active()
+                ->when(
+                    count($feedTypes) === 1,
+                    fn ($q) => $q->where('feed_type', $feedTypes[0]),
+                    fn ($q) => $q->whereIn('feed_type', $feedTypes)
+                )
+                ->orderByDesc('expires_at')
+                ->limit(self::BOOST_CANDIDATE_SCAN)
+                ->get();
+
+            $postIds = [];
+            foreach ($candidates as $boost) {
+                $postId = (string) $boost->post_id;
+                // Never spend a slot on something already on the page.
+                if (in_array($postId, $organicIds, true) || isset($postIds[$postId])) {
+                    continue;
+                }
+                // null => radius cannot be evaluated; do not gate the disclosure.
+                if ($this->audience->isEligibleFor($viewer, $boost) === false) {
+                    continue;
+                }
+                $postIds[$postId] = true;
+                if (count($postIds) >= self::BOOST_MAX_INJECT) {
+                    break;
+                }
+            }
+
+            $ids = array_keys($postIds);
+            if (!$ids) {
+                return collect();
+            }
+
+            // Same shape as the organic rows so toApiArray and the card renderer
+            // need no special case. renderableInFeed() keeps a paid link-share
+            // card from being spliced into a page the client then has to strip.
+            $hydrated = Post::query()
+                ->with([self::FEED_USER_WITH, self::FEED_ORIGINAL_USER_WITH, 'taggedUsers:id,handle,display_name,avatar_url'])
+                ->withCount(Post::engagementWithCounts())
+                ->renderableInFeed()
+                ->whereIn('id', $ids)
+                ->get()
+                ->keyBy('id');
+
+            // whereIn() gives no ordering guarantee, and the rank we just computed
+            // has to survive it — re-impose the scan order before interleaving.
+            $ranked = [];
+            foreach ($ids as $id) {
+                $post = $hydrated->get($id);
+                if ($post) {
+                    $ranked[] = $post;
+                }
+            }
+
+            return collect($ranked)->values();
+        } catch (\Throwable $e) {
+            // A boost problem must never cost the viewer their feed.
+            Log::warning('Boost feed injection skipped', ['error' => $e->getMessage()]);
+            return collect();
+        }
+    }
+
+    /**
+     * Splice boosted posts into the organic page, one per N organic slots.
+     *
+     * The first boost lands at index 1 (so it is never the very first card) and
+     * then every Nth slot after, matching the cadence the client used to apply
+     * locally. Boost order is the order given — furthest-expiring first, so the
+     * longest-running campaign leads.
+     *
+     * @param  \Illuminate\Support\Collection<int,Post>  $organic
+     * @param  \Illuminate\Support\Collection<int,Post>  $boosted
+     * @return \Illuminate\Support\Collection<int,Post>
+     */
+    private function interleaveBoosted($organic, $boosted)
+    {
+        $merged = [];
+        $o = 0;
+        $b = 0;
+        $nOrganic = $organic->count();
+        $nBoosted = $boosted->count();
+
+        while ($o < $nOrganic || $b < $nBoosted) {
+            $placed = count($merged);
+            $slotDue = $placed >= 1
+                && ($placed - 1) % self::BOOST_EVERY_N_ORGANIC === 0;
+
+            if ($b < $nBoosted && $slotDue) {
+                $merged[] = $boosted->get($b++);
+            } elseif ($o < $nOrganic) {
+                $merged[] = $organic->get($o++);
+            } else {
+                $merged[] = $boosted->get($b++);
+            }
+        }
+
+        return collect($merged)->values();
+    }
+
+    /**
+     * post_id => ['feed_type' => …] for posts on this page with a live boost.
+     *
+     * One query for the whole page rather than a lookup per post. A post can have
+     * more than one active boost (one per feed tier); the furthest-expiring wins so
+     * the Sponsored label matches the tier that will actually promote it.
+     *
+     * @param  array<int,string>  $postIds
+     * @return array<string,array{feed_type:string,expires_at:string}>
+     */
+    private static function activeBoostMap(array $postIds): array
+    {
+        if (!$postIds) {
+            return [];
+        }
+
+        try {
+            $rows = \App\Models\Boost::query()
+                ->whereIn('post_id', $postIds)
+                ->active()
+                ->orderByDesc('expires_at')
+                ->get(['post_id', 'feed_type', 'expires_at']);
+
+            $map = [];
+            foreach ($rows as $row) {
+                // orderByDesc means the first row seen for a post is the latest.
+                $map[(string) $row->post_id] ??= [
+                    'feed_type' => (string) $row->feed_type,
+                    'expires_at' => (string) $row->expires_at,
+                ];
+            }
+
+            return $map;
+        } catch (\Throwable $e) {
+            // Never fail a feed page over a boost badge.
+            Log::warning('Feed boost decoration failed', ['error' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     private function decodeFeedCursor(?string $cursor): array

@@ -14,6 +14,8 @@ class Boost extends Model
         'price',
         'radius_km',
         'center_local',
+        'center_lat',
+        'center_lng',
         'eligible_users_count',
         'duration_hours',
         'impressions_count',
@@ -28,6 +30,8 @@ class Boost extends Model
 
     protected $casts = [
         'price' => 'decimal:2',
+        'center_lat' => 'float',
+        'center_lng' => 'float',
         'activated_at' => 'datetime',
         'expires_at' => 'datetime',
         'last_analytics_event_at' => 'datetime',

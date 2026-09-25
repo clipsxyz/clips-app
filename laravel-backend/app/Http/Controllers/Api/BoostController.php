@@ -7,6 +7,7 @@ use App\Models\Boost;
 use App\Models\BoostAnalyticsEvent;
 use App\Models\Post;
 use App\Models\User;
+use App\Services\BoostAudienceService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,10 @@ use Illuminate\Database\QueryException;
 
 class BoostController extends Controller
 {
+    public function __construct(private BoostAudienceService $audience)
+    {
+    }
+
     /** Price in cents per eligible user reached. Single source of truth: config/boost.php */
     private function unitPriceCents(): int
     {
@@ -49,47 +54,6 @@ class BoostController extends Controller
         return max($minimum, $calculated);
     }
 
-    private function haversineKm(float $lat1, float $lon1, float $lat2, float $lon2): float
-    {
-        $earthRadiusKm = 6371.0;
-        $dLat = deg2rad($lat2 - $lat1);
-        $dLon = deg2rad($lon2 - $lon1);
-        $a = sin($dLat / 2) * sin($dLat / 2) +
-            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-            sin($dLon / 2) * sin($dLon / 2);
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-        return $earthRadiusKm * $c;
-    }
-
-    private function getCentroidCoords(?string $label): ?array
-    {
-        if (!$label) return null;
-        static $cache = [];
-        if (isset($cache[$label])) return $cache[$label];
-
-        $row = DB::table('location_centroids')->where('label', $label)->first(['latitude', 'longitude']);
-        if ($row) {
-            $coords = ['lat' => (float) $row->latitude, 'lng' => (float) $row->longitude];
-            $cache[$label] = $coords;
-            return $coords;
-        }
-
-        // Live Google resolve + cache when the seed table does not have this place yet.
-        try {
-            $resolved = (new \App\Services\GoogleMapsLocationService)->resolve(null, $label);
-            if ($resolved && isset($resolved['latitude'], $resolved['longitude'])) {
-                $coords = ['lat' => (float) $resolved['latitude'], 'lng' => (float) $resolved['longitude']];
-                $cache[$label] = $coords;
-                return $coords;
-            }
-        } catch (\Throwable $_) {
-            // ignore — pricing falls back to 0 eligible users
-        }
-
-        $cache[$label] = null;
-        return null;
-    }
-
     /**
      * Count eligible users for pricing (audience-size pricing).
      * - Excludes the boosting user
@@ -102,9 +66,9 @@ class BoostController extends Controller
         if (!$booster) return 0;
 
         $centerCoords =
-            $this->getCentroidCoords($booster->location_local) ??
-            $this->getCentroidCoords($booster->location_regional) ??
-            $this->getCentroidCoords($booster->location_national);
+            $this->audience->centroidCoords($booster->location_local) ??
+            $this->audience->centroidCoords($booster->location_regional) ??
+            $this->audience->centroidCoords($booster->location_national);
 
         if (!$centerCoords) return 0;
 
@@ -126,13 +90,13 @@ class BoostController extends Controller
         $count = 0;
         foreach ($candidates as $candidate) {
             $coords =
-                $this->getCentroidCoords($candidate->location_local) ??
-                $this->getCentroidCoords($candidate->location_regional) ??
-                $this->getCentroidCoords($candidate->location_national);
+                $this->audience->centroidCoords($candidate->location_local) ??
+                $this->audience->centroidCoords($candidate->location_regional) ??
+                $this->audience->centroidCoords($candidate->location_national);
 
             if (!$coords) continue;
 
-            $distanceKm = $this->haversineKm(
+            $distanceKm = $this->audience->haversineKm(
                 $centerCoords['lat'],
                 $centerCoords['lng'],
                 $coords['lat'],
@@ -188,11 +152,22 @@ class BoostController extends Controller
             $intent = \Stripe\PaymentIntent::create([
                 'amount'   => $priceCents,
                 'currency' => $currency,
-                'automatic_payment_methods' => ['enabled' => true],
+                // allow_redirects=never: a boost is card-only on both clients
+                // (PaymentScreen initPaymentSheet, PaymentPage confirmPayment).
+                // Leaving redirects enabled let the Dashboard's redirect methods
+                // (iDEAL, Sofort, …) into the intent, so confirming without a
+                // return_url was rejected by Stripe with "you must provide a
+                // return_url". Declaring the intent card-only removes the
+                // ambiguity at the source for every client, instead of relying on
+                // each caller remembering to pass a return URL.
+                'automatic_payment_methods' => [
+                    'enabled' => true,
+                    'allow_redirects' => 'never',
+                ],
                 'metadata' => [
                     'post_id'   => $postId,
                     'feed_type' => $feedType,
-                    'user_id' => $userId,
+                    'user_id'   => $userId,
                     'radius_km' => $radiusKm,
                     'duration_hours' => $durationHours,
                     'eligible_users_count' => $eligibleUsers,
@@ -266,6 +241,19 @@ class BoostController extends Controller
         $durationHours = (int) ($metadata->duration_hours ?? config('boost.default_duration_hours', 6));
         $now = now();
 
+        // Resolve the radius center from the booster's own record rather than from
+        // request input: the Stripe webhook is the authoritative activation path and
+        // carries no client payload, so this is the only place the center can come
+        // from. Deriving it server-side also means a client cannot point a boost at
+        // someone else's area. Falls back local -> regional -> national, mirroring
+        // estimateEligibleUsersCount so pricing and targeting agree.
+        $booster = User::find((string) ($metadata->user_id ?? ''));
+        $centerLocal = $extra['centerLocal'] ?? null;
+        if (!$centerLocal && $booster) {
+            $centerLocal = $booster->location_local ?: ($booster->location_regional ?: $booster->location_national);
+        }
+        $centerCoords = $this->audience->centroidCoords($centerLocal);
+
         try {
             $boost = Boost::create([
                 'post_id'              => (string) $metadata->post_id,
@@ -273,7 +261,9 @@ class BoostController extends Controller
                 'feed_type'            => (string) $metadata->feed_type,
                 'price'                => round($paidCents / 100, 2),
                 'radius_km'            => $metadata->radius_km ?? null,
-                'center_local'         => $extra['centerLocal'] ?? null,
+                'center_local'         => $centerLocal ?: null,
+                'center_lat'           => $centerCoords['lat'] ?? null,
+                'center_lng'           => $centerCoords['lng'] ?? null,
                 'eligible_users_count' => $metadata->eligible_users_count ?? null,
                 'duration_hours'       => $durationHours,
                 'payment_intent_id'    => $intent->id,
@@ -456,9 +446,21 @@ class BoostController extends Controller
         }
     }
 
+    /** Thin alias so the active-ids eligibility loop reads cleanly. */
+    private function viewerEligibleFor(?User $viewer, Boost $boost): ?bool
+    {
+        return $this->audience->isEligibleFor($viewer, $boost);
+    }
+
     /**
-     * Get active boosted post IDs for a feed type.
-     * Returns empty array on DB/driver errors so the feed still loads.
+     * Get active boosted post IDs for a feed type, scoped to the viewer.
+     *
+     * Authenticated and location-aware: a boost only reaches a viewer who falls
+     * inside its target radius. Previously this returned every active boost of
+     * that tier to any caller, so a Dublin boost was handed to viewers worldwide.
+     *
+     * Post ids only — the client fetches each post. Kept narrow deliberately so
+     * this stays one cheap indexed query; the feed payload itself is unchanged.
      */
     public function activeIds(Request $request)
     {
@@ -467,13 +469,25 @@ class BoostController extends Controller
             return response()->json(['error' => 'Invalid feed type'], 400);
         }
 
+        $viewer = Auth::user();
+
         try {
-            $ids = Boost::active()
+            $boosts = Boost::active()
                 ->forFeedType($feedType)
-                ->pluck('post_id')
-                ->unique()
-                ->values()
-                ->toArray();
+                ->orderByDesc('expires_at')
+                ->get();
+
+            $ids = [];
+            foreach ($boosts as $boost) {
+                $withinRadius = $this->viewerEligibleFor($viewer, $boost);
+                // null => eligibility unknown; include rather than hide the disclosure.
+                if ($withinRadius === false) {
+                    continue;
+                }
+                $ids[] = (string) $boost->post_id;
+            }
+
+            $ids = array_values(array_unique($ids));
 
             return response()->json(['postIds' => $ids]);
         } catch (\Throwable $e) {
@@ -501,7 +515,10 @@ class BoostController extends Controller
                 ]);
             }
 
-            $remaining = max(0, (int) $boost->expires_at->diffInMilliseconds(now(), false));
+            // diffInMilliseconds(..., false) is signed as (now - expires_at) on this
+            // Carbon version, so it came back negative and max(0, ...) pinned every
+            // active boost to 0 — the "X left" countdown could never render.
+            $remaining = max(0, (int) $boost->expires_at->diffInMilliseconds(now(), true));
 
             return response()->json([
                 'isActive'      => true,

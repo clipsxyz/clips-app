@@ -1689,6 +1689,18 @@ export function transformLaravelPost(response: any): Post {
     authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
     userLiked: response.user_liked || false,
     userReclipped: !!(response.user_reclipped || response.userReclipped),
+    // Sponsored disclosure. The feed payload flags every boosted post - both the
+    // ones spliced in and any that surfaced organically - so the badge is driven
+    // by the response we already have instead of a second round-trip. Read it
+    // explicitly (0/1/'1' included) because some drivers hand back integers.
+    isBoosted:
+      response.is_boosted === true ||
+      response.is_boosted === 1 ||
+      response.is_boosted === '1' ||
+      response.isBoosted === true,
+    boostFeedType: (response.boost_feed_type ||
+      response.boostFeedType ||
+      undefined) as BoostFeedType | undefined,
     stickers: response.stickers,
     templateId: response.template_id || response.templateId,
     bannerText: response.banner_text || response.bannerText,
@@ -2147,7 +2159,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         isVenueFeed ||
         isLandmarkFeed
       ) {
-        transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
+        // Sponsored posts are exempt. The guard exists to stop the server's
+        // deliberately broad OR-of-LIKEs from leaking foreign organic cards into
+        // a locality feed. A boost is different: it was bought to reach viewers
+        // inside a radius, and the server only injects it when this viewer is
+        // within that radius. Dropping it here would undo paid targeting and
+        // leave the page short. The `isBoosted` flag comes from the feed payload.
+        transformedItems = transformedItems.filter(
+          (p) => p.isBoosted || postMatchesLocationTab(p, t)
+        );
       }
 
       // Live mode: API posts only. Do not merge AsyncStorage/local seed (Sarah/Bob leak).
@@ -2500,9 +2520,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     items = dedupeItemsById(items);
 
     // Final mock-path guard: location feeds never return foreign author cards.
+    // Sponsored posts are exempt for the same reason as the live path: a boost is
+    // paid inventory targeting this viewer, not a leaked organic card.
     if (isCustomLocationFeed || t === 'finglas' || t === 'dublin' || t === 'ireland') {
       const before = items.length;
-      items = items.filter((p) => postMatchesLocationTab(p, tab));
+      items = items.filter((p) => p.isBoosted || postMatchesLocationTab(p, tab));
       if (items.length < before && typeof console !== 'undefined') {
         console.warn(
           `[location-guard] fetchPostsPage dropped ${before - items.length} leak(s) from "${tab}"`,

@@ -1,7 +1,11 @@
 {
   "name": "ClipsApp",
   "displayName": "ClipsApp",
+  "scheme": "clipsapp",
   "android": {
     "usesCleartextTraffic": true
+  },
+  "ios": {
+    "returnDeepLinkScheme": "clipsapp"
   }
 }

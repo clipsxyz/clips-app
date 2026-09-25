@@ -117,7 +117,11 @@ Route::post('/boost/stripe-webhook', [BoostController::class, 'stripeWebhook'])
     ->withoutMiddleware(ThrottleRequests::class);
 
 // Get active boosted post IDs for feed merging (public)
-Route::get('/boost/active-ids', [BoostController::class, 'activeIds']);
+// Active boosted post IDs for a feed type. Authenticated because the result is
+// scoped to the viewer's location (radius eligibility), so it must not be
+// answerable for an anonymous caller.
+Route::get('/boost/active-ids', [BoostController::class, 'activeIds'])
+    ->middleware('auth:sanctum');
 
 // Get boost status for a single post
 Route::get('/boost/status/{postId}', [BoostController::class, 'status']);

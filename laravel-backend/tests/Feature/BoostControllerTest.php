@@ -108,6 +108,60 @@ class BoostControllerTest extends TestCase
             ]);
     }
 
+    public function test_status_reports_remaining_time_for_an_active_boost(): void
+    {
+        $user = $this->signIn();
+        $post = Post::factory()->create(['user_id' => $user->id]);
+
+        $expiresAt = now()->addHours(6);
+        Boost::create([
+            'post_id' => $post->id,
+            'user_id' => $user->id,
+            'feed_type' => 'local',
+            'price' => 1.00,
+            'radius_km' => 25,
+            'duration_hours' => 6,
+            'payment_intent_id' => 'pi_remaining_time_test',
+            'activated_at' => now(),
+            'expires_at' => $expiresAt,
+        ]);
+
+        $res = $this->getJson("/api/boost/status/{$post->id}")->assertOk();
+
+        $this->assertTrue($res->json('isActive'));
+        // Regression: a signed diff collapsed this to 0 for every active boost, so
+        // the "X left" countdown in the app could never render.
+        $remaining = $res->json('timeRemaining');
+        $this->assertGreaterThan(
+            5.9 * 60 * 60 * 1000,
+            $remaining,
+            'timeRemaining must report real milliseconds until expiry'
+        );
+        $this->assertLessThanOrEqual(6 * 60 * 60 * 1000 + 5000, $remaining);
+    }
+
+    public function test_status_reports_zero_remaining_for_an_expired_boost(): void
+    {
+        $user = $this->signIn();
+        $post = Post::factory()->create(['user_id' => $user->id]);
+
+        Boost::create([
+            'post_id' => $post->id,
+            'user_id' => $user->id,
+            'feed_type' => 'local',
+            'price' => 1.00,
+            'duration_hours' => 6,
+            'payment_intent_id' => 'pi_expired_test',
+            'activated_at' => now()->subHours(7),
+            'expires_at' => now()->subHour(),
+        ]);
+
+        $res = $this->getJson("/api/boost/status/{$post->id}")->assertOk();
+
+        $this->assertFalse($res->json('isActive'));
+        $this->assertSame(0, $res->json('timeRemaining'));
+    }
+
     public function test_status_requires_a_post_id(): void
     {
         $this->signIn();
