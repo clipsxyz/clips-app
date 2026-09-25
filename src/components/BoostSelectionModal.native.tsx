@@ -196,12 +196,12 @@ export default function BoostSelectionModal({
                     });
                     if (cancelled) return;
                     setEligibleUsersCount(typeof res.eligibleUsersCount === 'number' ? res.eligibleUsersCount : null);
-                    setEstimatedTotalPrice(typeof res.priceEur === 'number' ? res.priceEur : null);
+                    setEstimatedTotalPrice(typeof res.priceEur === 'number' ? Math.max(1, res.priceEur) : null);
                 } else {
                     const baseByFeed: Record<BoostFeedType, number> = { local: 1200, regional: 2600, national: 5400 };
                     const multiplier = durationOptions.find((d) => d.hours === selectedDuration)?.multiplier ?? 1;
                     const eligible = Math.max(0, Math.round(baseByFeed[debouncedSelectedOption] * (debouncedRadiusKm / 2)));
-                    const price = Number((eligible * 0.05 * multiplier).toFixed(2));
+                    const price = Math.max(1, Number((eligible * 0.05 * multiplier).toFixed(2)));
                     if (cancelled) return;
                     setEligibleUsersCount(eligible);
                     setEstimatedTotalPrice(price);

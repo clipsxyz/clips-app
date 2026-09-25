@@ -38,6 +38,17 @@ class BoostController extends Controller
         return (float) ($multipliers[$durationHours] ?? 1.0);
     }
 
+    /**
+     * Audience price, never below the configured baseline (EUR 1.00 by default).
+     */
+    private function priceCents(int $eligibleUsers, float $multiplier): int
+    {
+        $calculated = (int) round($eligibleUsers * $this->unitPriceCents() * $multiplier);
+        $minimum = (int) config('boost.minimum_price_cents', 100);
+
+        return max($minimum, $calculated);
+    }
+
     private function haversineKm(float $lat1, float $lon1, float $lat2, float $lon2): float
     {
         $earthRadiusKm = 6371.0;
@@ -169,15 +180,7 @@ class BoostController extends Controller
         $multiplier = $this->durationMultiplier($durationHours);
 
         $eligibleUsers = $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm);
-        $priceCents = (int) round($eligibleUsers * $this->unitPriceCents() * $multiplier);
-
-        if ($priceCents <= 0) {
-            return response()->json([
-                'error' => 'NO_ELIGIBLE_AUDIENCE',
-                'eligibleUsersCount' => $eligibleUsers,
-                'priceCents' => $priceCents,
-            ], 400);
-        }
+        $priceCents = $this->priceCents($eligibleUsers, $multiplier);
 
         try {
             \Stripe\Stripe::setApiKey($secret);
@@ -227,7 +230,7 @@ class BoostController extends Controller
         $multiplier = $this->durationMultiplier($durationHours);
 
         $eligibleUsers = $this->estimateEligibleUsersCount($userId, $feedType, $radiusKm);
-        $priceCents = (int) round($eligibleUsers * $this->unitPriceCents() * $multiplier);
+        $priceCents = $this->priceCents($eligibleUsers, $multiplier);
 
         return response()->json([
             'currency' => config('boost.currency', 'eur'),

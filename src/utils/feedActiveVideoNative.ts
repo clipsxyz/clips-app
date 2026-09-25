@@ -12,6 +12,7 @@ let playingAtY = 0;
 let playbackAllowed = true;
 const activeListeners = new Set<IdListener>();
 const warmListeners = new Set<IdListener>();
+const playbackListeners = new Set<(allowed: boolean) => void>();
 const players = new Set<FeedPlayer>();
 
 function notify(listeners: Set<IdListener>, id: string | null): void {
@@ -82,10 +83,29 @@ export function parkAudibleFeedVideo(): void {
     notify(activeListeners, null);
 }
 
-/** Inbox / other tabs: freeze autoplay so viewability cannot restart ExoPlayer in the background. */
+/** Inbox / other tabs: freeze autoplay without unmounting. Unmounting on ColorOS leaves a second audible player. */
 export function setFeedPlaybackAllowed(allowed: boolean): void {
+    const changed = playbackAllowed !== allowed;
     playbackAllowed = allowed;
-    if (!allowed) haltFeedPlayback();
+    if (!allowed) haltAllPlayers();
+    if (changed) playbackListeners.forEach((fn) => fn(allowed));
+}
+
+export function subscribeFeedPlaybackAllowed(listener: (allowed: boolean) => void): () => void {
+    playbackListeners.add(listener);
+    listener(playbackAllowed);
+    return () => playbackListeners.delete(listener);
+}
+
+/** Mute tap: volume only. Pausing here stops the clip the user is watching. */
+export function setAllFeedPlayerVolumes(volume: number): void {
+    players.forEach((player) => {
+        try {
+            player.setVolume(volume);
+        } catch {
+            /* ColorOS ExoPlayer can already be released */
+        }
+    });
 }
 
 export function setFeedVideoPlayingAtY(y: number): void {

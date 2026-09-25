@@ -1,9 +1,10 @@
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { PaymentIntent, useStripe } from '@stripe/stripe-react-native';
+import { useStripe } from '@stripe/stripe-react-native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { FEED_PAGE_BG } from '../components/FeedPageLayout.native';
 import { useAuth } from '../context/Auth';
 import { activateBoost } from '../api/boost';
 import { createBoostPaymentIntent } from '../api/client';
@@ -33,6 +34,15 @@ function goalLabel(goal?: BoostGoal): string {
   return 'More views';
 }
 
+function paymentIntentIdFromClientSecret(secret: string): string | null {
+  const id = secret.split('_secret_')[0];
+  return id.startsWith('pi_') ? id : null;
+}
+
+function alreadyConfirmed(message?: string | null): boolean {
+  return /already succeeded|previously confirmed/i.test(message || '');
+}
+
 export default function PaymentScreen({ route, navigation }: any) {
   const { user } = useAuth();
   const stripe = useStripe();
@@ -41,6 +51,7 @@ export default function PaymentScreen({ route, navigation }: any) {
   const [isPreparing, setIsPreparing] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<{ title: string; body: string } | null>(null);
 
   const postId = params.postId;
   const feedType = params.boostFeedType || 'local';
@@ -83,17 +94,25 @@ export default function PaymentScreen({ route, navigation }: any) {
     };
   }, [postId, feedType, user?.id, meta?.radiusKm, durationHours]);
 
+  const showNotice = (title: string, body: string) => setNotice({ title, body });
+
   const handlePay = async () => {
     if (!postId || !user?.id) {
-      Alert.alert('Payment error', 'Missing payment details. Please try again from Boost.');
+      showNotice('Payment error', 'Missing payment details. Please try again from Boost.');
       return;
     }
     if (!clientSecret) {
-      Alert.alert('Payment error', errorMessage ?? 'Payment is not ready yet. Please try again.');
+      showNotice('Payment error', errorMessage ?? 'Payment is not ready yet. Please try again.');
       return;
     }
     if (!stripe) {
-      Alert.alert('Payment error', 'Stripe is still loading. Please try again in a moment.');
+      showNotice('Payment error', 'Stripe is still loading. Please try again in a moment.');
+      return;
+    }
+
+    const paymentIntentId = paymentIntentIdFromClientSecret(clientSecret);
+    if (!paymentIntentId) {
+      showNotice('Payment error', 'This checkout could not be verified. Please try again.');
       return;
     }
 
@@ -102,34 +121,32 @@ export default function PaymentScreen({ route, navigation }: any) {
     try {
       const { error: initError } = await stripe.initPaymentSheet({
         paymentIntentClientSecret: clientSecret,
-        merchantDisplayName: 'ClipsApp',
+        merchantDisplayName: 'Gazetteer',
         returnURL: RETURN_URL,
       });
-      if (initError) throw new Error(initError.message);
+      if (initError && !alreadyConfirmed(initError.message)) throw new Error(initError.message);
 
       const { error: presentError } = await stripe.presentPaymentSheet();
-      if (presentError) {
-        setErrorMessage(presentError.message ?? 'Payment cancelled');
-        return;
+      if (presentError && !alreadyConfirmed(presentError.message)) {
+        if (presentError.code === 'Canceled') {
+          setErrorMessage('Payment cancelled.');
+          return;
+        }
+        throw new Error(presentError.message);
       }
 
-      const { error: confirmError, paymentIntent } = await stripe.confirmPayment(clientSecret);
-      if (confirmError) throw new Error(confirmError.message);
-      if (paymentIntent?.status !== PaymentIntent.Status.Succeeded) {
-        throw new Error('Payment was not completed. Please try again.');
-      }
-
-      await activateBoost(postId, user.id, feedType, amount, paymentIntent.id, {
+      await activateBoost(postId, user.id, feedType, amount, paymentIntentId, {
         radiusKm: meta?.radiusKm,
         eligibleUsersCount: meta?.eligibleUsersCount,
         durationHours,
         centerLocal: meta?.centerLocal,
       });
 
-      navigation.replace('PaymentSuccess', { postId, feedType, amount });
+      navigation.replace('PaymentSuccess', { postId, feedType, amount, durationHours });
     } catch (error: any) {
-      setErrorMessage(error?.message ?? 'Could not complete the payment. Please try again.');
-      Alert.alert('Payment failed', String(error?.message ?? 'Could not complete the payment.'));
+      const message = error?.message ?? 'Could not complete the payment. Please try again.';
+      setErrorMessage(message);
+      showNotice('Payment failed', message);
     } finally {
       setIsProcessing(false);
     }
@@ -138,12 +155,12 @@ export default function PaymentScreen({ route, navigation }: any) {
   const canPay = Boolean(postId && user?.id && clientSecret) && !isPreparing && !isProcessing;
 
   return (
-    <GazetteerScreenShell>
+    <GazetteerScreenShell ambient={false} style={styles.page}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
           <Icon name="arrow-back" size={ox(22)} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.title}>Boost checkout</Text>
+        <Text style={styles.title}>Checkout</Text>
         <View style={styles.iconButton} />
       </View>
 
@@ -193,7 +210,7 @@ export default function PaymentScreen({ route, navigation }: any) {
           ) : null}
 
           <Text style={[styles.label, styles.spaced]}>Total</Text>
-          <Text style={styles.amount}>EUR {amount.toFixed(2)}</Text>
+          <Text style={styles.amount}>€{amount.toFixed(2)}</Text>
 
           <Text style={styles.helper}>
             Payments are powered by Stripe. Card details are entered in Stripe's secure sheet and
@@ -213,17 +230,32 @@ export default function PaymentScreen({ route, navigation }: any) {
                 : isPreparing
                   ? 'Preparing...'
                   : canPay
-                    ? `Confirm · EUR ${amount.toFixed(2)}`
+                    ? `Pay €${amount.toFixed(2)}`
                     : 'Payment unavailable'}
             </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
+      <Modal visible={notice != null} transparent animationType="fade" onRequestClose={() => setNotice(null)}>
+        <Pressable style={styles.noticeBackdrop} onPress={() => setNotice(null)}>
+          <Pressable style={styles.noticeCard} onPress={() => {}}>
+            <Text style={styles.noticeTitle}>{notice?.title}</Text>
+            <Text style={styles.noticeBody}>{notice?.body}</Text>
+            <TouchableOpacity style={styles.noticeButton} onPress={() => setNotice(null)}>
+              <Text style={styles.noticeButtonText}>OK</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+    backgroundColor: FEED_PAGE_BG,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -231,6 +263,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: ox(16),
     paddingVertical: ox(12),
     ...gazetteerHeader,
+    backgroundColor: FEED_PAGE_BG,
   },
   iconButton: {
     width: ox(32),
@@ -239,15 +272,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: ox(18),
-    color: '#FFFFFF',
-    fontWeight: '700',
+    fontSize: ox(22),
+    color: '#e3e3e3',
+    fontWeight: '300',
+    letterSpacing: -0.4,
   },
   scroll: { paddingBottom: ox(24) },
   card: {
     margin: ox(16),
-    padding: ox(16),
-    borderRadius: ox(14),
+    padding: ox(20),
+    borderRadius: ox(24),
     ...glassPanel,
   },
   lockRow: { flexDirection: 'row', alignItems: 'center', gap: ox(6), marginBottom: ox(12) },
@@ -265,9 +299,10 @@ const styles = StyleSheet.create({
     marginTop: ox(4),
   },
   amount: {
-    color: '#FFFFFF',
-    fontSize: ox(28),
-    fontWeight: '800',
+    color: '#f472b6',
+    fontSize: ox(34),
+    fontWeight: '300',
+    letterSpacing: -0.6,
     marginTop: ox(4),
   },
   helper: {
@@ -286,12 +321,12 @@ const styles = StyleSheet.create({
     marginTop: ox(14),
   },
   payButton: {
-    marginTop: ox(20),
+    marginTop: ox(22),
     backgroundColor: '#d91b5c',
-    borderRadius: ox(10),
+    borderRadius: ox(999),
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: ox(13),
+    paddingVertical: ox(14),
   },
   payButtonDisabled: {
     opacity: 0.65,
@@ -299,6 +334,46 @@ const styles = StyleSheet.create({
   payButtonText: {
     color: '#FFFFFF',
     fontSize: ox(16),
-    fontWeight: '700',
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  noticeBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(11, 7, 17, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: ox(28),
+  },
+  noticeCard: {
+    width: '100%',
+    borderRadius: ox(24),
+    padding: ox(22),
+    ...glassPanel,
+  },
+  noticeTitle: {
+    color: '#e3e3e3',
+    fontSize: ox(22),
+    fontWeight: '300',
+    letterSpacing: -0.4,
+  },
+  noticeBody: {
+    color: 'rgba(227, 227, 227, 0.78)',
+    fontSize: ox(15),
+    lineHeight: ox(22),
+    fontWeight: '300',
+    marginTop: ox(10),
+  },
+  noticeButton: {
+    marginTop: ox(18),
+    alignSelf: 'flex-end',
+    backgroundColor: '#d91b5c',
+    borderRadius: ox(999),
+    paddingHorizontal: ox(18),
+    paddingVertical: ox(10),
+  },
+  noticeButtonText: {
+    color: '#FFFFFF',
+    fontSize: ox(15),
+    fontWeight: '600',
   },
 });

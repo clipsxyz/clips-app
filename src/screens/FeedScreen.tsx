@@ -90,7 +90,7 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { loadFeedVideoPrebufferConfig, collectFeedVideoPrefetchUris, prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
@@ -2121,6 +2121,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         overlayResumeVideoPostIdRef.current = resumeId;
         lastViewableVideoPostIdRef.current = resumeId;
+        // Same card is already mounted. Tearing it down and starting again leaves the
+        // first ExoPlayer audible on ColorOS, so the clip plays twice.
+        if (String(getActiveFeedVideoPostId() || '') === String(resumeId)) {
+            overlayResumeVideoPostIdRef.current = null;
+            return;
+        }
         // Pin-scroll after Scenes must not look like a user fling (that leaves the card paused).
         suppressFeedViewabilityRef.current = true;
         feedScrollingRef.current = false;

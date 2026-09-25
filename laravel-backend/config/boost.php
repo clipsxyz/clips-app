@@ -17,6 +17,9 @@ return [
 
     'unit_price_cents' => 5,
 
+    /** Never charge less than this, including when the eligible audience is 0. */
+    'minimum_price_cents' => 100,
+
     'duration_multipliers' => [
         6 => 1.0,
         12 => 1.75,

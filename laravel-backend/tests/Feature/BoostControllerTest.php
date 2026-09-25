@@ -208,6 +208,31 @@ class BoostControllerTest extends TestCase
             ->assertJson(['error' => 'Post not found']);
     }
 
+    public function test_estimate_charges_one_euro_when_audience_is_empty(): void
+    {
+        $this->signIn();
+        config(['boost.minimum_price_cents' => 100, 'boost.unit_price_cents' => 5]);
+
+        $booster = User::factory()->create([
+            'handle' => '@nobodynearby',
+            'location_local' => null,
+            'location_regional' => null,
+            'location_national' => null,
+        ]);
+
+        $this->postJson('/api/boost/estimate', [
+            'feedType' => 'local',
+            'userId' => $booster->id,
+            'radiusKm' => 2,
+            'durationHours' => 6,
+        ])->assertOk()
+            ->assertJson([
+                'eligibleUsersCount' => 0,
+                'priceCents' => 100,
+                'priceEur' => 1,
+            ]);
+    }
+
     public function test_prices_endpoint_exposes_audience_pricing(): void
     {
         $this->getJson('/api/boost/prices')
@@ -239,8 +264,9 @@ class BoostControllerTest extends TestCase
 
         $body = json_decode($response->getContent(), true);
         $this->assertSame(5, $body['unitPriceCents']);
+        $minimum = (int) config('boost.minimum_price_cents');
         $this->assertSame(
-            $body['eligibleUsersCount'] * 5,
+            max($minimum, $body['eligibleUsersCount'] * 5),
             $body['priceCents']
         );
     }

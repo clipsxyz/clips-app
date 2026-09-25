@@ -6,11 +6,12 @@ import {
     FlatList,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
+    Modal,
+    Pressable,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
@@ -37,6 +38,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
+    const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
 
     const loadUserPosts = useCallback(async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
@@ -94,10 +96,15 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             if (existing?.isActive) {
                 setShowBoostModal(false);
                 setSelectedPost(null);
-                Alert.alert(
-                    'Already boosted',
-                    'This post is already boosted. It will expire in 6 hours.',
-                );
+                const hoursLeft = existing.expiresAt
+                    ? Math.max(1, Math.ceil((existing.expiresAt - Date.now()) / (60 * 60 * 1000)))
+                    : null;
+                setNotice({
+                    title: 'Already boosted',
+                    body: hoursLeft
+                        ? `This post is already boosted. About ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'} left.`
+                        : 'This post is already boosted.',
+                });
             }
         } catch {
             // Keep modal open if status check fails offline
@@ -303,6 +310,17 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                     });
                 }}
             />
+            <Modal visible={notice != null} transparent animationType="fade" onRequestClose={() => setNotice(null)}>
+                <Pressable style={styles.noticeBackdrop} onPress={() => setNotice(null)}>
+                    <Pressable style={styles.noticeCard} onPress={() => {}}>
+                        <Text style={styles.noticeTitle}>{notice?.title}</Text>
+                        <Text style={styles.noticeBody}>{notice?.body}</Text>
+                        <TouchableOpacity style={styles.noticeButton} onPress={() => setNotice(null)}>
+                            <Text style={styles.noticeButtonText}>OK</Text>
+                        </TouchableOpacity>
+                    </Pressable>
+                </Pressable>
+            </Modal>
         </GazetteerScreenShell>
     );
 };
@@ -457,6 +475,45 @@ const styles = StyleSheet.create({
         color: '#7DD3FC',
         fontSize: ox(11),
         fontWeight: '700',
+    },
+    noticeBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(11, 7, 17, 0.72)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: ox(28),
+    },
+    noticeCard: {
+        width: '100%',
+        borderRadius: ox(24),
+        padding: ox(22),
+        ...glassPanel,
+    },
+    noticeTitle: {
+        color: '#e3e3e3',
+        fontSize: ox(22),
+        fontWeight: '300',
+        letterSpacing: -0.4,
+    },
+    noticeBody: {
+        color: 'rgba(227, 227, 227, 0.78)',
+        fontSize: ox(15),
+        lineHeight: ox(22),
+        fontWeight: '300',
+        marginTop: ox(10),
+    },
+    noticeButton: {
+        marginTop: ox(18),
+        alignSelf: 'flex-end',
+        backgroundColor: '#d91b5c',
+        borderRadius: ox(999),
+        paddingHorizontal: ox(18),
+        paddingVertical: ox(10),
+    },
+    noticeButtonText: {
+        color: '#FFFFFF',
+        fontSize: ox(15),
+        fontWeight: '600',
     },
     errorText: {
         fontSize: ox(16),

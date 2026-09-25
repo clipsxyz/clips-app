@@ -223,7 +223,7 @@ export default function BoostSelectionModal({
 
                     if (cancelled) return;
                     const ec = typeof res.eligibleUsersCount === 'number' ? res.eligibleUsersCount : null;
-                    const priceEur = typeof res.priceEur === 'number' ? res.priceEur : null;
+                    const priceEur = typeof res.priceEur === 'number' ? Math.max(1, res.priceEur) : null;
 
                     setEligibleUsersCount(ec);
                     setEstimatedTotalPrice(priceEur);
@@ -237,7 +237,7 @@ export default function BoostSelectionModal({
                     };
                     const multiplier = durationOptions.find((d) => d.hours === selectedDuration)?.multiplier ?? 1;
                     const eligible = Math.max(0, Math.round(baseByFeed[debouncedSelectedOption] * (debouncedRadiusKm / 2)));
-                    const price = Number((eligible * 0.05 * multiplier).toFixed(2));
+                    const price = Math.max(1, Number((eligible * 0.05 * multiplier).toFixed(2)));
                     if (cancelled) return;
                     setEligibleUsersCount(eligible);
                     setEstimatedTotalPrice(price);

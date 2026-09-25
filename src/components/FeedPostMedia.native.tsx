@@ -26,6 +26,8 @@ import {
     subscribeActiveFeedVideo,
     subscribeWarmFeedVideo,
     registerFeedVideoPlayer,
+    setAllFeedPlayerVolumes,
+    subscribeFeedPlaybackAllowed,
 } from '../utils/feedActiveVideoNative';
 import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { consumeFeedVideoHandoff, peekFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
@@ -513,6 +515,11 @@ const FeedPostMedia = React.memo(
         mode === 'feed' &&
         !suspendNativeVideo &&
         String(storeWarmPostId) === String(post.id);
+    const [feedPlaybackAllowed, setFeedPlaybackAllowedState] = useState(true);
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedPlaybackAllowed(setFeedPlaybackAllowedState);
+    }, [mode]);
 
     // ColorOS TextureView can keep audio after pause() if it stays mounted.
     // Bluesky tears the inactive player down immediately; we do the same —
@@ -533,7 +540,10 @@ const FeedPostMedia = React.memo(
         } catch {
             /* ignore */
         }
-        setKeepPlayerMounted(false);
+        // Unmounting in this same frame drops the player while it is still
+        // playing, and ColorOS keeps that audio under the next post.
+        const timer = setTimeout(() => setKeepPlayerMounted(false), 280);
+        return () => clearTimeout(timer);
     }, [mode, isAudible, isWarmMount]);
 
     useEffect(() => {
@@ -1003,7 +1013,11 @@ const FeedPostMedia = React.memo(
     const setFeedSoundOn = (nextSoundOn: boolean) => {
         // Flip ExoPlayer volume on the tap. The muted prop catches up on the next render.
         try {
-            feedVideoRef.current?.setVolume?.(nextSoundOn ? 1 : 0);
+            setAllFeedPlayerVolumes(0);
+            if (nextSoundOn) {
+                feedVideoRef.current?.setVolume?.(1);
+                feedVideoRef.current?.resume?.();
+            }
         } catch {
             /* player already released */
         }
@@ -1126,7 +1140,7 @@ const FeedPostMedia = React.memo(
         };
         const cachedVideoSource = buildFeedVideoSource(slideUrl, slideRawUrl);
         // Warm mounts stay paused+muted. Only the audible active card may play.
-        const feedShouldPlay = mode === 'feed' && isAudible && !feedScrolling;
+        const feedShouldPlay = mode === 'feed' && isAudible && !feedScrolling && feedPlaybackAllowed;
 
         return (
             <View style={styles.slideFill} collapsable={false}>

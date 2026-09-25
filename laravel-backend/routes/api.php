@@ -94,6 +94,7 @@ Route::get('/boost/prices', function () {
     return response()->json([
         'currency' => config('boost.currency'),
         'unitPriceCents' => (int) config('boost.unit_price_cents'),
+        'minimumPriceCents' => (int) config('boost.minimum_price_cents'),
         'durationMultipliers' => config('boost.duration_multipliers'),
     ]);
 });
