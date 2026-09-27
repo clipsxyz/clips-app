@@ -1,12 +1,27 @@
 /**
  * Shared ExoPlayer / AVPlayer buffer settings for feed MP4s.
- * Tuned for Instant Start: begin playback as soon as ~200ms is buffered.
+ *
+ * Two different jobs, deliberately tuned in opposite directions:
+ *
+ * - START FAST: `bufferForPlaybackMs` gates the *initial* start, so it stays low
+ *   (150ms) to get the first frame up quickly after a card settles.
+ * - DON'T STALL AFTERWARDS: the old floor was `minBufferMs: 300` /
+ *   `bufferForPlaybackAfterRebufferMs: 200`, which asked ExoPlayer to keep only
+ *   0.3s ahead and to resume after 0.2s. On a variable network that resumes
+ *   straight back into a stall, so the player micro-rebuffered repeatedly — a
+ *   freeze that looked like a start delay but happened mid-clip. The floor is now
+ *   4s ahead, resuming after 2.5s.
+ *
+ * `maxBufferMs` must stay above `minBufferMs`: ExoPlayer stops loading once it
+ * holds `minBufferMs`, so a lower cap would simply be inert. 12s is still far
+ * under media3's 50s default — feed clips are short, and every extra second of
+ * buffer competes with the next card's Range prebuffer for bandwidth.
  */
 export const FEED_VIDEO_BUFFER_CONFIG = {
-    minBufferMs: 300,
-    maxBufferMs: 8000,
+    minBufferMs: 4000,
+    maxBufferMs: 12000,
     bufferForPlaybackMs: 150,
-    bufferForPlaybackAfterRebufferMs: 200,
+    bufferForPlaybackAfterRebufferMs: 2500,
     /** Fallback ExoPlayer SimpleCache when the HTTP proxy is unavailable. */
     cacheSizeMB: 150,
 } as const;

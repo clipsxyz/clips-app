@@ -90,8 +90,13 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { loadFeedVideoPrebufferConfig, collectFeedVideoPrefetchUris, prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, clearAudibleFeedVideo, parkAudibleFeedVideo, setWarmFeedVideoPostId, setFeedVideoPlayingAtY, setFeedPlaybackAllowed, setFeedTextureMountAllowed } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, setFeedVideoPlayingAtY, setFeedPlaybackAllowed, setFeedTextureMountAllowed } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
+import {
+    assignRef,
+    setFeedUiThreadScrollY,
+    setFeedUiThreadViewportHeight,
+} from '../utils/feedViewabilityUiThread';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import {
     isHeavyFeedSheetOpen,
@@ -117,6 +122,9 @@ import {
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import {
+    useAnimatedReaction,
+    useAnimatedRef,
+    useScrollViewOffset,
     useSharedValue,
 } from 'react-native-reanimated';
 
@@ -236,7 +244,7 @@ import SavePostModal from '../components/SavePostModal.native';
 import QRCodeModal from '../components/QRCodeModal.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
-import { updatePost as apiUpdatePost } from '../api/client';
+import { updatePost as apiUpdatePost, isAbortError } from '../api/client';
 import PostCommentsSheet from '../components/PostCommentsSheet';
 import {
     getCollectionsForPost,
@@ -1911,12 +1919,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        // Bluesky: the clip is active when half of *the postcard* is on screen.
-        // Viewport-% kept a tall 4:5 card "viewable" after you'd already moved on.
-        itemVisiblePercentThreshold: 65,
-        // Keep short enough that ExoPlayer can mount+buffer during the last
-        // part of a fling, but long enough to avoid thrashing mid-swipe.
-        minimumViewTime: 60,
+        // Bluesky ViewManager: active when ≥50% of the video view is on screen.
+        itemVisiblePercentThreshold: 50,
+        minimumViewTime: 0,
     });
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2226,13 +2231,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Overlays / comments: never re-arm from list re-renders or stale viewability.
         if (feedAutoplayOverlayBlocks()) {
             activeVideoPostIdRef.current = null;
-            setWarmFeedVideoPostId(null);
             setActiveFeedVideoPostId(null);
             return;
         }
         if (!feedAutoplayAllowedRef.current || !postId) {
             activeVideoPostIdRef.current = null;
-            setWarmFeedVideoPostId(null);
             setActiveFeedVideoPostId(null);
             return;
         }
@@ -2319,21 +2322,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
             lastViewableVideoPostIdRef.current = nextId;
             lastViewabilityYRef.current = y;
-            // Bluesky-style: cut previous audio immediately when the postcard changes,
-            // then warm-mount the next ExoPlayer paused so settle can Instant Start.
+            // Bluesky Android: do not rebuild the active player on every scroll frame.
+            // Only record the topmost ≥50% video; endDrag / momentumEnd applies it
+            // (see updateActiveVideoViewAsync in @bsky.app/video).
             if (feedScrollingRef.current) {
-                // Release whenever the target changes — including when it becomes null
-                // because no video is over the viewability line any more (a photo or
-                // text post owning the viewport mid-fling). Gating this on `nextId`
-                // left the previous clip playing through the entire scroll, and then
-                // promoted that stale clip again on settle.
-                if (String(activeVideoPostIdRef.current ?? '') !== String(nextId ?? '')) {
+                if (getActiveFeedVideoPostId() != null) {
                     activeVideoPostIdRef.current = null;
-                    clearAudibleFeedVideo();
+                    haltFeedPlayback();
                 }
-                setWarmFeedVideoPostId(nextId);
             } else {
-                setWarmFeedVideoPostId(null);
                 scheduleActiveFeedVideoRef.current(nextId);
             }
 
@@ -3436,15 +3433,58 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setCursor(hasNextPage ? 1 : null);
     }, [feedQueryPending, isFetchingNextPage, hasNextPage, feedDataUpdatedAt]);
 
+    // After an aborted first page (soft-empty), leave the skeleton and soft-retry once.
+    const feedAbortSoftRetryRef = useRef(0);
+    React.useEffect(() => {
+        feedAbortSoftRetryRef.current = 0;
+    }, [homeFeedQueryKey]);
+    React.useEffect(() => {
+        if (feedQueryPending || feedQueryFetching) return;
+        const loaded = pageBatches.reduce((n, batch) => n + (batch?.length || 0), 0);
+        if (loaded > 0) {
+            feedAbortSoftRetryRef.current = 0;
+            return;
+        }
+        if (feedQueryIsError) return;
+        if (feedAbortSoftRetryRef.current >= 1) {
+            setInitialLoading(false);
+            setEnd(true);
+            return;
+        }
+        feedAbortSoftRetryRef.current += 1;
+        setInitialLoading(false);
+        const t = setTimeout(() => {
+            void queryClient.invalidateQueries({ queryKey: homeFeedQueryKey });
+        }, 400);
+        return () => clearTimeout(t);
+    }, [
+        feedQueryPending,
+        feedQueryFetching,
+        feedQueryIsError,
+        pageBatches,
+        feedDataUpdatedAt,
+        queryClient,
+        homeFeedQueryKey,
+    ]);
+
     React.useEffect(() => {
         if (!feedQueryIsError || !feedQueryError) return;
         const err = feedQueryError;
+        if (isAbortError(err)) {
+            // Aborted fetches are cancellations, not failures. Clear the skeleton and
+            // let pull-to-refresh / the soft-retry effect recover.
+            setInitialLoading(false);
+            setError(null);
+            if (pagesRef.current.flat().length === 0) {
+                setEnd(true);
+            }
+            return;
+        }
         const errMsg = err instanceof Error ? err.message : String(err ?? '');
         const isTransientNetwork =
             (err instanceof TypeError && /network request failed|failed to fetch/i.test(errMsg)) ||
             (err instanceof Error &&
-                (err.name === 'AbortError' ||
-                    err.name === 'ConnectionRefused' ||
+                (err.name === 'ConnectionRefused' ||
                     /network request failed|failed to fetch|CONNECTION_REFUSED|timed out/i.test(errMsg)));
         if (pagesRef.current.flat().length === 0) {
             setError(
@@ -3457,6 +3497,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         : 'Failed to load feed',
             );
             setEnd(true);
+            setInitialLoading(false);
         }
     }, [feedQueryIsError, feedQueryError, feedDataUpdatedAt]);
 
@@ -3472,6 +3513,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (gen !== feedLoadGenRef.current) return;
         } catch (err) {
             if (gen !== feedLoadGenRef.current) return;
+            if (isAbortError(err)) {
+                setError(null);
+                if (pagesRef.current.flat().length === 0) setEnd(true);
+                return;
+            }
             if (__DEV__) console.warn('Feed reload failed:', err);
             const msg = err instanceof Error ? err.message : '';
             setError(msg ? `Failed to load feed (${msg.slice(0, 100)})` : 'Failed to load feed');
@@ -4735,9 +4781,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             clearTimeout(feedScrollIdleTimerRef.current);
             feedScrollIdleTimerRef.current = null;
         }
-        // Silence now, but keep this ExoPlayer mounted (warm) so settle can resume it.
+        // ColorOS: destroy the active ExoPlayer as soon as the finger goes down.
+        // Bluesky's native destroy() runs when the view loses active; we clear the id
+        // so React unmounts the only mounted TextureView.
         activeVideoPostIdRef.current = null;
-        parkAudibleFeedVideo();
+        haltFeedPlayback();
     }, []);
 
     const settleRetryRef = useRef(false);
@@ -4752,9 +4800,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         feedScrollingRef.current = true;
         setFeedScrollBusy(true);
         activeVideoPostIdRef.current = null;
-        parkAudibleFeedVideo();
+        haltFeedPlayback();
     }, []);
 
+    /**
+     * Bluesky `updateActiveVideoViewAsync`: pick the topmost ≥50% video and make it
+     * the only active ExoPlayer (destroy previous by clearing id → unmount).
+     */
     const startSettledFeedVideo = React.useCallback(() => {
         if (feedAutoplayOverlayBlocks()) {
             requestAnimationFrame(() => setFeedScrollBusy(false));
@@ -4763,56 +4815,125 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const playId = feedAutoplayAllowedRef.current
             ? lastViewableVideoPostIdRef.current
             : null;
-        // Clear the scroll flag in the same turn as promotion so the warm player
-        // unpauses on that render instead of waiting another frame.
+        feedScrollingRef.current = false;
         setFeedScrollBusy(false);
         if (!playId && !settleRetryRef.current) {
-            // The last viewability tick can land while no video is over the line, so
-            // there is nothing to promote. onViewableItemsChanged only fires when the
-            // viewable set *changes*, so retry once to pick up the settled clip rather
-            // than stranding the feed paused until the user scrolls again.
             settleRetryRef.current = true;
             feedScrollIdleTimerRef.current = setTimeout(
                 startSettledFeedVideoRef.current,
-                140,
+                32,
             );
             return;
         }
+        settleRetryRef.current = false;
+        // Force notify even if the id matches a stale ref after halt.
+        activeVideoPostIdRef.current = null;
         scheduleActiveFeedVideoRef.current(playId, true);
     }, []);
 
     startSettledFeedVideoRef.current = startSettledFeedVideo;
 
     const onFeedMomentumScrollEnd = React.useCallback(() => {
-        feedScrollingRef.current = false;
         if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-        // Player is often already warm-mounted from mid-scroll.
-        feedScrollIdleTimerRef.current = setTimeout(startSettledFeedVideo, 24);
+        feedScrollIdleTimerRef.current = null;
+        startSettledFeedVideo();
     }, [startSettledFeedVideo]);
 
     const onFeedScrollEndDrag = React.useCallback((e: any) => {
         feedScrollYRef.current = e.nativeEvent.contentOffset.y;
         if (e.nativeEvent.velocity && Math.abs(e.nativeEvent.velocity.y) > 0.05) {
-            // Momentum will follow — keep busy until momentum end.
+            // Momentum will follow — Bluesky applies active on momentumEnd.
             return;
         }
         if (feedScrollIdleTimerRef.current) clearTimeout(feedScrollIdleTimerRef.current);
-        settleRetryRef.current = false;
-        feedScrollIdleTimerRef.current = setTimeout(() => {
-            feedScrollingRef.current = false;
-            startSettledFeedVideo();
-        }, 24);
+        feedScrollIdleTimerRef.current = null;
+        startSettledFeedVideo();
     }, [startSettledFeedVideo]);
 
     const onFeedScroll = React.useCallback((e: any) => {
         const y = e.nativeEvent.contentOffset.y;
         feedScrollYRef.current = y;
+        // Publish to the silence net's shareable. This is still JS-thread (see the
+        // note below), so the net is a secondary guard here, not a true UI-thread one.
+        setFeedUiThreadScrollY(y);
         if (suppressFeedViewabilityRef.current) return;
+        // Bluesky Android does not re-pick on every scroll frame; ColorOS still needs
+        // an immediate destroy once the playing postcard has left the screen.
         if (haltFeedPlaybackIfScrolled(y)) {
             feedScrollingRef.current = true;
+            setFeedScrollBusy(true);
             activeVideoPostIdRef.current = null;
         }
     }, []);
+
+    const onFeedListLayout = React.useCallback((e: any) => {
+        // The list's own height is the visibility band. Publishing it keeps the
+        // UI-thread guard's geometry exact when chrome (comments sheet, tab bar)
+        // changes the usable viewport, and is what lets the guard stay quiet
+        // before first layout rather than scoring 0 and silencing playback.
+        const h = e?.nativeEvent?.layout?.height;
+        if (typeof h === 'number' && h > 0) setFeedUiThreadViewportHeight(h);
+    }, []);
+
+    /**
+     * UI-thread scroll offset for the 50% silence net.
+     *
+     * FlashList v2 owns the scroll view's `onScroll` — that handler does the
+     * recycler bookkeeping (`updateScrollOffset`, `computeItemViewability`, the
+     * velocity tracker, `checkBounds`) and delegates to our `onScroll` prop from
+     * inside itself. It must not be replaced.
+     *
+     * So instead of clobbering it, we add a *second*, independent native
+     * listener: `useScrollViewOffset` registers through `registerForEvents` and
+     * runs its worklet on the UI thread, leaving FlashList's handler untouched.
+     * The JS-thread `onScroll` above still runs at `scrollEventThrottle={32}` and
+     * remains the primary ±8px path.
+     *
+     * Reaching the underlying ScrollView: `renderScrollComponent` is supplied as a
+     * plain function, which is the branch where FlashList forwards its own ref to
+     * us as a prop (`useSecondaryProps.js:103-106`) instead of attaching it to
+     * the element it creates. That lets one callback ref feed both refs, so
+     * `scrollTo` / `getScrollResponder` keep working.
+     *
+     * IDENTITY INVARIANT: this callback's identity must never change. FlashList
+     * memoises `CompatScrollView` on `renderScrollComponent`, so a new function
+     * identity would swap the scroll component type and remount the list
+     * mid-session. Both deps below are stable for the component's lifetime
+     * (`useAnimatedRef` returns one ref object for the life of the hook).
+     */
+    const feedUiScrollRef = useAnimatedRef<any>();
+    const feedFlashScrollRef = useRef<any>(null);
+
+    const setFeedScrollRefs = React.useCallback(
+        (node: any) => {
+            // Reanimated's ref first — it is what feeds the UI-thread listener.
+            feedUiScrollRef(node);
+            // Then FlashList's, by whichever shape it uses.
+            assignRef(feedFlashScrollRef.current, node);
+        },
+        [feedUiScrollRef],
+    );
+
+    const renderFeedScrollComponent = React.useCallback(
+        (props: any) => {
+            const { ref: flashRef, ...rest } = props ?? {};
+            feedFlashScrollRef.current = flashRef ?? null;
+            return <GHScrollView {...rest} ref={setFeedScrollRefs} />;
+        },
+        [setFeedScrollRefs],
+    );
+
+    const feedUiScrollOffset = useScrollViewOffset(feedUiScrollRef);
+
+    // Both halves run on the UI thread, so the net gets a per-frame signal even
+    // when JS is too busy to deliver the throttled `onScroll`.
+    useAnimatedReaction(
+        () => feedUiScrollOffset.value,
+        (y, previous) => {
+            if (previous !== null && y === previous) return;
+            setFeedUiThreadScrollY(y);
+        },
+    );
 
     const feedKeyExtractor = React.useCallback((item: FeedListRow) => {
         if (item.kind === 'post') return `post:${item.post.id}`;
@@ -4895,7 +5016,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 getItemType={feedGetItemType}
                 drawDistance={1600}
                 estimatedItemSize={560}
-                renderScrollComponent={GHScrollView}
+                renderScrollComponent={renderFeedScrollComponent}
                 extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${scenesOverlay?.postId || ''}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 scrollEnabled={!scenesOverlay}
@@ -4905,6 +5026,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 onScrollEndDrag={onFeedScrollEndDrag}
                 onScroll={onFeedScroll}
                 scrollEventThrottle={32}
+                onLayout={onFeedListLayout}
                 decelerationRate={Platform.OS === 'ios' ? 'normal' : 0.985}
                 refreshControl={
                     <RefreshControl

@@ -2241,6 +2241,13 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
               : undefined,
       };
     } catch (error: any) {
+      if (
+        error?.name === 'AbortError' ||
+        error?.name === 'TimeoutError' ||
+        /aborted/i.test(String(error?.message || ''))
+      ) {
+        throw error;
+      }
       console.log('[fetchPostsPage/posts] live feed failed — throwing (do not fake an empty feed)', {
         name: error?.name,
         message: error?.message,

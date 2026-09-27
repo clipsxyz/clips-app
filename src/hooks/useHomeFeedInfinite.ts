@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import type { Post } from '../types';
 import { queryKeys } from '../api/queryClient';
+import { isAbortError } from '../api/client';
 import {
     fetchInitialVisibleFeed,
     fetchVisibleFeedPage,
@@ -89,7 +90,22 @@ export function useHomeFeedInfinite(input: HomeFeedQueryInput) {
         queryKey,
         enabled: input.enabled !== false && Boolean(input.filter) && Boolean(input.viewerUserId),
         initialPageParam: 0 as string | number,
-        queryFn: ({ pageParam }) => fetchHomeFeedPage({ ...input, getPrefs }, pageParam),
+        queryFn: async ({ pageParam }) => {
+            try {
+                return await fetchHomeFeedPage({ ...input, getPrefs }, pageParam);
+            } catch (err) {
+                // Filter switches / timeout races abort in-flight pages. Returning an
+                // empty continuable page keeps the query out of isError so the feed
+                // does not stick on the skeleton or paint a red AbortError.
+                if (isAbortError(err)) {
+                    return {
+                        items: [] as Post[],
+                        nextCursor: null,
+                    };
+                }
+                throw err;
+            }
+        },
         getNextPageParam: (lastPage) => {
             const raw = lastPage as HomeFeedPage & { next_cursor?: string | number | null };
             const cursor =
@@ -104,7 +120,10 @@ export function useHomeFeedInfinite(input: HomeFeedQueryInput) {
         staleTime: 60 * 1000,
         gcTime: 15 * 60 * 1000,
         refetchOnMount: false,
-        retry: 1,
+        retry: (failureCount, error) => {
+            if (isAbortError(error)) return false;
+            return failureCount < 1;
+        },
     });
 
     const flatPosts = useMemo(() => {

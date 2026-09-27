@@ -61,7 +61,12 @@ export function isAbortError(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
     const name = String((error as { name?: string }).name || '');
     const message = String((error as { message?: string }).message || '');
-    return name === 'AbortError' || name === 'TimeoutError' || message === 'Aborted';
+    return (
+        name === 'AbortError' ||
+        name === 'TimeoutError' ||
+        message === 'Aborted' ||
+        /aborted/i.test(message)
+    );
 }
 
 export function isTooManyRequestsError(error: unknown): boolean {
@@ -222,8 +227,10 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
         } catch (error: any) {
             clearTimeout(timeoutId);
             lastError = error;
-            const isAbort = error?.name === 'AbortError';
-            if (isAbort) throw error;
+            if (isAbortError(error) || controller.signal.aborted) {
+                // Timeout / navigation cancel — callers decide; never log as a hard failure.
+                throwAbortError();
+            }
 
             const isConnectionError = isFetchConnectionError(error);
             if (isConnectionError && i < candidates.length - 1) {
