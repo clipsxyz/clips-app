@@ -105,6 +105,7 @@ import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
 import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
 import { ox } from '../constants/nativeOpticalScale';
+import { ignoreAbort } from '../utils/abortSafe';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
@@ -260,9 +261,9 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         let mounted = true;
-        void getGlobalVideoMutedNative().then((muted) => {
+        ignoreAbort(getGlobalVideoMutedNative().then((muted) => {
             if (mounted) setIsMuted(muted);
-        });
+        }));
         return subscribeGlobalVideoMuted((muted) => setIsMuted(muted));
     }, []);
 

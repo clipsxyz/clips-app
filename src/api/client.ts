@@ -7,6 +7,7 @@ import {
     isLaravelApiEnabled,
     markLaravelUnreachable,
 } from '../config/runtimeEnv';
+import { isAbortLikeError } from '../utils/abortSafe';
 import { getAuthTokenAsync, getAuthorizationHeader, persistAuthToken } from '../utils/authTokenBridge';
 import { getApiBaseUrl, getApiBaseUrlCandidates, rememberSuccessfulApiBaseUrl, resolvePublicMediaUrl } from './apiBaseUrl';
 import { isMockMode } from './apiMode';
@@ -57,16 +58,13 @@ function rewriteUrlToApiBase(url: string, apiBase: string): string | null {
     }
 }
 
+/**
+ * Delegates to the shared helper so there is exactly one definition of "this was
+ * a cancellation" in the app. `isAbortLikeError` is a superset (it also matches a
+ * stringified rejection), which is what we want here.
+ */
 export function isAbortError(error: unknown): boolean {
-    if (!error || typeof error !== 'object') return false;
-    const name = String((error as { name?: string }).name || '');
-    const message = String((error as { message?: string }).message || '');
-    return (
-        name === 'AbortError' ||
-        name === 'TimeoutError' ||
-        message === 'Aborted' ||
-        /aborted/i.test(message)
-    );
+    return isAbortLikeError(error);
 }
 
 export function isTooManyRequestsError(error: unknown): boolean {

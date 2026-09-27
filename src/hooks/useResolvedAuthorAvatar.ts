@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getAvatarForHandle, resolveAvatarImageUri, setAvatarForHandle } from '../api/users';
 import { isMockMode } from '../config/runtimeEnv';
+import { ignoreAbort } from '../utils/abortSafe';
 
 function sameHandle(a?: string | null, b?: string | null): boolean {
     const na = String(a || '')
@@ -76,10 +77,10 @@ export function useResolvedAuthorAvatar(opts: {
     useEffect(() => {
         if (resolved || !handle || isMockMode()) return;
         let cancelled = false;
-        void fetchAudienceAvatar(handle).then((url) => {
+        ignoreAbort(fetchAudienceAvatar(handle).then((url) => {
             if (!url || cancelled) return;
             setFetchedUrl(url);
-        });
+        }));
         return () => {
             cancelled = true;
         };

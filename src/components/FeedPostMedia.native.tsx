@@ -15,7 +15,14 @@ import {
     type ViewStyle,
 } from 'react-native';
 import { FlatList, Gesture, GestureDetector, Pressable as GesturePressable } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Reanimated, {
+    createAnimatedComponent,
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withTiming,
+} from 'react-native-reanimated';
 import type { Post, PostMediaItem, StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -59,8 +66,37 @@ import VideoCTAOverlay from './VideoCTAOverlay.native';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 import { FEED_UI } from '../constants/feedUiTokens';
+import {
+    FEED_COLLAPSE_DURATION_MS,
+    armAndExpandOnUIThread,
+    beginFeedExpandDrag,
+    cacheFeedExpandCard,
+    getFeedExpandCard,
+    getFeedExpandScreen,
+    getFeedExpandTargetPostId,
+    dragFeedExpand,
+    endFeedExpandDrag,
+    computeExpandTransform,
+    isExpandTargetCard,
+    armFeedExpand,
+    getFeedExpandProgress,
+    getFeedExpandTarget,
+    runFeedExpandAnimation,
+    runFeedExpandSnapBack,
+    runFeedCollapseAnimation,
+    subscribeFeedExpand,
+    type FeedExpandTarget,
+} from '../utils/feedFullscreenExpandNative';
+import { useWindowDimensions } from 'react-native';
 
 const ANDROID_FEED_VIDEO_PROPS = androidListSafeVideoProps();
+
+/**
+ * The media card is an animated component purely so the expand transform can be
+ * applied as a style. Declared once at module scope: recreating it would remount
+ * every visible card (and therefore every ExoPlayer) on each render.
+ */
+const AnimatedFeedMediaCard = createAnimatedComponent(View);
 
 function firstMediaUri(...vals: unknown[]): string | undefined {
     for (const v of vals) {
@@ -360,6 +396,13 @@ type Props = {
     fillViewport?: boolean;
     /** Natural pixel size of the current slide — parent sizes the frame from this. */
     onNaturalSize?: (width: number, height: number) => void;
+    /**
+     * Bumped by the owning screen on every focus return. The card hard-forces its
+     * native audio session when this changes, because `muted`/`volume` are derived
+     * from local `soundOn` and therefore do NOT change across a blur round-trip —
+     * without an explicit signal React forwards nothing and ExoPlayer stays at 0.
+     */
+    focusEpoch?: number;
 };
 
 const FeedPostMedia = React.memo(
@@ -385,6 +428,7 @@ const FeedPostMedia = React.memo(
         hideOverlayChrome = false,
         fillViewport = false,
         onNaturalSize,
+        focusEpoch = 0,
     },
     ref,
 ) {
@@ -398,6 +442,16 @@ const FeedPostMedia = React.memo(
     const [loadingByUrl, setLoadingByUrl] = useState<Record<string, boolean>>({});
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
+    /**
+     * Explicit user pause from a tap while this card owns the fullscreen viewport.
+     *
+     * Deliberately separate from `paused`, which the autoplay effect above owns and
+     * rewrites whenever the active slot changes — folding a user intent into it would
+     * mean the next scroll or focus change silently undid the pause. This ANDs into the
+     * native `paused`/`muted`/`volume`/`repeat` props only while expanded, and is reset
+     * the moment the card leaves fullscreen.
+     */
+    const [expandedUserPaused, setExpandedUserPaused] = useState(false);
     const pendingSeekRef = useRef<number | null>(null);
     const playbackTimeRef = useRef(0);
     const lastHandoffAtRef = useRef(0);
@@ -544,6 +598,34 @@ const FeedPostMedia = React.memo(
         }
     }, [mode, isAudible, resetPosterCover]);
     const isFeedAutoplayActive = isAudible;
+
+    /**
+     * Force the native ExoPlayer back onto React's *visual* mute state.
+     *
+     * The blur cleanup above (and `silencePlayer` in the store) leave the native
+     * player at volume 0, but `muted`/`volume` are derived from local `soundOn`, so
+     * they are unchanged across a blur round-trip and React forwards no new value.
+     * The result is the reported desync: the icon reads "unmuted" over a silent
+     * player, and the first sound tap only re-mutes. Re-assert on the ref whenever
+     * this card owns the slot, and again on load for a remounted player.
+     */
+    const syncFeedPlayerVolume = useCallback(() => {
+        if (mode !== 'feed') return;
+        const handle = feedVideoRef.current;
+        if (!handle) return;
+        try {
+            handle.setVolume?.(soundOn ? 1 : 0);
+            if (soundOn && feedPlaybackAllowed) handle.resume?.();
+            else handle.pause?.();
+        } catch {
+            /* ColorOS ExoPlayer can already be released */
+        }
+    }, [feedPlaybackAllowed, mode, soundOn]);
+
+    useEffect(() => {
+        if (!isAudible) return;
+        syncFeedPlayerVolume();
+    }, [isAudible, syncFeedPlayerVolume]);
 
     /**
      * UI-thread visibility guard.
@@ -705,6 +787,48 @@ const FeedPostMedia = React.memo(
     const video = !textOnly && activeIsVideo && !!mediaUrl;
     const posterUriForSize = resolveFeedVideoPosterUri(activeItem, post);
 
+    /**
+     * Unconditional focus-return force.
+     *
+     * The `isAudible` effect above only fires when the active-slot id actually flips.
+     * Navigating back into the feed can re-claim the same card (or have the id restored
+     * before this card re-renders), in which case nothing changes and the imperative
+     * `setVolume(0)` left by the blur cleanup is never reversed. A focus epoch always
+     * changes, so this re-asserts unconditionally.
+     *
+     * `resume()` is called as well as `setVolume()`: on ColorOS a still-paused ExoPlayer
+     * ignores the volume update, which is the "icon says unmuted but the clip is dead"
+     * state. The rAF retry covers a player whose TextureView is still attaching.
+     */
+    useEffect(() => {
+        if (mode !== 'feed' || !video) return;
+        if (!isAudible) return;
+        let cancelled = false;
+        const force = () => {
+            if (cancelled) return;
+            const player = feedVideoRef.current as {
+                setVolume?: (n: number) => void;
+                resume?: () => void;
+                pause?: () => void;
+            } | null;
+            if (!player) return;
+            try {
+                player.setVolume?.(soundOn ? 1 : 0);
+                if (soundOn) player.resume?.();
+                else player.pause?.();
+            } catch {
+                /* ColorOS ExoPlayer can already be released */
+            }
+        };
+        force();
+        // One more pass next frame: the TextureView may attach its ref after this commit.
+        const id = requestAnimationFrame(force);
+        return () => {
+            cancelled = true;
+            cancelAnimationFrame(id);
+        };
+    }, [focusEpoch, isAudible, mode, soundOn, video]);
+
     useEffect(() => {
         if (!posterUriForSize) return;
         let cancelled = false;
@@ -726,6 +850,66 @@ const FeedPostMedia = React.memo(
         Boolean(onOpenScenes) &&
         !hideOverlayChrome;
     const showMuteButton = video && mode === 'feed' && isFeedAutoplayActive && !hideOverlayChrome;
+
+    /* ------------------------------------------------------------------ *
+     * Fullscreen tap-to-pause feedback
+     *
+     * Mirrors the Scenes viewer pill: Reanimated drives the whole animation on the UI
+     * thread so the badge lands on the very next frame and the imperative pause() is
+     * not waiting on a React commit.
+     * ------------------------------------------------------------------ */
+    const playPauseOpacity = useSharedValue(0);
+    const playPauseScale = useSharedValue(1);
+    const playPauseIsPaused = useSharedValue(false);
+    const playPauseHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const showPlayPausePill = useCallback(() => {
+        playPauseIsPaused.value = expandedUserPaused;
+        playPauseScale.value = 0.8;
+        playPauseOpacity.value = withTiming(1, { duration: 120 });
+        playPauseScale.value = withTiming(1, { duration: 180 });
+        if (playPauseHoldTimerRef.current) clearTimeout(playPauseHoldTimerRef.current);
+        playPauseHoldTimerRef.current = setTimeout(() => {
+            playPauseOpacity.value = withDelay(60, withTiming(0, { duration: 200 }));
+        }, 400);
+    }, [expandedUserPaused, playPauseIsPaused, playPauseOpacity, playPauseScale]);
+
+    const playPausePillStyle = useAnimatedStyle(() => ({
+        opacity: playPauseOpacity.value,
+        transform: [{ scale: playPauseScale.value }],
+    }));
+    const playPausePlayGlyphStyle = useAnimatedStyle(() => ({
+        opacity: playPauseIsPaused.value ? 1 : 0,
+    }));
+    const playPausePauseGlyphStyle = useAnimatedStyle(() => ({
+        opacity: playPauseIsPaused.value ? 0 : 1,
+    }));
+
+    useEffect(() => {
+        return () => {
+            if (playPauseHoldTimerRef.current) clearTimeout(playPauseHoldTimerRef.current);
+        };
+    }, []);
+
+    /**
+     * Single tap while this card owns the fullscreen viewport toggles play/pause.
+     *
+     * This used to fall through to `handleFullscreen()`, which *collapsed* the card —
+     * so a tap in fullscreen could never pause anything. Collapse now lives only on the
+     * swipe-down dismiss pan.
+     */
+    const handleExpandedTapPause = useCallback(() => {
+        const next = !expandedUserPaused;
+        setExpandedUserPaused(next);
+        playPauseIsPaused.value = next;
+        try {
+            if (next) feedVideoRef.current?.pause?.();
+            else feedVideoRef.current?.resume?.();
+        } catch {
+            /* ColorOS ExoPlayer can already be released */
+        }
+        showPlayPausePill();
+    }, [expandedUserPaused, feedVideoRef, playPauseIsPaused, showPlayPausePill]);
 
     useEffect(() => {
         if (suspendNativeVideo) {
@@ -918,13 +1102,157 @@ const FeedPostMedia = React.memo(
     /** Native Image/Video steal touches on Android — never let them take the responder in feed. */
     const mediaPointerEvents = feedTapCapture ? ('none' as const) : undefined;
 
+    /**
+     * Full-screen expand.
+     *
+     * Only the card that owns the mounted player may expand (`slideMountVideo`),
+     * which guarantees the thing we animate is the thing that is playing — no
+     * second ExoPlayer, so nothing re-buffers and the ColorOS double-audio scar
+     * cannot recur.
+     *
+     * The style is transform-only on purpose. Animating width/height would
+     * re-lay-out the TextureView every frame, and this app has already seen a 1px
+     * layout drift remount ExoPlayer (see `onFrameLayout`). Nothing here changes
+     * layout, so `onLayout` never fires and the player is untouched.
+     */
+    const mediaCardRef = useRef<View>(null);
+    const window = useWindowDimensions();
+    /** Pixels of downward travel that map to a full collapse. */
+    const dismissTravelPx = window.height * 0.55;
+    // Body-scope twin of `slideMountVideo`, which is declared inside renderSlide
+    // and so is not visible here. `isAudible` is the load-bearing term: it is
+    // exactly the condition that keeps this card as the single mounted player.
+    const canExpandCard =
+        mode === 'feed' && Boolean(video) && isAudible && textureMountAllowed && !playFailed;
+    const [expandTarget, setExpandTarget] = useState<FeedExpandTarget | null>(null);
+    const isExpanding = expandTarget != null && expandTarget.postId === String(post.id);
+
+    // Leaving fullscreen drops the user pause so the card rejoins the feed playing.
+    // Keyed on `isExpanding` rather than `expandTarget` so it also clears when another
+    // card takes over the viewport.
+    useEffect(() => {
+        if (!isExpanding) setExpandedUserPaused(false);
+    }, [isExpanding]);
+
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedExpand(setExpandTarget);
+    }, [mode]);
+
+    const expandProgress = getFeedExpandProgress();
+
+    const expandCardRef = getFeedExpandCard();
+    const expandScreenRef = getFeedExpandScreen();
+    const expandTargetPostIdRef = getFeedExpandTargetPostId();
+    // Captured as a plain string, not React state: the style must be able to
+    // decide "am I the target?" without waiting for a commit, while still
+    // ignoring the global mirrors when a sibling owns the morph.
+    const expandPostId = String(post.id);
+
+    /**
+     * Reads the UI-thread mirrors, NOT `isExpanding`. There is deliberately no
+     * React state in this closure: a worklet that captured component state would
+     * not re-run until React re-rendered, which is precisely the freeze we are
+     * removing. The morph is now startable from the tap worklet itself.
+     */
+    const expandAnimatedStyle = useAnimatedStyle((): ViewStyle => {
+        // The mirrors are global, so every mounted card sees them. Bail unless
+        // this card is the one being expanded, otherwise a tap would scale every
+        // visible sibling to full screen and lift them all to zIndex 100.
+        if (!isExpandTargetCard(expandPostId, expandTargetPostIdRef.value)) {
+            return { transform: [{ translateX: 0 }, { translateY: 0 }, { scale: 1 }] };
+        }
+        const card = expandCardRef.value;
+        const screen = expandScreenRef.value;
+        if (!card || !screen) {
+            return { transform: [{ translateX: 0 }, { translateY: 0 }, { scale: 1 }] };
+        }
+        const next = computeExpandTransform(expandProgress.value, card, screen);
+        return {
+            transform: [
+                { translateX: next.translateX },
+                { translateY: next.translateY },
+                { scale: next.scale },
+            ],
+            // Lift above sibling cards. Android needs elevation as well as zIndex
+            // for a view to paint over its neighbours.
+            zIndex: 100,
+            elevation: 100,
+        };
+    }, []);
+
+    /**
+     * JS-thread mirror of the module's cached rect, kept in sync after each
+     * measure. Plain objects (not refs) so the gesture worklet can capture them;
+     * `armAndExpandOnUIThread` re-validates them against the module's own cache
+     * and the live scroll offset before using them.
+     */
+    const [expandCachedCard, setExpandCachedCard] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const [expandCachedScreen, setExpandCachedScreen] = useState<{ width: number; height: number } | null>(null);
+
+    /**
+     * Measure + cache. Called ahead of the tap so the gesture worklet can arm
+     * without a bridge round trip. `scrollYAtMeasure` stamps the rect; the
+     * worklet refuses the fast path if the list has moved since.
+     */
+    const measureAndCache = useCallback(() => {
+        const node = mediaCardRef.current;
+        if (!node || typeof node.measureInWindow !== 'function') return;
+        node.measureInWindow((x, y, w, h) => {
+            if (w <= 0 || h <= 0) return;
+            const rect = { x, y, width: w, height: h };
+            const screen = { width: window.width, height: window.height };
+            cacheFeedExpandCard(rect, screen, getFeedUiThreadScrollY());
+            setExpandCachedCard(rect);
+            setExpandCachedScreen(screen);
+        });
+    }, [window.height, window.width]);
+
+    // Pre-measure whenever this card becomes the one holding the player, and
+    // again after any re-layout. By tap time the rect is already on the UI
+    // thread, so the morph can start inside the gesture worklet.
+    useEffect(() => {
+        if (!canExpandCard) return;
+        measureAndCache();
+    }, [canExpandCard, measureAndCache]);
+
+    const beginExpand = useCallback(() => {
+        const node = mediaCardRef.current;
+        if (!node || typeof node.measureInWindow !== 'function') return;
+        node.measureInWindow((x, y, w, h) => {
+            if (!canExpandCard || w <= 0 || h <= 0) return;
+            armFeedExpand({
+                postId: String(post.id),
+                card: { x, y, width: w, height: h },
+                screen: { width: window.width, height: window.height },
+            });
+        });
+    }, [canExpandCard, post.id, window.height, window.width]);
+
+    const collapse = useCallback(() => {
+        runFeedCollapseAnimation();
+    }, []);
+
+    // Only a card with the live player can expand, and only in the feed.
+
     const handleFullscreen = useCallback(() => {
+        // Tapping an already-expanded card collapses it back to its feed position.
+        if (isExpanding) {
+            collapse();
+            return;
+        }
+        // Only the card holding the mounted player expands. Anything else falls
+        // through to the normal tap behaviour (navigating to the detail screen).
+        if (canExpandCard) {
+            beginExpand();
+            return;
+        }
         if (onPress && !onDoubleLike && !onSingleTap) {
             onPress();
             return;
         }
         onSingleTap?.();
-    }, [onDoubleLike, onPress, onSingleTap]);
+    }, [beginExpand, canExpandCard, collapse, isExpanding, onDoubleLike, onPress, onSingleTap]);
 
     const handleDoubleLikeAt = useCallback(
         (localX?: number, localY?: number) => {
@@ -943,10 +1271,56 @@ const FeedPostMedia = React.memo(
             if (tapY > frameH - 56 && (tapX > frameW - 56 || tapX < 160)) {
                 return;
             }
+            // Already fullscreen: the tap is a play/pause toggle, not a collapse.
+            if (isExpanding) {
+                handleExpandedTapPause();
+                return;
+            }
             handleFullscreen();
         },
-        [handleFullscreen, height, width],
+        [handleExpandedTapPause, handleFullscreen, height, isExpanding, width],
     );
+
+    /**
+     * Swipe-down dismiss.
+     *
+     * Only mounted while expanded, and it drives the SAME progress shareable the
+     * style reads, so the card tracks the finger 1:1 with no JS per frame. On
+     * release, a short drag snaps back to full screen and a long one animates all
+     * the way back to the card frame — the player is never detached either way.
+     */
+    const dismissPanGesture = useMemo(
+        () =>
+            isExpanding
+                ? Gesture.Pan()
+                      .activeOffsetY(12)
+                      // Ignore mostly-horizontal drags so they still read as
+                      // "nope" rather than hijacking a swipe.
+                      .failOffsetX([-40, 40])
+                      .onBegin(beginFeedExpandDrag)
+                      .onUpdate((e: any) => {
+                          'worklet';
+                          dragFeedExpand(e.translationY || 0, dismissTravelPx);
+                      })
+                      .onEnd(() => {
+                          'worklet';
+                          // runFeedCollapseAnimation is a module import, so the
+                          // worklet closure captures it safely.
+                          if (endFeedExpandDrag()) runOnJS(runFeedCollapseAnimation)();
+                      })
+                : null,
+        [dismissTravelPx, isExpanding],
+    );
+
+    /**
+     * Worklet-safe mirrors. A `ref` cannot be read inside a worklet (the closure
+     * would capture a snapshot), so the values the gesture needs live in plain
+     * objects re-created on each render, which Reanimated re-captures for us.
+     * (`expandPostId` is declared above, next to the animated style that also
+     * needs it, so there is a single source for this render.)
+     */
+    const expandIsExpanding = { value: isExpanding };
+    const expandFastPathEnabled = canExpandCard;
 
     const mediaTapGesture = useMemo(() => {
         const doubleTap = Gesture.Tap()
@@ -970,6 +1344,24 @@ const FeedPostMedia = React.memo(
             .onEnd((e, success) => {
                 'worklet';
                 if (!success) return;
+                // Fast path, entirely on the UI thread: arm the transform and
+                // start the flight now, so the morph begins on the next frame
+                // instead of after measureInWindow + a React commit. `runOnJS`
+                // below is scheduled, so it cannot delay this.
+                if (
+                    expandFastPathEnabled &&
+                    expandCachedCard != null &&
+                    expandCachedScreen != null &&
+                    !expandIsExpanding.value &&
+                    armAndExpandOnUIThread(
+                        expandPostId,
+                        expandCachedCard,
+                        expandCachedScreen,
+                        getFeedUiThreadScrollY(),
+                    )
+                ) {
+                    return;
+                }
                 runOnJS(handleMediaTapSingle)(e.x, e.y);
             });
         const taps = Gesture.Exclusive(doubleTap, singleTap);
@@ -977,7 +1369,31 @@ const FeedPostMedia = React.memo(
             return Gesture.Simultaneous(Gesture.Native(), taps);
         }
         return taps;
-    }, [feedTapCapture, handleDoubleLikeAt, handleMediaTapSingle, hasCarousel]);
+    }, [
+        canExpandCard,
+        expandCachedCard,
+        expandCachedScreen,
+        expandPostId,
+        feedTapCapture,
+        handleDoubleLikeAt,
+        handleMediaTapSingle,
+        hasCarousel,
+        isExpanding,
+    ]);
+
+    /**
+     * Composed so the dismiss pan only exists while expanded. While collapsed the
+     * vertical drag must reach the feed list, not a hidden pan recogniser — hence
+     * this is not an `Gesture.Simultaneous` with an always-on pan.
+     */
+    const composedFeedMediaGesture = useMemo(
+        () =>
+            dismissPanGesture
+                ? Gesture.Exclusive(dismissPanGesture, mediaTapGesture)
+                : mediaTapGesture,
+        [dismissPanGesture, mediaTapGesture],
+    );
+
 
     const handleOpenScenesPress = useCallback(() => {
         onOpenScenes?.();
@@ -1003,8 +1419,12 @@ const FeedPostMedia = React.memo(
             if (nextH > 0) {
                 setPageHeight((prev) => (Math.abs(prev - nextH) > 1 ? nextH : prev));
             }
+            // A re-layout invalidates the cached window-space rect the fast path
+            // relies on, so re-measure. Width/height never change during the morph
+            // itself (transform-only), so this cannot fire mid-transition.
+            if (canExpandCard) measureAndCache();
         },
-        [fillViewport, height, width],
+        [canExpandCard, fillViewport, height, measureAndCache, width],
     );
 
     if (textOnly) {
@@ -1067,8 +1487,17 @@ const FeedPostMedia = React.memo(
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
     const isSquareFrame = height > 0 && width > 0 && Math.abs(height - width) < 8;
-    const mediaFit = isSquareFrame || !isLandscapeMedia ? 'cover' : 'contain';
-    const clipRadius = isSquareFrame ? FEED_UI.media.videoRadius : 0;
+    // Feed videos always sit in a fixed 4:5 portrait box from FeedScreen — cover-crop
+    // so landscape/square sources do not shrink the card (Stories-adjacent recycle).
+    const mediaFit =
+        mode === 'feed' && video
+            ? 'cover'
+            : isSquareFrame || !isLandscapeMedia
+              ? 'cover'
+              : 'contain';
+    // Radius follows the card, not squareness: the video frame is a 4:5 portrait box
+    // now, so `isSquareFrame` alone would strip the rounded corners off every video.
+    const clipRadius = isSquareFrame || (mode === 'feed' && video) ? FEED_UI.media.videoRadius : 0;
     const frameBoxStyle = fillViewport
         ? {
               width: '100%' as const,
@@ -1077,7 +1506,8 @@ const FeedPostMedia = React.memo(
           }
         : {
               width: '100%' as const,
-              height,
+              // Fill the parent 4:5 box from FeedScreen — do not re-derive height here.
+              height: mode === 'feed' && video ? ('100%' as const) : height,
               overflow: 'hidden' as const,
               borderRadius: clipRadius,
           };
@@ -1156,6 +1586,9 @@ const FeedPostMedia = React.memo(
         // React "scroll busy" flag — that stuck true and left the visible card silent
         // while a destroyed previous ExoPlayer kept leaking audio on ColorOS.
         const feedShouldPlay = mode === 'feed' && isAudible && feedPlaybackAllowed;
+        // A user pause from a fullscreen tap overrides autoplay, and volume/repeat/mute
+        // follow it so ExoPlayer is genuinely stopped rather than left looping silent.
+        const videoShouldPlay = feedShouldPlay && !expandedUserPaused;
 
         return (
             <View style={styles.slideFill} collapsable={false}>
@@ -1164,10 +1597,10 @@ const FeedPostMedia = React.memo(
                         key={String(post.id)}
                         remountEpoch={playerEpoch}
                         source={cachedVideoSource}
-                        paused={mode === 'detail' ? paused : !feedShouldPlay}
-                        muted={mode === 'feed' ? !feedShouldPlay || !soundOn : false}
-                        volume={mode === 'detail' ? 1 : feedShouldPlay && soundOn ? 1 : 0}
-                        repeat={mode === 'feed' && feedShouldPlay}
+                        paused={mode === 'detail' ? paused : !videoShouldPlay}
+                        muted={mode === 'feed' ? !videoShouldPlay || !soundOn : false}
+                        volume={mode === 'detail' ? 1 : videoShouldPlay && soundOn ? 1 : 0}
+                        repeat={mode === 'feed' && videoShouldPlay}
                         posterUri={slidePosterUri}
                         resizeMode={fillViewport ? 'contain' : mediaFit}
                         boxWidth={slideWidth}
@@ -1183,6 +1616,10 @@ const FeedPostMedia = React.memo(
                             onFirstFrameReady();
                         }}
                         onLoad={(meta) => {
+                            // A player that remounted (focus/TextureView churn) starts from
+                            // whatever the imperative blur cleanup left behind, so re-assert
+                            // the visual mute state as soon as it reports ready.
+                            syncFeedPlayerVolume();
                             const seekTo =
                                 pendingSeekRef.current ??
                                 stickyResumeTimeRef.current ??
@@ -1333,15 +1770,16 @@ const FeedPostMedia = React.memo(
     );
 
     const mediaCard = (
-        <View
-            style={[styles.wrap, frameStyle, style]}
+        <AnimatedFeedMediaCard
+            ref={mediaCardRef}
+            style={[styles.wrap, frameStyle, style, expandAnimatedStyle]}
             collapsable={false}
             onLayout={onFrameLayout}
             accessibilityRole={feedTapCapture ? 'button' : undefined}
             accessibilityLabel={feedTapCapture ? 'Double tap to like' : undefined}
         >
             {feedTapCapture ? (
-                <GestureDetector gesture={mediaTapGesture}>
+                <GestureDetector gesture={composedFeedMediaGesture}>
                     <View style={styles.slideFill} collapsable={false}>
                         {mediaBody}
                     </View>
@@ -1401,8 +1839,21 @@ const FeedPostMedia = React.memo(
                 {burstAt ? (
                     <FeedDoubleTapLikeBurst key={burstKey} centered />
                 ) : null}
+                {/* Centre play/pause feedback for the fullscreen tap. The layer only
+                    centres; the badge carries the animated opacity/scale so the
+                    full-screen view itself is never transformed. */}
+                <View style={styles.playPausePillLayer} pointerEvents="none">
+                    <Reanimated.View style={[styles.playPausePill, playPausePillStyle]}>
+                        <Reanimated.View style={[styles.playPauseGlyph, playPausePlayGlyphStyle]}>
+                            <Icon name="play" size={30} color="#FFFFFF" />
+                        </Reanimated.View>
+                        <Reanimated.View style={[styles.playPauseGlyph, playPausePauseGlyphStyle]}>
+                            <Icon name="pause" size={30} color="#FFFFFF" />
+                        </Reanimated.View>
+                    </Reanimated.View>
+                </View>
             </View>
-        </View>
+        </AnimatedFeedMediaCard>
     );
 
     return mediaCard;
@@ -1427,6 +1878,7 @@ const FeedPostMedia = React.memo(
             prev.suspendNativeVideo === next.suspendNativeVideo &&
             prev.hideOverlayChrome === next.hideOverlayChrome &&
             prev.fillViewport === next.fillViewport &&
+            prev.focusEpoch === next.focusEpoch &&
             prev.carouselIndex === next.carouselIndex &&
             Boolean(prev.onLikeBurst) === Boolean(next.onLikeBurst) &&
             Boolean(prev.onDoubleLike) === Boolean(next.onDoubleLike) &&
@@ -1555,6 +2007,24 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         zIndex: 999,
         overflow: 'hidden',
+    },
+    playPausePillLayer: {
+        ...StyleSheet.absoluteFill,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    playPausePill: {
+        width: 76,
+        height: 76,
+        borderRadius: 38,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    playPauseGlyph: {
+        ...StyleSheet.absoluteFill,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     videoErrorTitle: {
         marginTop: 8,

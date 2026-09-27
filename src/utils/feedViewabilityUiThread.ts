@@ -75,7 +75,19 @@ export function setFeedUiThreadViewportHeight(h: number): void {
     if (Number.isFinite(h) && h > 0) viewportHeight.value = h;
 }
 
+/**
+ * Read the scroll offset from the UI thread.
+ *
+ * Marked as a worklet for the same reason as `setFeedUiThreadScrollY` above: the
+ * fast-path tap handler in `FeedPostMedia` needs the offset *synchronously* to
+ * work out the expand offset, before it can decide whether to arm the morph.
+ * `runOnJS` is not an option here — it schedules onto the JS thread and returns
+ * `undefined` on the UI thread, so it cannot hand a number back to the worklet.
+ * Without the directive this throws "Tried to synchronously call a non-worklet
+ * function on the UI thread" the first time a card is tapped to expand.
+ */
 export function getFeedUiThreadScrollY(): number {
+    'worklet';
     return scrollY.value;
 }
 

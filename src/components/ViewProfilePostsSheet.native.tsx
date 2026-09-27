@@ -23,6 +23,23 @@ import { incrementViews, toggleLike } from '../api/posts';
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import { getGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
+import {
+    resolveViewerStartIndex,
+    resolveViewerStartPost,
+    shouldDeferViewabilityActivation,
+} from '../utils/profilePostsViewerIndex';
+
+/** How long the tapped post holds the active slot before viewability takes over. */
+const VIEWER_START_HOLD_MS = 900;
+
+/** Topmost visible video post id in a viewability report. */
+function viewabilityVideoPost(viewableItems: Array<ViewToken>): string | null {
+    const videos = viewableItems
+        .filter((token) => token.isViewable && token.item && postHasVideoMedia(token.item as Post))
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const item = videos[0]?.item as Post | undefined;
+    return item ? String(item.id) : null;
+}
 
 type Props = {
     visible: boolean;
@@ -58,6 +75,17 @@ export default function ViewProfilePostsSheet({
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
     const activeVideoPostIdRef = useRef<string | null>(null);
     activeVideoPostIdRef.current = activeVideoPostId;
+    /** Tapped post that must win the active slot before viewability is trusted. */
+    const pendingStartPostIdRef = useRef<string | null>(null);
+    /** Retry handle for a failed scrollToIndex (variable-height rows). */
+    const scrollRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(
+        () => () => {
+            if (scrollRetryRef.current != null) clearTimeout(scrollRetryRef.current);
+        },
+        [],
+    );
 
     const activateVideo = useCallback((postId: string | null) => {
         const next = postId ? String(postId) : null;
@@ -84,26 +112,41 @@ export default function ViewProfilePostsSheet({
     useEffect(() => {
         if (!visible || feedPosts.length === 0) return;
         if (activeVideoPostIdRef.current) return;
-        const tapped = initialPostId
-            ? feedPosts.find((p) => String(p.id) === String(initialPostId))
-            : feedPosts[0];
-        if (tapped && postHasVideoMedia(tapped)) {
-            activateVideo(String(tapped.id));
-            return;
+        // Resolve against the array the list actually renders, never a global/parent
+        // ordering, so the activated clip is the one the user tapped.
+        const start = resolveViewerStartPost(feedPosts, initialPostId, postHasVideoMedia);
+        // Hold viewability back until the list has settled on the tapped post,
+        // otherwise the first-rendered card claims the active slot.
+        if (initialPostId) {
+            pendingStartPostIdRef.current = String(initialPostId);
         }
-        const firstVideo = feedPosts.find((p) => postHasVideoMedia(p));
-        activateVideo(firstVideo ? String(firstVideo.id) : null);
+        activateVideo(start ? String(start.id) : null);
     }, [activateVideo, visible, initialPostId, feedPosts]);
 
     useEffect(() => {
         if (!visible || !initialPostId || feedPosts.length === 0) return;
-        const index = feedPosts.findIndex((p) => String(p.id) === String(initialPostId));
-        if (index <= 0) return;
+        const index = resolveViewerStartIndex(feedPosts, initialPostId);
+        if (index < 0) return;
         const t = setTimeout(() => {
             listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
         }, 120);
         return () => clearTimeout(t);
     }, [visible, initialPostId, feedPosts]);
+
+    // Release the viewability hold if the list never reports the tapped post
+    // (failed scroll / very long list), otherwise the viewer would stay frozen.
+    useEffect(() => {
+        if (!visible || !initialPostId) return;
+        const t = setTimeout(() => {
+            pendingStartPostIdRef.current = null;
+        }, VIEWER_START_HOLD_MS);
+        return () => clearTimeout(t);
+    }, [visible, initialPostId]);
+
+    useEffect(() => {
+        if (visible) return;
+        pendingStartPostIdRef.current = null;
+    }, [visible]);
 
     const viewabilityConfig = useRef({
         itemVisiblePercentThreshold: 60,
@@ -112,11 +155,14 @@ export default function ViewProfilePostsSheet({
 
     const onViewableItemsChanged = useRef(
         ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
-            const visibleVideos = viewableItems
-                .filter((token) => token.isViewable && token.item && postHasVideoMedia(token.item as Post))
-                .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-            const next = visibleVideos[0]?.item as Post | undefined;
-            if (next) activateVideo(String(next.id));
+            const visibleVideos = viewabilityVideoPost(viewableItems);
+            const next = visibleVideos;
+            if (shouldDeferViewabilityActivation(pendingStartPostIdRef.current, next)) return;
+            // The list caught up with the tapped post; hand control back to viewability.
+            if (pendingStartPostIdRef.current != null && next != null) {
+                pendingStartPostIdRef.current = null;
+            }
+            if (next) activateVideo(next);
         },
     ).current;
 
@@ -194,10 +240,20 @@ export default function ViewProfilePostsSheet({
                         viewabilityConfig={viewabilityConfig}
                         onViewableItemsChanged={onViewableItemsChanged}
                         onScrollToIndexFailed={(info) => {
-                            listRef.current?.scrollToOffset({
+                            // FeedCard heights vary, so averageItemLength is only an
+                            // estimate. Approximate first, then retry the exact index
+                            // once the rows around it have rendered.
+                            const list = listRef.current;
+                            if (!list) return;
+                            list.scrollToOffset({
                                 offset: Math.max(0, info.averageItemLength * info.index),
                                 animated: false,
                             });
+                            if (scrollRetryRef.current != null) clearTimeout(scrollRetryRef.current);
+                            scrollRetryRef.current = setTimeout(() => {
+                                scrollRetryRef.current = null;
+                                list.scrollToIndex({ index: info.index, animated: false, viewPosition: 0 });
+                            }, 120);
                         }}
                         renderItem={({ item }) => (
                             <View style={{ overflow: 'hidden', flexDirection: 'column', position: 'relative' }}>

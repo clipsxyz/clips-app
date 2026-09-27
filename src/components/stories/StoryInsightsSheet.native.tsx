@@ -16,6 +16,7 @@ import { getAvatarForHandle } from '../../api/users';
 import type { Story } from '../../types';
 import { timeAgo } from '../../utils/timeAgo';
 import GazetteerBottomSheetModal, { GAZETTEER_SHEET_CHARCOAL } from '../GazetteerBottomSheetModal.native';
+import { ignoreAbort } from '../../utils/abortSafe';
 
 type Props = {
     visible: boolean;
@@ -71,7 +72,7 @@ export default function StoryInsightsSheet({
     useEffect(() => {
         if (!visible || tab !== 'viewers' || !currentUserId) return;
         let cancelled = false;
-        void getFollowedUsers(currentUserId).then((followed) => {
+        ignoreAbort(getFollowedUsers(currentUserId).then((followed) => {
             if (cancelled) return;
             const followedSet = new Set((followed || []).map((h) => (h || '').toLowerCase()));
             const next: Record<string, boolean> = {};
@@ -81,7 +82,7 @@ export default function StoryInsightsSheet({
                     norm === currentUserHandle.toLowerCase() || followedSet.has(norm);
             });
             setViewerFollowMap(next);
-        });
+        }));
         return () => {
             cancelled = true;
         };

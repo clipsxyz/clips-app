@@ -90,7 +90,7 @@ import {
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
 import { loadFeedVideoPrebufferConfig, collectFeedVideoPrefetchUris, prebufferFeedVideos } from '../utils/prefetchFeedVideoNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, setFeedVideoPlayingAtY, setFeedPlaybackAllowed, setFeedTextureMountAllowed } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, getActiveFeedVideoPostId, haltFeedPlayback, haltFeedPlaybackIfScrolled, releaseFeedPlaybackOnBlur, setFeedVideoPlayingAtY, setFeedPlaybackAllowed, setFeedTextureMountAllowed, restoreFeedPlaybackAfterFocus } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import {
     assignRef,
@@ -116,6 +116,7 @@ import {
 } from '../utils/scenesViewerActiveNative';
 import {
     getGlobalVideoMutedNative,
+    getCachedGlobalVideoMutedNative,
     setGlobalVideoMutedNative,
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
@@ -329,6 +330,7 @@ import { fetchSuggestedPostsByPlaces, transformLaravelPost } from '../api/posts'
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
 import { ox } from '../constants/nativeOpticalScale';
+import { getFeedExpandPostId, resetFeedExpandForNavigation, subscribeFeedExpand } from '../utils/feedFullscreenExpandNative';
 
 type Tab = string;
 
@@ -1040,6 +1042,7 @@ const FeedCard = React.memo(function FeedCard({
     scenesExpanding = false,
     scenesExpandProgress,
     scenesExpandOrigin,
+    focusEpoch,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -1085,6 +1088,13 @@ const FeedCard = React.memo(function FeedCard({
     scenesExpanding?: boolean;
     scenesExpandProgress?: import('react-native-reanimated').SharedValue<number>;
     scenesExpandOrigin?: FeedScenesOrigin | null;
+    /**
+     * Bumped by FeedScreen on every focus return and forwarded to the card's player.
+     * Lives here rather than being closed over because FeedCard is a separate
+     * component scope, and this file is `@ts-nocheck` so a missing declaration
+     * would only surface as a runtime ReferenceError.
+     */
+    focusEpoch?: number;
 }) {
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
@@ -1124,13 +1134,15 @@ const FeedCard = React.memo(function FeedCard({
     const mediaInset = isVideoPostCard ? FEED_UI.media.videoInset : 0;
     const mediaRadius = isVideoPostCard ? FEED_UI.media.videoRadius : 0;
     const innerMediaWidth = Math.max(1, cardMediaWidth - mediaInset * 2);
+    // Videos: always 4:5 (`videoPortraitAspect`). Do not pass natural size — FlashList
+    // recycle / Stories-adjacent measure used to shrink later cards into a square.
     const mediaFrameHeight = Math.round(
         feedCardMediaHeight(
             innerMediaWidth,
             safePositiveLayoutNumber(windowHeight, 720),
             postHasVideoMedia(post),
-            isLandscapeMedia,
-            mediaWidthOverHeight,
+            !postHasVideoMedia(post) && isLandscapeMedia,
+            postHasVideoMedia(post) ? undefined : mediaWidthOverHeight,
         ),
     );
 
@@ -1350,13 +1362,19 @@ const FeedCard = React.memo(function FeedCard({
                         >
                         <View
                             style={{
-                                width: isVideoPostCard ? mediaFrameHeight : '100%',
+                                // Every feed video shares one 4:5 portrait box + 16px inset,
+                                // including cards rendered after Stories 24 / widgets.
+                                width: isVideoPostCard ? innerMediaWidth : '100%',
                                 height: mediaFrameHeight,
                                 maxHeight: mediaFrameHeight,
+                                // RN aspectRatio is width/height → 4/5 portrait.
+                                ...(isVideoPostCard ? { aspectRatio: 4 / 5 } : null),
                                 overflow: 'hidden',
                                 backgroundColor: '#000000',
                                 alignSelf: 'center',
                                 borderRadius: mediaRadius,
+                                borderWidth: 1,
+                                borderColor: 'rgba(255, 255, 255, 0.08)',
                             }}
                             ref={mediaWrapRef}
                             collapsable={false}
@@ -1365,9 +1383,10 @@ const FeedCard = React.memo(function FeedCard({
                                 ref={videoMediaRef}
                                 post={post}
                                 carouselIndex={carouselIndex}
+                                focusEpoch={focusEpoch}
                                 onCarouselIndexChange={setCarouselIndex}
                                 stickers={post.stickers}
-                                width={isVideoPostCard ? mediaFrameHeight : cardMediaWidth}
+                                width={isVideoPostCard ? innerMediaWidth : cardMediaWidth}
                                 height={mediaFrameHeight}
                                 onNaturalSize={handleNaturalSize}
                                 onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
@@ -1396,7 +1415,7 @@ const FeedCard = React.memo(function FeedCard({
                             />
                             {isVideoPostCard ? (
                                 <FeedMediaRoundFrame
-                                    width={mediaFrameHeight}
+                                    width={innerMediaWidth}
                                     height={mediaFrameHeight}
                                     radius={mediaRadius}
                                     color={FEED_PAGE_BG}
@@ -1609,6 +1628,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [scenesViewerActive, setScenesViewerActiveState] = useState(false);
     const scenesExpandProgress = useSharedValue(0);
     const [scenesOverlay, setScenesOverlay] = useState(null);
+    /**
+     * Full-screen video expand.
+     *
+     * The feed must not scroll while a card is morphed to full screen: a scroll
+     * would move the very frame the card is animating back to, and FlashList
+     * recycling would unmount the player mid-flight. `expandSettled` stays true
+     * until the collapse animation has actually landed, so interaction is not
+     * restored on the first frame of the way back.
+     */
+    const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
+    useEffect(() => {
+        setExpandedPostId(getFeedExpandPostId());
+        return subscribeFeedExpand((t) => setExpandedPostId(t ? t.postId : null));
+    }, []);
+    const expandBlocksScroll = expandedPostId != null;
     useEffect(() => {
         // Overlay session is module-level and survives Fast Refresh. A leftover
         // session locks the feed (no scroll, no tab bar) with nothing to close.
@@ -2109,6 +2143,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     feedAutoplayAllowedRef.current = feedAutoplayAllowed;
 
     const isFeedFocusedRef = useRef(true);
+    /** Bumped on every focus return; drives per-card native audio re-assertion. */
+    const [feedFocusEpoch, setFeedFocusEpoch] = useState(0);
 
     const scenesViewerActiveRef = useRef(scenesViewerActive);
     scenesViewerActiveRef.current = scenesViewerActive;
@@ -2192,6 +2228,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             feedScrollingRef.current = false;
             setFeedScrollBusy(false);
             scheduleActiveFeedVideoRef.current(resumeId, true);
+            // Re-claim halts every player (imperative setVolume(0) + pause). When the
+            // card kept its React props across the blur round-trip, React forwards no
+            // new paused/muted/volume value, so re-assert them here or the feed
+            // returns silent and the first sound tap only re-mutes.
+            restoreFeedPlaybackAfterFocus(getCachedGlobalVideoMutedNative());
             setTimeout(() => {
                 suppressFeedViewabilityRef.current = false;
             }, 220);
@@ -2389,6 +2430,36 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         },
     ]);
 
+    /**
+     * Single blur path for the feed.
+     *
+     * The two `useFocusEffect` cleanups below used to be copies of each other,
+     * which is how they drifted. They now share this one implementation so a
+     * navigation-away can never take a different path than a tab switch.
+     *
+     * `releaseFeedPlaybackOnBlur` is the important call: it halts every
+     * registered player AND clears the active id, releasing the single-player
+     * slot. It also re-opens the global `playbackAllowed` flag, because closing
+     * it here (as this code used to) permanently blocked ProfileScreen and
+     * ViewProfilePostsSheet from ever claiming the slot — their videos stayed
+     * silent and the feed kept the id. The feed stays frozen across the blur by
+     * `isFeedFocusedRef`, which makes its viewability scheduler bail out.
+     *
+     * The expand mirrors are dropped too, so returning to the feed never finds
+     * a card parked mid-morph behind a screen transition.
+     */
+    const handleFeedBlur = useCallback(() => {
+        if (autoplayTimerRef.current) {
+            clearTimeout(autoplayTimerRef.current);
+            autoplayTimerRef.current = null;
+        }
+        activeVideoPostIdRef.current = null;
+        isFeedFocusedRef.current = false;
+        resetFeedExpandForNavigation();
+        releaseFeedPlaybackOnBlur();
+        setFeedTextureMountAllowed(true);
+    }, []);
+
     useFocusEffect(
         useCallback(() => {
             // Scroll flags can stick true across navigations on some Android OEMs.
@@ -2396,6 +2467,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setFeedScrollBusy(false);
             suppressFeedViewabilityRef.current = false;
             isFeedFocusedRef.current = true;
+            // Bump the epoch every focus so each mounted card hard-forces its native
+            // audio session (volume + resume) on return. The card's own muted/volume
+            // props come from local `soundOn` and do not change across a blur, so
+            // without this nothing tells ExoPlayer to come back.
+            setFeedFocusEpoch((n) => n + 1);
 
             const incomingPlaceFeed =
                 (typeof route?.params?.location === 'string' && route.params.location.trim()) ||
@@ -2406,16 +2482,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 activeVideoPostIdRef.current = null;
                 haltFeedPlayback();
                 setFeedPlaybackAllowed(true);
-                return () => {
-                    if (autoplayTimerRef.current) {
-                        clearTimeout(autoplayTimerRef.current);
-                        autoplayTimerRef.current = null;
-                    }
-                    activeVideoPostIdRef.current = null;
-                    isFeedFocusedRef.current = false;
-                    setFeedPlaybackAllowed(false);
-                    setFeedTextureMountAllowed(true);
-                };
+                return handleFeedBlur;
             }
 
             setFeedPlaybackAllowed(true);
@@ -2438,6 +2505,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
             const finishRestore = () => {
                 restoreFeedVideoAfterOverlay();
+                // Safety net for the paths restoreFeedVideoAfterOverlay cannot reach
+                // itself (already-active early return, viewability re-claiming first):
+                // the re-claim silences every player before re-arming, and React only
+                // re-forwards paused/muted/volume when those props actually change.
+                // Land after the double-rAF re-arm so a return never needs a second tap.
+                setTimeout(() => {
+                    restoreFeedPlaybackAfterFocus(getCachedGlobalVideoMutedNative());
+                }, 120);
             };
 
             if (scenesReturn?.postId || pinnedY != null || restoreId) {
@@ -2450,17 +2525,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             } else {
                 finishRestore();
             }
-            return () => {
-                if (autoplayTimerRef.current) {
-                    clearTimeout(autoplayTimerRef.current);
-                    autoplayTimerRef.current = null;
-                }
-                activeVideoPostIdRef.current = null;
-                isFeedFocusedRef.current = false;
-                setFeedPlaybackAllowed(false);
-                setFeedTextureMountAllowed(true);
-            };
-        }, [pinFeedScrollSoon, restoreFeedVideoAfterOverlay, route?.params?.location])
+            return handleFeedBlur;
+        }, [handleFeedBlur, pinFeedScrollSoon, restoreFeedVideoAfterOverlay, route?.params?.location])
     );
 
     useEffect(() => {
@@ -4448,6 +4514,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     key={mergedPost.id}
                     post={mergedPost}
                     isVideoActive={false}
+                    focusEpoch={feedFocusEpoch}
                     scenesExpanding={false}
                     scenesExpandProgress={scenesExpandProgress}
                     scenesExpandOrigin={null}
@@ -5019,7 +5086,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 renderScrollComponent={renderFeedScrollComponent}
                 extraData={`${pendingUploadTick}-${refreshing}-${commentsModalOpen}-${scenesOverlay?.postId || ''}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
-                scrollEnabled={!scenesOverlay}
+                scrollEnabled={!scenesOverlay && !expandBlocksScroll}
                 onScrollBeginDrag={onFeedScrollBeginDrag}
                 onMomentumScrollBegin={onFeedMomentumScrollBegin}
                 onMomentumScrollEnd={onFeedMomentumScrollEnd}

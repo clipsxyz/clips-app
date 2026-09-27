@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { fetchLinkPreview } from '../api/linkPreview';
 import type { LinkPreview } from '../types';
 import { extractFirstHttpUrl } from '../utils/linkPreview';
+import { ignoreAbort } from '../utils/abortSafe';
 
 export function useLinkPreview(
     text: string,
@@ -22,11 +23,11 @@ export function useLinkPreview(
         let cancelled = false;
         setLoading(true);
         const timer = setTimeout(() => {
-            void fetchLinkPreview(url).then((result) => {
+            ignoreAbort(fetchLinkPreview(url).then((result) => {
                 if (cancelled) return;
                 setPreview(result);
                 setLoading(false);
-            });
+            }));
         }, debounceMs);
 
         return () => {

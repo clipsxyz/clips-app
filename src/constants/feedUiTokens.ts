@@ -16,8 +16,8 @@ const FEED_UI_BY_MODE = {
       minAspect: 3 / 4,
       /** 4:5 portrait video/image (height/width). */
       maxAspect: 5 / 4,
-      /** Square MP4 postcard (height/width). */
-      videoSquareAspect: 1,
+      /** 4:5 portrait MP4 frame (height/width) when the source size is unknown. */
+      videoPortraitAspect: 5 / 4,
       /** 16:9 landscape video (height/width). */
       videoLandscapeAspect: 9 / 16,
       /** Cap media so header + video + action bar fit in one screen. */
@@ -67,8 +67,8 @@ const FEED_UI_BY_MODE = {
       minAspect: 3 / 4,
       /** 4:5 portrait video/image (height/width). */
       maxAspect: 5 / 4,
-      /** Square MP4 postcard (height/width). */
-      videoSquareAspect: 1,
+      /** 4:5 portrait MP4 frame (height/width) when the source size is unknown. */
+      videoPortraitAspect: 5 / 4,
       /** 16:9 landscape video (height/width). */
       videoLandscapeAspect: 9 / 16,
       /** Cap media so header + video + action bar fit in one screen. */
@@ -115,7 +115,13 @@ export const FEED_UI = FEED_UI_BY_MODE[FEED_UI_MODE];
 
 /**
  * Media frame height from the feed card width.
- * Videos are a square postcard. Images keep 4:5 / landscape rules.
+ *
+ * Videos always use the fixed 4:5 portrait feed frame (`videoPortraitAspect`), so a
+ * card before or after Stories 24 / any inline widget is the same height. Adapting
+ * to natural size (or a recycled FlashList cell's stale measure) made later posts
+ * render squarish while the first postcard stayed tall.
+ *
+ * Images still honour source ratio, clamped between 3:4 and 4:5.
  */
 export function feedCardMediaHeight(
   width: number,
@@ -126,7 +132,8 @@ export function feedCardMediaHeight(
 ): number {
   let heightOverWidth = FEED_UI.media.maxAspect;
   if (isVideo) {
-    heightOverWidth = FEED_UI.media.videoSquareAspect;
+    // Exact 4:5 for every feed video — ignore natural size / landscape flags.
+    heightOverWidth = FEED_UI.media.videoPortraitAspect;
   } else if (typeof widthOverHeight === 'number' && Number.isFinite(widthOverHeight) && widthOverHeight > 0) {
     const natural = 1 / widthOverHeight;
     if (widthOverHeight > 1) {

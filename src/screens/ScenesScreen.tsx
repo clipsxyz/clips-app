@@ -1,10 +1,13 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { InteractionManager, StatusBar } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import ScenesViewer from '../components/ScenesViewer.native';
 import { setFeedVideoHandoff, peekFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { getScenesLaunchPayload, clearScenesLaunchPayload } from '../utils/scenesLaunchNative';
+import { stopScenesPlayback } from '../utils/feedScenesPlaybackNative';
+import { haltFeedPlayback } from '../utils/feedActiveVideoNative';
 import { getLocalPostById } from '../api/posts';
 import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
 
@@ -66,6 +69,50 @@ export default function ScenesScreen({ route, navigation }: any) {
     const [posts, setPosts] = useState<Post[]>(() => resolveScenesPosts(params));
     const openingPostsRef = useRef(posts);
 
+    /**
+     * Stop everything this screen is responsible for playing, synchronously.
+     *
+     * Two players can be alive at once and they are not interchangeable:
+     *
+     *  - `stopScenesPlayback` silences the viewer's own ExoPlayer, which lives
+     *    in this screen and is NOT in the feed's single-player slot store
+     *    (registering it there let the feed's scheduler pause it out from under
+     *    the user — see `feedScenesPlaybackNative`).
+     *  - `haltFeedPlayback` releases the feed card's slot so the destination
+     *    screen can claim it. Without this the profile screen mounts while the
+     *    feed still holds `activePostId`, and its own videos are refused by
+     *    `setActiveFeedVideoPostId`'s `if (next && !playbackAllowed)` guard.
+     *
+     * Called from the blur effect below AND inline before each navigation, so
+     * the teardown happens even if focus handling is late or the navigation is
+     * dispatched from inside a gesture worklet.
+     */
+    const teardownPlayback = useCallback(() => {
+        stopScenesPlayback();
+        haltFeedPlayback();
+    }, []);
+
+    /**
+     * Safety net for every exit that is not an explicit `teardownPlayback`
+     * call: swipe-down dismiss, hardware back, `goBack()` from `handleClose`,
+     * and the viewer's own `navigation.navigate('Messages', …)`.
+     *
+     * `ScenesScreen` is a real navigation screen, so losing focus is a
+     * reliable signal — unlike the old `Modal`-based overlay, where presenting
+     * it never blurred the feed and the halt never fired at all.
+     */
+    useFocusEffect(
+        useCallback(() => teardownPlayback, [teardownPlayback]),
+    );
+
+    const navigateAway = useCallback(
+        (routeName: string, routeParams?: object) => {
+            teardownPlayback();
+            navigation.navigate(routeName, routeParams);
+        },
+        [navigation, teardownPlayback],
+    );
+
     const handleClose = useCallback(
         (savedTime?: number, postId?: string, mutedState?: boolean) => {
             const initialById = new Map(
@@ -86,12 +133,15 @@ export default function ScenesScreen({ route, navigation }: any) {
                 });
             }
             clearScenesLaunchPayload();
+            // Stop before going back: the feed resumes on focus, and it should
+            // reclaim the slot from a stopped player rather than a live one.
+            teardownPlayback();
             navigation.goBack();
             InteractionManager.runAfterInteractions(() => {
                 flushScenesPostUpdates();
             });
         },
-        [initialMuted, navigation, posts],
+        [initialMuted, navigation, posts, teardownPlayback],
     );
 
     return (
@@ -108,12 +158,10 @@ export default function ScenesScreen({ route, navigation }: any) {
                 viewerHandle={user?.handle}
                 viewerAvatarUrl={user?.avatarUrl}
                 onClose={handleClose}
-                onVisitProfile={(handle) =>
-                    navigation.navigate('ViewProfile', { handle })
-                }
+                onVisitProfile={(handle) => navigateAway('ViewProfile', { handle })}
                 onPostsChange={setPosts}
-                navigation={navigation}
-                onBoost={() => navigation.navigate('Boost')}
+                navigation={{ navigate: (r: string, p?: object) => navigateAway(r, p) }}
+                onBoost={() => navigateAway('Boost')}
             />
         </>
     );

@@ -76,6 +76,8 @@ import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import ProfileCoverActionsModal from '../components/ProfileCoverActionsModal.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import { postHasVideoMedia } from '../utils/postMedia';
+import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 import { getEffectivePlacesTraveled, formatProfileStatCount } from '../utils/effectivePlacesTraveled';
 import { getStableUserId } from '../utils/userId';
 import type { ProfilePostNotifyLevel } from '../utils/profilePostNotifyPrefs';
@@ -85,6 +87,7 @@ import {
     getProfilePostNotifyLevelMobile,
     setProfilePostNotifyLevelMobile,
 } from '../utils/profilePostNotifyPrefsMobile';
+import { ignoreAbort } from '../utils/abortSafe';
 
 function sameHandle(a?: string | null, b?: string | null): boolean {
     const norm = (value?: string | null) =>
@@ -155,6 +158,8 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [profilePostsHasMore, setProfilePostsHasMore] = useState(false);
     const [profilePostsLoadingMore, setProfilePostsLoadingMore] = useState(false);
     const suppressGridOpenClickRef = React.useRef(false);
+    /** Grid cell hosts — measureInWindow for Bluesky shared-element Scenes open. */
+    const gridTileRefs = React.useRef<Map<string, View>>(new Map());
     const [showConnectionsModal, setShowConnectionsModal] = useState(false);
     const [connectionsScope, setConnectionsScope] = useState<ConnectionsScope>('followers');
     const [followersList, setFollowersList] = useState<ConnectionRow[]>([]);
@@ -192,7 +197,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             return;
         }
         const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
-        void getProfilePostNotifyLevelMobile(viewerId, decodedHandle).then(setPostNotifyLevel);
+        ignoreAbort(getProfilePostNotifyLevelMobile(viewerId, decodedHandle).then(setPostNotifyLevel));
     }, [user?.id, decodedHandle, isOwnProfile]);
 
     const profileDisplayName = React.useMemo(() => {
@@ -1053,12 +1058,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         void Promise.all([loadConnections('followers', true), loadConnections('following', true)]);
     };
 
-    const filteredPosts = posts.filter((p) => {
-        if (contentTab === 'videos') return isVideoPost(p);
-        if (contentTab === 'photos') return !!p.mediaUrl && !isVideoPost(p);
-        if (contentTab === 'text') return isTextOnlyPost(p);
-        return true;
-    });
+    // Memoized: this array is also handed to the posts viewer, and a fresh identity
+    // on every render would re-run the viewer's scroll/activation effects each time.
+    const filteredPosts = React.useMemo(
+        () =>
+            posts.filter((p) => {
+                if (contentTab === 'videos') return isVideoPost(p);
+                if (contentTab === 'photos') return !!p.mediaUrl && !isVideoPost(p);
+                if (contentTab === 'text') return isTextOnlyPost(p);
+                return true;
+            }),
+        [posts, contentTab],
+    );
 
     // Instagram-style mutuals: people the profile follows that the viewer also follows.
     const mutualList = React.useMemo(
@@ -1185,6 +1196,42 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const onSelectPost = (item: Post) => {
         if (suppressGridOpenClickRef.current) {
             suppressGridOpenClickRef.current = false;
+            return;
+        }
+        // Video tiles: Bluesky shared-element morph into Scenes (measure → spring expand).
+        if (isVideoPost(item) || postHasVideoMedia(item)) {
+            const videoPosts = filteredPosts.filter(
+                (p) => isVideoPost(p) || postHasVideoMedia(p),
+            );
+            const scenesPosts = (
+                videoPosts.some((p) => String(p.id) === String(item.id))
+                    ? videoPosts
+                    : [item, ...videoPosts]
+            ).slice();
+            const launch = (origin: { x: number; y: number; width: number; height: number } | null) => {
+                setScenesLaunchPayload({
+                    initialPostId: String(item.id),
+                    posts: scenesPosts,
+                    feedLabel: profileDisplayName || decodedHandle,
+                    originRect: origin,
+                });
+                navigation.navigate('Scenes', {
+                    initialPostId: String(item.id),
+                    feedLabel: profileDisplayName || decodedHandle,
+                });
+            };
+            const node = gridTileRefs.current.get(String(item.id));
+            if (node && typeof node.measureInWindow === 'function') {
+                node.measureInWindow((x, y, width, height) => {
+                    if (width > 8 && height > 8) {
+                        launch({ x, y, width, height });
+                    } else {
+                        launch(null);
+                    }
+                });
+                return;
+            }
+            launch(null);
             return;
         }
         setSelectedPostId(item.id);
@@ -1692,11 +1739,14 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     ) : (
                         <View style={styles.postsGrid}>
                             {filteredPosts.map((item) => (
-                                <Pressable
+                                <View
                                     key={item.id}
-                                    onPress={() => onSelectPost(item)}
-                                    onLongPress={() => openGridPeek(item)}
-                                    delayLongPress={450}
+                                    ref={(node) => {
+                                        const id = String(item.id);
+                                        if (node) gridTileRefs.current.set(id, node);
+                                        else gridTileRefs.current.delete(id);
+                                    }}
+                                    collapsable={false}
                                     style={{
                                         width: '33.33%',
                                         height: 120,
@@ -1706,18 +1756,30 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                         padding: FEED_UI.spacing.hairlineGap,
                                     }}
                                 >
-                                    <View
+                                    <Pressable
+                                        onPress={() => onSelectPost(item)}
+                                        onLongPress={() => openGridPeek(item)}
+                                        delayLongPress={450}
                                         style={{
                                             flex: 1,
                                             overflow: 'hidden',
                                             borderRadius: 8,
                                             position: 'relative',
                                         }}
-                                        pointerEvents="none"
                                     >
-                                        <ProfileGridThumb post={item} />
-                                    </View>
-                                </Pressable>
+                                        <View
+                                            style={{
+                                                flex: 1,
+                                                overflow: 'hidden',
+                                                borderRadius: 8,
+                                                position: 'relative',
+                                            }}
+                                            pointerEvents="none"
+                                        >
+                                            <ProfileGridThumb post={item} />
+                                        </View>
+                                    </Pressable>
+                                </View>
                             ))}
                         </View>
                     )}
@@ -1923,7 +1985,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     setShowPostsSheet(false);
                     setSelectedPostId(null);
                 }}
-                posts={posts}
+                posts={filteredPosts}
                 initialPostId={selectedPostId}
                 profileName={profileDisplayName}
                 profileHandle={decodedHandle}

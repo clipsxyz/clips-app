@@ -20,6 +20,8 @@ import Animated, {
     useAnimatedReaction,
     useAnimatedStyle,
     useSharedValue,
+    withDelay,
+    withSpring,
     withTiming,
     cancelAnimation,
 } from 'react-native-reanimated';
@@ -46,6 +48,13 @@ import SavePostModal from './SavePostModal.native';
 import ScenesFooterBar from './ScenesFooterBar.native';
 /** Match feed card double-tap window (FeedScreen uses 260ms). */
 const SCENES_DOUBLE_TAP_MS = 260;
+/** Bluesky-style shared-element morph (open + swipe-to-dismiss). */
+const SCENES_MORPH_SPRING = { damping: 20, stiffness: 200, mass: 0.6 } as const;
+/** Centered play/pause pill timings — all consumed on the UI thread. */
+const PLAY_PAUSE_PILL_HOLD_MS = 400;
+const PLAY_PAUSE_PILL_FADE_MS = 200;
+const PLAY_PAUSE_PILL_SCALE_MS = 160;
+const PLAY_PAUSE_PILL_MIN_SCALE = 0.8;
 import QRCodeModal from './QRCodeModal.native';
 import EditPostModal from './EditPostModal.native';
 import CreateGroupModal from './CreateGroupModal.native';
@@ -60,6 +69,7 @@ import {
     subscribeGlobalVideoMuted,
 } from '../utils/globalVideoMuteNative';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import { setScenesPlaybackPlayer } from '../utils/feedScenesPlaybackNative';
 import { setScenesViewerActive } from '../utils/scenesViewerActiveNative';
 import type { ScenesOriginRect } from '../utils/scenesLaunchNative';
 import {
@@ -90,6 +100,7 @@ import {
     hasPendingFollowRequest,
     isProfilePrivate,
 } from '../api/privacy';
+import { ignoreAbort } from '../utils/abortSafe';
 
 /** Match web ScenesModal comments open ease (~Reels mini viewport). */
 const COMMENTS_MEDIA_MS = 640;
@@ -209,6 +220,23 @@ export default function ScenesViewer({
         originRect && originRect.width > 8 && originRect.height > 8 ? 1 : 0,
     );
     const screenW = useSharedValue(windowWidth);
+    const screenH = useSharedValue(windowHeight);
+    /** Progress at pan begin — UI-thread dismiss morph reads this. */
+    const dragStartProgress = useSharedValue(1);
+
+    /**
+     * Center play/pause feedback pill.
+     *
+     * Driven entirely by shared values so tapping the fullscreen video costs no
+     * React render: `paused` still has to setState (it is the `Video` prop), but
+     * the badge's opacity/scale and its play-vs-pause icon are resolved on the UI
+     * thread from these three values alone.
+     */
+    const playPauseOpacity = useSharedValue(0);
+    const playPauseScale = useSharedValue(PLAY_PAUSE_PILL_MIN_SCALE);
+    /** 1 => the tap paused the clip (show the pause glyph), 0 => resumed (play glyph). */
+    const playPauseIsPaused = useSharedValue(0);
+
     const closingRef = useRef(false);
     const closedOnceRef = useRef(false);
 
@@ -241,6 +269,13 @@ export default function ScenesViewer({
     const userMovedFromInitialRef = useRef(false);
     const [muted, setMuted] = useState(initialMuted ?? true);
     const [paused, setPaused] = useState(false);
+    /**
+     * Tap-to-pause source of truth. The `paused` prop drives the `Video` element, but
+     * a prop change only lands on the next commit, so the gesture flips this and hits
+     * the native handle directly. Mirrored from React state so the two cannot drift.
+     */
+    const pausedSv = useSharedValue(false);
+    pausedSv.value = paused;
     const [progress, setProgress] = useState(0);
     const [commentsOpen, setCommentsOpen] = useState(false);
     const [sharePost, setSharePost] = useState<Post | null>(null);
@@ -282,7 +317,6 @@ export default function ScenesViewer({
     const commentsAudioUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const commentsOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastMediaTapRef = useRef(0);
-    const singleMediaTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const caption = activePost ? getPostDisplayCaption(activePost) : '';
     const authorAvatarSrc = useResolvedAuthorAvatar({
@@ -316,26 +350,29 @@ export default function ScenesViewer({
 
     useEffect(() => {
         screenW.value = windowWidth;
-    }, [screenW, windowWidth]);
+        screenH.value = windowHeight;
+    }, [screenH, screenW, windowHeight, windowWidth]);
 
     useEffect(() => {
         closingRef.current = false;
         closedOnceRef.current = false;
         const rect =
             originRect && originRect.width > 8 && originRect.height > 8 ? originRect : null;
+        cancelAnimation(enterProgress);
         if (rect) {
             originX.value = rect.x;
             originY.value = rect.y;
             originW.value = rect.width;
             originH.value = rect.height;
             hasOrigin.value = 1;
+            // Start at the thumbnail, then spring to fullscreen (Bluesky shared element).
+            enterProgress.value = 0;
+            enterProgress.value = withSpring(1, SCENES_MORPH_SPRING);
         } else {
             hasOrigin.value = 0;
+            enterProgress.value = 1;
         }
-        cancelAnimation(enterProgress);
-        enterProgress.value = 1;
     }, [
-        embedFeedPlayer,
         enterProgress,
         hasOrigin,
         originH,
@@ -360,9 +397,9 @@ export default function ScenesViewer({
             return;
         }
         let mounted = true;
-        void getGlobalVideoMutedNative().then((m) => {
+        ignoreAbort(getGlobalVideoMutedNative().then((m) => {
             if (mounted) setMuted(m);
-        });
+        }));
         return subscribeGlobalVideoMuted((m) => setMuted(m));
     }, [initialMuted]);
 
@@ -392,10 +429,6 @@ export default function ScenesViewer({
         setMetadataIndex(0);
         setTopMetaVisible(true);
         lastMediaTapRef.current = 0;
-        if (singleMediaTapTimerRef.current) {
-            clearTimeout(singleMediaTapTimerRef.current);
-            singleMediaTapTimerRef.current = null;
-        }
     }, [activePost?.id]);
 
     useEffect(() => {
@@ -456,16 +489,22 @@ export default function ScenesViewer({
                 width: sw,
                 height: sh,
                 opacity: 1,
+                borderRadius: 0,
+                overflow: 'hidden' as const,
             };
         }
         const ow = Math.max(1, originW.value);
         const oh = Math.max(1, originH.value);
+        // Thumbnail → fullscreen: size + position. Dragging down shrinks back toward
+        // the grid tile; borderRadius settles at 16 like the Passport grid cell.
         return {
             position: 'absolute' as const,
             top: 0,
             left: 0,
             width: interpolate(p, [0, 1], [ow, sw]),
             height: interpolate(p, [0, 1], [oh, sh]),
+            borderRadius: interpolate(p, [0, 1], [16, 0]),
+            overflow: 'hidden' as const,
             transform: [
                 { translateX: interpolate(p, [0, 1], [originX.value, 0]) },
                 { translateY: interpolate(p, [0, 1], [originY.value, 0]) },
@@ -473,9 +512,16 @@ export default function ScenesViewer({
         };
     });
     const backdropStyle = useAnimatedStyle(() => ({
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
         opacity: hasOrigin.value
             ? interpolate(enterProgress.value, [0, 0.55, 1], [0, 0.85, 1])
             : interpolate(enterProgress.value, [0, 1], [0.35, 1]),
+    }));
+    const chromeFadeStyle = useAnimatedStyle(() => ({
+        opacity: hasOrigin.value
+            ? interpolate(enterProgress.value, [0.72, 1], [0, 1])
+            : 1,
     }));
 
     const activeMediaSlides = useMemo(
@@ -500,9 +546,9 @@ export default function ScenesViewer({
         }
         setIsSaved(Boolean(activePost.isBookmarked));
         let cancelled = false;
-        void getCollectionsForPost(viewerUserId, activePost.id).then((cols) => {
+        ignoreAbort(getCollectionsForPost(viewerUserId, activePost.id).then((cols) => {
             if (!cancelled) setIsSaved(cols.length > 0);
-        });
+        }));
         return () => {
             cancelled = true;
         };
@@ -522,9 +568,9 @@ export default function ScenesViewer({
     useEffect(() => {
         if (!overflowVisible || !activePost?.id) return;
         let cancelled = false;
-        void hasPostNotificationsPrefMobile(viewerUserId, activePost.id).then((on) => {
+        ignoreAbort(hasPostNotificationsPrefMobile(viewerUserId, activePost.id).then((on) => {
             if (!cancelled) setOverflowNotify(on);
-        });
+        }));
         return () => {
             cancelled = true;
         };
@@ -548,12 +594,27 @@ export default function ScenesViewer({
         }
     }, [activeIndex, muted, onClose, posts]);
 
+    const markMorphClosing = useCallback(() => {
+        closingRef.current = true;
+        setDismissPull(0);
+    }, []);
+
     const handleBack = useCallback(() => {
         if (closedOnceRef.current || closingRef.current) return;
         closingRef.current = true;
         setDismissPull(0);
-        invokeClose();
-    }, [invokeClose]);
+        if (hasOrigin.value < 1) {
+            invokeClose();
+            return;
+        }
+        // Spring the card back into the grid tile, then unmount.
+        cancelAnimation(enterProgress);
+        enterProgress.value = withSpring(0, SCENES_MORPH_SPRING, (finished) => {
+            if (finished) {
+                runOnJS(invokeClose)();
+            }
+        });
+    }, [enterProgress, hasOrigin, invokeClose]);
 
     useEffect(() => {
         if (embedFeedPlayer) return;
@@ -682,6 +743,35 @@ export default function ScenesViewer({
         return () => {
             if (commentsOpenTimerRef.current) clearTimeout(commentsOpenTimerRef.current);
             if (commentsAudioUnlockTimerRef.current) clearTimeout(commentsAudioUnlockTimerRef.current);
+        };
+    }, []);
+
+    /**
+     * Publish this overlay's ExoPlayer to its own stop-control, NOT to the
+     * shared single-player store.
+     *
+     * `feedActiveVideoNative` is a slot store: `setActiveFeedVideoPostId` halts
+     * every registered player on each transition, so registering here would let
+     * the feed's scheduler pause the video the user is watching — and with the
+     * `paused` prop unchanged, React would not re-assert it. The overlay is a
+     * separate native Modal and does not compete for the feed's slot.
+     */
+    useEffect(() => {
+        const node = videoRef as {
+            current?: { pause: () => void; setVolume: (n: number) => void } | null;
+        };
+        let published = false;
+        const attach = () => {
+            const player = node?.current;
+            if (!player || typeof player.pause !== 'function') return false;
+            setScenesPlaybackPlayer(player);
+            published = true;
+            return true;
+        };
+        // The ref is null until the <Video> commits, so allow one retry frame.
+        if (!attach()) requestAnimationFrame(attach);
+        return () => {
+            if (published) setScenesPlaybackPlayer(null);
         };
     }, []);
 
@@ -863,12 +953,70 @@ export default function ScenesViewer({
         );
     }, [activePost]);
 
+    /**
+     * Flash the centered pill for a tap that paused/resumed the clip.
+     *
+     * Writing `1` before scheduling the fade is deliberate: the second assignment
+     * replaces the first, so the badge appears on the very next UI frame and the
+     * delayed fade-out is the only animation queued on the value.
+     */
+    const showPlayPausePill = useCallback((nextPaused: boolean) => {
+        playPauseIsPaused.value = nextPaused ? 1 : 0;
+        playPauseScale.value = PLAY_PAUSE_PILL_MIN_SCALE;
+        playPauseOpacity.value = 1;
+        playPauseScale.value = withTiming(1, {
+            duration: PLAY_PAUSE_PILL_SCALE_MS,
+            easing: Easing.out(Easing.quad),
+        });
+        playPauseOpacity.value = withDelay(
+            PLAY_PAUSE_PILL_HOLD_MS,
+            withTiming(0, { duration: PLAY_PAUSE_PILL_FADE_MS }),
+        );
+    }, []);
+
+    const hidePlayPausePill = useCallback(() => {
+        cancelAnimation(playPauseOpacity);
+        cancelAnimation(playPauseScale);
+        playPauseOpacity.value = 0;
+        playPauseScale.value = PLAY_PAUSE_PILL_MIN_SCALE;
+    }, []);
+
+    const playPausePillStyle = useAnimatedStyle(() => ({
+        opacity: playPauseOpacity.value,
+        transform: [{ scale: playPauseScale.value }],
+    }));
+
+    // Both glyphs stay mounted; the crossfade is a pure UI-thread multiply, so the
+    // icon never needs a JS render to switch between play and pause.
+    const playPausePlayGlyphStyle = useAnimatedStyle(() => ({
+        opacity: playPauseOpacity.value * (1 - playPauseIsPaused.value),
+    }));
+    const playPausePauseGlyphStyle = useAnimatedStyle(() => ({
+        opacity: playPauseOpacity.value * playPauseIsPaused.value,
+    }));
+
+    // A pill left fading over a newly swiped-to post would claim the wrong state.
+    useEffect(() => {
+        hidePlayPausePill();
+    }, [activePost?.id, hidePlayPausePill]);
+
     const handleSingleTapPause = useCallback(() => {
+        setTopMetaVisible(true);
         const slide = activeMediaSlides[mediaSlideIndex];
-        if (slide?.type === 'video' || postHasVideoMedia(activePost)) {
-            setPaused((p) => !p);
+        if (!(slide?.type === 'video' || postHasVideoMedia(activePost))) return;
+        const next = !pausedSv.value;
+        pausedSv.value = next;
+        setPaused(next);
+        // Drive ExoPlayer now. Waiting for the `paused` prop to round-trip leaves the
+        // player running (or frozen) for a frame behind what the pill already shows.
+        try {
+            if (next) videoRef.current?.pause?.();
+            else videoRef.current?.resume?.();
+        } catch {
+            /* player already released */
         }
-    }, [activeMediaSlides, activePost, mediaSlideIndex]);
+        showPlayPausePill(next);
+    }, [activeMediaSlides, activePost, mediaSlideIndex, pausedSv, showPlayPausePill]);
 
     const fireDoubleTapLikeAt = useCallback(
         (pageX: number, pageY: number) => {
@@ -889,11 +1037,13 @@ export default function ScenesViewer({
             setTopMetaVisible(true);
 
             const now = Date.now();
-            if (now - lastMediaTapRef.current <= SCENES_DOUBLE_TAP_MS) {
-                if (singleMediaTapTimerRef.current) {
-                    clearTimeout(singleMediaTapTimerRef.current);
-                    singleMediaTapTimerRef.current = null;
-                }
+            const isDoubleTap = now - lastMediaTapRef.current <= SCENES_DOUBLE_TAP_MS;
+            // Toggle immediately. The previous version waited out the whole
+            // double-tap window before pausing, which read as a dead tap.
+            handleSingleTapPause();
+            if (isDoubleTap) {
+                // Second tap already re-toggled the pause above (net zero), so this
+                // is purely the like burst.
                 lastMediaTapRef.current = 0;
                 const ne = event?.nativeEvent;
                 const pageX = typeof ne?.pageX === 'number' ? ne.pageX : windowWidth / 2;
@@ -901,24 +1051,26 @@ export default function ScenesViewer({
                 fireDoubleTapLikeAt(pageX, pageY);
                 return;
             }
-
             lastMediaTapRef.current = now;
-            if (singleMediaTapTimerRef.current) {
-                clearTimeout(singleMediaTapTimerRef.current);
-            }
-            singleMediaTapTimerRef.current = setTimeout(() => {
-                handleSingleTapPause();
-                singleMediaTapTimerRef.current = null;
-            }, SCENES_DOUBLE_TAP_MS + 20);
         },
         [fireDoubleTapLikeAt, handleSingleTapPause, isTextOnlyPost, windowHeight, windowWidth],
     );
 
+    /**
+     * Single-tap surface for the single-slide branch. A real `Pressable` is used
+     * instead of relying on the RNGH tap recognizer alone: on some ColorOS builds the
+     * gesture handler over a bare `View` never receives the centre tap, while a
+     * `Pressable` is a guaranteed touch target. Double-tap-like stays on the UI
+     * thread via `mediaGestures`; the second press toggles the pause straight back
+     * out, so a double tap ends up play/pause-neutral.
+     */
+    const handleMediaSurfacePress = useCallback(() => {
+        if (isTextOnlyPost) return;
+        handleSingleTapPause();
+    }, [handleSingleTapPause, isTextOnlyPost]);
+
     useEffect(() => {
         return () => {
-            if (singleMediaTapTimerRef.current) {
-                clearTimeout(singleMediaTapTimerRef.current);
-            }
             if (topMetaHideTimerRef.current) {
                 clearTimeout(topMetaHideTimerRef.current);
             }
@@ -975,28 +1127,70 @@ export default function ScenesViewer({
     }, []);
 
     const mediaGestures = useMemo(() => {
-        const tap = Gesture.Tap()
+        // Only the double tap and the vertical pan live here. Single tap is handled by
+        // a real `Pressable` (`handleMediaSurfacePress`) so the centre tap always
+        // registers; keeping it in both places would toggle pause twice per tap.
+        const doubleTap = Gesture.Tap()
             .enabled(!commentsOpen)
-            .maxDuration(280)
+            .numberOfTaps(2)
+            .maxDuration(420)
+            .maxDistance(36)
             .onEnd((e, success) => {
+                'worklet';
                 if (!success) return;
-                runOnJS(handleMediaPress)(
-                    {
-                        nativeEvent: { pageX: e.absoluteX, pageY: e.absoluteY },
-                    } as GestureResponderEvent,
-                );
+                runOnJS(fireDoubleTapLikeAt)(e.absoluteX, e.absoluteY);
             });
         const vertical = Gesture.Pan()
+            .enabled(!commentsOpen)
             .activeOffsetY([-16, 16])
-            .failOffsetX([-20, 20])
+            .failOffsetX([-28, 28])
+            .onBegin(() => {
+                'worklet';
+                dragStartProgress.value = enterProgress.value;
+            })
             .onUpdate((e) => {
+                'worklet';
+                // Profile / shared-element open: drag down shrinks toward the tile.
+                if (hasOrigin.value >= 1 && e.translationY > 0) {
+                    const travel = Math.max(1, screenH.value * 0.5);
+                    const next = dragStartProgress.value - e.translationY / travel;
+                    enterProgress.value = next < 0 ? 0 : next > 1 ? 1 : next;
+                    return;
+                }
                 runOnJS(onVerticalPanUpdate)(e.translationY);
             })
             .onEnd((e) => {
+                'worklet';
+                if (hasOrigin.value >= 1) {
+                    const shouldDismiss =
+                        enterProgress.value < 0.55 || e.velocityY > 800;
+                    if (shouldDismiss) {
+                        runOnJS(markMorphClosing)();
+                        enterProgress.value = withSpring(0, SCENES_MORPH_SPRING, (finished) => {
+                            if (finished) {
+                                runOnJS(invokeClose)();
+                            }
+                        });
+                    } else {
+                        enterProgress.value = withSpring(1, SCENES_MORPH_SPRING);
+                    }
+                    return;
+                }
                 runOnJS(onVerticalPanEnd)(e.translationY);
             });
-        return Gesture.Simultaneous(tap, vertical);
-    }, [commentsOpen, handleMediaPress, onVerticalPanEnd, onVerticalPanUpdate]);
+        return Gesture.Simultaneous(doubleTap, vertical);
+    }, [
+        commentsOpen,
+        dragStartProgress,
+        enterProgress,
+        fireDoubleTapLikeAt,
+        hasOrigin,
+        invokeClose,
+        markMorphClosing,
+        onVerticalPanEnd,
+        onVerticalPanUpdate,
+        screenH,
+    ]);
 
     const hideEmbeddedPlayer = embedFeedPlayer && activeIndex === initialIndex;
 
@@ -1107,11 +1301,14 @@ export default function ScenesViewer({
         Boolean(playbackSource);
 
     return (
-        <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
-            <View
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: 'transparent' }}>
+            <Animated.View style={backdropStyle} pointerEvents="none" />
+            <Animated.View
                 style={[
-                    { flex: 1, backgroundColor: '#000000' },
-                    dismissPull > 0
+                    { backgroundColor: '#000000' },
+                    mediaLayerAnimStyle,
+                    dismissPull > 0 &&
+                    !(originRect && originRect.width > 8 && originRect.height > 8)
                         ? { transform: [{ translateY: dismissPull }], opacity: dismissOpacity }
                         : null,
                 ]}
@@ -1123,6 +1320,7 @@ export default function ScenesViewer({
                                 pageHeight={windowHeight}
                                 index={mediaSlideIndex}
                                 onIndexChange={commitCarouselIndex}
+                                onTap={handleMediaPress}
                                 enabled={!commentsOpen}
                             >
                                 {activeMediaSlides.map((slide, index) => {
@@ -1192,7 +1390,13 @@ export default function ScenesViewer({
                         collapsable={false}
                         style={{ width: windowWidth, height: windowHeight }}
                     >
-                        {showImageSlide ? (
+                    <Pressable
+                        // Single-tap play/pause. `Pressable` is the reliable touch
+                        // target; the gesture layer above only adds double-tap + pan.
+                        onPress={handleMediaSurfacePress}
+                        style={StyleSheet.absoluteFill}
+                    >
+                    {showImageSlide ? (
                             <Image
                                 source={{ uri: activeSlide!.url }}
                                 resizeMode="cover"
@@ -1220,6 +1424,7 @@ export default function ScenesViewer({
                                 shutterColor="transparent"
                             />
                         ) : null}
+                    </Pressable>
                     </View>
                 </GestureDetector>
                 )}
@@ -1243,15 +1448,18 @@ export default function ScenesViewer({
                 />
             ) : null}
 
-            <View
+            <Animated.View
                 pointerEvents="box-none"
-                style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: windowWidth,
-                    backgroundColor: 'transparent',
-                }}
+                style={[
+                    {
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: windowWidth,
+                        backgroundColor: 'transparent',
+                    },
+                    chromeFadeStyle,
+                ]}
             >
             <View
                 pointerEvents="box-none"
@@ -1301,19 +1509,22 @@ export default function ScenesViewer({
                 </View>
             ) : null}
             </View>
-            </View>
+            </Animated.View>
 
             {!commentsOpen ? (
-            <View
+            <Animated.View
                 pointerEvents="box-none"
-                style={{
-                    position: 'absolute',
-                    left: 0,
-                    bottom: 0,
-                    width: windowWidth,
-                    backgroundColor: 'transparent',
-                    paddingBottom: insets.bottom,
-                }}
+                style={[
+                    {
+                        position: 'absolute',
+                        left: 0,
+                        bottom: 0,
+                        width: windowWidth,
+                        backgroundColor: 'transparent',
+                        paddingBottom: insets.bottom,
+                    },
+                    chromeFadeStyle,
+                ]}
             >
             <View style={[styles.bottomBlock, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
                 <View style={[styles.bottomRow, { backgroundColor: 'transparent' }]} pointerEvents="box-none">
@@ -1438,10 +1649,24 @@ export default function ScenesViewer({
                     onMore={() => setOverflowVisible(true)}
                 />
             </View>
-            </View>
+            </Animated.View>
             ) : null}
 
             <View style={[styles.fxLayer, { backgroundColor: 'transparent' }]} pointerEvents="none">
+                {/* Center play/pause feedback. The outer layer only centres; the badge
+                    carries the animated opacity/scale so the full-screen layer is
+                    never transformed. */}
+                <View style={styles.playPausePillLayer} pointerEvents="none">
+                    <Animated.View style={[styles.playPausePill, playPausePillStyle]}>
+                        <Animated.View style={[styles.playPauseGlyph, playPausePlayGlyphStyle]}>
+                            <Icon name="play" size={30} color="#FFFFFF" />
+                        </Animated.View>
+                        <Animated.View style={[styles.playPauseGlyph, playPausePauseGlyphStyle]}>
+                            <Icon name="pause" size={30} color="#FFFFFF" />
+                        </Animated.View>
+                    </Animated.View>
+                </View>
+
                 {burstAt ? (
                     <FeedDoubleTapLikeBurst
                         x={burstAt?.x ?? 0}
@@ -1457,7 +1682,6 @@ export default function ScenesViewer({
                     targetRef={likeButtonRef}
                     onComplete={() => setHeartDrop(null)}
                 />
-            </View>
             </View>
 
             {/* Modal (same as feed) — absolute Reels dock + adjustResize was crushing
@@ -1714,6 +1938,7 @@ export default function ScenesViewer({
                 onClose={() => setInviteGroupHandle(null)}
             />
 
+            </Animated.View>
         </GestureHandlerRootView>
     );
 }
@@ -1809,6 +2034,22 @@ const styles = StyleSheet.create({
     fxLayer: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 60,
+    },
+    playPausePillLayer: {
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    playPausePill: {
+        width: 76,
+        height: 76,
+        borderRadius: 38,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    playPauseGlyph: {
+        position: 'absolute',
     },
     page: { width: '100%', backgroundColor: '#000' },
     fallback: { ...StyleSheet.absoluteFillObject, backgroundColor: '#111' },

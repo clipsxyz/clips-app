@@ -3,6 +3,9 @@ import { InteractionManager, Modal, StatusBar, StyleSheet, View } from 'react-na
 import { useAuth } from '../context/Auth';
 import type { Post } from '../types';
 import { setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
+import { haltFeedPlayback } from '../utils/feedActiveVideoNative';
+import { stopScenesPlayback } from '../utils/feedScenesPlaybackNative';
+import { resetFeedExpandForNavigation } from '../utils/feedFullscreenExpandNative';
 import {
     getFeedScenesOverlaySession,
     setFeedScenesOverlaySession,
@@ -84,6 +87,32 @@ export default function FeedScenesRootModal() {
         startPostId && viewerPosts.some((p) => String(p.id) === startPostId),
     );
 
+    /**
+     * Every navigation out of this overlay runs through here, and all three
+     * steps are synchronous and ordered — no `await`, no animation, no
+     * deferred callback between the stop and the navigation.
+     *
+     * 1. `resetFeedExpandForNavigation` drops the morph so no card is left
+     *    parked mid-transition behind the new screen.
+     * 2. `stopScenesPlayback` silences *this overlay's* ExoPlayer. It cannot be
+     *    reached through the shared store, because it lives in its own native
+     *    Modal window and is not competing for the feed's slot.
+     * 3. `haltFeedPlayback` clears the feed's active id, releasing the slot so
+     *    the destination screen can claim it and start playing.
+     *
+     * Doing all three before dispatching means there is no frame in which the
+     * profile screen mounts while anything is still audible underneath it.
+     */
+    const navigateAway = useCallback(
+        (route: string, params?: object) => {
+            resetFeedExpandForNavigation();
+            stopScenesPlayback();
+            haltFeedPlayback();
+            navigateRef.current?.(route, params);
+        },
+        [],
+    );
+
     return (
         <Modal
             visible={isExpanded}
@@ -110,18 +139,16 @@ export default function FeedScenesRootModal() {
                         viewerAvatarUrl={user?.avatarUrl}
                         onClose={closeOverlay}
                         onVisitProfile={(handle) => {
-                            const navigate = navigateRef.current;
                             closeOverlay();
-                            navigate?.('ViewProfile', { handle });
+                            navigateAway('ViewProfile', { handle });
                         }}
                         onPostsChange={setPosts}
                         navigation={{
-                            navigate: (route, params) => navigateRef.current?.(route, params),
+                            navigate: (route, params) => navigateAway(route, params),
                         }}
                         onBoost={() => {
-                            const navigate = navigateRef.current;
                             closeOverlay();
-                            navigate?.('Boost');
+                            navigateAway('Boost');
                         }}
                     />
                 ) : null}

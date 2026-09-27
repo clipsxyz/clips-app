@@ -64,8 +64,10 @@ export default function VideoCTAOverlay({
 const styles = StyleSheet.create({
     wrap: {
         position: 'absolute',
-        left: 8,
-        bottom: 8,
+        // Mirrors the top location badge's inset (PostHeaderOverlay row: 10px) so the
+        // two overlays read as one grid instead of hugging opposite corners.
+        left: 12,
+        bottom: 12,
         zIndex: 40,
     },
     pillRow: {

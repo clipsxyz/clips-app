@@ -3,6 +3,7 @@ type IdListener = (postId: string | null) => void;
 type FeedPlayer = {
     pause: () => void;
     setVolume: (volume: number) => void;
+    resume?: () => void;
 };
 
 /**
@@ -60,6 +61,33 @@ export function haltFeedPlayback(): void {
     notify(activeListeners, null);
 }
 
+/**
+ * Hand the single-player slot back because the feed screen lost focus.
+ *
+ * Deliberately *re-opens* `playbackAllowed` rather than closing it. That flag
+ * is module-global, and both `setActiveFeedVideoPostId` and
+ * `forceActiveFeedVideoPostId` early-return while it is false:
+ *
+ *     if (next && !playbackAllowed) return;
+ *
+ * So closing it on blur froze feed autoplay but ALSO meant ProfileScreen and
+ * ViewProfilePostsSheet could never claim the slot — their videos stayed silent
+ * and the feed's `activePostId` was still held. Nothing ever re-opened the flag
+ * except the feed's own focus handler, so it deadlocked until you navigated
+ * back to the feed.
+ *
+ * The feed stays frozen across the blur by `isFeedFocusedRef` instead: its
+ * viewability scheduler bails on `!isFeedFocusedRef.current`, so it cannot
+ * steal the slot back while another screen wants it. Clearing `activePostId`
+ * here is what actually releases the slot.
+ */
+export function releaseFeedPlaybackOnBlur(): void {
+    haltFeedPlayback();
+    const changed = playbackAllowed !== true;
+    playbackAllowed = true;
+    if (changed) playbackListeners.forEach((fn) => fn(true));
+}
+
 /** @deprecated Use haltFeedPlayback — kept so older call sites still hard-stop. */
 export function clearAudibleFeedVideo(): void {
     haltFeedPlayback();
@@ -112,6 +140,29 @@ export function setAllFeedPlayerVolumes(volume: number): void {
     players.forEach((player) => {
         try {
             player.setVolume(volume);
+        } catch {
+            /* ColorOS ExoPlayer can already be released */
+        }
+    });
+}
+
+/**
+ * Re-assert volume/paused on the feed when the screen regains focus.
+ *
+ * Blur silences players imperatively (`silencePlayer`). `FeedPostMedia` derives its
+ * `volume`/`muted` props from local `soundOn` state, so those props are unchanged
+ * across a blur round-trip and React never forwards a new value to the native
+ * player — the clip comes back silent and the first sound-icon tap only re-mutes.
+ * Only the props that actually flip (`paused`) recover on their own.
+ */
+export function restoreFeedPlaybackAfterFocus(muted: boolean): void {
+    if (!playbackAllowed) return;
+    if (activePostId == null) return;
+    const volume = muted ? 0 : 1;
+    players.forEach((player) => {
+        try {
+            player.setVolume(volume);
+            if (!muted) player.resume?.();
         } catch {
             /* ColorOS ExoPlayer can already be released */
         }
@@ -173,4 +224,20 @@ export function getWarmFeedVideoPostId(): string | null {
 export function subscribeWarmFeedVideo(listener: IdListener): () => void {
     listener(null);
     return () => {};
+}
+
+/**
+ * Reset all module state. Test-only: the values above are process-global, so
+ * without this a suite that leaves `activePostId` or the gates flipped would
+ * silently poison every test after it.
+ */
+export function __resetFeedActiveVideoForTests(): void {
+    players.clear();
+    activeListeners.clear();
+    playbackListeners.clear();
+    textureMountListeners.clear();
+    activePostId = null;
+    playingAtY = 0;
+    playbackAllowed = true;
+    textureMountAllowed = true;
 }

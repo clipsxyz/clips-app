@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -166,5 +169,49 @@ describe('net arming', () => {
         setFeedUiThreadAnchor({ anchorY: 0, cardHeight: 800 });
         setFeedUiThreadAnchor({ anchorY: 5000, cardHeight: 600 });
         expect(getFeedUiThreadAnchor()).toEqual({ anchorY: 5000, cardHeight: 600 });
+    });
+});
+
+/**
+ * UI-thread callability is a property of the *source text*, not of the runtime
+ * value: a missing `'worklet'` directive compiles and type-checks fine, passes
+ * every behavioural test above (Vitest has no UI thread), and then throws
+ * "Tried to synchronously call a non-worklet function on the UI thread" the
+ * first time a user taps a card to expand. So assert the directive directly.
+ *
+ * `getFeedUiThreadScrollY` in particular is called synchronously inside the
+ * fast-path `singleTap.onEnd` worklet in `FeedPostMedia.native.tsx`, where the
+ * scroll offset is needed to compute the expand offset before the morph can be
+ * armed. `runOnJS` is not an escape hatch there — it schedules onto the JS
+ * thread and returns `undefined` on the UI thread, so it cannot hand a number
+ * back to the worklet.
+ */
+describe('worklet directives', () => {
+    const source = readFileSync(
+        resolve(process.cwd(), 'src/utils/feedViewabilityUiThread.ts'),
+        'utf8',
+    );
+
+    const declaredWorklets = new Set(
+        [...source.matchAll(/(?:function\s+(\w+)|const\s+(\w+)\s*=)/g)]
+            .map((m) => m[1] ?? m[2])
+            .filter((name) => {
+                const at = source.indexOf(`${name}(`);
+                if (at < 0) return false;
+                return /^\s*'worklet';/m.test(source.slice(at, at + 400));
+            }),
+    );
+
+    // Every function in this module that reads or writes a shareable has to be
+    // callable from the UI thread: they are driven from Reanimated scroll
+    // handlers and from the feed tap/expand worklets.
+    const shareableAccessors = [
+        'setFeedUiThreadScrollY',
+        'setFeedUiThreadViewportHeight',
+        'getFeedUiThreadScrollY',
+    ];
+
+    it.each(shareableAccessors)('%s carries a worklet directive', (name) => {
+        expect(declaredWorklets).toContain(name);
     });
 });
