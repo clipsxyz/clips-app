@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,13 @@ use Illuminate\Support\Str;
 
 class Post extends Model
 {
+    /**
+     * Hops to walk below a region when resolving descendants. The gazetteer is
+     * admin_level 0 (Country) -> 1|2 (County/Region) -> 3 (City/District), so four
+     * levels covers the deepest possible chain. Also bounds parent_id cycles.
+     */
+    public const MAX_REGION_DEPTH = 4;
+
     use HasFactory, SoftDeletes;
 
     protected $keyType = 'string';
@@ -38,6 +46,7 @@ class Post extends Model
         'thumbnail_url',
         'location_label',
         'place_id',
+        'gazetteer_region_id',
         'latitude',
         'longitude',
         'venue',
@@ -157,6 +166,18 @@ class Post extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * The gazetteer region this post was taken in.
+     *
+     * Nullable and not yet populated: every existing post has a NULL here, and nothing
+     * writes to it yet. Location filtering still goes through scopeByLocation(), which
+     * LIKE-matches the free-text location_label / venue / landmark strings.
+     */
+    public function gazetteerRegion(): BelongsTo
+    {
+        return $this->belongsTo(GazetteerRegion::class, 'gazetteer_region_id');
     }
 
     public function comments()
@@ -318,6 +339,82 @@ class Post extends Model
         return $query->whereHas('user.followers', function ($q) use ($userId) {
             $q->where('follower_id', $userId);
         });
+    }
+
+    /**
+     * Posts tagged with $regionId directly, OR tagged with any region beneath it.
+     *
+     * The gazetteer is a Country (admin_level 0) -> County (1) -> City (3) tree linked by
+     * gazetteer_regions.parent_id. There is no materialised path column, so descendants
+     * are resolved by walking parent_id downwards one level per query and accumulating
+     * ids until a level comes back empty.
+     *
+     * Deliberately self-contained: nothing in the existing feed path calls this yet and
+     * no controller or route has been wired up to it.
+     *
+     * Fails closed. A null, empty or non-numeric $regionId yields NO posts rather than
+     * all posts, so a missing filter value can never silently return the whole feed.
+     * scopeByLocation() returns the query untouched for an empty string, which is fine
+     * for a text search but the wrong direction for a scoping filter.
+     *
+     * The walk is bounded at 4 levels, matching the admin_level 0-3 design, and that
+     * bound is also what makes this safe against a parent_id cycle:
+     * gazetteer_regions.parent_id is a plain self-referencing FK with nothing stopping
+     * A -> B -> A, and an unbounded walk would never terminate. A cycle truncates the
+     * result set rather than hanging.
+     *
+     * NULL gazetteer_region_id never matches (SQL three-valued logic), so untagged posts
+     * are excluded from every region filter.
+     *
+     * Uses whereIntegerInRaw-style accumulation via orWhereIn, so this stays a single
+     * posts query plus one gazetteer_regions query per level -- no recursive CTE, which
+     * would need different SQL on pgsql vs mysql and does not exist in older MySQL.
+     *
+     * @param  int|string|null  $regionId
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeInRegion($query, $regionId)
+    {
+        $ids = $this->regionIdsWithDescendants($regionId);
+
+        return $query->whereIn($this->getTable().'.gazetteer_region_id', $ids);
+    }
+
+    /**
+     * $regionId plus every descendant region id, breadth-first.
+     *
+     * Bounded by MAX_REGION_DEPTH hops. Returns an empty array for a bad $regionId so
+     * scopeInRegion() then matches nothing rather than everything.
+     *
+     * @param  int|string|null  $regionId
+     * @return array<int>
+     */
+    public function regionIdsWithDescendants($regionId)
+    {
+        if (! is_numeric($regionId) || (int) $regionId <= 0) {
+            return [];
+        }
+
+        $region = new GazetteerRegion;
+
+        $frontier = [(int) $regionId];
+        $seen = $frontier;
+        $depth = 0;
+
+        while ($frontier && $depth < self::MAX_REGION_DEPTH) {
+            $children = $region->newQuery()
+                ->whereIn('parent_id', $frontier)
+                ->pluck('id')
+                ->all();
+
+            // array_diff also drops ids already seen, so a parent_id cycle cannot make
+            // the frontier grow without bound even before the depth cap is reached.
+            $frontier = array_values(array_diff($children, $seen));
+            $seen = array_merge($seen, $frontier);
+            $depth++;
+        }
+
+        return array_values($seen);
     }
 
     // Helper methods
