@@ -84,3 +84,40 @@ describe('transformLaravelPost media dimensions', () => {
     expect(post.mediaUrl).toBeTruthy();
   });
 });
+
+describe('transformLaravelPost dominant color', () => {
+  const base = {
+    id: 'p1',
+    user_handle: 'someone',
+    media_url: 'http://localhost:8000/storage/uploads/a/1.jpg',
+    media_type: 'image',
+  };
+
+  it('maps the snake_case API field onto dominantColor', () => {
+    const post = transformLaravelPost({ ...base, dominant_color: '#2C2A26' });
+
+    expect(post.dominantColor).toBe('#2C2A26');
+  });
+
+  it('accepts the camelCase spelling too', () => {
+    // The API emits snake_case alongside a camelCase alias in places; accepting both means a
+    // response shape change cannot silently drop the ambient tint back to the fallback.
+    const post = transformLaravelPost({ ...base, dominantColor: '#313331' } as never);
+
+    expect(post.dominantColor).toBe('#313331');
+  });
+
+  it('leaves dominantColor undefined for text-only posts', () => {
+    // No sampleable media means no colour. Leaving it undefined lets the canvas hold its
+    // fallback instead of tinting a text card with something invented.
+    const post = transformLaravelPost({ id: 'p2', user_handle: 'someone', text: 'caption only' });
+
+    expect(post.dominantColor).toBeUndefined();
+  });
+
+  it('does not coerce an explicit null into a colour', () => {
+    const post = transformLaravelPost({ ...base, dominant_color: null });
+
+    expect(post.dominantColor).toBeUndefined();
+  });
+});

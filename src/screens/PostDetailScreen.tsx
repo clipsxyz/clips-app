@@ -41,7 +41,10 @@ import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia from '../components/FeedPostMedia.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
-import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
+import {
+    collectFeedFullscreenSlides,
+    fullscreenSlideIndexForCarousel,
+} from '../utils/feedImageFullscreen';
 import {
     hideFeedPostMobile,
     markNotInterestedFeedPostMobile,
@@ -402,7 +405,19 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                     mode="detail"
                                     isActive
                                     muted={false}
-                                    onPress={() => setImageFullscreenOpen(true)}
+                                    // Guarded: the fullscreen surface is image+video aware now,
+                                    // but a post whose only media is unrenderable (missing file,
+                                    // data:text URL) would still open a black shell. StoriesScreen
+                                    // applies the same precondition; this tap had none, which is how
+                                    // every video post landed on an empty fullscreen state.
+                                    onPress={() => {
+                                        if (
+                                            collectFeedFullscreenSlides(post).length > 0 ||
+                                            isTextOnlyPost(post)
+                                        ) {
+                                            setImageFullscreenOpen(true);
+                                        }
+                                    }}
                                 />
                             </View>
                             {carouselThumbItems.length > 1 ? (
@@ -685,7 +700,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
             <ImageFullscreenModal
                 post={post}
                 visible={imageFullscreenOpen}
-                initialIndex={imageFullscreenIndexForCarousel(post, carouselIndex)}
+                initialIndex={fullscreenSlideIndexForCarousel(post, carouselIndex)}
                 onClose={() => setImageFullscreenOpen(false)}
                 onLike={handleLike}
                 onComment={() => setCommentsOpen(true)}
@@ -859,7 +874,14 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     commentsModalBackdrop: {
-        ...StyleSheet.absoluteFillObject,
+        // Explicit rather than `...StyleSheet.absoluteFillObject`: that property is absent
+        // from this RN version's StyleSheet type, and `absoluteFill` is a registered style ID
+        // that cannot be spread inside StyleSheet.create.
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
         backgroundColor: 'rgba(0,0,0,0.55)',
     },
     commentsModalSheet: {

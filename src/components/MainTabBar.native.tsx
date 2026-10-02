@@ -25,6 +25,13 @@ function TabSquareIcon({ name, focused }: { name: string; focused: boolean }) {
   );
 }
 
+/**
+ * Absolute floating tab icons.
+ *
+ * Background is transparent on purpose: React Navigation scenes use zIndex, so an
+ * rgba fill here composites against black on Android. The frosted band is painted
+ * inside FeedPageLayout (sibling of FeedAmbientCanvas) — same trick as the header.
+ */
 export default function MainTabBar({
   state,
   descriptors,
@@ -53,7 +60,13 @@ export default function MainTabBar({
   const showAddYours = showContributeCue && activeRouteName === 'Home';
 
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 18 : 8) }]}>
+    <View
+      collapsable={false}
+      style={[
+        styles.wrap,
+        { paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 10 : 6) },
+      ]}
+    >
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const focused = state.index === index;
@@ -132,7 +145,7 @@ export default function MainTabBar({
                     end={{ x: 1, y: 0 }}
                     style={styles.addYoursGradient}
                   >
-                    <Icon name="location" size={12} color="#111827" />
+                    <Icon name="location" size={10} color="#111827" />
                     <Text style={styles.addYoursText}>Add Yours</Text>
                   </LinearGradient>
                   <View style={styles.addYoursTail} />
@@ -155,31 +168,35 @@ export default function MainTabBar({
 
 const styles = StyleSheet.create({
   wrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-around',
     paddingHorizontal: 8,
-    paddingTop: 6,
-    backgroundColor: '#030712',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    paddingTop: 2,
+    backgroundColor: '#161E2E',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
     overflow: 'visible',
-    zIndex: 20,
-    elevation: 20,
+    elevation: 0,
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    paddingVertical: 2,
     overflow: 'visible',
+    backgroundColor: 'transparent',
   },
   iconStack: {
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: FEED_UI.icon.tabSquare,
-    paddingTop: 4,
+    paddingTop: 0,
     paddingRight: 8,
     overflow: 'visible',
   },
@@ -199,7 +216,7 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   label: {
-    marginTop: 4,
+    marginTop: 2,
     fontSize: 10,
     fontWeight: '500',
   },
@@ -231,31 +248,31 @@ const styles = StyleSheet.create({
   },
   addYoursBubble: {
     position: 'absolute',
-    bottom: 40,
+    bottom: 32,
     alignItems: 'center',
     zIndex: 20,
   },
   addYoursGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    borderRadius: 16,
+    gap: 3,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   addYoursText: {
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: '700',
     color: '#111827',
   },
   addYoursTail: {
-    width: 8,
-    height: 8,
+    width: 6,
+    height: 6,
     backgroundColor: '#d8dde3',
     transform: [{ rotate: '45deg' }],
-    marginTop: -4,
-    borderRadius: 2,
+    marginTop: -3,
+    borderRadius: 1,
   },
 });

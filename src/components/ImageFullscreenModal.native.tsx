@@ -24,8 +24,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Video, { type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
-import { collectFeedImageUrls } from '../utils/feedImageFullscreen';
+import { collectFeedFullscreenSlides, type FullscreenSlide } from '../utils/feedImageFullscreen';
+import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
 import { getImageFullscreenLaunch, clearImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
 import {
     getTextOnlyBackgroundColor,
@@ -74,10 +76,6 @@ type Props = {
     onFollow?: () => void | Promise<void>;
     onVisitProfile?: () => void;
 };
-
-function collectImageUrls(post: Post): string[] {
-    return collectFeedImageUrls(post);
-}
 
 function compactCount(n: number | undefined): string {
     const v = Math.max(0, Number(n) || 0);
@@ -131,17 +129,47 @@ export default function ImageFullscreenModal({
     const scrollRef = useRef<ScrollView>(null);
     const skipScrollSyncRef = useRef(false);
     const originRef = useRef<ImageFullscreenOrigin | null>(null);
-    const images = useMemo(() => {
-        const fromPost = post ? collectImageUrls(post) : [];
+    /**
+     * Fullscreen pages, image and video alike.
+     *
+     * `images` is retained for the empty-state / caption-path decisions below, which are
+     * about "does this post have any *renderable* media". `slides` is what actually gets
+     * rendered, so a video post produces a playable slide instead of falling through to a
+     * black shell.
+     */
+    const slides = useMemo(() => {
+        if (!post) return [];
+        const fromPost = collectFeedFullscreenSlides(post);
         if (fromPost.length > 0) return fromPost;
+        // Preserve the launch-time snapshot: the expand animation may open this modal
+        // before the post's media has resolved on the freshly mounted screen.
         const launch = getImageFullscreenLaunch();
         if (launch && post && String(launch.post.id) === String(post.id) && launch.urls.length > 0) {
-            return launch.urls;
+            return launch.urls
+                .filter((url) => typeof url === 'string' && !/^data:text\//i.test(url))
+                .map((url) => ({ kind: 'image' as const, url }));
         }
-        return launch?.urls ?? [];
+        return [];
     }, [post]);
+    const images = useMemo(
+        () => (slides.length ? slides.filter((s) => s.kind === 'image').map((s) => s.url) : []),
+        [slides],
+    );
     const textBody = (post?.text || post?.caption || '').trim();
-    const isTextOnly = images.length === 0 && Boolean(textBody);
+    const isTextOnly = slides.length === 0 && Boolean(textBody);
+    const hasVideoSlide = slides.some((s) => s.kind === 'video');
+
+    // Autoplay with sound is hostile, and the app already has a global feed mute concept, so
+    // fullscreen video starts muted and the user opts into audio explicitly.
+    const [videoMuted, setVideoMuted] = useState(true);
+    const videoRef = useRef<VideoRef>(null);
+
+    // Paused per slide rather than globally: off-screen slides must stop, otherwise every
+    // previously viewed video keeps playing under the next one.
+    const slidePaused = useCallback(
+        (slideIndex: number) => !visible || closing || slideIndex !== index,
+        [visible, closing, index],
+    );
 
     const progress = useSharedValue(0);
     const backdropOp = useSharedValue(0);
@@ -269,7 +297,7 @@ export default function ImageFullscreenModal({
 
     useEffect(() => {
         if (!visible || isTextOnly) return;
-        const max = Math.max(0, images.length - 1);
+        const max = Math.max(0, slides.length - 1);
         const next = Math.min(Math.max(0, initialIndex), max);
         setIndex(next);
         skipScrollSyncRef.current = true;
@@ -277,7 +305,7 @@ export default function ImageFullscreenModal({
         requestAnimationFrame(() => {
             skipScrollSyncRef.current = false;
         });
-    }, [visible, post?.id, initialIndex, images.length, screenWidth, isTextOnly]);
+    }, [visible, post?.id, initialIndex, slides.length, screenWidth, isTextOnly]);
 
     const backdropStyle = useAnimatedStyle(() => ({
         opacity: backdropOp.value,
@@ -330,15 +358,15 @@ export default function ImageFullscreenModal({
         }
     };
 
-    const hasCarousel = images.length > 1;
+    const hasCarousel = slides.length > 1;
 
     const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
         if (skipScrollSyncRef.current) return;
         const next = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
-        setIndex(Math.max(0, Math.min(next, images.length - 1)));
+        setIndex(Math.max(0, Math.min(next, slides.length - 1)));
     };
 
-    if (!images.length && !isTextOnly) {
+    if (!slides.length && !isTextOnly) {
         return (
             <Modal
                 visible={visible}
@@ -365,6 +393,54 @@ export default function ImageFullscreenModal({
     }
 
     const animating = !chromeShown || closing;
+
+    /**
+     * One page of the stage.
+     *
+     * `pointerEvents="none"` on the video matters: the surrounding Pressable owns taps for
+     * chrome toggling, and react-native-video's native view would otherwise swallow them on
+     * Android.
+     */
+    const renderSlide = (slide: FullscreenSlide, slideIndex: number) => {
+        const frameStyle = animating
+            ? styles.stageFill
+            : { width: screenWidth, height: screenHeight };
+
+        if (slide.kind === 'video') {
+            return (
+                <Pressable key={slide.url} onPress={toggleChrome} style={frameStyle}>
+                    <Video
+                        ref={slideIndex === index ? videoRef : undefined}
+                        source={{ uri: slide.url }}
+                        style={styles.image}
+                        resizeMode={imageResizeMode === 'contain' ? 'contain' : 'cover'}
+                        // Plays immediately on open: paused is false for the focused slide.
+                        paused={slidePaused(slideIndex)}
+                        muted={videoMuted}
+                        poster={slide.posterUrl}
+                        posterResizeMode="cover"
+                        repeat
+                        playInBackground={false}
+                        playWhenInactive={false}
+                        ignoreSilentSwitch="ignore"
+                        useTextureView
+                        pointerEvents="none"
+                        {...androidListSafeVideoProps()}
+                    />
+                </Pressable>
+            );
+        }
+
+        return (
+            <Pressable key={slide.url} onPress={toggleChrome} style={frameStyle}>
+                <Image
+                    source={{ uri: slide.url }}
+                    style={styles.image}
+                    resizeMode={imageResizeMode}
+                />
+            </Pressable>
+        );
+    };
 
     const mediaStage = (
         <View style={styles.stage}>
@@ -402,36 +478,25 @@ export default function ImageFullscreenModal({
                     style={animating ? styles.stageFill : { width: screenWidth, height: screenHeight }}
                     scrollEnabled={shellReady && !closing}
                 >
-                    {images.map((uri) => (
-                        <Pressable
-                            key={uri}
-                            onPress={toggleChrome}
-                            style={
-                                animating
-                                    ? styles.stageFill
-                                    : { width: screenWidth, height: screenHeight }
-                            }
-                        >
-                            <Image
-                                source={{ uri }}
-                                style={styles.image}
-                                resizeMode={imageResizeMode}
-                            />
-                        </Pressable>
-                    ))}
+                    {slides.map(renderSlide)}
                 </ScrollView>
             ) : (
+                slides.map((slide, i) => renderSlide(slide, i))
+            )}
+            {hasVideoSlide && !isTextOnly ? (
                 <Pressable
-                    onPress={toggleChrome}
-                    style={animating ? styles.stageFill : { width: screenWidth, height: screenHeight }}
+                    style={[styles.muteFab, { bottom: insets.bottom + 18 }]}
+                    onPress={() => setVideoMuted((m) => !m)}
+                    hitSlop={10}
+                    accessibilityLabel={videoMuted ? 'Unmute video' : 'Mute video'}
                 >
-                    <Image
-                        source={{ uri: images[0] }}
-                        style={styles.image}
-                        resizeMode={imageResizeMode}
+                    <Icon
+                        name={videoMuted ? 'volume-mute' : 'volume-high'}
+                        size={ox(22)}
+                        color="#FFFFFF"
                     />
                 </Pressable>
-            )}
+            ) : null}
         </View>
     );
 
@@ -700,6 +765,19 @@ const styles = StyleSheet.create({
         zIndex: 30,
         elevation: 30,
     },
+    /** Audio opt-in for fullscreen video. Centred above the safe-area inset. */
+    muteFab: {
+        position: 'absolute',
+        alignSelf: 'center',
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        zIndex: 25,
+        elevation: 25,
+    },
     headerCloseSpacer: {
         width: 44,
         height: 44,
@@ -717,7 +795,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     stageFill: {
-        ...StyleSheet.absoluteFillObject,
+        // Explicit rather than `...StyleSheet.absoluteFillObject`: that property is absent
+        // from this RN version's StyleSheet type, and `absoluteFill` is a registered style ID
+        // that cannot be spread inside StyleSheet.create.
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
     },
     image: {
         width: '100%',

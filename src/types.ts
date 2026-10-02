@@ -101,6 +101,14 @@ export type Post = {
   /** width / height of the primary media. See PostMediaItem.aspectRatio. */
   aspectRatio?: number;
   mediaItems?: PostMediaItem[]; // Multiple media items for carousel with effects/templates, including text-only clips
+  /**
+   * Dominant colour sampled server-side from the poster / first still image.
+   * Tints the feed's ambient canvas behind the floating cards. Optional: text-only posts
+   * and posts whose media file is gone have no sample, and the canvas holds its fallback.
+   */
+  dominantColor?: string;
+  /** Raw API spelling, retained alongside the camelCase alias. */
+  dominant_color?: string;
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images

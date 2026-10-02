@@ -28,8 +28,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
-import PassportTravelingBorder from '../components/PassportTravelingBorder.native';
+import FeedAmbientCanvas from '../components/FeedAmbientCanvas.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { PASSPORT_SHEET_WASH } from '../components/PassportSheetCanvas.native';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -100,6 +101,7 @@ import FeedPageLayout, {
     FEED_CARD_CAPTION_PADDING,
     FEED_CARD_ENGAGEMENT_BAR,
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+    FEED_CARD_ENGAGEMENT_SCRIM,
     FEED_CARD_ENGAGEMENT_LEFT,
     FEED_CARD_HEADER_WRAP,
     FEED_CARD_MEDIA_WRAP,
@@ -131,8 +133,10 @@ import FeedPageLayout, {
     FEED_HEADER_RIGHT_ACTIONS,
     FEED_HEADER_SIDE_ACTION,
     FEED_HEADER_SIDE_LABEL,
-    FEED_PAGE_BG,
-    FEED_POST_CARD_STYLE,
+FEED_PAGE_BG,
+      FEED_POST_CARD_STYLE,
+      FEED_CARD_FLOAT_WRAP,
+      FEED_TAB_BAR_CLEARANCE,
     FEED_EMPTY_BADGE,
     FEED_EMPTY_CARD,
     FEED_EMPTY_CREATE_GRADIENT,
@@ -160,7 +164,7 @@ import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedPostTagRow from '../components/FeedPostTagRow.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
-import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
+import { fullscreenSlideIndexForCarousel } from '../utils/feedImageFullscreen';
 import { setImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
@@ -293,6 +297,13 @@ import { ox } from '../constants/nativeOpticalScale';
 
 /** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
 const FEED_SWITCH_PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
+
+/**
+ * Content clearance for the floating glass tab bar. The bar is absolutely positioned and
+ * no longer participates in layout, so the feed body reserves this band itself to keep the
+ * final card (and its action row) tappable above the bar.
+ */
+const TAB_BAR_CLEARANCE = FEED_TAB_BAR_CLEARANCE;
 
 type Tab = string;
 
@@ -705,7 +716,7 @@ function PillTabs({
                                             {
                                                 translateY: feedSwitchBadgeAnim.interpolate({
                                                     inputRange: [0, 1],
-                                                    outputRange: [-8, 0],
+                                                    outputRange: [6, 0],
                                                 }),
                                             },
                                             {
@@ -718,14 +729,14 @@ function PillTabs({
                                     },
                                 ]}
                             >
-                                <View style={styles.feedSwitchBadgeCaret} />
                                 <View style={styles.feedSwitchBadgeInner}>
-                                    <Icon name="location" size={ox(14)} color="#FFFFFF" />
+                                    <Icon name="location" size={ox(11)} color="#FFFFFF" />
                                     <Text style={styles.feedSwitchBadgeText}>Switch feed</Text>
                                 </View>
+                                <View style={styles.feedSwitchBadgeCaret} />
                             </Animated.View>
                         ) : null}
-                        <PassportTravelingBorder borderRadius={10} borderWidth={2}>
+                        <View style={styles.feedSwitchPillBorder}>
                             <TouchableOpacity
                                 onPress={() => setMenuOpen((prev) => !prev)}
                                 style={FEED_HEADER_LOCATION_PILL}
@@ -747,7 +758,7 @@ function PillTabs({
                                 </Text>
                                 <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
                             </TouchableOpacity>
-                        </PassportTravelingBorder>
+                        </View>
                     </View>
 
                     <Modal
@@ -1177,7 +1188,8 @@ const FeedCard = React.memo(function FeedCard({
     }, [onLike]);
 
     const openStillFullscreen = React.useCallback(() => {
-        const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
+        // Slide-aware, not image-only: a mixed carousel must open the slide that was tapped.
+        const startIndex = fullscreenSlideIndexForCarousel(post, carouselIndex);
         const open = (origin?: ImageFullscreenOrigin | null) => {
             onOpenImageFullscreen?.(startIndex, origin ?? null);
         };
@@ -1196,15 +1208,16 @@ const FeedCard = React.memo(function FeedCard({
     }, [carouselIndex, onOpenImageFullscreen, post]);
 
     const handleMediaSingleTap = React.useCallback(() => {
-        // Active video: toggle mute (button always visible too).
+        // One tap → fullscreen (Scenes for video, still viewer for images). Mute is the icon.
         if (currentFeedSlideIsVideo(post, carouselIndex)) {
-            videoMediaRef.current?.toggleVideoMute();
+            handleOpenScenesPress();
             return;
         }
         openStillFullscreen();
-    }, [carouselIndex, openStillFullscreen, post]);
+    }, [carouselIndex, handleOpenScenesPress, openStillFullscreen, post]);
 
     return (
+        <View style={FEED_CARD_FLOAT_WRAP}>
         <View style={FEED_POST_CARD_STYLE}>
             <FeedPostTagRow tags={postTags} />
 
@@ -1292,12 +1305,9 @@ const FeedCard = React.memo(function FeedCard({
                                 isActive={isVideoActive && !isClientUploading}
                                 suspendNativeVideo={suspendNativeVideo}
                                 muted={feedVideoMuted}
-                                onOpenScenes={
-                                    mediaGesturesEnabled ? handleOpenScenesPress : undefined
-                                }
                             />
-                            {isClientUploading ? (
-                                <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
+                              {isClientUploading ? (
+                                  <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
                                     <ActivityIndicator size="large" color="#FFFFFF" />
                                     <Text style={FEED_CARD_UPLOAD_TITLE}>Posting…</Text>
                                     <Text style={FEED_CARD_UPLOAD_SUBTITLE}>Preparing your post</Text>
@@ -1318,6 +1328,25 @@ const FeedCard = React.memo(function FeedCard({
                                     aboveMuteControl={showVideoMuteOnMedia}
                                     onPress={() => onOpenTaggedSheet?.()}
                                 />
+                            ) : null}
+                            {showVideoMuteOnMedia &&
+                            currentFeedSlideIsVideo(post, carouselIndex) &&
+                            !isClientUploading ? (
+                                <Pressable
+                                    style={styles.feedMuteButton}
+                                    onPress={() => {
+                                        videoMediaRef.current?.toggleVideoMute();
+                                    }}
+                                    hitSlop={10}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={feedVideoMuted ? 'Unmute video' : 'Mute video'}
+                                >
+                                    <Icon
+                                        name={feedVideoMuted ? 'volume-mute' : 'volume-high'}
+                                        size={18}
+                                        color="#FFFFFF"
+                                    />
+                                </Pressable>
                             ) : null}
                         </View>
                     ) : null}
@@ -1357,6 +1386,15 @@ const FeedCard = React.memo(function FeedCard({
                     (isClientUploading || isClientUploadFailed) && FEED_CARD_ENGAGEMENT_BAR_DIMMED,
                 ]}
             >
+                {/* Same passport wash as the share-card Swal. */}
+                <LinearGradient
+                    pointerEvents="none"
+                    style={FEED_CARD_ENGAGEMENT_SCRIM}
+                    colors={[...PASSPORT_SHEET_WASH]}
+                    locations={[0, 0.22, 0.52, 0.78, 1]}
+                    start={{ x: 0.05, y: 1 }}
+                    end={{ x: 0.95, y: 0 }}
+                />
                 <View style={FEED_CARD_ENGAGEMENT_LEFT}>
                     <FeedEngagementRow
                         likeButtonRef={likeButtonRef}
@@ -1419,9 +1457,10 @@ const FeedCard = React.memo(function FeedCard({
                 onMessage={
                     onOpenDM ? () => onOpenDM(post.userHandle, post.id) : undefined
                 }
-                onBlock={onBlockUser}
-                onReport={onReportUser}
-            />
+onBlock={onBlockUser}
+                  onReport={onReportUser}
+              />
+          </View>
         </View>
     );
 }, (prev, next) => {
@@ -2090,10 +2129,42 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     ).current;
 
+    /** Ambient tint only — does not touch autoplay / activeVideoPostId refs. */
+    const [activePostColor, setActivePostColor] = useState<string | null>(null);
+    const ambientViewabilityConfigRef = useRef({
+        itemVisiblePercentThreshold: 50,
+        minimumViewTime: 0,
+    });
+    const onAmbientViewableItemsChanged = useRef(
+        ({
+            viewableItems,
+        }: {
+            viewableItems: Array<{ isViewable?: boolean; item?: FeedListRow; index?: number | null }>;
+        }) => {
+            const posts: Array<{ post: Post; index: number }> = [];
+            for (const token of viewableItems) {
+                if (!token.isViewable || !token.item || token.item.kind !== 'post') continue;
+                posts.push({ post: token.item.post, index: token.index ?? 0 });
+            }
+            if (posts.length === 0) return;
+            posts.sort((a, b) => a.index - b.index);
+            const post = posts[0].post;
+            const next =
+                (typeof post.dominantColor === 'string' && post.dominantColor) ||
+                (typeof post.dominant_color === 'string' && post.dominant_color) ||
+                null;
+            setActivePostColor((prev) => (prev === next ? prev : next));
+        },
+    ).current;
+
     const viewabilityConfigCallbackPairs = useRef([
         {
             viewabilityConfig: viewabilityConfigRef.current,
             onViewableItemsChanged,
+        },
+        {
+            viewabilityConfig: ambientViewabilityConfigRef.current,
+            onViewableItemsChanged: onAmbientViewableItemsChanged,
         },
     ]);
 
@@ -3403,6 +3474,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     ]);
     flatForRenderRef.current = flatForRender;
 
+    // Seed ambient colour once when the first post appears (viewability often skips mount).
+    const ambientColorSeededRef = useRef(false);
+    React.useEffect(() => {
+        if (ambientColorSeededRef.current) return;
+        const firstPost = flatForRender.find((row) => row.kind === 'post');
+        if (!firstPost || firstPost.kind !== 'post') return;
+        ambientColorSeededRef.current = true;
+        const next =
+            (typeof firstPost.post.dominantColor === 'string' && firstPost.post.dominantColor) ||
+            (typeof firstPost.post.dominant_color === 'string' && firstPost.post.dominant_color) ||
+            null;
+        setActivePostColor(next);
+    }, [flatForRender]);
+    React.useEffect(() => {
+        if (flatForRender.some((row) => row.kind === 'post')) return;
+        ambientColorSeededRef.current = false;
+    }, [flatForRender]);
+
     // First-paint bootstrap only. Like/comment patch `pages` → new `flat` identity;
     // that must NEVER re-arm a player. After viewability has spoken, it owns autoplay.
     const feedHasPosts = flat.length > 0;
@@ -4121,6 +4210,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             <FeedPageLayout
                 online={online}
                 error={error}
+                backdrop={<FeedAmbientCanvas dominantColor={activePostColor} />}
                 onRetry={() => {
                     setError(null);
                     void reloadFeedFromStartRef.current();
@@ -4146,8 +4236,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     />
                 }
             >
-            <View style={styles.feedListShell}>
-            <FlatList
+<View style={[styles.feedListShell, { paddingBottom: TAB_BAR_CLEARANCE + insets.bottom }]}>
+              <FlatList
                 ref={flatListRef}
                 style={styles.feedList}
                 data={flatForRender}
@@ -4970,6 +5060,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 };
 
 const styles = StyleSheet.create({
+    /** Outside TextureView — sibling of FeedPostMedia so mute stays visible on Android. */
+    feedMuteButton: {
+        position: 'absolute',
+        right: 10,
+        bottom: 10,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.72)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.55)',
+        zIndex: 80,
+        elevation: Platform.OS === 'android' ? 80 : 0,
+    },
     mediaBurstPortal: {
         ...StyleSheet.absoluteFillObject,
         position: 'absolute',
@@ -4980,7 +5086,9 @@ const styles = StyleSheet.create({
     },
     container: {
         flex: 1,
-        backgroundColor: FEED_PAGE_BG,
+        // Transparent so FeedAmbientCanvas (inside FeedPageLayout) can bleed under
+        // the absolute tab bar — sceneContainerStyle is also transparent.
+        backgroundColor: 'transparent',
     },
     fullscreenOverlayRoot: {
         flex: 1,
@@ -4999,23 +5107,33 @@ const styles = StyleSheet.create({
     },
     feedListShell: {
         flex: 1,
-        backgroundColor: FEED_PAGE_BG,
+        // Transparent: the ambient canvas is mounted at FeedPageLayout root so it can paint
+        // behind the pinned header as well as this scroll body. FeedPageLayout's own opaque
+        // backdrop still owns the base colour if the canvas ever fails to mount.
+        backgroundColor: 'transparent',
         position: 'relative',
         overflow: 'hidden',
     },
     feedList: {
         flex: 1,
-        backgroundColor: FEED_PAGE_BG,
+        // Transparent so the root FeedAmbientCanvas (FeedPageLayout backdrop) shows
+        // through the gaps between floating cards.
+        backgroundColor: 'transparent',
         elevation: 0,
     },
     feedListRow: {
         position: 'relative',
         overflow: 'hidden',
         marginBottom: 16,
-        backgroundColor: FEED_PAGE_BG,
+        // Transparent so the ambient canvas shows in the gap beside each floating card.
+        // This wrapper spans the FULL row width, so leaving it opaque painted over the
+        // 16px margins and hid the canvas completely.
+        backgroundColor: 'transparent',
     },
     feedListContent: {
-        backgroundColor: FEED_PAGE_BG,
+        // Same reason as feedListRow: the content container covers the whole scroll area
+        // and would otherwise bury the canvas behind an opaque page colour.
+        backgroundColor: 'transparent',
         flexGrow: 1,
     },
     tabContainer: {
@@ -5034,45 +5152,55 @@ const styles = StyleSheet.create({
     },
     feedSwitchBadge: {
         position: 'absolute',
-        top: 44,
         left: 0,
         right: 0,
-        marginTop: ox(10),
-        zIndex: 20,
+        bottom: '100%',
+        marginBottom: ox(6),
+        zIndex: 50,
         alignItems: 'center',
     },
     feedSwitchPillWrap: {
         position: 'relative',
         alignSelf: 'center',
         maxWidth: '100%',
+        zIndex: 50,
+        overflow: 'visible',
+    },
+    feedSwitchPillBorder: {
+        borderRadius: 10,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        overflow: 'hidden',
+        zIndex: 1,
     },
     feedSwitchBadgeInner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: ox(6),
-        paddingHorizontal: ox(16),
-        paddingVertical: ox(7),
-        borderRadius: ox(18),
-        borderWidth: 1.5,
+        gap: ox(4),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(4),
+        borderRadius: ox(12),
+        borderWidth: 1,
         borderColor: '#FFFFFF',
         backgroundColor: '#000000',
     },
     feedSwitchBadgeText: {
         color: '#FFFFFF',
-        fontSize: ox(13),
+        fontSize: ox(11),
         fontWeight: '700',
     },
     feedSwitchBadgeCaret: {
-        width: 10,
-        height: 10,
-        marginBottom: ox(-5),
+        width: 7,
+        height: 7,
+        marginTop: ox(-4),
         backgroundColor: '#000000',
-        borderLeftWidth: 1.5,
-        borderTopWidth: 1.5,
+        borderRightWidth: 1,
+        borderBottomWidth: 1,
         borderColor: '#FFFFFF',
         transform: [{ rotate: '45deg' }],
-        borderRadius: ox(2),
+        borderRadius: ox(1),
         zIndex: 1,
+        alignSelf: 'center',
     },
     feedSwitchSheetOverlay: {
         flex: 1,

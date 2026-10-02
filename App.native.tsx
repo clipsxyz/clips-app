@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -98,11 +98,31 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
+// MainTabBar is a floating glass bar; the navigator must not paint its own opaque
+// panel or hairline underneath it, otherwise it clips the ambient tint again.
 const TAB_BAR_STYLE = {
-  backgroundColor: '#030712',
-  borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  borderTopWidth: 1,
-} as const;
+  backgroundColor: 'transparent',
+  borderTopWidth: 0,
+  borderTopColor: 'transparent',
+  elevation: 0,
+  shadowOpacity: 0,
+  shadowColor: 'transparent',
+  position: 'absolute' as const,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
+
+/** Keep nav chrome transparent so FeedAmbientCanvas shows through frosted bars. */
+const NAV_THEME = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: 'transparent',
+    card: 'transparent',
+    border: 'transparent',
+  },
+};
 
 function CreateTabPlaceholder() {
   return <View style={styles.createTabPlaceholder} />;
@@ -170,7 +190,7 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: TAB_BAR_STYLE,
-        sceneContainerStyle: { backgroundColor: GAZETTEER_ABYSS },
+        sceneContainerStyle: { backgroundColor: 'transparent' },
         lazy: true,
       }}
       tabBar={(props) => (
@@ -239,9 +259,9 @@ function App(): React.JSX.Element {
     <AuthProvider>
       <BottomSheetModalProvider>
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <UploadProgressToast />
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer ref={navigationRef} theme={NAV_THEME}>
           <Stack.Navigator
             initialRouteName="Splash"
             screenOptions={{
@@ -250,7 +270,12 @@ function App(): React.JSX.Element {
             }}
           >
           <Stack.Screen name="Splash" component={SplashScreen} />
-          <Stack.Screen name="MainTabs" component={MainTabs} />
+          {/* Transparent so FeedAmbientCanvas can bleed under the frosted tab bar. */}
+          <Stack.Screen
+            name="MainTabs"
+            component={MainTabs}
+            options={{ contentStyle: { backgroundColor: 'transparent' } }}
+          />
           <Stack.Screen name="Discover" component={DiscoverScreen} />
           <Stack.Screen name="ProfileCover" component={ProfileCoverScreen} />
           <Stack.Screen
@@ -371,7 +396,9 @@ function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
-    backgroundColor: '#030712',
+    // Near-black floor only as last-resort letterbox; MainTabs + feed stay transparent
+    // so FeedAmbientCanvas can show through frosted chrome / tab glass.
+    backgroundColor: '#0B0E14',
   },
   createTabPlaceholder: {
     flex: 1,

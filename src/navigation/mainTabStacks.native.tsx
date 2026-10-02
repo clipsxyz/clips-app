@@ -1,7 +1,6 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
 import FeedScreen from '../screens/FeedScreen';
 import BoostScreen from '../screens/BoostScreen';
 import SearchScreen from '../screens/SearchScreen';
@@ -12,7 +11,8 @@ const Stack = createNativeStackNavigator();
 
 const stackScreenOptions = {
     headerShown: false,
-    contentStyle: { backgroundColor: GAZETTEER_ABYSS },
+    // Transparent so Home's FeedAmbientCanvas can bleed under the floating tab bar.
+    contentStyle: { backgroundColor: 'transparent' },
 } as const;
 
 type FeedHomeBoundaryState = { error: Error | null; retryKey: number };
@@ -88,7 +88,9 @@ export const InboxTabStack = createMainTabStack('InboxMain', InboxScreen);
 const styles = StyleSheet.create({
     homeTabRoot: {
         flex: 1,
-        backgroundColor: '#030712',
+        // Transparent: ambient canvas lives in FeedPageLayout and must reach the
+        // screen edges under the frosted header and absolute tab bar.
+        backgroundColor: 'transparent',
         overflow: 'hidden',
     },
     feedErrorRoot: {

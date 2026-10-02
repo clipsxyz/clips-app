@@ -11,6 +11,7 @@ use App\Services\BoostAnalyticsService;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
 use App\Services\VideoThumbnailService;
+use App\Support\DominantColor;
 use App\Support\VideoDimensions;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -233,6 +234,13 @@ class PostController extends Controller
         $postData['thumbnail_url'] = $poster;
         $postData['video_poster_url'] = $poster;
         $postData['poster_url'] = $poster;
+
+        // Sampled dominant colour, used by the client to tint the feed's ambient canvas
+        // behind the floating cards. Validated on read because the column is a plain
+        // string: a malformed legacy value must degrade to null (the client falls back)
+        // rather than ship a colour it cannot interpolate.
+        $dominantColor = is_string($post->dominant_color) ? trim($post->dominant_color) : '';
+        $postData['dominant_color'] = DominantColor::isValid($dominantColor) ? $dominantColor : null;
 
         $postData = Post::applyEngagementCounts($postData, $attrs);
 

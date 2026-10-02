@@ -40,9 +40,13 @@ describe('buildSharePostToStoriesPayload', () => {
             userHandle: '@a',
             stats: { views: 0, likes: 0, comments: 0, shares: 0, reclips: 0 },
         } as Post;
-        const payload = buildSharePostToStoriesPayload(post);
-        expect(payload.isTextOnlyShare).toBe(false);
-        expect(payload.mediaUrl).toBeUndefined();
-        expect(payload.shareText).toContain('caption');
+const payload = buildSharePostToStoriesPayload(post);
+          // True is what triggers the canvas path (see the `isTextOnlyShare` gating in
+          // buildSharePostToStoriesPayload, which strips mediaUrl and swaps in canvas
+          // rendering). This assertion was stale at `false`, which contradicted both this
+          // test's own name and the two assertions below it.
+          expect(payload.isTextOnlyShare).toBe(true);
+          expect(payload.mediaUrl).toBeUndefined();
+          expect(payload.shareText).toContain('caption');
     });
 });

@@ -45,9 +45,17 @@ class PostTest extends TestCase
         $this->assertNotContains($reclippedPost->id, $results);
     }
 
-    public function test_by_location_scope_filters_by_location_label(): void
-    {
-        $user = User::factory()->create();
+public function test_by_location_scope_filters_by_location_label(): void
+{
+    // UserFactory hardcodes location_regional = 'Dublin'. scopeByLocation() intentionally
+    // also matches the AUTHOR's location_* fields via orWhereHas('user'), so with the default
+    // user BOTH posts match and this test cannot isolate post-level label filtering.
+    // Moving the author off Dublin isolates what this test is actually named for.
+    $user = User::factory()->create([
+        'location_local' => 'Galway',
+        'location_regional' => 'Galway',
+        'location_national' => 'Ireland',
+    ]);
 
         $dublinPost = Post::factory()->create([
             'user_id' => $user->id,

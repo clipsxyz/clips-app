@@ -1383,9 +1383,15 @@ export function transformLaravelPost(response: any): Post {
     // snake_case alongside the camelCase alias. Absent on rows that were never backfilled
     // (text-only posts, or media whose file is missing) -- the card then measures
     // naturalSize at runtime and falls back to RATIO_FALLBACK.
-    width: response.width ?? existing?.width,
-    height: response.height ?? existing?.height,
-    aspectRatio: response.aspect_ratio ?? response.aspectRatio ?? existing?.aspectRatio,
+width: response.width ?? existing?.width,
+      height: response.height ?? existing?.height,
+      aspectRatio: response.aspect_ratio ?? response.aspectRatio ?? existing?.aspectRatio,
+      // Dominant colour sampled server-side from the poster/first still image, used to tint
+      // the feed's ambient canvas behind the floating cards. Both key spellings accepted
+      // because the API returns snake_case alongside the camelCase alias. Absent on rows
+      // with no sampleable media (text-only posts, media whose file is gone) -- the canvas
+      // then holds its fallback rather than guessing.
+      dominantColor: response.dominant_color ?? response.dominantColor ?? existing?.dominantColor,
     // Some endpoints may return caption but omit text_content/text (or vice versa).
     // Keep both mapped so feed/fullscreen always have display copy.
     text: response.text_content || response.text || response.caption || existing?.text,

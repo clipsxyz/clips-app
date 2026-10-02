@@ -50,6 +50,7 @@ class Post extends Model
         'width',
         'height',
         'aspect_ratio',
+        'dominant_color',
         'gazetteer_region_id',
         'latitude',
         'longitude',

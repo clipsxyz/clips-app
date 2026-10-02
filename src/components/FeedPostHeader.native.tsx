@@ -19,6 +19,7 @@ import {
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
+import { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -250,13 +251,23 @@ export default function FeedPostHeader({
             style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}
             pointerEvents="box-none"
         >
-            {isOverlaid ? (
+            {/* Same passport wash as the share-card Swal / FeedShareModal. */}
+            {!isOverlaid ? (
+                <LinearGradient
+                    colors={[...PASSPORT_SHEET_WASH]}
+                    locations={[0, 0.22, 0.52, 0.78, 1]}
+                    start={{ x: 0.05, y: 1 }}
+                    end={{ x: 0.95, y: 0 }}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                />
+            ) : (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}
                     style={StyleSheet.absoluteFill}
                     pointerEvents="none"
                 />
-            ) : null}
+            )}
             <View style={styles.content}>{chrome}</View>
         </View>
     );
@@ -272,7 +283,7 @@ const styles = StyleSheet.create({
         paddingTop: 12,
         paddingBottom: 8,
         justifyContent: 'center',
-        backgroundColor: '#030712',
+        backgroundColor: '#060d16',
         overflow: 'hidden',
     },
     wrapOverlaid: {

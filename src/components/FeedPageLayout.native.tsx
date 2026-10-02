@@ -24,11 +24,28 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
 
-/** Web `main` / feed shell background (App.tsx style={{ backgroundColor: '#030712' }}). */
-export const FEED_PAGE_BG = '#030712';
+/** News feed shell / ambient canvas floor. */
+export const FEED_PAGE_BG = '#161E2E';
 
-/** Web post card / article background (FeedCard style). */
-export const FEED_CARD_BG = '#030712';
+/** Web post card / article background — Gazetteer Swal sheet (`#060d16`). */
+export const FEED_CARD_BG = '#060d16';
+
+/**
+ * Header (username) + engagement (like) chrome — same Swal Gazetteer sheet colour.
+ */
+export const FEED_CARD_CHROME_BG = '#060d16';
+
+/**
+ * Header + footer chrome fill — same floor as the feed ambient canvas.
+ */
+export const FEED_CHROME_GLASS = '#161E2E';
+
+/**
+ * Height of the MainTabBar content above the home-indicator / nav inset.
+ * Kept in sync with FeedScreen `TAB_BAR_CLEARANCE` so the in-feed bottom glass
+ * band lines up with the absolute tab icons.
+ */
+export const FEED_TAB_BAR_CLEARANCE = 64;
 
 /** Media column + loading frame (black letterbox). */
 export const FEED_CARD_MEDIA_BG = '#000000';
@@ -46,6 +63,39 @@ export const FEED_POST_CARD_STYLE = {
     flexDirection: 'column' as const,
 };
 
+/**
+ * NOW TV-style floating card shell.
+ *
+ * Deliberately a NEW wrapper instead of a restyle of `FEED_POST_CARD_STYLE`. The card
+ * keeps its own opaque background and its own 1px separator; insetting the shell is what
+ * exposes the ambient canvas in the margins between cards. The canvas has to be visible in
+ * the gap to be worth animating, so that separation is the whole effect.
+ */
+export const FEED_CARD_FLOAT_WRAP = {
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 20,
+    overflow: 'hidden' as const,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: FEED_CARD_BG,
+    position: 'relative' as const,
+} as const;
+
+/**
+ * Bottom 35% of the media frame.
+ *
+ * Anchored to the MEDIA wrapper, not the card, so it tints only the image/video. Captions
+ * and the engagement bar render below that wrapper in the card body and are unaffected.
+ */
+export const FEED_CARD_MEDIA_SCRIM = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '35%' as const,
+} as const;
+
 /** Header → media → footer. Clip media so TextureView cannot bleed. */
 export const FEED_CARD_BODY = {
     position: 'relative' as const,
@@ -60,7 +110,7 @@ export const FEED_CARD_HEADER_WRAP = {
     width: '100%' as const,
     minHeight: 56,
     zIndex: 2,
-    backgroundColor: FEED_CARD_BG,
+    backgroundColor: FEED_CARD_CHROME_BG,
 } as const;
 
 /** Default media frame while sizing / for letterboxing. */
@@ -81,13 +131,11 @@ export const FEED_CARD_CAPTION_PADDING = {
     paddingVertical: 10,
 } as const;
 
-/** Web EngagementBar shell: `px-3 pt-2 pb-2.5 border-t` with borderColor #030712. */
+/** Web EngagementBar shell: `px-3 pt-2 pb-2.5`. No hairline — the glass scrim owns the edge. */
 export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 10,
-    borderTopWidth: 1,
-    borderTopColor: FEED_PAGE_BG,
 } as const;
 
 /** Full-bleed media column below the stacked post header. */
@@ -183,11 +231,26 @@ export const FEED_CARD_SPONSORED_FEED_TYPE = {
 
 /** Web EngagementBar flex row + border-t padding. */
 export const FEED_CARD_ENGAGEMENT_BAR = {
+    position: 'relative' as const,
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
     alignItems: 'center' as const,
     minWidth: 0,
     ...FEED_CARD_ENGAGEMENT_BAR_PADDING,
+};
+
+/**
+ * Soft scrim seated behind the action controls. Keeps Like/Comment/Boost/Save reading as
+ * frosted chrome over the card body rather than a flat dark panel, without reducing the
+ * opacity of the card itself (text legibility over arbitrary footage is preserved).
+ */
+export const FEED_CARD_ENGAGEMENT_SCRIM = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    pointerEvents: 'none' as const,
 };
 
 export const FEED_CARD_ENGAGEMENT_BAR_DIMMED = {
@@ -342,8 +405,8 @@ export const FEED_EMPTY_GRADIENT_BTN_TEXT = {
 export const FEED_EMPTY_NOTIFY_GRADIENT = ['#0EA5E9', '#6366F1', '#A855F7'] as const;
 export const FEED_EMPTY_CREATE_GRADIENT = ['#EF4444', '#FACC15', '#EF4444'] as const;
 
-/** Web PillTabs container: `bg-black py-1`. */
-export const FEED_PILL_TABS_BG = '#000000';
+/** Header pill-tabs row — same floor as feed chrome. */
+export const FEED_PILL_TABS_BG = '#161E2E';
 
 /** Web location pill: `bg-[#36454F]`. */
 export const FEED_LOCATION_PILL_BG = '#36454F';
@@ -544,6 +607,12 @@ export type FeedPageLayoutProps = {
     header: ReactNode;
     /** Scrollable feed body — pass a FlatList with style={{ flex: 1 }}. */
     children: ReactNode;
+    /**
+     * Ambient canvas mounted at layout root so it paints behind the pinned chrome as
+     * well as the scroll body. When supplied, the scroll body drops its opaque page
+     * colour and both the header and the scroll area read as frosted glass.
+     */
+    backdrop?: ReactNode;
     online?: boolean;
     error?: string | null;
     onRetry?: () => void;
@@ -553,18 +622,36 @@ export type FeedPageLayoutProps = {
 export default function FeedPageLayout({
     header,
     children,
+    backdrop,
     online = true,
     error = null,
     onRetry,
     style,
 }: FeedPageLayoutProps) {
     const insets = useSafeAreaInsets();
+    const glassScrollHost = backdrop ? styles.scrollHostGlass : null;
 
     return (
-        <View style={[styles.root, style]}>
-            <View style={styles.opaqueBackdrop} pointerEvents="none" />
-            {/* Pinned chrome — web: shrink-0 pt-[safe-area] (FeedPageWrapper) */}
-            <View style={[styles.pinnedChrome, { paddingTop: insets.top }]}>
+        <View style={[styles.root, backdrop ? styles.rootGlass : null, style]}>
+            {/* Ambient is the only full-bleed plane when present. Opaque floor only when
+                there is no canvas — otherwise Android paints the solid sibling over the
+                transparent list and the tint never reads in the card margins. */}
+            {backdrop ? (
+                <View style={styles.ambientHost} pointerEvents="none" collapsable={false}>
+                    {backdrop}
+                </View>
+            ) : (
+                <View style={styles.opaqueBackdrop} pointerEvents="none" />
+            )}
+            {/*
+              IMPORTANT: chrome + scroll must be DIRECT siblings of the ambient host.
+              Wrapping them in a zIndex'd column creates an Android offscreen layer that
+              composites rgba glass against black — looking like solid #000 bars.
+            */}
+            <View
+                style={[styles.pinnedChrome, backdrop ? styles.pinnedChromeGlass : null, { paddingTop: insets.top }]}
+                collapsable={false}
+            >
                 <View style={styles.spacer16} />
 
                 {!online ? (
@@ -600,7 +687,21 @@ export default function FeedPageLayout({
             </View>
 
             {/* Inner scroll host — web: flex-1 min-h-0 overflow-y-auto pb-2 */}
-            <View style={styles.scrollHost}>{children}</View>
+            <View style={[styles.scrollHost, glassScrollHost]}>{children}</View>
+
+            {/*
+              Bottom glass band — same sibling compositing trick as pinnedChrome.
+              React Navigation's tab scene uses zIndex, so a translucent MainTabBar
+              would alpha-blend against black instead of this canvas. Paint the glass
+              here (under transparent tab icons) so the glow reaches the gesture area.
+            */}
+            {backdrop ? (
+                <View
+                    pointerEvents="none"
+                    collapsable={false}
+                    style={[styles.bottomChromeGlass, { height: FEED_TAB_BAR_CLEARANCE + insets.bottom }]}
+                />
+            ) : null}
         </View>
     );
 }
@@ -611,15 +712,58 @@ const styles = StyleSheet.create({
         backgroundColor: FEED_PAGE_BG,
         overflow: 'hidden',
     },
-    opaqueBackdrop: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: FEED_PAGE_BG,
-        zIndex: 0,
+    /** Drop the solid page fill so the ambient canvas owns the full-bleed plane. */
+    rootGlass: {
+        backgroundColor: 'transparent',
     },
+    opaqueBackdrop: {
+          // Spelled out rather than `...StyleSheet.absoluteFillObject`: that property is
+          // absent from this RN version's StyleSheet type (it only exists on some versions),
+          // and `absoluteFill` is a registered style ID, so it cannot be spread here.
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          bottom: 0,
+          backgroundColor: FEED_PAGE_BG,
+          zIndex: 0,
+      },
+    ambientHost: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        zIndex: 0,
+        elevation: 0,
+    },
+    /** Ambient canvas mounts as a root sibling under this frosted band. */
     pinnedChrome: {
         flexShrink: 0,
-        zIndex: 140,
         backgroundColor: FEED_PAGE_BG,
+        borderBottomWidth: 0,
+        borderBottomColor: 'transparent',
+        overflow: 'visible',
+        zIndex: 50,
+        ...Platform.select({
+            android: { elevation: 0 },
+            ios: {},
+        }),
+    },
+    pinnedChromeGlass: {
+        backgroundColor: FEED_CHROME_GLASS,
+        borderBottomWidth: 0,
+        borderBottomColor: 'transparent',
+        overflow: 'visible',
+    },
+    bottomChromeGlass: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: FEED_CHROME_GLASS,
+        borderTopWidth: 0,
+        borderTopColor: 'transparent',
         ...Platform.select({
             android: { elevation: 0 },
             ios: {},
@@ -629,17 +773,23 @@ const styles = StyleSheet.create({
         height: 16, // web h-4
     },
     pillTabsHost: {
-        backgroundColor: FEED_PILL_TABS_BG,
+        // Transparent so it does not double-darken the frosted chrome behind it.
+        backgroundColor: 'transparent',
         paddingVertical: 4, // web py-1
         position: 'relative',
-        zIndex: 140,
+        // Let the "Switch feed" cue sit above the pill without being clipped.
+        overflow: 'visible',
+        zIndex: 50,
     },
     scrollHost: {
         flex: 1,
         minHeight: 0,
         paddingBottom: 8, // web pb-2
         backgroundColor: FEED_PAGE_BG,
-        zIndex: 1,
+    },
+    /** Drop the opaque page colour when an ambient canvas owns the root background. */
+    scrollHostGlass: {
+        backgroundColor: 'transparent',
     },
     offlineBanner: {
         marginHorizontal: 12, // mx-3

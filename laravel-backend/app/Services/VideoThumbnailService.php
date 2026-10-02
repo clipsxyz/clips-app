@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Post;
+use App\Support\DominantColor;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -21,10 +22,18 @@ class VideoThumbnailService
                 $this->mergePosterIntoMediaItems($post, $existing);
                 $post->save();
             }
+            // Run even on the early-return path: the poster may predate this feature, so the
+            // colour is still missing on a post whose thumbnail is already present.
+            $this->ensureDominantColorFor($post);
+
             return $existing;
         }
 
         if (!$this->isVideoPost($post)) {
+            // Still-image posts never reach the FFmpeg branch, but they can still be
+            // sampled straight off their own media, which is where most feed colour comes from.
+            $this->ensureDominantColorFor($post);
+
             return null;
         }
 
@@ -38,6 +47,8 @@ class VideoThumbnailService
             $post->thumbnail_url = $sibling;
             $this->mergePosterIntoMediaItems($post, $sibling);
             $post->save();
+            $this->ensureDominantColorFor($post);
+
             return $sibling;
         }
 
@@ -49,8 +60,112 @@ class VideoThumbnailService
         $post->thumbnail_url = $url;
         $this->mergePosterIntoMediaItems($post, $url);
         $post->save();
+        $this->ensureDominantColorFor($post);
 
         return $url;
+    }
+
+    /**
+     * Sample and persist a dominant colour for the feed's ambient canvas.
+     *
+     * IDEMPOTENT BY DESIGN. An existing value is never recomputed, so this is safe to call
+     * on every render pass and never causes a write for a post that already has a colour.
+     * Deliberately not folded into the thumbnail save: sampling can fail (missing file,
+     * unreadable remote URL) and must never block or roll back thumbnail generation.
+     */
+    public function ensureDominantColorFor(Post $post): void
+    {
+        if ($this->hasDominantColor($post)) {
+            return;
+        }
+
+        $hex = $this->sampleDominantColorFor($post);
+        if ($hex === null) {
+            return;
+        }
+
+        $post->dominant_color = $hex;
+        $post->save();
+    }
+
+    /**
+     * Compute the post's dominant colour WITHOUT persisting it.
+     *
+     * Split out from ensureDominantColorFor for one specific reason: the persist path saves
+     * internally, so a `--dry-run` backfill that called it and then "undid" the value in
+     * memory would still have written every row. Callers that must not write use this.
+     */
+    public function sampleDominantColorFor(Post $post): ?string
+    {
+        // Poster first: it is a small, cheap, already-generated JPEG and it is what the
+        // feed actually displays for a video card.
+        $hex = $this->sampleFromUrl(is_string($post->thumbnail_url) ? $post->thumbnail_url : null);
+        if ($hex === null) {
+            $hex = $this->sampleFromUrl($this->firstImageUrl($post));
+        }
+
+        return $hex;
+    }
+
+    private function hasDominantColor(Post $post): bool
+    {
+        return trim((string) ($post->dominant_color ?? '')) !== '';
+    }
+
+    /**
+     * Sample a colour from a URL that may be a local path, a `/storage/...` URL, or remote.
+     *
+     * Remote sources are fetched rather than skipped because poster/media URLs can point at
+     * a CDN. Bounded by a short timeout: a slow host must not stall the render job, and a
+     * missing colour only costs the ambient tint.
+     */
+    private function sampleFromUrl(?string $url): ?string
+    {
+        if (! is_string($url) || $url === '') {
+            return null;
+        }
+
+        $local = $this->resolveLocalPath($url);
+        if ($local !== null) {
+            return DominantColor::fromFile($local);
+        }
+
+        if (! preg_match('#^https?://#i', $url)) {
+            return null;
+        }
+
+        $context = stream_context_create([
+            'http' => ['timeout' => 4, 'follow_location' => 1, 'max_redirects' => 2],
+        ]);
+        $binary = @file_get_contents($url, false, $context);
+        if ($binary === false || $binary === '') {
+            return null;
+        }
+
+        return DominantColor::fromString($binary);
+    }
+
+    /** First still-image source on the post, used when there is no poster to sample. */
+    private function firstImageUrl(Post $post): ?string
+    {
+        $items = is_array($post->media_items) ? $post->media_items : [];
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $url = $item['url'] ?? null;
+            if (is_string($url) && $url !== '' && ($item['type'] ?? null) === 'image') {
+                return $url;
+            }
+        }
+
+        if (is_string($post->media_url)
+            && $post->media_url !== ''
+            && preg_match('/\.(jpe?g|png|webp|gif)(\?|$)/i', $post->media_url)) {
+            return $post->media_url;
+        }
+
+        return null;
     }
 
     public function extractJpeg(string $videoUrl, string $postId): ?string

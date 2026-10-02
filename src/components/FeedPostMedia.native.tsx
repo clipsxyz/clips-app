@@ -34,7 +34,7 @@ import {
     isTextOnlyPost,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
-import { postHasVideoMedia, resolvePostPlaybackUri } from '../utils/postMedia';
+import { resolvePostPlaybackUri } from '../utils/postMedia';
 import {
     feedAspectRatio,
     intrinsicRatio,
@@ -48,8 +48,8 @@ import {
     mockFeedVideoSource,
     resolveMockFeedVideoUrl,
 } from '../constants/mockFeedVideos';
-import { FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
-import VideoCTAOverlay from './VideoCTAOverlay.native';
+import { FEED_CARD_MEDIA_SCRIM, FEED_CARD_MEDIA_TAP_LAYER } from './FeedPageLayout.native';
+import LinearGradient from 'react-native-linear-gradient';
 import FeedVideoCaptionOverlay from './FeedVideoCaptionOverlay.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 
@@ -138,7 +138,7 @@ type Props = {
     onPress?: (event?: GestureResponderEvent) => void;
     /** Feed: double-tap like (web Media / TextCard parity). Optional local tap coords. */
     onDoubleLike?: (x?: number, y?: number) => void;
-    /** Feed: single-tap — image fullscreen or video mute flash (web Media). */
+    /** Feed: single-tap opens fullscreen (Scenes for video, still viewer for images). */
     onSingleTap?: () => void;
     stickers?: StickerOverlay[];
     onMediaLoad?: () => void;
@@ -153,8 +153,6 @@ type Props = {
     /** Feed autoplay is muted by default (global mute pref). */
     muted?: boolean;
     style?: StyleProp<ViewStyle>;
-    /** Feed video: opens vertical Scenes viewer. */
-    onOpenScenes?: () => void;
 };
 
 const FeedPostMedia = React.memo(
@@ -176,7 +174,6 @@ const FeedPostMedia = React.memo(
         suspendNativeVideo = false,
         muted = true,
         style,
-        onOpenScenes,
     },
     ref,
 ) {
@@ -421,9 +418,6 @@ const FeedPostMedia = React.memo(
 
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && activeIsVideo && !!mediaUrl;
-    const showScenesCta =
-        mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
-    const showMuteButton = video && mode === 'feed' && isFeedAutoplayActive;
 
     useEffect(() => {
         if (suspendNativeVideo) {
@@ -632,10 +626,6 @@ const FeedPostMedia = React.memo(
         },
         [],
     );
-
-    const handleOpenScenesPress = useCallback(() => {
-        onOpenScenes?.();
-    }, [onOpenScenes]);
 
     const renderFeedTapOverlay = () => {
         // Non-carousel: transparent overlay (Image/Video steal touches on Android).
@@ -988,23 +978,12 @@ const FeedPostMedia = React.memo(
                 />
             ) : null}
             {renderFeedTapOverlay()}
-            {showScenesCta ? (
-                <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={post.userHandle} />
-            ) : null}
-            {showMuteButton ? (
-                <Pressable
-                    style={styles.muteButton}
-                    onPress={(e) => {
-                        e.stopPropagation?.();
-                        setFeedSoundOn(!soundOn);
-                        setMuteFlash(true);
-                        setTimeout(() => setMuteFlash(false), 1100);
-                    }}
-                    hitSlop={8}
-                >
-                    <Icon name={soundOn ? 'volume-high' : 'volume-mute'} size={14} color="#FFFFFF" />
-                </Pressable>
-            ) : null}
+            {/* Scrim under chrome — mute control stays above it on the bottom edge. */}
+            <LinearGradient
+                style={styles.mediaScrim}
+                colors={['transparent', 'rgba(11, 14, 20, 0.90)']}
+                pointerEvents="none"
+            />
             {video && mode === 'detail' && paused ? (
                 <Pressable style={styles.playBadge} onPress={() => setPaused(false)}>
                     <Icon name="play-circle" size={64} color="rgba(255,255,255,0.95)" />
@@ -1104,14 +1083,19 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 10,
         bottom: 10,
-        width: 26,
-        height: 26,
-        borderRadius: 13,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.55)',
         zIndex: 25,
         elevation: Platform.OS === 'android' ? 25 : 0,
+    },
+    mediaScrim: {
+        ...FEED_CARD_MEDIA_SCRIM,
+        zIndex: 2,
+        elevation: 0,
     },
     videoFallback: {
         backgroundColor: '#121212',
