@@ -6,6 +6,7 @@ import FeedLiveShareIcon from './FeedLiveShareIcon.native';
 
 const BRAND_ACTIVE = '#7A8AF0';
 const ACTION_ICON = FEED_UI.icon.action;
+const PILL_ACTION_ICON = 15;
 /** Web share control is `w-11 h-11` (44) around a 24px glyph — keep hit box, smaller glyph. */
 const ACTION_HIT = 40;
 
@@ -16,6 +17,8 @@ type Props = {
     showMetrics?: boolean;
     metricsOpen?: boolean;
     onToggleMetrics?: () => void;
+    /** NOW TV frosted pill chrome. */
+    pillChrome?: boolean;
 };
 
 /** Web EngagementBar right cluster: external share + optional boost metrics. */
@@ -25,27 +28,30 @@ export default function FeedEngagementRightActions({
     showMetrics = false,
     metricsOpen = false,
     onToggleMetrics,
+    pillChrome = false,
 }: Props) {
+    const iconSize = pillChrome ? PILL_ACTION_ICON : ACTION_ICON;
+
     return (
-        <View style={styles.row}>
+        <View style={[styles.row, pillChrome && styles.rowPill]}>
             {onShare ? (
                 <TouchableOpacity
                     onPress={onShare}
-                    style={styles.shareButton}
+                    style={[styles.shareButton, pillChrome && styles.pill]}
                     accessibilityLabel={`Share post, ${shares} shares`}
                     accessibilityRole="button"
                 >
-                    <FeedLiveShareIcon size={ACTION_ICON} color="#FFFFFF" />
-                    <Text style={styles.count}>{shares}</Text>
+                    <FeedLiveShareIcon size={iconSize} color="#FFFFFF" />
+                    <Text style={[styles.count, pillChrome && styles.countPill]}>{shares}</Text>
                 </TouchableOpacity>
             ) : null}
             {showMetrics && onToggleMetrics ? (
                 <TouchableOpacity
                     onPress={onToggleMetrics}
-                    style={styles.button}
+                    style={[styles.button, pillChrome && styles.pill]}
                     accessibilityLabel="Toggle boost metrics"
                 >
-                    <FeedBarChartIcon size={ACTION_ICON} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
+                    <FeedBarChartIcon size={iconSize} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
                 </TouchableOpacity>
             ) : null}
         </View>
@@ -58,6 +64,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         columnGap: 8,
         flexShrink: 0,
+        zIndex: 1,
+    },
+    rowPill: {
+        columnGap: 4,
+        flexShrink: 1,
+        minWidth: 0,
     },
     shareButton: {
         minHeight: ACTION_HIT,
@@ -75,10 +87,25 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    pill: {
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        borderRadius: 20,
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        minWidth: 0,
+        minHeight: 0,
+        width: undefined,
+        height: undefined,
+        columnGap: 4,
+    },
     count: {
         fontSize: FEED_UI.type.actionCount,
         fontWeight: '400',
         color: '#FFFFFF',
         fontVariant: ['tabular-nums'],
+    },
+    countPill: {
+        fontSize: 11,
+        fontWeight: '600',
     },
 });

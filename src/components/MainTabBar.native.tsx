@@ -26,11 +26,8 @@ function TabSquareIcon({ name, focused }: { name: string; focused: boolean }) {
 }
 
 /**
- * Absolute floating tab icons.
- *
- * Background is transparent on purpose: React Navigation scenes use zIndex, so an
- * rgba fill here composites against black on Android. The frosted band is painted
- * inside FeedPageLayout (sibling of FeedAmbientCanvas) — same trick as the header.
+ * Absolute floating tab icons over a NOW TV-style footer gradient.
+ * No solid bar fill — media bleeds through the fade; FeedPageLayout paints a matching band.
  */
 export default function MainTabBar({
   state,
@@ -67,6 +64,12 @@ export default function MainTabBar({
         { paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 10 : 6) },
       ]}
     >
+      <LinearGradient
+        pointerEvents="none"
+        colors={['rgba(11, 14, 20, 0.0)', 'rgba(11, 14, 20, 0.75)', 'rgba(11, 14, 20, 0.95)']}
+        locations={[0, 0.45, 1]}
+        style={styles.frostOverlay}
+      />
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const focused = state.index === index;
@@ -177,11 +180,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingHorizontal: 8,
     paddingTop: 2,
-    backgroundColor: '#161E2E',
+    backgroundColor: 'transparent',
     borderTopWidth: 0,
     borderTopColor: 'transparent',
     overflow: 'visible',
     elevation: 0,
+    zIndex: 20,
+  },
+  frostOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 0,
   },
   tabItem: {
     flex: 1,
@@ -190,6 +202,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     overflow: 'visible',
     backgroundColor: 'transparent',
+    zIndex: 1,
   },
   iconStack: {
     position: 'relative',

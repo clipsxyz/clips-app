@@ -30,7 +30,6 @@ import LinearGradient from 'react-native-linear-gradient';
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import FeedAmbientCanvas from '../components/FeedAmbientCanvas.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
-import { PASSPORT_SHEET_WASH } from '../components/PassportSheetCanvas.native';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -71,6 +70,7 @@ import ImageFullscreenModal, {
 } from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { postHasVideoMedia, currentFeedSlideIsVideo } from '../utils/postMedia';
+import { resolveServerAmbientAccent } from '../utils/feedAmbientPalette';
 import { feedMediaHeight, intrinsicRatio, resolveIntrinsicSize } from '../utils/mediaAspectRatio';
 import NetInfo from '@react-native-community/netinfo';
 import {
@@ -101,10 +101,12 @@ import FeedPageLayout, {
     FEED_CARD_CAPTION_PADDING,
     FEED_CARD_ENGAGEMENT_BAR,
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
-    FEED_CARD_ENGAGEMENT_SCRIM,
     FEED_CARD_ENGAGEMENT_LEFT,
-    FEED_CARD_HEADER_WRAP,
+    FEED_CARD_ENGAGEMENT_OVERLAY,
+    FEED_CARD_HEADER_OVERLAY,
     FEED_CARD_MEDIA_WRAP,
+    FEED_CARD_OVERLAY_FOOTER_GRADIENT,
+    FEED_CARD_OVERLAY_HEADER_GRADIENT,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
     FEED_CARD_SPONSORED_ROW,
@@ -136,6 +138,7 @@ import FeedPageLayout, {
 FEED_PAGE_BG,
       FEED_POST_CARD_STYLE,
       FEED_CARD_FLOAT_WRAP,
+      FEED_PINNED_CHROME_CONTENT_HEIGHT,
       FEED_TAB_BAR_CLEARANCE,
     FEED_EMPTY_BADGE,
     FEED_EMPTY_CARD,
@@ -1251,31 +1254,10 @@ const FeedCard = React.memo(function FeedCard({
                 />
             ) : (
                 <View style={FEED_CARD_BODY}>
-                    <View style={FEED_CARD_HEADER_WRAP}>
-                        <FeedPostHeader
-                            post={post}
-                            viewerHandle={viewerHandle}
-                            isCurrentUser={isCurrentUser}
-                            onFollow={onFollow}
-                            onOpenDM={onOpenDM}
-                            onProfileMenuPress={openProfileMenu}
-                            onHasStoryChange={setHeaderHasStory}
-                            onOverflowPress={onOverflowPress}
-                            onRegisterDmAnchor={onRegisterDmAnchor}
-                            menuAnchorRef={profileMenuAnchorRef}
-                        />
-                    </View>
                     {hasFeedMedia ? (
                         <View
                             style={[
                                 FEED_CARD_MEDIA_WRAP,
-                                // Only `height` now. The old `maxHeight: mediaFrameHeight`
-                                // alongside it is what forced the black bars: the wrapper
-                                // kept its token height while the content inside grew or
-                                // shrank, and `FEED_CARD_MEDIA_WRAP.backgroundColor` is
-                                // #000000, so every difference rendered as black. With
-                                // height derived from the intrinsic ratio the two agree by
-                                // construction.
                                 { height: mediaFrameHeight },
                             ]}
                             ref={mediaWrapRef}
@@ -1306,8 +1288,8 @@ const FeedCard = React.memo(function FeedCard({
                                 suspendNativeVideo={suspendNativeVideo}
                                 muted={feedVideoMuted}
                             />
-                              {isClientUploading ? (
-                                  <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
+                            {isClientUploading ? (
+                                <View style={FEED_CARD_UPLOAD_OVERLAY} pointerEvents="none">
                                     <ActivityIndicator size="large" color="#FFFFFF" />
                                     <Text style={FEED_CARD_UPLOAD_TITLE}>Posting…</Text>
                                     <Text style={FEED_CARD_UPLOAD_SUBTITLE}>Preparing your post</Text>
@@ -1322,6 +1304,84 @@ const FeedCard = React.memo(function FeedCard({
                                     </Text>
                                 </View>
                             ) : null}
+
+                            <View style={FEED_CARD_HEADER_OVERLAY} pointerEvents="box-none">
+                                <LinearGradient
+                                    colors={[...FEED_CARD_OVERLAY_HEADER_GRADIENT]}
+                                    style={StyleSheet.absoluteFill}
+                                    pointerEvents="none"
+                                />
+                                <FeedPostHeader
+                                    post={post}
+                                    viewerHandle={viewerHandle}
+                                    isCurrentUser={isCurrentUser}
+                                    isOverlaid
+                                    onFollow={onFollow}
+                                    onOpenDM={onOpenDM}
+                                    onProfileMenuPress={openProfileMenu}
+                                    onHasStoryChange={setHeaderHasStory}
+                                    onOverflowPress={onOverflowPress}
+                                    onRegisterDmAnchor={onRegisterDmAnchor}
+                                    menuAnchorRef={profileMenuAnchorRef}
+                                />
+                            </View>
+
+                            <View
+                                style={[
+                                    FEED_CARD_ENGAGEMENT_OVERLAY,
+                                    (isClientUploading || isClientUploadFailed) &&
+                                        FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+                                ]}
+                                pointerEvents="box-none"
+                            >
+                                <LinearGradient
+                                    colors={[...FEED_CARD_OVERLAY_FOOTER_GRADIENT]}
+                                    style={StyleSheet.absoluteFill}
+                                    pointerEvents="none"
+                                />
+                                <View style={FEED_CARD_ENGAGEMENT_LEFT}>
+                                    <FeedEngagementRow
+                                        likeButtonRef={likeButtonRef}
+                                        likes={post.stats.likes}
+                                        comments={post.stats.comments}
+                                        shares={post.stats.shares}
+                                        reclips={post.stats.reclips}
+                                        views={post.stats.views}
+                                        userLiked={post.userLiked}
+                                        userReclipped={post.userReclipped}
+                                        isSaved={post.isBookmarked}
+                                        onLike={() => {
+                                            void onLike();
+                                        }}
+                                        onLikesPress={() => {
+                                            if (post.stats.likes > 0) onOpenLikesSheet?.();
+                                        }}
+                                        onComment={onComment}
+                                        onShareToStories={() => onShareToStories?.()}
+                                        onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                                        reclipDisabled={isCurrentUser}
+                                        onSave={() => {
+                                            void onBookmark();
+                                        }}
+                                        showReclip
+                                        showSaveLabel={!showBoostMetrics}
+                                        compact={showBoostMetrics}
+                                        tone="feed"
+                                        pillChrome
+                                    />
+                                </View>
+                                <FeedEngagementRightActions
+                                    showMetrics={showBoostMetrics}
+                                    metricsOpen={isMetricsOpen}
+                                    onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
+                                    shares={post.stats.shares}
+                                    onShare={() => {
+                                        void onShare();
+                                    }}
+                                    pillChrome
+                                />
+                            </View>
+
                             {hasTaggedUsers ? (
                                 <FeedTaggedMediaBadge
                                     count={post.taggedUsers!.length}
@@ -1358,7 +1418,6 @@ const FeedCard = React.memo(function FeedCard({
                             onSelect={setCarouselIndex}
                         />
                     ) : null}
-
                 </View>
             )}
 
@@ -1379,57 +1438,6 @@ const FeedCard = React.memo(function FeedCard({
                     />
                 </Pressable>
             ) : null}
-
-            <View
-                style={[
-                    FEED_CARD_ENGAGEMENT_BAR,
-                    (isClientUploading || isClientUploadFailed) && FEED_CARD_ENGAGEMENT_BAR_DIMMED,
-                ]}
-            >
-                {/* Same passport wash as the share-card Swal. */}
-                <LinearGradient
-                    pointerEvents="none"
-                    style={FEED_CARD_ENGAGEMENT_SCRIM}
-                    colors={[...PASSPORT_SHEET_WASH]}
-                    locations={[0, 0.22, 0.52, 0.78, 1]}
-                    start={{ x: 0.05, y: 1 }}
-                    end={{ x: 0.95, y: 0 }}
-                />
-                <View style={FEED_CARD_ENGAGEMENT_LEFT}>
-                    <FeedEngagementRow
-                        likeButtonRef={likeButtonRef}
-                        likes={post.stats.likes}
-                        comments={post.stats.comments}
-                        shares={post.stats.shares}
-                        reclips={post.stats.reclips}
-                        views={post.stats.views}
-                        userLiked={post.userLiked}
-                        userReclipped={post.userReclipped}
-                        isSaved={post.isBookmarked}
-                        onLike={() => { void onLike(); }}
-                        onLikesPress={() => {
-                            if (post.stats.likes > 0) onOpenLikesSheet?.();
-                        }}
-                        onComment={onComment}
-                        onShareToStories={() => onShareToStories?.()}
-                        onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
-                        reclipDisabled={isCurrentUser}
-                        onSave={() => { void onBookmark(); }}
-                        showReclip
-                        showSaveLabel={!showBoostMetrics}
-                        compact={showBoostMetrics}
-                        tone="feed"
-                    />
-                </View>
-
-                <FeedEngagementRightActions
-                    showMetrics={showBoostMetrics}
-                    metricsOpen={isMetricsOpen}
-                    onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
-                    shares={post.stats.shares}
-                    onShare={() => { void onShare(); }}
-                />
-            </View>
 
             {showBoostMetrics ? (
                 <BoostMetricsPanel post={post} isOpen={isMetricsOpen} />
@@ -2148,11 +2156,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
             if (posts.length === 0) return;
             posts.sort((a, b) => a.index - b.index);
-            const post = posts[0].post;
-            const next =
-                (typeof post.dominantColor === 'string' && post.dominantColor) ||
-                (typeof post.dominant_color === 'string' && post.dominant_color) ||
-                null;
+            const next = resolveServerAmbientAccent(posts[0].post);
             setActivePostColor((prev) => (prev === next ? prev : next));
         },
     ).current;
@@ -3481,10 +3485,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const firstPost = flatForRender.find((row) => row.kind === 'post');
         if (!firstPost || firstPost.kind !== 'post') return;
         ambientColorSeededRef.current = true;
-        const next =
-            (typeof firstPost.post.dominantColor === 'string' && firstPost.post.dominantColor) ||
-            (typeof firstPost.post.dominant_color === 'string' && firstPost.post.dominant_color) ||
-            null;
+        const next = resolveServerAmbientAccent(firstPost.post);
         setActivePostColor(next);
     }, [flatForRender]);
     React.useEffect(() => {
@@ -4501,7 +4502,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 contentContainerStyle={[
                     styles.feedListContent,
                     {
-                        paddingBottom: Math.max(insets.bottom, 8) + 12,
+                        // Absolute glass header overlays the list — pad content so the
+                        // first card starts fully below Stories / Ireland / Passport.
+                        paddingTop: insets.top + FEED_PINNED_CHROME_CONTENT_HEIGHT,
+                        paddingBottom: TAB_BAR_CLEARANCE + insets.bottom,
                     },
                 ]}
             />
@@ -5064,7 +5068,7 @@ const styles = StyleSheet.create({
     feedMuteButton: {
         position: 'absolute',
         right: 10,
-        bottom: 10,
+        bottom: 58,
         width: 36,
         height: 36,
         borderRadius: 18,

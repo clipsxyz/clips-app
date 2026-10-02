@@ -19,7 +19,7 @@ import {
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
-import { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
+import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
 export type FeedPostHeaderProps = {
     post: Post;
@@ -251,17 +251,7 @@ export default function FeedPostHeader({
             style={[styles.wrap, isOverlaid && styles.wrapOverlaid]}
             pointerEvents="box-none"
         >
-            {/* Same passport wash as the share-card Swal / FeedShareModal. */}
-            {!isOverlaid ? (
-                <LinearGradient
-                    colors={[...PASSPORT_SHEET_WASH]}
-                    locations={[0, 0.22, 0.52, 0.78, 1]}
-                    start={{ x: 0.05, y: 1 }}
-                    end={{ x: 0.95, y: 0 }}
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="none"
-                />
-            ) : (
+            {!isOverlaid ? null : (
                 <LinearGradient
                     colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)', 'transparent']}
                     style={StyleSheet.absoluteFill}
@@ -283,17 +273,12 @@ const styles = StyleSheet.create({
         paddingTop: 12,
         paddingBottom: 8,
         justifyContent: 'center',
-        backgroundColor: '#060d16',
+        backgroundColor: FEED_CARD_CHROME_BG,
         overflow: 'hidden',
     },
     wrapOverlaid: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 30,
+        backgroundColor: 'transparent',
         // No elevation — elevated full-width headers steal media taps on Android even with box-none.
-        // Still-image tap layer is inset below this chrome (see FEED_CARD_MEDIA_TAP_LAYER).
     },
     content: {
         zIndex: 1,

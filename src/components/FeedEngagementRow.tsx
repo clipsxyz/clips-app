@@ -9,7 +9,9 @@ import FeedRepeatIcon from './FeedRepeatIcon.native';
 import FeedBookmarkIcon from './FeedBookmarkIcon.native';
 
 const ACTION_ICON = FEED_UI.icon.action;
+const PILL_ACTION_ICON = 15;
 const RECLIP_INNER_ICON = Math.round(ACTION_ICON * 0.58);
+const PILL_RECLIP_INNER = Math.round(PILL_ACTION_ICON * 0.58);
 
 type FeedEngagementRowProps = {
     likes: number;
@@ -39,6 +41,8 @@ type FeedEngagementRowProps = {
     likeButtonRef?: React.RefObject<View | null>;
     /** White icons for feed bar (web EngagementBar); gray for profile cards. */
     tone?: 'feed' | 'muted';
+    /** NOW TV frosted pill chrome for each action cluster. */
+    pillChrome?: boolean;
 };
 
 export default function FeedEngagementRow({
@@ -65,52 +69,60 @@ export default function FeedEngagementRow({
     compact = false,
     likeButtonRef,
     tone = 'feed',
+    pillChrome = false,
 }: FeedEngagementRowProps) {
     const iconColor = tone === 'feed' ? '#FFFFFF' : '#D1D5DB';
     const countColor = tone === 'feed' ? '#FFFFFF' : '#D1D5DB';
     const reclipIdleColor = tone === 'feed' ? '#9CA3AF' : '#D1D5DB';
     const reclipCountColor = tone === 'feed' ? '#D1D5DB' : '#9CA3AF';
     const saveColor = isSaved ? '#7A8AF0' : iconColor;
+    const pillStyle = pillChrome ? styles.itemPill : null;
+    const iconSize = pillChrome ? PILL_ACTION_ICON : ACTION_ICON;
+    const reclipInnerSize = pillChrome ? PILL_RECLIP_INNER : RECLIP_INNER_ICON;
+    const countTextStyle = pillChrome ? styles.textPill : styles.text;
+    const showSaveText = showSaveLabel && !pillChrome;
 
     return (
-        <View style={[styles.row, compact && styles.rowCompact]}>
+        <View style={[styles.row, compact && styles.rowCompact, pillChrome && styles.rowPill]}>
             <View
                 ref={likeButtonRef}
                 collapsable={false}
-                style={[styles.item, compact && styles.itemCompact]}
+                style={[styles.item, compact && styles.itemCompact, pillStyle]}
             >
                 <TouchableOpacity onPress={onLike} disabled={!onLike} activeOpacity={0.7}>
-                    <FeedLikeThumbsIcon size={ACTION_ICON} filled={userLiked} color={iconColor} />
+                    <FeedLikeThumbsIcon size={iconSize} filled={userLiked} color={iconColor} />
                 </TouchableOpacity>
                 <TouchableOpacity
                     onPress={onLikesPress || onLike}
                     disabled={!(onLikesPress || onLike)}
                     activeOpacity={0.7}
                 >
-                    <Text style={[styles.text, { color: countColor }, styles.likeCount]}>{likes}</Text>
+                    <Text style={[countTextStyle, { color: countColor }, !pillChrome && styles.likeCount]}>
+                        {likes}
+                    </Text>
                 </TouchableOpacity>
             </View>
 
             <TouchableOpacity
                 onPress={onComment}
-                style={[styles.item, compact && styles.itemCompact]}
+                style={[styles.item, compact && styles.itemCompact, pillStyle]}
                 disabled={!onComment}
                 activeOpacity={0.7}
                 accessibilityLabel={`Comments, ${comments}`}
             >
-                <FeedMessageSquareIcon size={ACTION_ICON} color={iconColor} />
-                <Text style={[styles.text, { color: countColor }]}>{comments}</Text>
+                <FeedMessageSquareIcon size={iconSize} color={iconColor} />
+                <Text style={[countTextStyle, { color: countColor }]}>{comments}</Text>
             </TouchableOpacity>
 
             {showShareToStories ? (
                 <TouchableOpacity
                     onPress={onShareToStories}
-                    style={[styles.item, compact && styles.itemCompact]}
+                    style={[styles.item, compact && styles.itemCompact, pillStyle]}
                     disabled={!onShareToStories}
                     activeOpacity={0.7}
                 >
-                    <ShareToStoriesFeedIcon size={ACTION_ICON} color={iconColor} />
-                    <Text style={[styles.text, { color: countColor }]}>{shares}</Text>
+                    <ShareToStoriesFeedIcon size={iconSize} color={iconColor} />
+                    <Text style={[countTextStyle, { color: countColor }]}>{shares}</Text>
                 </TouchableOpacity>
             ) : null}
 
@@ -120,6 +132,7 @@ export default function FeedEngagementRow({
                     style={[
                         styles.item,
                         compact && styles.itemCompact,
+                        pillStyle,
                         reclipDisabled && styles.itemDisabled,
                     ]}
                     disabled={!onReclip || reclipDisabled}
@@ -132,29 +145,34 @@ export default function FeedEngagementRow({
                             end={{ x: 1, y: 1 }}
                             style={styles.reclipGradientRing}
                         >
-                            <View style={styles.reclipInner}>
-                                <FeedRepeatIcon size={RECLIP_INNER_ICON} color="#FFFFFF" />
+                            <View
+                                style={[
+                                    styles.reclipInner,
+                                    pillChrome && { width: iconSize, height: iconSize, borderRadius: iconSize / 2 },
+                                ]}
+                            >
+                                <FeedRepeatIcon size={reclipInnerSize} color="#FFFFFF" />
                             </View>
                         </LinearGradient>
                     ) : (
-                        <FeedRepeatIcon size={ACTION_ICON} color={reclipIdleColor} />
+                        <FeedRepeatIcon size={iconSize} color={reclipIdleColor} />
                     )}
-                    <Text style={[styles.text, { color: reclipCountColor }]}>{reclips}</Text>
+                    <Text style={[countTextStyle, { color: reclipCountColor }]}>{reclips}</Text>
                 </TouchableOpacity>
             ) : null}
 
             {showSave ? (
                 <TouchableOpacity
                     onPress={onSave}
-                    style={[styles.item, compact && styles.itemCompact]}
+                    style={[styles.item, compact && styles.itemCompact, pillStyle]}
                     disabled={!onSave}
                     activeOpacity={0.7}
                     accessibilityLabel={isSaved ? 'Saved' : 'Save post'}
                     accessibilityState={{ selected: isSaved }}
                 >
-                    <FeedBookmarkIcon size={ACTION_ICON} color={saveColor} filled={isSaved} />
-                    {showSaveLabel ? (
-                        <Text style={[styles.text, { color: countColor }]}>
+                    <FeedBookmarkIcon size={iconSize} color={saveColor} filled={isSaved} />
+                    {showSaveText ? (
+                        <Text style={[countTextStyle, { color: countColor }]}>
                             {isSaved ? 'Saved' : 'Save'}
                         </Text>
                     ) : null}
@@ -162,8 +180,8 @@ export default function FeedEngagementRow({
             ) : null}
 
             {showViews ? (
-                <View style={[styles.item, compact && styles.itemCompact]}>
-                    <Text style={[styles.text, { color: countColor }]}>{views}</Text>
+                <View style={[styles.item, compact && styles.itemCompact, pillStyle]}>
+                    <Text style={[countTextStyle, { color: countColor }]}>{views}</Text>
                 </View>
             ) : null}
         </View>
@@ -183,6 +201,10 @@ const styles = StyleSheet.create({
     rowCompact: {
         columnGap: 6,
     },
+    rowPill: {
+        columnGap: 4,
+        justifyContent: 'flex-start',
+    },
     /** Web EngagementBar: `min-h-[40px] px-1 gap-1`. */
     item: {
         flexDirection: 'row',
@@ -192,6 +214,16 @@ const styles = StyleSheet.create({
         paddingHorizontal: 2,
         flexShrink: 0,
     },
+    itemPill: {
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        borderRadius: 20,
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        minWidth: 0,
+        minHeight: 0,
+        columnGap: 4,
+        flexShrink: 1,
+    },
     itemCompact: {
         paddingHorizontal: 0,
         columnGap: 2,
@@ -199,6 +231,11 @@ const styles = StyleSheet.create({
     text: {
         fontSize: FEED_UI.type.actionCount,
         fontWeight: '400',
+        fontVariant: ['tabular-nums'],
+    },
+    textPill: {
+        fontSize: 11,
+        fontWeight: '600',
         fontVariant: ['tabular-nums'],
     },
     likeCount: {

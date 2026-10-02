@@ -21,6 +21,7 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -36,9 +37,20 @@ export const FEED_CARD_BG = '#060d16';
 export const FEED_CARD_CHROME_BG = '#060d16';
 
 /**
- * Header + footer chrome fill — same floor as the feed ambient canvas.
+ * NOW TV frosted chrome — header fades out downward; footer fades in upward.
+ * Solid fill kept only as a non-glass fallback token.
  */
-export const FEED_CHROME_GLASS = '#161E2E';
+export const FEED_CHROME_GLASS = 'transparent';
+export const FEED_CHROME_HEADER_GRADIENT = [
+    'rgba(11, 14, 20, 0.92)',
+    'rgba(11, 14, 20, 0.65)',
+    'rgba(11, 14, 20, 0.0)',
+] as const;
+export const FEED_CHROME_FOOTER_GRADIENT = [
+    'rgba(11, 14, 20, 0.0)',
+    'rgba(11, 14, 20, 0.75)',
+    'rgba(11, 14, 20, 0.95)',
+] as const;
 
 /**
  * Height of the MainTabBar content above the home-indicator / nav inset.
@@ -46,6 +58,13 @@ export const FEED_CHROME_GLASS = '#161E2E';
  * band lines up with the absolute tab icons.
  */
 export const FEED_TAB_BAR_CLEARANCE = 64;
+
+/**
+ * Stories / Ireland / Passport row + spacers under the absolute glass header.
+ * Feed list `contentContainerStyle.paddingTop` = insets.top + this so the first
+ * card clears the translucent chrome while still scrolling underneath it.
+ */
+export const FEED_PINNED_CHROME_CONTENT_HEIGHT = 92;
 
 /** Media column + loading frame (black letterbox). */
 export const FEED_CARD_MEDIA_BG = '#000000';
@@ -55,21 +74,17 @@ export const FEED_CARD_BORDER_COLOR = 'rgba(55, 65, 81, 0.9)';
 
 /** Web FeedCard article chrome (non-tile mode). */
 export const FEED_POST_CARD_STYLE = {
-    backgroundColor: FEED_CARD_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: FEED_CARD_BORDER_COLOR,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0,
+    borderBottomColor: 'transparent',
     position: 'relative' as const,
     overflow: 'hidden' as const,
     flexDirection: 'column' as const,
 };
 
 /**
- * NOW TV-style floating card shell.
- *
- * Deliberately a NEW wrapper instead of a restyle of `FEED_POST_CARD_STYLE`. The card
- * keeps its own opaque background and its own 1px separator; insetting the shell is what
- * exposes the ambient canvas in the margins between cards. The canvas has to be visible in
- * the gap to be worth animating, so that separation is the whole effect.
+ * NOW TV-style floating card shell — transparent so ambient shows in the gap;
+ * media corners clip via overflow + radius.
  */
 export const FEED_CARD_FLOAT_WRAP = {
     marginHorizontal: 16,
@@ -78,16 +93,17 @@ export const FEED_CARD_FLOAT_WRAP = {
     overflow: 'hidden' as const,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    backgroundColor: FEED_CARD_BG,
+    backgroundColor: 'transparent',
     position: 'relative' as const,
 } as const;
 
 /**
- * Bottom 35% of the media frame.
- *
- * Anchored to the MEDIA wrapper, not the card, so it tints only the image/video. Captions
- * and the engagement bar render below that wrapper in the card body and are unaffected.
+ * Top / bottom edge fades over media (NOW TV poster chrome).
  */
+export const FEED_CARD_OVERLAY_HEADER_GRADIENT = ['rgba(0, 0, 0, 0.75)', 'rgba(0, 0, 0, 0.0)'] as const;
+export const FEED_CARD_OVERLAY_FOOTER_GRADIENT = ['rgba(0, 0, 0, 0.0)', 'rgba(0, 0, 0, 0.85)'] as const;
+
+/** Bottom 35% of the media frame (legacy media-only tint). */
 export const FEED_CARD_MEDIA_SCRIM = {
     position: 'absolute' as const,
     left: 0,
@@ -104,13 +120,24 @@ export const FEED_CARD_BODY = {
     flexDirection: 'column' as const,
 };
 
-/** Reserved chrome above media so the player cannot collapse into the next card. */
+/** Reserved chrome above media (profile / non-overlay cards). */
 export const FEED_CARD_HEADER_WRAP = {
     position: 'relative' as const,
     width: '100%' as const,
     minHeight: 56,
     zIndex: 2,
     backgroundColor: FEED_CARD_CHROME_BG,
+} as const;
+
+/** Username row overlaid on the media poster (news feed NOW TV). */
+export const FEED_CARD_HEADER_OVERLAY = {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    elevation: Platform.OS === 'android' ? 10 : 0,
+    backgroundColor: 'transparent',
 } as const;
 
 /** Default media frame while sizing / for letterboxing. */
@@ -134,18 +161,17 @@ export const FEED_CARD_CAPTION_PADDING = {
 /** Web EngagementBar shell: `px-3 pt-2 pb-2.5`. No hairline — the glass scrim owns the edge. */
 export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
     paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 10,
+    paddingTop: 10,
+    paddingBottom: 12,
 } as const;
 
-/** Full-bleed media column below the stacked post header. */
+/** Full-bleed media column — poster owns the card body; chrome overlays it. */
 export const FEED_CARD_MEDIA_WRAP = {
     width: '100%' as const,
     backgroundColor: FEED_CARD_MEDIA_BG,
     position: 'relative' as const,
     overflow: 'hidden' as const,
-    // Android only clips TextureView children when overflow:hidden is paired with a radius.
-    borderRadius: 1,
+    borderRadius: 20,
 };
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
@@ -159,14 +185,14 @@ export const FEED_CARD_MEDIA_FX_LAYER = {
     elevation: Platform.OS === 'android' ? 45 : 0,
 } as const;
 
-/** Transparent tap layer above media (header is stacked above this frame). */
+/** Transparent tap layer above media (header/footer overlays sit outside this inset). */
 export const FEED_CARD_MEDIA_TAP_LAYER = {
     position: 'absolute' as const,
-    top: 0,
+    top: 56,
     left: 0,
     right: 0,
-    // Leave bottom chrome clear for Scenes CTA + mute (external tap layer sits above media).
-    bottom: 56,
+    // Leave bottom chrome clear for engagement overlay + mute.
+    bottom: 72,
     zIndex: 15,
     // Android skips fully transparent views for hit-testing.
     backgroundColor: 'rgba(0,0,0,0.01)',
@@ -230,13 +256,34 @@ export const FEED_CARD_SPONSORED_FEED_TYPE = {
 };
 
 /** Web EngagementBar flex row + border-t padding. */
+/** Engagement bar under media (profile / non-overlay cards). */
 export const FEED_CARD_ENGAGEMENT_BAR = {
     position: 'relative' as const,
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
     alignItems: 'center' as const,
     minWidth: 0,
+    backgroundColor: FEED_CARD_CHROME_BG,
     ...FEED_CARD_ENGAGEMENT_BAR_PADDING,
+};
+
+/** Engagement bar overlaid on the media poster (news feed NOW TV). */
+export const FEED_CARD_ENGAGEMENT_OVERLAY = {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    elevation: Platform.OS === 'android' ? 10 : 0,
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    minWidth: 0,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
+    columnGap: 4,
 };
 
 /**
@@ -263,6 +310,7 @@ export const FEED_CARD_ENGAGEMENT_LEFT = {
     minWidth: 0,
     flexShrink: 1,
     marginRight: 8,
+    zIndex: 1,
 };
 
 /** Web carousel thumb rail: px-3 py-2 bg-black/95 border-t border-white/10. */
@@ -631,6 +679,43 @@ export default function FeedPageLayout({
     const insets = useSafeAreaInsets();
     const glassScrollHost = backdrop ? styles.scrollHostGlass : null;
 
+    const chromeBody = (
+        <>
+            <View style={styles.spacer16} />
+
+            {!online ? (
+                <View style={styles.offlineBanner} accessibilityRole="alert">
+                    <Text style={styles.offlineBannerText}>
+                        You're offline. Actions will sync when back online.
+                    </Text>
+                </View>
+            ) : null}
+
+            <View style={styles.pillTabsHost}>{header}</View>
+
+            <View style={styles.spacer16} />
+
+            {error ? (
+                <View style={styles.errorBanner} accessibilityRole="alert">
+                    <Text style={styles.errorText} numberOfLines={4}>
+                        {error}
+                    </Text>
+                    {onRetry ? (
+                        <TouchableOpacity
+                            style={styles.errorRetryBtn}
+                            onPress={onRetry}
+                            activeOpacity={0.85}
+                            accessibilityRole="button"
+                            accessibilityLabel="Retry loading feed"
+                        >
+                            <Text style={styles.errorRetryText}>Retry</Text>
+                        </TouchableOpacity>
+                    ) : null}
+                </View>
+            ) : null}
+        </>
+    );
+
     return (
         <View style={[styles.root, backdrop ? styles.rootGlass : null, style]}>
             {/* Ambient is the only full-bleed plane when present. Opaque floor only when
@@ -648,43 +733,24 @@ export default function FeedPageLayout({
               Wrapping them in a zIndex'd column creates an Android offscreen layer that
               composites rgba glass against black — looking like solid #000 bars.
             */}
-            <View
-                style={[styles.pinnedChrome, backdrop ? styles.pinnedChromeGlass : null, { paddingTop: insets.top }]}
-                collapsable={false}
-            >
-                <View style={styles.spacer16} />
-
-                {!online ? (
-                    <View style={styles.offlineBanner} accessibilityRole="alert">
-                        <Text style={styles.offlineBannerText}>
-                            You're offline. Actions will sync when back online.
-                        </Text>
-                    </View>
-                ) : null}
-
-                <View style={styles.pillTabsHost}>{header}</View>
-
-                <View style={styles.spacer16} />
-
-                {error ? (
-                    <View style={styles.errorBanner} accessibilityRole="alert">
-                        <Text style={styles.errorText} numberOfLines={4}>
-                            {error}
-                        </Text>
-                        {onRetry ? (
-                            <TouchableOpacity
-                                style={styles.errorRetryBtn}
-                                onPress={onRetry}
-                                activeOpacity={0.85}
-                                accessibilityRole="button"
-                                accessibilityLabel="Retry loading feed"
-                            >
-                                <Text style={styles.errorRetryText}>Retry</Text>
-                            </TouchableOpacity>
-                        ) : null}
-                    </View>
-                ) : null}
-            </View>
+            {backdrop ? (
+                <LinearGradient
+                    colors={[...FEED_CHROME_HEADER_GRADIENT]}
+                    locations={[0, 0.55, 1]}
+                    pointerEvents="box-none"
+                    collapsable={false}
+                    style={[styles.pinnedChromeGlass, { paddingTop: insets.top }]}
+                >
+                    {chromeBody}
+                </LinearGradient>
+            ) : (
+                <View
+                    style={[styles.pinnedChrome, { paddingTop: insets.top }]}
+                    collapsable={false}
+                >
+                    {chromeBody}
+                </View>
+            )}
 
             {/* Inner scroll host — web: flex-1 min-h-0 overflow-y-auto pb-2 */}
             <View style={[styles.scrollHost, glassScrollHost]}>{children}</View>
@@ -696,9 +762,11 @@ export default function FeedPageLayout({
               here (under transparent tab icons) so the glow reaches the gesture area.
             */}
             {backdrop ? (
-                <View
+                <LinearGradient
                     pointerEvents="none"
                     collapsable={false}
+                    colors={[...FEED_CHROME_FOOTER_GRADIENT]}
+                    locations={[0, 0.45, 1]}
                     style={[styles.bottomChromeGlass, { height: FEED_TAB_BAR_CLEARANCE + insets.bottom }]}
                 />
             ) : null}
@@ -751,23 +819,27 @@ const styles = StyleSheet.create({
         }),
     },
     pinnedChromeGlass: {
-        backgroundColor: FEED_CHROME_GLASS,
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 10,
+        elevation: Platform.OS === 'android' ? 10 : 0,
         borderBottomWidth: 0,
         borderBottomColor: 'transparent',
         overflow: 'visible',
+        backgroundColor: 'transparent',
     },
     bottomChromeGlass: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: FEED_CHROME_GLASS,
+        zIndex: 10,
+        elevation: Platform.OS === 'android' ? 10 : 0,
+        backgroundColor: 'transparent',
         borderTopWidth: 0,
         borderTopColor: 'transparent',
-        ...Platform.select({
-            android: { elevation: 0 },
-            ios: {},
-        }),
     },
     spacer16: {
         height: 16, // web h-4
