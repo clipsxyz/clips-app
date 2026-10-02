@@ -70,7 +70,6 @@ import ImageFullscreenModal, {
 } from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { postHasVideoMedia, currentFeedSlideIsVideo } from '../utils/postMedia';
-import { resolveServerAmbientAccent } from '../utils/feedAmbientPalette';
 import { feedMediaHeight, intrinsicRatio, resolveIntrinsicSize } from '../utils/mediaAspectRatio';
 import NetInfo from '@react-native-community/netinfo';
 import {
@@ -1258,7 +1257,10 @@ const FeedCard = React.memo(function FeedCard({
                         <View
                             style={[
                                 FEED_CARD_MEDIA_WRAP,
-                                { height: mediaFrameHeight },
+                                {
+                                    height: mediaFrameHeight,
+                                    maxHeight: mediaFrameHeight,
+                                },
                             ]}
                             ref={mediaWrapRef}
                             collapsable={false}
@@ -2137,38 +2139,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     ).current;
 
-    /** Ambient tint only — does not touch autoplay / activeVideoPostId refs. */
-    const [activePostColor, setActivePostColor] = useState<string | null>(null);
-    const ambientViewabilityConfigRef = useRef({
-        itemVisiblePercentThreshold: 50,
-        minimumViewTime: 0,
-    });
-    const onAmbientViewableItemsChanged = useRef(
-        ({
-            viewableItems,
-        }: {
-            viewableItems: Array<{ isViewable?: boolean; item?: FeedListRow; index?: number | null }>;
-        }) => {
-            const posts: Array<{ post: Post; index: number }> = [];
-            for (const token of viewableItems) {
-                if (!token.isViewable || !token.item || token.item.kind !== 'post') continue;
-                posts.push({ post: token.item.post, index: token.index ?? 0 });
-            }
-            if (posts.length === 0) return;
-            posts.sort((a, b) => a.index - b.index);
-            const next = resolveServerAmbientAccent(posts[0].post);
-            setActivePostColor((prev) => (prev === next ? prev : next));
-        },
-    ).current;
-
     const viewabilityConfigCallbackPairs = useRef([
         {
             viewabilityConfig: viewabilityConfigRef.current,
             onViewableItemsChanged,
-        },
-        {
-            viewabilityConfig: ambientViewabilityConfigRef.current,
-            onViewableItemsChanged: onAmbientViewableItemsChanged,
         },
     ]);
 
@@ -3478,21 +3452,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     ]);
     flatForRenderRef.current = flatForRender;
 
-    // Seed ambient colour once when the first post appears (viewability often skips mount).
-    const ambientColorSeededRef = useRef(false);
-    React.useEffect(() => {
-        if (ambientColorSeededRef.current) return;
-        const firstPost = flatForRender.find((row) => row.kind === 'post');
-        if (!firstPost || firstPost.kind !== 'post') return;
-        ambientColorSeededRef.current = true;
-        const next = resolveServerAmbientAccent(firstPost.post);
-        setActivePostColor(next);
-    }, [flatForRender]);
-    React.useEffect(() => {
-        if (flatForRender.some((row) => row.kind === 'post')) return;
-        ambientColorSeededRef.current = false;
-    }, [flatForRender]);
-
     // First-paint bootstrap only. Like/comment patch `pages` → new `flat` identity;
     // that must NEVER re-arm a player. After viewability has spoken, it owns autoplay.
     const feedHasPosts = flat.length > 0;
@@ -4211,7 +4170,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             <FeedPageLayout
                 online={online}
                 error={error}
-                backdrop={<FeedAmbientCanvas dominantColor={activePostColor} />}
+                backdrop={<FeedAmbientCanvas />}
                 onRetry={() => {
                     setError(null);
                     void reloadFeedFromStartRef.current();

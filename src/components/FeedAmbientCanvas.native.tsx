@@ -1,51 +1,28 @@
-import React, { memo, useEffect } from 'react';
+import React, { memo } from 'react';
 import { StyleSheet } from 'react-native';
-import Animated, {
-    interpolateColor,
-    useAnimatedStyle,
-    useSharedValue,
-    withTiming,
-} from 'react-native-reanimated';
-import { normalizeHex } from '../utils/feedAmbientPalette';
+import LinearGradient from 'react-native-linear-gradient';
+import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
 
 type Props = {
-    /** Focused post accent — morphs the full-bleed feed floor. */
+    /** Ignored — canvas is locked to the share-card Passport wash. */
     dominantColor?: string | null;
 };
 
-/** Safe neutral when the focused post has no usable dominant colour. */
-const AMBIENT_NEUTRAL_HEX = '#0B0E14';
-
-const MORPH_MS = 500;
+/** Same floor as native share / Passport sheets. */
+export const FEED_AMBIENT_STATIC_HEX = PASSPORT_ABYSS;
 
 /**
- * Full-bleed feed floor. Colour-only Reanimated morph — no gestures / video.
+ * Full-bleed feed floor — identical Passport sheet wash as the share card canvas.
  */
-function FeedAmbientCanvasBase({ dominantColor }: Props) {
-    const progress = useSharedValue(0);
-    const fromColor = useSharedValue(AMBIENT_NEUTRAL_HEX);
-    const toColor = useSharedValue(AMBIENT_NEUTRAL_HEX);
-
-    useEffect(() => {
-        const next = normalizeHex(dominantColor) ?? AMBIENT_NEUTRAL_HEX;
-        // Carry the last target as the new origin so mid-morph scrolls stay continuous.
-        fromColor.value = toColor.value;
-        toColor.value = next;
-        progress.value = 0;
-        progress.value = withTiming(1, { duration: MORPH_MS });
-    }, [dominantColor, fromColor, progress, toColor]);
-
-    const animatedStyle = useAnimatedStyle(() => ({
-        backgroundColor: interpolateColor(
-            progress.value,
-            [0, 1],
-            [fromColor.value, toColor.value],
-        ),
-    }));
-
+function FeedAmbientCanvasBase(_props: Props) {
     return (
-        <Animated.View
-            style={[styles.canvas, animatedStyle]}
+        <LinearGradient
+            colors={[...PASSPORT_SHEET_WASH]}
+            locations={[0, 0.22, 0.52, 0.78, 1]}
+            start={{ x: 0.05, y: 1 }}
+            end={{ x: 0.95, y: 0 }}
+            style={styles.canvas}
             pointerEvents="none"
             collapsable={false}
         />
@@ -61,7 +38,7 @@ const styles = StyleSheet.create({
         bottom: 0,
         zIndex: 0,
         elevation: 0,
-        backgroundColor: AMBIENT_NEUTRAL_HEX,
+        backgroundColor: FEED_AMBIENT_STATIC_HEX,
     },
 });
 

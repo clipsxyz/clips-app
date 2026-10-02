@@ -25,8 +25,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
 
-/** News feed shell / ambient canvas floor. */
-export const FEED_PAGE_BG = '#161E2E';
+/** News feed shell / ambient canvas floor — matches share-card Passport abyss. */
+export const FEED_PAGE_BG = '#060d16';
 
 /** Web post card / article background — Gazetteer Swal sheet (`#060d16`). */
 export const FEED_CARD_BG = '#060d16';
@@ -135,8 +135,8 @@ export const FEED_CARD_HEADER_OVERLAY = {
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 10,
-    elevation: Platform.OS === 'android' ? 10 : 0,
+    zIndex: 30,
+    elevation: Platform.OS === 'android' ? 30 : 0,
     backgroundColor: 'transparent',
 } as const;
 
@@ -168,11 +168,12 @@ export const FEED_CARD_ENGAGEMENT_BAR_PADDING = {
 /** Full-bleed media column — poster owns the card body; chrome overlays it. */
 export const FEED_CARD_MEDIA_WRAP = {
     width: '100%' as const,
-    backgroundColor: FEED_CARD_MEDIA_BG,
+    backgroundColor: '#000000',
     position: 'relative' as const,
     overflow: 'hidden' as const,
+    // Radius + overflow clips Android TextureView so recycled / stacked surfaces cannot bleed.
     borderRadius: 20,
-};
+} as const;
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */
 export const FEED_CARD_MEDIA_FX_LAYER = {
@@ -273,8 +274,8 @@ export const FEED_CARD_ENGAGEMENT_OVERLAY = {
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 10,
-    elevation: Platform.OS === 'android' ? 10 : 0,
+    zIndex: 30,
+    elevation: Platform.OS === 'android' ? 30 : 0,
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
     alignItems: 'center' as const,

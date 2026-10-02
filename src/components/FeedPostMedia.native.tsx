@@ -39,7 +39,6 @@ import {
     feedAspectRatio,
     intrinsicRatio,
     resolveIntrinsicSize,
-    RATIO_FALLBACK,
 } from '../utils/mediaAspectRatio';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
@@ -420,6 +419,13 @@ const FeedPostMedia = React.memo(
     const video = !textOnly && activeIsVideo && !!mediaUrl;
 
     useEffect(() => {
+        if (mode !== 'feed') return;
+        if (isViewable) return;
+        // Inactive cell: drop any leftover TextureView cover state so remount starts clean.
+        resetPosterCover();
+    }, [isViewable, mode, resetPosterCover]);
+
+    useEffect(() => {
         if (suspendNativeVideo) {
             needsRemountAfterSuspendRef.current = true;
         }
@@ -713,13 +719,12 @@ const FeedPostMedia = React.memo(
     // width/ratio exceeds width, and bounding by width would shrink the frame below the
     // wrapper and reintroduce the very black gap this clamp is meant to prevent.
     const frameHeight = height > 0 ? Math.min(contentHeight, height) : contentHeight;
-    const mediaAspect = width > 0 && frameHeight > 0 ? width / frameHeight : RATIO_FALLBACK;
     const frameStyle = {
         width,
         height: frameHeight,
-        aspectRatio: mediaAspect,
-        backgroundColor: '#121212',
+        backgroundColor: '#000000',
         overflow: 'hidden' as const,
+        borderRadius: 20,
     };
 
     const renderSlide = (
@@ -742,14 +747,15 @@ const FeedPostMedia = React.memo(
         const slidePosterUri = slidePosterRaw;
 
         const slideIsCurrent = slideIndex === currentIndex;
-        // Keep the player mounted (paused) while the cell is on-screen so the
-        // first frame / poster is ready before autoplay. Unmount only for
-        // overlay suspend (Android TextureView punch-through) or play failure.
+        // Feed: mount TextureView only while this card is the viewability target.
+        // Keeping paused players on recycled/neighbouring cells punches through the
+        // action-bar overlay on Android.
         const slideMountVideo =
             slideVideo &&
             slideIsCurrent &&
             !playFailed &&
-            (mode === 'detail' || (mode === 'feed' && !suspendNativeVideo));
+            (mode === 'detail' ||
+                (mode === 'feed' && !suspendNativeVideo && isViewable));
 
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
@@ -757,7 +763,7 @@ const FeedPostMedia = React.memo(
                 <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                     <Image
                         source={{ uri: slideUrl }}
-                        style={[styles.stillImage, { width: '100%', height: '100%' }]}
+                        style={styles.stillImage}
                         resizeMode="cover"
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         progressiveRenderingEnabled={false}
@@ -781,7 +787,7 @@ const FeedPostMedia = React.memo(
             );
         }
 
-        // Poster stays fully visible until first decoded frame — covers buffer/black frames.
+        // Poster covers the frame until the active player paints its first frame.
         const showBufferCover = !slideMountVideo || posterMounted || !videoSurfaceReady;
         const onFirstFrameReady = () => {
             markUrlLoaded(slideRawUrl);
@@ -793,10 +799,7 @@ const FeedPostMedia = React.memo(
             <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
                 {slideMountVideo ? (
                     <View
-                        style={[
-                            styles.videoClip,
-                            { width, height: frameHeight },
-                        ]}
+                        style={styles.videoClip}
                         pointerEvents={mediaPointerEvents}
                         collapsable={false}
                     >
@@ -804,7 +807,7 @@ const FeedPostMedia = React.memo(
                             key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
                             ref={feedVideoRef}
                             source={cachedVideoSource as object}
-                            style={{ width, height: frameHeight }}
+                            style={styles.videoFill}
                             resizeMode="cover"
                             controls={false}
                             paused={mode === 'detail' ? paused : !isViewable}
@@ -816,14 +819,6 @@ const FeedPostMedia = React.memo(
                             ignoreSilentSwitch="ignore"
                             useTextureView
                             hideShutterView
-                            poster={
-                                slidePosterUri
-                                    ? {
-                                          source: { uri: slidePosterUri },
-                                          resizeMode: 'cover' as const,
-                                      }
-                                    : undefined
-                            }
                             {...androidListSafeVideoProps()}
                             pointerEvents="none"
                             onLoadStart={() => {
@@ -892,6 +887,8 @@ const FeedPostMedia = React.memo(
                         onLoad={() => markUrlLoaded(slideRawUrl)}
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />
+                ) : !slideMountVideo ? (
+                    <View style={styles.posterPlaceholder} pointerEvents="none" />
                 ) : null}
 
                 {renderFeedTapOverlay()}
@@ -923,21 +920,20 @@ const FeedPostMedia = React.memo(
                     decelerationRate="fast"
                     scrollEventThrottle={16}
                     onMomentumScrollEnd={onCarouselScrollEnd}
-                    style={{ width, height: frameHeight, aspectRatio: mediaAspect }}
+                    style={frameStyle}
                 >
                     {carouselItems.map((item, index) => (
                         <View
                             key={`${post.id}-carousel-${index}-${item.url}`}
-                            style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}
+                            style={[styles.mediaFrame, frameStyle]}
                         >
                             {renderSlide(item, index)}
                         </View>
                     ))}
                 </ScrollView>
             ) : (
-                <View style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}>
-                    {inner}
-                </View>
+                // Single clip box — avoid nesting a second mediaFrame around the slide.
+                inner
             )}
         </>
     );
@@ -947,7 +943,7 @@ const FeedPostMedia = React.memo(
             style={[
                 styles.wrap,
                 styles.mediaFrame,
-                { width, height: frameHeight, aspectRatio: mediaAspect },
+                frameStyle,
                 style,
             ]}
             collapsable={false}
@@ -955,7 +951,7 @@ const FeedPostMedia = React.memo(
             {feedTapCapture && hasCarousel ? (
                 <GestureDetector gesture={mediaTapGesture}>
                     <View
-                        style={[styles.mediaFrame, { width, height: frameHeight, aspectRatio: mediaAspect }]}
+                        style={[styles.mediaFrame, frameStyle]}
                         collapsable={false}
                     >
                         {mediaBody}
@@ -1031,18 +1027,19 @@ const styles = StyleSheet.create({
     wrap: {
         position: 'relative',
         overflow: 'hidden',
+        backgroundColor: '#000000',
     },
     mediaFrame: {
         overflow: 'hidden',
-        backgroundColor: '#121212',
+        backgroundColor: '#000000',
         position: 'relative',
-        borderRadius: 1,
+        borderRadius: 20,
     },
     videoClip: {
+        ...StyleSheet.absoluteFillObject,
         overflow: 'hidden',
-        position: 'relative',
-        borderRadius: 1,
-        backgroundColor: '#121212',
+        borderRadius: 20,
+        backgroundColor: '#000000',
     },
     stillImage: {
         ...StyleSheet.absoluteFillObject,
@@ -1063,9 +1060,11 @@ const styles = StyleSheet.create({
         height: '100%',
         zIndex: 2,
         elevation: Platform.OS === 'android' ? 2 : 0,
+        backgroundColor: '#000000',
     },
     posterPlaceholder: {
-        backgroundColor: '#121212',
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
     },
     loadingOverlay: {
         ...StyleSheet.absoluteFillObject,

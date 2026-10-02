@@ -396,9 +396,8 @@ function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
-    // Near-black floor only as last-resort letterbox; MainTabs + feed stay transparent
-    // so FeedAmbientCanvas can show through frosted chrome / tab glass.
-    backgroundColor: '#0B0E14',
+    // Match share-card Passport abyss / FeedAmbientCanvas.
+    backgroundColor: '#060d16',
   },
   createTabPlaceholder: {
     flex: 1,
