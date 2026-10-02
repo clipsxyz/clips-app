@@ -1,0 +1,15 @@
+# Keep Cursor focused on the app root; heavy trees are not source of truth.
+node_modules/
+**/node_modules/
+laravel-backend/vendor/
+ios/Pods/
+ios/build/
+android/.gradle/
+android/build/
+android/app/build/
+coverage/
+.expo/
+tmp/
+.metro-health-check-*
+dist/
+build/

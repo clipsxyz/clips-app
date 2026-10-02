@@ -45,6 +45,18 @@ export type PostMediaItem = {
   posterUrl?: string;
   thumbnailUrl?: string;
   thumbnail_url?: string;
+  /**
+   * Intrinsic pixel dimensions of this slide, read from MP4/PNG/JPEG metadata by the
+   * backend on upload. Lets the feed lay the card out at its final height on first paint
+   * instead of guessing and then shifting when `onLoad` arrives. Optional because posts
+   * created before the dimensions columns existed have no value; the client falls back to
+   * measuring via `naturalSize`.
+   */
+  width?: number;
+  height?: number;
+  /** width / height, precomputed server-side. Redundant with width/height but saves the
+   *  client a division and makes the contract explicit. Trust width/height when present. */
+  aspectRatio?: number;
   effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>;
   text?: string;
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
@@ -79,6 +91,15 @@ export type Post = {
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
   /** Video framing preference chosen at upload time. */
   videoFrameMode?: 'crop' | 'fit' | 'original';
+  /**
+   * Intrinsic pixel dimensions of the primary media, from backend metadata. Same purpose
+   * as `PostMediaItem.width/height`: lets the feed size the card before the stream is
+   * fetched. Absent on legacy posts, which fall back to `naturalSize` measurement.
+   */
+  width?: number;
+  height?: number;
+  /** width / height of the primary media. See PostMediaItem.aspectRatio. */
+  aspectRatio?: number;
   mediaItems?: PostMediaItem[]; // Multiple media items for carousel with effects/templates, including text-only clips
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field

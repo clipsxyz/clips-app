@@ -3,30 +3,135 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Post;
-use App\Models\User;
-use App\Models\RenderJob;
 use App\Jobs\ProcessRenderJob;
+use App\Models\Post;
+use App\Models\RenderJob;
+use App\Models\User;
 use App\Services\BoostAnalyticsService;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
 use App\Services\VideoThumbnailService;
-use Illuminate\Http\Request;
+use App\Support\VideoDimensions;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
-use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Str;
-use Carbon\Carbon;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class PostController extends Controller
 {
     private function buildPublicShareUrl(string $token): string
     {
         $base = rtrim((string) (config('app.frontend_url') ?: config('app.url') ?: ''), '/');
-        return $base !== '' ? ($base . '/p/' . $token) : ('/p/' . $token);
+
+        return $base !== '' ? ($base.'/p/'.$token) : ('/p/'.$token);
+    }
+
+    /**
+     * Resolve intrinsic width/height/aspect_ratio for the post's primary media.
+     *
+     * Two sources, in priority order:
+     *
+     * 1. Client-supplied `width`/`height`. This is the primary path. Posts are created
+     *    against an already-uploaded remote URL, so the server frequently cannot read the
+     *    bytes -- but the client has just decoded the file in the picker or composer and
+     *    knows its dimensions exactly. Trusting those also avoids a second decode.
+     *
+     * 2. Server-side inspection of a local upload. Best effort: only when the media URL
+     *    resolves to a real file under this app's storage root. Remote URLs are NOT
+     *    fetched -- that would put an arbitrary SSRF and a multi-second request behind
+     *    post creation.
+     *
+     * Returns all-null when neither source yields a usable pair, which is a valid state:
+     * the client measures `naturalSize` at runtime and the card still sizes correctly.
+     *
+     * @return array{width: ?int, height: ?int, aspect_ratio: ?float}
+     */
+    private function resolveMediaDimensions(Request $request): array
+    {
+        $empty = ['width' => null, 'height' => null, 'aspect_ratio' => null];
+
+        $width = $request->input('width');
+        $height = $request->input('height');
+
+        if ($width !== null && $height !== null) {
+            $width = (int) $width;
+            $height = (int) $height;
+
+            if ($width > 0 && $height > 0) {
+                return [
+                    'width' => $width,
+                    'height' => $height,
+                    'aspect_ratio' => round($width / $height, 6),
+                ];
+            }
+        }
+
+        // Fall back to reading a local upload's container metadata.
+        $url = $request->input('mediaUrl');
+
+        if (! is_string($url) || $url === '') {
+            $items = $request->input('mediaItems');
+            $url = is_array($items) ? (string) ($items[0]['url'] ?? '') : '';
+        }
+
+        $localPath = $this->localPathForMediaUrl($url);
+
+        if ($localPath === null) {
+            return $empty;
+        }
+
+        $inspected = VideoDimensions::inspect($localPath);
+
+        if ($inspected === null) {
+            return $empty;
+        }
+
+        return [
+            'width' => $inspected['width'],
+            'height' => $inspected['height'],
+            'aspect_ratio' => round($inspected['width'] / $inspected['height'], 6),
+        ];
+    }
+
+    /**
+     * Map a media URL to a readable local file, or null.
+     *
+     * Only accepts paths that land inside storage/app/public, after realpath() -- so a
+     * traversal attempt like /storage/../../.env cannot escape. Returns null for anything
+     * remote, which is what keeps post creation from making outbound requests.
+     */
+    private function localPathForMediaUrl(string $url): ?string
+    {
+        if ($url === '' || preg_match('#^https?://#i', $url)) {
+            return null;
+        }
+
+        $relative = parse_url($url, PHP_URL_PATH) ?: $url;
+        $relative = ltrim((string) $relative, '/');
+
+        // Accept both "/storage/uploads/x.mp4" and "storage/uploads/x.mp4".
+        if (! str_starts_with($relative, 'storage/')) {
+            return null;
+        }
+
+        $root = realpath(storage_path('app/public'));
+        $candidate = realpath(public_path($relative));
+
+        if ($root === false || $candidate === false) {
+            return null;
+        }
+
+        // Containment check on the resolved path, not the requested one.
+        if (! str_starts_with($candidate, $root.DIRECTORY_SEPARATOR)) {
+            return null;
+        }
+
+        return is_file($candidate) ? $candidate : null;
     }
 
     /**
@@ -82,6 +187,13 @@ class PostController extends Controller
         $postData['latitude'] = $post->latitude;
         $postData['longitude'] = $post->longitude;
         $postData['placeId'] = $post->place_id;
+        // Intrinsic media dimensions. camelCase duplicates because the RN Post type reads
+        // `width`/`height`/`aspectRatio`; the snake_case originals come through $post->toArray()
+        // and are kept for any existing consumer. The client trusts width/height and only
+        // falls back to aspectRatio when the integers are absent.
+        $postData['aspectRatio'] = $post->aspect_ratio !== null
+            ? (float) $post->aspect_ratio
+            : null;
         $postData['taggedUsers'] = $post->relationLoaded('taggedUsers')
             ? $post->taggedUsers->pluck('handle')->toArray()
             : [];
@@ -136,7 +248,7 @@ class PostController extends Controller
             'cursor' => 'nullable|string',
             'limit' => 'integer|min:1|max:50',
             'filter' => 'nullable|string|max:200',
-            'userId' => 'nullable|string'
+            'userId' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -169,11 +281,12 @@ class PostController extends Controller
 
             return response()->json($response);
         } catch (\Throwable $e) {
-            \Log::warning('posts index failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            \Log::warning('posts index failed: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
+
             return response()->json([
                 'items' => [],
                 'nextCursor' => null,
-                'hasMore' => false
+                'hasMore' => false,
             ]);
         }
     }
@@ -183,35 +296,35 @@ class PostController extends Controller
      */
     private function buildFeedResponse(array $cursorState, int $limit, string $filter, ?string $userId): array
     {
-            $hasViewer = !empty($userId);
-            // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
-            // Location feeds: only original posts from that location.
-            $query = Post::query()
-                ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
-                ->withCount(Post::engagementWithCounts());
+        $hasViewer = ! empty($userId);
+        // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
+        // Location feeds: only original posts from that location.
+        $query = Post::query()
+            ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
+            ->withCount(Post::engagementWithCounts());
 
-            if ($filter === 'Following' && $userId) {
-                $query->following($userId);
-                // Include reclipped posts so "when you reclip it gets shared to people who follow you"
-            } elseif ($filter !== 'Following') {
-                $query->notReclipped()->byLocation($filter);
-            } else {
-                // Following but no userId (e.g. guest): only original posts
-                $query->notReclipped();
-            }
+        if ($filter === 'Following' && $userId) {
+            $query->following($userId);
+            // Include reclipped posts so "when you reclip it gets shared to people who follow you"
+        } elseif ($filter !== 'Following') {
+            $query->notReclipped()->byLocation($filter);
+        } else {
+            // Following but no userId (e.g. guest): only original posts
+            $query->notReclipped();
+        }
 
-            if ($hasViewer) {
-                $query->withExists([
-                    'likes as user_liked' => function ($q) use ($userId) {
-                        $q->where('users.id', $userId);
-                    },
-                    'bookmarks as is_bookmarked' => function ($q) use ($userId) {
-                        $q->where('users.id', $userId);
-                    },
-                    'reclips as user_reclipped' => function ($q) use ($userId) {
-                        $q->where('users.id', $userId);
-                    },
-                ])
+        if ($hasViewer) {
+            $query->withExists([
+                'likes as user_liked' => function ($q) use ($userId) {
+                    $q->where('users.id', $userId);
+                },
+                'bookmarks as is_bookmarked' => function ($q) use ($userId) {
+                    $q->where('users.id', $userId);
+                },
+                'reclips as user_reclipped' => function ($q) use ($userId) {
+                    $q->where('users.id', $userId);
+                },
+            ])
                 ->selectRaw(
                     "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
                     [$userId]
@@ -220,42 +333,42 @@ class PostController extends Controller
                     "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
                     [$userId]
                 );
-            }
+        }
 
-            if ($cursorState['created_at'] && $cursorState['id']) {
-                $query->where(function ($q) use ($cursorState) {
-                    $q->where('created_at', '<', $cursorState['created_at'])
-                      ->orWhere(function ($q2) use ($cursorState) {
-                          $q2->where('created_at', '=', $cursorState['created_at'])
-                             ->where('id', '<', $cursorState['id']);
-                      });
-                });
-            } elseif ($cursorState['page'] > 0) {
-                // Backward compatibility for old numeric page cursors.
-                $query->offset($cursorState['page'] * $limit);
-            }
+        if ($cursorState['created_at'] && $cursorState['id']) {
+            $query->where(function ($q) use ($cursorState) {
+                $q->where('created_at', '<', $cursorState['created_at'])
+                    ->orWhere(function ($q2) use ($cursorState) {
+                        $q2->where('created_at', '=', $cursorState['created_at'])
+                            ->where('id', '<', $cursorState['id']);
+                    });
+            });
+        } elseif ($cursorState['page'] > 0) {
+            // Backward compatibility for old numeric page cursors.
+            $query->offset($cursorState['page'] * $limit);
+        }
 
-            $posts = $query->orderBy('created_at', 'desc')
-                ->orderBy('id', 'desc')
-                ->limit($limit)
-                ->get()
-                ->unique('id')
-                ->values();
+        $posts = $query->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
+            ->limit($limit)
+            ->get()
+            ->unique('id')
+            ->values();
 
-            $userModel = $hasViewer ? User::find($userId) : null;
-            $transformedPosts = $posts->map(fn (Post $post) => self::toApiArray($post, $userModel));
+        $userModel = $hasViewer ? User::find($userId) : null;
+        $transformedPosts = $posts->map(fn (Post $post) => self::toApiArray($post, $userModel));
 
-            $lastPost = $posts->last();
-            $nextCursor = null;
-            if ($posts->count() === $limit && $lastPost) {
-                $nextCursor = $this->encodeFeedCursor($lastPost->created_at, (string) $lastPost->id);
-            }
+        $lastPost = $posts->last();
+        $nextCursor = null;
+        if ($posts->count() === $limit && $lastPost) {
+            $nextCursor = $this->encodeFeedCursor($lastPost->created_at, (string) $lastPost->id);
+        }
 
-            return [
-                'items' => $transformedPosts,
-                'nextCursor' => $nextCursor,
-                'hasMore' => $nextCursor !== null
-            ];
+        return [
+            'items' => $transformedPosts,
+            'nextCursor' => $nextCursor,
+            'hasMore' => $nextCursor !== null,
+        ];
     }
 
     private function decodeFeedCursor(?string $cursor): array
@@ -275,12 +388,12 @@ class PostController extends Controller
             $encoded .= str_repeat('=', 4 - $padding);
         }
         $decoded = base64_decode($encoded, true);
-        if ($decoded === false || !str_contains($decoded, '|')) {
+        if ($decoded === false || ! str_contains($decoded, '|')) {
             return ['created_at' => null, 'id' => null, 'page' => 0];
         }
 
         [$createdAtRaw, $id] = explode('|', $decoded, 2);
-        if (!$id || !Str::isUuid($id)) {
+        if (! $id || ! Str::isUuid($id)) {
             return ['created_at' => null, 'id' => null, 'page' => 0];
         }
 
@@ -298,7 +411,8 @@ class PostController extends Controller
         $createdAtString = $createdAt instanceof \DateTimeInterface
             ? $createdAt->format('Y-m-d H:i:s')
             : Carbon::parse((string) $createdAt)->format('Y-m-d H:i:s');
-        return rtrim(strtr(base64_encode($createdAtString . '|' . $id), '+/', '-_'), '=');
+
+        return rtrim(strtr(base64_encode($createdAtString.'|'.$id), '+/', '-_'), '=');
     }
 
     /**
@@ -307,7 +421,7 @@ class PostController extends Controller
     public function show(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:posts,id'
+            'id' => 'required|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -315,8 +429,8 @@ class PostController extends Controller
         }
 
         $userId = $request->get('userId');
-        $hasViewer = !empty($userId);
-        
+        $hasViewer = ! empty($userId);
+
         $query = Post::with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
@@ -332,18 +446,19 @@ class PostController extends Controller
                     $q->where('users.id', $userId);
                 },
             ])
-            ->selectRaw(
-                "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
-                [$userId]
-            )
-            ->selectRaw(
-                "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
-                [$userId]
-            );
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
+                    [$userId]
+                );
         }
 
         $post = $query->findOrFail($id);
         $userModel = $hasViewer ? User::find($userId) : null;
+
         return response()->json(self::toApiArray($post, $userModel));
     }
 
@@ -352,7 +467,7 @@ class PostController extends Controller
      */
     public function showPublicByToken(Request $request, string $token): JsonResponse
     {
-        if (!is_string($token) || strlen($token) < 16) {
+        if (! is_string($token) || strlen($token) < 16) {
             return response()->json(['error' => 'Post not found'], 404);
         }
 
@@ -362,7 +477,7 @@ class PostController extends Controller
             ->where('public_share_token', $token)
             ->first();
 
-        if (!$post) {
+        if (! $post) {
             return response()->json(['error' => 'Post not found'], 404);
         }
 
@@ -410,6 +525,12 @@ class PostController extends Controller
             'socialFormat' => 'nullable|string|in:youtube_shorts,tiktok,instagram_reels',
             'mediaUrl' => 'nullable|string|max:2048',
             'mediaType' => 'nullable|in:image,video',
+            // Intrinsic dimensions. Optional because the client may not know them yet;
+            // the feed falls back to measuring naturalSize at runtime when absent.
+            // 8192 is the ceiling VideoDimensions::isSane() uses, so a value accepted
+            // here cannot be one the extractor would later reject.
+            'width' => 'nullable|integer|min:1|max:8192',
+            'height' => 'nullable|integer|min:1|max:8192',
             'videoFrameMode' => 'nullable|in:crop,fit,original',
             'videoPosterUrl' => 'nullable|string|max:2048',
             'caption' => 'nullable|string|max:500',
@@ -441,19 +562,19 @@ class PostController extends Controller
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        if (!$request->text && !$request->mediaUrl && !$request->mediaItems) {
+        if (! $request->text && ! $request->mediaUrl && ! $request->mediaItems) {
             return response()->json(['error' => 'Post must have text or media'], 400);
         }
 
         $mediaUrl = $request->input('mediaUrl');
-        if (is_string($mediaUrl) && $mediaUrl !== '' && !preg_match('#^https?://#i', $mediaUrl)) {
+        if (is_string($mediaUrl) && $mediaUrl !== '' && ! preg_match('#^https?://#i', $mediaUrl)) {
             return response()->json([
                 'error' => 'Invalid media URL',
                 'message' => 'mediaUrl must be an http(s) URL after upload. Local device paths are not allowed.',
             ], 400);
         }
         $videoPosterUrl = $request->input('videoPosterUrl');
-        if (is_string($videoPosterUrl) && $videoPosterUrl !== '' && !preg_match('#^https?://#i', $videoPosterUrl)) {
+        if (is_string($videoPosterUrl) && $videoPosterUrl !== '' && ! preg_match('#^https?://#i', $videoPosterUrl)) {
             return response()->json([
                 'error' => 'Invalid poster URL',
                 'message' => 'videoPosterUrl must be an http(s) URL after upload.',
@@ -463,6 +584,7 @@ class PostController extends Controller
         $user = Auth::user();
         if (! $user) {
             \Log::warning('posts.store rejected: unauthenticated');
+
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
 
@@ -476,10 +598,11 @@ class PostController extends Controller
 
         $post = DB::transaction(function () use ($request, $user) {
             $geo = $this->resolvePostGeoFields($request);
+            $dimensions = $this->resolveMediaDimensions($request);
 
             $mediaItems = $request->mediaItems;
             $posterUrl = is_string($request->videoPosterUrl) ? trim($request->videoPosterUrl) : '';
-            if ((!is_array($mediaItems) || $mediaItems === []) && $request->mediaUrl) {
+            if ((! is_array($mediaItems) || $mediaItems === []) && $request->mediaUrl) {
                 $mediaItems = [[
                     'url' => $request->mediaUrl,
                     'type' => $request->mediaType ?: 'image',
@@ -487,7 +610,7 @@ class PostController extends Controller
             }
             if ($posterUrl !== '' && is_array($mediaItems)) {
                 foreach ($mediaItems as $index => $item) {
-                    if (!is_array($item)) {
+                    if (! is_array($item)) {
                         continue;
                     }
                     $type = $item['type'] ?? null;
@@ -507,6 +630,9 @@ class PostController extends Controller
                 'text_content' => $request->text,
                 'media_url' => $request->mediaUrl,
                 'media_type' => $request->mediaType,
+                'width' => $dimensions['width'],
+                'height' => $dimensions['height'],
+                'aspect_ratio' => $dimensions['aspect_ratio'],
                 'thumbnail_url' => $posterUrl !== '' ? $posterUrl : null,
                 'location_label' => $geo['location_label'] ?? $request->location,
                 'place_id' => $geo['place_id'],
@@ -544,15 +670,15 @@ class PostController extends Controller
             $user->increment('posts_count');
 
             // Create render job if editTimeline is provided (hybrid editing pipeline)
-            if ($request->editTimeline && is_array($request->editTimeline) && !empty($request->editTimeline)) {
+            if ($request->editTimeline && is_array($request->editTimeline) && ! empty($request->editTimeline)) {
                 $renderJobId = (string) Str::uuid();
-                
+
                 // Get video source URL from mediaUrl or first mediaItem
                 $videoSourceUrl = $request->mediaUrl;
-                if (!$videoSourceUrl && $request->mediaItems && count($request->mediaItems) > 0) {
+                if (! $videoSourceUrl && $request->mediaItems && count($request->mediaItems) > 0) {
                     $videoSourceUrl = $request->mediaItems[0]['url'] ?? '';
                 }
-                
+
                 if ($videoSourceUrl) {
                     RenderJob::create([
                         'id' => $renderJobId,
@@ -572,7 +698,6 @@ class PostController extends Controller
                     $post->save();
                 }
             }
-
 
             // Reload relationships
             $post->load(['user', 'taggedUsers']);
@@ -598,7 +723,7 @@ class PostController extends Controller
         $postData['thumbnail_url'] = $poster;
         $postData['video_poster_url'] = $poster;
         $postData['poster_url'] = $poster;
-        
+
         // Include render_job_id if a render job was created
         if ($post->render_job_id) {
             $postData['render_job_id'] = $post->render_job_id;
@@ -675,7 +800,7 @@ class PostController extends Controller
         // Transform to frontend format (same as store method)
         $postData = $post->toArray();
         $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
-        
+
         // Map backend fields to frontend format
         $postData['text'] = $postData['text_content'] ?? '';
         $postData['locationLabel'] = $postData['location_label'] ?? '';
@@ -704,7 +829,7 @@ class PostController extends Controller
         $user = Auth::user();
         $post = Post::find($id);
 
-        if (!$post) {
+        if (! $post) {
             return response()->json(['error' => 'Post not found'], 404);
         }
 
@@ -713,6 +838,7 @@ class PostController extends Controller
         }
 
         $post->delete();
+
         return response()->json(['success' => true]);
     }
 
@@ -722,7 +848,7 @@ class PostController extends Controller
     public function toggleLike(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:posts,id'
+            'id' => 'required|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -739,12 +865,14 @@ class PostController extends Controller
                 // Unlike
                 $user->postLikes()->detach($post->id);
                 $post->decrement('likes_count');
+
                 return ['liked' => false];
             } else {
                 // Like
                 $user->postLikes()->attach($post->id);
                 $post->increment('likes_count');
                 BoostAnalyticsService::incrementForPost($post->id, 'likes_count');
+
                 return ['liked' => true];
             }
         });
@@ -793,7 +921,7 @@ class PostController extends Controller
             ->select('users.id', 'users.handle', 'users.display_name', 'users.avatar_url')
             ->orderByDesc('post_likes.created_at');
 
-        if (!empty($viewerId)) {
+        if (! empty($viewerId)) {
             $query->selectRaw(
                 "exists(
                     select 1 from user_follows uf
@@ -812,7 +940,7 @@ class PostController extends Controller
                 'handle' => $user->handle,
                 'display_name' => $user->display_name,
                 'avatar_url' => $user->avatar_url,
-                'is_following' => !empty($viewerId) ? (bool) ($user->is_following ?? false) : false,
+                'is_following' => ! empty($viewerId) ? (bool) ($user->is_following ?? false) : false,
             ];
         })->values();
 
@@ -834,11 +962,11 @@ class PostController extends Controller
             $post = Post::where('id', $id)->first();
 
             // If post doesn't exist in database, return success anyway (frontend may be using mock data)
-            if (!$post) {
+            if (! $post) {
                 return response()->json([
                     'success' => true,
                     'views' => 0,
-                    'message' => 'Post not in database, view tracked client-side'
+                    'message' => 'Post not in database, view tracked client-side',
                 ]);
             }
 
@@ -849,7 +977,7 @@ class PostController extends Controller
                 try {
                     DB::transaction(function () use ($user, $post) {
                         try {
-                            if (!$user->views()->where('post_id', $post->id)->exists()) {
+                            if (! $user->views()->where('post_id', $post->id)->exists()) {
                                 $user->views()->attach($post->id, [], false);
                             }
                         } catch (\Illuminate\Database\QueryException $e) {
@@ -857,11 +985,11 @@ class PostController extends Controller
                                 throw $e;
                             }
                         } catch (\Exception $e) {
-                            \Log::debug('View tracking error: ' . $e->getMessage());
+                            \Log::debug('View tracking error: '.$e->getMessage());
                         }
                     });
                 } catch (\Exception $e) {
-                    \Log::debug('View tracking transaction error: ' . $e->getMessage());
+                    \Log::debug('View tracking transaction error: '.$e->getMessage());
                 }
             }
 
@@ -883,14 +1011,15 @@ class PostController extends Controller
 
             return response()->json([
                 'success' => true,
-                'views' => $views
+                'views' => $views,
             ]);
         } catch (\Throwable $e) {
-            \Log::warning('incrementView failed: ' . $e->getMessage(), ['id' => $id, 'trace' => $e->getTraceAsString()]);
+            \Log::warning('incrementView failed: '.$e->getMessage(), ['id' => $id, 'trace' => $e->getTraceAsString()]);
+
             return response()->json([
                 'success' => true,
                 'views' => 0,
-                'message' => 'View tracked client-side'
+                'message' => 'View tracked client-side',
             ]);
         }
     }
@@ -901,7 +1030,7 @@ class PostController extends Controller
     public function share(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:posts,id'
+            'id' => 'required|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -939,7 +1068,7 @@ class PostController extends Controller
     public function regenerateShareToken(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:posts,id'
+            'id' => 'required|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -949,7 +1078,7 @@ class PostController extends Controller
         $user = Auth::user();
         $post = Post::findOrFail($id);
 
-        if (!$user instanceof User || $post->user_id !== $user->id) {
+        if (! $user instanceof User || $post->user_id !== $user->id) {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
@@ -969,7 +1098,7 @@ class PostController extends Controller
     public function reclip(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:posts,id'
+            'id' => 'required|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -987,10 +1116,11 @@ class PostController extends Controller
         $result = DB::transaction(function () use ($user, $originalPost) {
             // Check if already reclipped
             $existingReclip = $user->reclips()->where('post_id', $originalPost->id)->first();
-            
+
             if ($existingReclip) {
                 // Return the updated original post instead of error
                 $originalPost->refresh();
+
                 return $originalPost;
             }
 
@@ -1001,6 +1131,13 @@ class PostController extends Controller
                 'text_content' => $originalPost->text_content,
                 'media_url' => $originalPost->media_url,
                 'media_type' => $originalPost->media_type,
+                // Carry the intrinsic dimensions across. Without these the reclip lands as a
+                // NULL-dimension row and renders in the 1:1 fallback box until its video
+                // fires onLoad, even though the original post already knows the exact size.
+                'width' => $originalPost->width,
+                'height' => $originalPost->height,
+                'aspect_ratio' => $originalPost->aspect_ratio,
+                'media_items' => $originalPost->media_items,
                 'location_label' => $originalPost->location_label,
                 'is_reclipped' => true,
                 'original_post_id' => $originalPost->id,
@@ -1011,7 +1148,7 @@ class PostController extends Controller
             // Add reclip record
             $user->reclips()->create([
                 'post_id' => $originalPost->id,
-                'user_handle' => $user->handle
+                'user_handle' => $user->handle,
             ]);
 
             // Update original post reclip count

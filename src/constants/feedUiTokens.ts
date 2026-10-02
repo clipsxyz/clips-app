@@ -101,7 +101,22 @@ const FEED_UI_BY_MODE = {
 export const FEED_UI_MODE: FeedUiMode = 'compact';
 export const FEED_UI = FEED_UI_BY_MODE[FEED_UI_MODE];
 
-/** Media frame height: 4:5 vertical (default) or 16:9 landscape, capped to the viewport. */
+/**
+ * Media frame height: 4:5 vertical (default) or 16:9 landscape, capped to the viewport.
+ *
+ * @deprecated No longer called by the feed. It chose a height from a fixed token BEFORE
+ * any media was decoded, which is precisely what produced the letterbox: the card was
+ * pinned to a 4:5 box (height AND maxHeight) while the video inside independently sized
+ * to its true ratio, and the surplus rendered as black bars.
+ *
+ * `FeedCard` now derives its height from the intrinsic dimensions via
+ * `feedMediaHeight()` in `src/utils/mediaAspectRatio.ts`, and `FeedPostMedia` reports the
+ * intrinsic size upward. Kept only so the web/legacy call sites still resolve -- delete
+ * it once those are migrated.
+ *
+ * Note the `isLandscape` parameter was never reachable from the main feed: the call site
+ * passed three arguments, so the `videoLandscapeAspect` branch below never executed.
+ */
 export function feedCardMediaHeight(
   width: number,
   windowHeight: number,

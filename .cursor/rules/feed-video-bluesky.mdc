@@ -1,0 +1,85 @@
+---
+description: Bluesky-standard feed MP4 — Phase 0 freeze + acceptance criteria. Blocks Scenes dual-player patches.
+globs: src/components/FeedPostMedia.native.tsx,src/components/ScenesViewer.native.tsx,src/screens/ScenesScreen.tsx,src/screens/FeedScreen.tsx,src/utils/feedActiveVideoNative.ts,src/utils/feedVideoExclusiveNative.ts,src/components/Stories24Feed*.native.tsx
+alwaysApply: false
+---
+
+# Feed video (Bluesky-standard) — Phase 0
+
+## Freeze (do not violate)
+
+The **Scenes dual-player** experiment is frozen. Do **not**:
+
+- Patch `ScenesViewer` / `ScenesScreen` for dual-player handoff races (poster shutter, InteractionManager tricks)
+- Mount a second `react-native-video` / ExoPlayer **while the feed TextureView is still alive**
+- Re-introduce Stories 24 preview `<Video>` while a feed postcard can own the slot
+
+Phase 3 immersive Scenes is allowed **only** after the feed player is torn down (`setFeedTextureMountAllowed(false)`), with **one** active Scenes Video + poster-only inactive pages.
+
+Work order: **Phase 1** (single-player feed) → **Phase 2** (same-player fullscreen) → **Phase 3** (immersive Scenes, optional). Do not start a later phase until the earlier phase’s acceptance checks pass on device (Oppo/ColorOS).
+
+Reference: Bluesky `social-app` — one active `BlueskyVideoView`, native `VisibilityView`, fullscreen via same player `enterFullscreen()` — not a second JS player.
+
+## Acceptance criteria (must meet before calling feed video “done”)
+
+### A. Single surface (always)
+
+- [ ] At most **one** audible TextureView / ExoPlayer exists in the feed viewport
+- [ ] Non-active video posts show **poster Image only** (no paused TextureView left mounted)
+- [ ] Stories 24 rail thumbs are **Image-only** whenever the feed video slot can be active
+- [ ] No feed surface rebinds into a top-left mini thumb when opening or closing fullscreen
+
+### B. Autoplay
+
+- [ ] The most-visible video postcard autoplays (muted per global mute)
+- [ ] Scrolling away pauses/destroys the previous player; the new active card starts (or shows poster until ready)
+- [ ] On Android, active-video selection updates on **scroll settle**, not every viewability tick (avoid ExoPlayer create/destroy jank)
+- [ ] App background → pause; foreground → resume the same active card if still visible
+- [ ] User preference / global mute is respected across cards
+
+### C. Fullscreen (same player — Phase 2)
+
+- [ ] Tap / “View in scenes” expands **the same** feed player (no second ExoPlayer, no black 2–4s gap)
+- [ ] Audio and picture continue without a seek jump (or seek only to the paused handoff time intentionally)
+- [ ] Dismiss fullscreen returns to the feed card with the same clip still the active slot
+- [ ] No corner-thumb steal / surface swap on enter or exit
+
+### D. Return to feed
+
+- [ ] After fullscreen dismiss, the postcard shows the playing (or correctly paused) frame, not a black hole
+- [ ] Viewability cannot immediately steal the slot from the returning card for a short grace window
+- [ ] Mute state matches what the user left fullscreen with (or global mute)
+
+## Phase checklist
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| **0** | Freeze dual-player Scenes; write these criteria | Done |
+| **1** | Single-player feed (destroy inactive; Image thumbs) | **Done — verify on device** |
+| **2** | Same-player fullscreen (expand or native fullscreen API) | **Done — verify on device** |
+| **3** | Immersive Scenes (optional; only after 1–2 pass on device) | **Deferred on ColorOS** — CTA uses same-player expand; Scenes navigate stays off until solid |
+| **4** | Evaluate `@bsky.app/video` vs `react-native-video` | **Done — stay on RNV** |
+
+## Phase 4 decision (2026-09-28)
+
+**Recommendation: keep `react-native-video` ^6.19. Keep adopting Bluesky’s rules, not their package.**
+
+| Factor | `@bsky.app/video` / bluesky-video | Our stack (`react-native-video`) |
+|--------|-----------------------------------|----------------------------------|
+| Architecture | Native `BlueskyVideoView` + `enterFullscreen()` → `FullscreenActivity` | JS Video + `armFeedExpand` same-player morph (Phase 2) |
+| Bare RN fit | Expo module (`peer: expo`); needs expo-modules host / autolinking / native rebuild | Already shipping on bare RN 0.85 |
+| Docs / support | Usage TODO; Bluesky-app-first support | Mature; we own patches |
+| ColorOS | Bluesky still hits Android fullscreen black/audio bugs | Dual-player was our failure mode; Phase 1–2 remove that |
+| Cost to switch | Large epic: Expo modules wiring, replace FeedPostMedia + cache, Android `FullscreenActivity`, iOS rebuild | Already done |
+
+**When to revisit:** only if Oppo still fails Phase 1–2 acceptance **after** a clean device verify (single surface + CTA expand + return), and a spike proves `enterFullscreen` is stable on ColorOS. Do **not** install `@bsky.app/video` as a speculative fix.
+
+## When implementing Phase 1+
+
+- Prefer changing `feedActiveVideoNative` + `FeedPostMedia.native.tsx` + Stories 24 thumbs
+- Phase 2: **Bluesky enterFullscreen** — tap = `presentFullscreenPlayer()` (RNV), matching `videoRef.enterFullscreen(true)` in Bluesky’s `VideoEmbedInnerNative`. **Not** a JS scale morph inside FlashList. **Mute = mute control only**
+- Phase A start latency: warm **imminent** active URI (not only siblings); `prioritizeFirst` Range prebuffer; `bufferForPlaybackMs: 100`; keep elevated poster until `onReadyForDisplay`; `__DEV__` logs `[feed-video] firstFrame Nms`
+- Phase B: **do not destroy ExoPlayer on every scroll** — pause+mute and keep TextureView; tear down only after ~160px leave; same-card settle = resume (no remount)
+- Phase 3 immersive Scenes navigate is **deferred** on ColorOS (black surface); do not re-enable dual-mount
+- Phase 4: stay on `react-native-video` unless ColorOS spike overturns the decision above
+- Verify on a real Android device (ColorOS), not only iOS simulator

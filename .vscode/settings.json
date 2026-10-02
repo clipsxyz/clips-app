@@ -7,8 +7,6 @@
   "css.lint.unknownAtRules": "ignore",
   "typescript.tsserver.experimental.enableProjectDiagnostics": false,
   "typescript.disableAutomaticTypeAcquisition": false,
-  "typescript.preferences.includePackageJsonAutoImports": "off",
-  "typescript.validate.enable": true,
   "files.associations": {
     "src/screens/**/*.tsx": "typescriptreact",
     "src/screens/**/*.ts": "typescript"
@@ -17,11 +15,26 @@
     "**/src/screens/tsconfig.json": true
   },
   "search.exclude": {
-    "**/src/screens": false
+    "**/src/screens": false,
+    "**/node_modules": true,
+    "**/vendor": true,
+    "**/ios/Pods": true,
+    "**/coverage": true,
+    "**/tmp": true
   },
-  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/laravel-backend/vendor/**": true,
+    "**/ios/Pods/**": true,
+    "**/android/.gradle/**": true,
+    "**/android/app/build/**": true,
+    "**/coverage/**": true,
+    "**/tmp/**": true,
+    "**/.expo/**": true
+  },
+  "git.autoRepositoryDetection": "openEditors",
+  "git.repositoryScanMaxDepth": 0,
   "[typescriptreact]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   }
 }
-

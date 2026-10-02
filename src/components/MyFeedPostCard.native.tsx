@@ -10,6 +10,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post, User } from '../types';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedPostMedia from './FeedPostMedia.native';
+import { feedMediaHeight } from '../utils/mediaAspectRatio';
 import FeedTextOnlyFeedLayout from './FeedTextOnlyFeedLayout.native';
 import FeedCaptionText from './FeedCaptionText.native';
 import FeedEngagementRow from './FeedEngagementRow';
@@ -77,7 +78,9 @@ export default function MyFeedPostCard({
     );
     const postTags = post.tags?.filter(Boolean) ?? [];
     const isCurrentUser = true;
-    const mediaHeight = Math.min(cardMediaWidth * 1.1, 420);
+    // Same shared geometry as the main feed so a landscape clip and a portrait clip are
+    // both content-sized instead of inheriting one hardcoded ratio.
+    const mediaHeight = feedMediaHeight(cardMediaWidth, post.width, post.height);
 
     const triggerHeartDrop = (pageX: number, pageY: number) => {
         setHeartDrop({ startX: pageX, startY: pageY });

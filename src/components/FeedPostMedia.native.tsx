@@ -36,6 +36,12 @@ import {
 } from '../utils/effectiveTextPostStyleNative';
 import { postHasVideoMedia, resolvePostPlaybackUri } from '../utils/postMedia';
 import {
+    feedAspectRatio,
+    intrinsicRatio,
+    resolveIntrinsicSize,
+    RATIO_FALLBACK,
+} from '../utils/mediaAspectRatio';
+import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
     isPlayableLocalMediaUri,
@@ -117,6 +123,17 @@ type Props = {
     onCarouselIndexChange?: (index: number) => void;
     width: number;
     height: number;
+    /**
+     * Fired once the intrinsic pixel size of the current slide is known -- from the
+     * backend payload when present, otherwise from `naturalSize`/`source` at load time.
+     * The card wrapper uses it to size itself to the content instead of a fixed token
+     * height, which is what removes the letterbox.
+     *
+     * Reports the RAW intrinsic width/height, not the clamped feed ratio: the wrapper
+     * needs to know what the media actually is before deciding how to clamp it.
+     * Not fired for text-only posts.
+     */
+    onIntrinsicSize?: (size: { width: number; height: number }) => void;
     /** @deprecated Feed uses onDoubleLike + onSingleTap (TextCard parity). */
     onPress?: (event?: GestureResponderEvent) => void;
     /** Feed: double-tap like (web Media / TextCard parity). Optional local tap coords. */
@@ -148,6 +165,7 @@ const FeedPostMedia = React.memo(
         onCarouselIndexChange,
         width,
         height,
+        onIntrinsicSize,
         onPress,
         onDoubleLike,
         onSingleTap,
@@ -189,7 +207,15 @@ const FeedPostMedia = React.memo(
     const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() =>
         getActiveFeedVideoPostId(),
     );
-    const [isLandscapeMedia, setIsLandscapeMedia] = useState(false);
+    /**
+     * Intrinsic width/height measured at runtime, from RNV `naturalSize` (video) or
+     * `source` (image). Null until the first load. This replaces the old
+     * `isLandscapeMedia` boolean: that flag could only choose between 4:5 and 16:9, so
+     * a 9:16 clip and a 4:3 clip were indistinguishable and both got the wrong box.
+     */
+    const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number } | null>(
+        null,
+    );
 
     const resetPosterCover = useCallback(() => {
         mediaRevealRef.current?.stop();
@@ -250,6 +276,52 @@ const FeedPostMedia = React.memo(
     const maxCarouselIndex = Math.max(0, carouselItems.length - 1);
     const safeCarouselIndex = Math.min(Math.max(0, carouselIndex), maxCarouselIndex);
     const [currentIndex, setCurrentIndex] = useState(safeCarouselIndex);
+
+    /** Backend-supplied dimensions for the current slide, if the API provided them. */
+    const apiSize = React.useMemo(() => {
+        const item = carouselItems[currentIndex];
+        const w = Number(item?.width ?? post.width);
+        const h = Number(item?.height ?? post.height);
+
+        return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
+    }, [carouselItems, currentIndex, post.width, post.height]);
+
+    /**
+     * Resolved through the SAME helper the card wrapper uses. These two layers are each
+     * given the other's height and then re-derive one, so any disagreement between them
+     * surfaces immediately as black space between the video and the engagement row. Routing
+     * both through `resolveIntrinsicSize` makes that divergence impossible by construction.
+     *
+     * Declared here, above the reporting effect, because that effect needs it on the very
+     * first render -- that first paint is exactly when a wrong box is most visible.
+     */
+    const effectiveSize = resolveIntrinsicSize({
+        api: apiSize,
+        measured: measuredSize,
+        measuredForId: post.id,
+        postId: post.id,
+    });
+
+    const reportIntrinsicSize = useCallback(
+        (size: { width: number; height: number }) => {
+            onIntrinsicSize?.(size);
+        },
+        [onIntrinsicSize],
+    );
+
+    /**
+     * Once we know what the media is, tell the wrapper. An effect rather than firing
+     * from the load handler directly so the API dimensions also reach the parent on the
+     * very first render -- that is the whole point of storing them, and it removes the
+     * layout shift a late `onLoad` would otherwise cause.
+     */
+    React.useEffect(() => {
+        if (effectiveSize) {
+            reportIntrinsicSize(effectiveSize);
+        }
+        // `effectiveSize` is a fresh object each render, so depend on its contents instead.
+    }, [effectiveSize?.width, effectiveSize?.height, reportIntrinsicSize]);
+
     const markUrlLoaded = useCallback(
         (url: string) => {
             loadedUrlsRef.current.add(url);
@@ -293,7 +365,7 @@ const FeedPostMedia = React.memo(
         lastEmittedIndexRef.current = 0;
         setPlayFailed(false);
         setVideoUrlFallbackByRaw({});
-        setIsLandscapeMedia(false);
+        setMeasuredSize(null);
     }, [post.id]);
 
     // Prefetch video posters so placeholders paint instantly on re-scroll.
@@ -631,9 +703,27 @@ const FeedPostMedia = React.memo(
 
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
 
-    const frameHeight =
-        isLandscapeMedia && width > 0 ? Math.min(width * (9 / 16), height) : height;
-    const mediaAspect = width > 0 && frameHeight > 0 ? width / frameHeight : 4 / 5;
+    /**
+     * The ratio we actually render at: content-first, clamped only at the policy
+     * extremes. `height` is now a MAXIMUM rather than a fixed box -- the wrapper may have
+     * measured a different (content-derived) height and passes that down, but a caller
+     * that still passes a token height gets a sane clamp instead of an unstretched box.
+     */    const intrinsicWidth = effectiveSize?.width;
+    const intrinsicHeight = effectiveSize?.height;
+    const targetRatio = feedAspectRatio(intrinsicWidth, intrinsicHeight);
+    const contentHeight =
+        width > 0 ? Math.round(width / targetRatio) : height > 0 ? height : 0;
+    // Clamp to the height the wrapper actually allocated so the video can never overflow the
+    // card. This can never open a gap: when the wrapper was capped below the content height,
+    // `height` IS the wrapper's height, so the frame lands exactly on it and the engagement
+    // row stays flush. The visible effect of capping is extra cropping via resizeMode="cover",
+    // which is the intended trade for a very tall clip on a short viewport.
+    //
+    // Deliberately NOT also clamped to `width`: any portrait ratio is below 1, so
+    // width/ratio exceeds width, and bounding by width would shrink the frame below the
+    // wrapper and reintroduce the very black gap this clamp is meant to prevent.
+    const frameHeight = height > 0 ? Math.min(contentHeight, height) : contentHeight;
+    const mediaAspect = width > 0 && frameHeight > 0 ? width / frameHeight : RATIO_FALLBACK;
     const frameStyle = {
         width,
         height: frameHeight,
@@ -687,8 +777,11 @@ const FeedPostMedia = React.memo(
                             markUrlLoaded(slideRawUrl);
                             if (!slideIsCurrent) return;
                             const src = e.nativeEvent.source;
-                            if (src && Number(src.width) > 0 && Number(src.height) > 0) {
-                                setIsLandscapeMedia(Number(src.width) > Number(src.height));
+                            if (src && intrinsicRatio(src.width, src.height) != null) {
+                                setMeasuredSize({
+                                    width: Number(src.width),
+                                    height: Number(src.height),
+                                });
                             }
                         }}
                         onError={() => markUrlLoaded(slideRawUrl)}
@@ -765,11 +858,16 @@ const FeedPostMedia = React.memo(
                                         /* ignore */
                                     }
                                 }
+                                // Intrinsic dimensions straight from the container
+                                // metadata. `naturalSize` is the pre-rotation size; a clip
+                                // recorded at 1920x1080 then rotated to portrait reports
+                                // width < height, which is exactly what we want to size to.
                                 const ns = meta?.naturalSize;
-                                if (ns && Number(ns.width) > Number(ns.height)) {
-                                    setIsLandscapeMedia(true);
-                                } else if (ns && Number(ns.width) > 0 && Number(ns.height) > 0) {
-                                    setIsLandscapeMedia(false);
+                                if (ns && intrinsicRatio(ns.width, ns.height) != null) {
+                                    setMeasuredSize({
+                                        width: Number(ns.width),
+                                        height: Number(ns.height),
+                                    });
                                 }
                             }}
                             onProgress={(e) => {

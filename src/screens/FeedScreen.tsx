@@ -62,7 +62,7 @@ import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
-import { FEED_UI, feedCardMediaHeight } from '../constants/feedUiTokens';
+import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
@@ -70,6 +70,7 @@ import ImageFullscreenModal, {
 } from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { postHasVideoMedia, currentFeedSlideIsVideo } from '../utils/postMedia';
+import { feedMediaHeight, intrinsicRatio, resolveIntrinsicSize } from '../utils/mediaAspectRatio';
 import NetInfo from '@react-native-community/netinfo';
 import {
     getFeedAutoplayPref,
@@ -101,7 +102,6 @@ import FeedPageLayout, {
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
     FEED_CARD_ENGAGEMENT_LEFT,
     FEED_CARD_HEADER_WRAP,
-    FEED_CARD_MEDIA_FRAME,
     FEED_CARD_MEDIA_WRAP,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
@@ -1060,22 +1060,66 @@ const FeedCard = React.memo(function FeedCard({
     const postViewRecordedRef = React.useRef(false);
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
-    // 4:5 portrait (default) or 16:9 landscape, capped to ~58% of the screen so
-    // header + media + likes/comments/share fit without scrolling one post.
-    const mediaFrameHeight = feedCardMediaHeight(
-        cardMediaWidth,
-        safePositiveLayoutNumber(windowHeight, 720),
-        postHasVideoMedia(post),
-    );
-    const imageStyle = React.useMemo(
-        () => ({
-            width: cardMediaWidth,
-            height: mediaFrameHeight,
-            ...FEED_CARD_MEDIA_FRAME,
-        }),
-        [cardMediaWidth, mediaFrameHeight],
+
+    /**
+     * Intrinsic size of the current slide.
+     *
+     * `apiMedia` is derived (not stored) so it can never go stale or be wiped -- the
+     * dimensions come from the payload on every render. `measuredMedia` holds only what
+     * FeedPostMedia reported at runtime, tagged with the post id it was measured for.
+     *
+     * This previously used a single state seeded from the API plus a
+     * `useEffect([post.id])` that nulled it on recycling. That effect ALSO fired on mount,
+     * so it erased the API dimensions before the first paint: the wrapper fell back to a
+     * 1:1 square while FeedPostMedia -- reading `post.width/height` straight from props --
+     * correctly drew the video at 16:9. The 171pt difference rendered as a black box under
+     * every landscape video. Deriving instead of storing removes the failure mode; the
+     * post-id tag removes the need for the reset entirely.
+     */
+    const apiMedia = React.useMemo(() => {
+        const w = Number(post.width);
+        const h = Number(post.height);
+
+        return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
+    }, [post.width, post.height]);
+
+    const [measuredMedia, setMeasuredMedia] = React.useState<{ width: number; height: number } | null>(null);
+    const [measuredPostId, setMeasuredPostId] = React.useState<string | null>(null);
+
+    const handleIntrinsicMedia = React.useCallback(
+        (size: { width: number; height: number }) => {
+            setMeasuredPostId(post.id);
+            setMeasuredMedia((prev) =>
+                prev && prev.width === size.width && prev.height === size.height ? prev : size,
+            );
+        },
+        [post.id],
     );
 
+    const intrinsicMedia = resolveIntrinsicSize({
+        api: apiMedia,
+        measured: measuredMedia,
+        measuredForId: measuredPostId,
+        postId: post.id,
+    });
+
+    /**
+     * Height derived from the CONTENT, not a fixed token.
+     *
+     * This is the letterbox fix. The wrapper used to be pinned to `feedCardMediaHeight()`
+     * with both `height` AND `maxHeight` while the inner video independently shrank to the
+     * real 16:9 size -- so on a 390x844 device a landscape clip sat in a ~487pt box filling
+     * only ~219pt of it, and the rest was black. Now the box is sized from the intrinsic
+     * ratio resolved by {@link resolveIntrinsicSize}, clamped by feedAspectRatio, and only
+     * then capped to the viewport so a tall post cannot push the engagement row off screen.
+     */
+    const mediaFrameHeight = React.useMemo(() => {
+        const contentHeight = feedMediaHeight(cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height);
+        const viewportCap =
+            safePositiveLayoutNumber(windowHeight, 720) * FEED_UI.media.maxViewportFraction;
+
+        return Math.round(Math.min(contentHeight, viewportCap));
+    }, [cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height, windowHeight]);
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
     const isClientUploadFailed = post.clientUploadStatus === 'failed';
@@ -1212,10 +1256,14 @@ const FeedCard = React.memo(function FeedCard({
                         <View
                             style={[
                                 FEED_CARD_MEDIA_WRAP,
-                                {
-                                    height: mediaFrameHeight,
-                                    maxHeight: mediaFrameHeight,
-                                },
+                                // Only `height` now. The old `maxHeight: mediaFrameHeight`
+                                // alongside it is what forced the black bars: the wrapper
+                                // kept its token height while the content inside grew or
+                                // shrank, and `FEED_CARD_MEDIA_WRAP.backgroundColor` is
+                                // #000000, so every difference rendered as black. With
+                                // height derived from the intrinsic ratio the two agree by
+                                // construction.
+                                { height: mediaFrameHeight },
                             ]}
                             ref={mediaWrapRef}
                             collapsable={false}
@@ -1223,6 +1271,7 @@ const FeedCard = React.memo(function FeedCard({
                             <FeedPostMedia
                                 ref={videoMediaRef}
                                 post={post}
+                                onIntrinsicSize={handleIntrinsicMedia}
                                 carouselIndex={carouselIndex}
                                 onCarouselIndexChange={setCarouselIndex}
                                 stickers={post.stickers}

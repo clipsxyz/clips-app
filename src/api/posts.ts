@@ -1376,6 +1376,16 @@ export function transformLaravelPost(response: any): Post {
     mediaType: resolvedMediaType,
     videoFrameMode: resolvedVideoFrameMode,
     mediaItems: processedMediaItems ?? mediaItems,
+    // Intrinsic media dimensions, backfilled server-side for posts created before the
+    // media-dimensions migration. Without these the feed has no way to size a card until
+    // the video fires onLoad, so every legacy landscape clip first paints as a 1:1 square
+    // and then visibly reflows. Both key spellings are accepted because the API returns
+    // snake_case alongside the camelCase alias. Absent on rows that were never backfilled
+    // (text-only posts, or media whose file is missing) -- the card then measures
+    // naturalSize at runtime and falls back to RATIO_FALLBACK.
+    width: response.width ?? existing?.width,
+    height: response.height ?? existing?.height,
+    aspectRatio: response.aspect_ratio ?? response.aspectRatio ?? existing?.aspectRatio,
     // Some endpoints may return caption but omit text_content/text (or vice versa).
     // Keep both mapped so feed/fullscreen always have display copy.
     text: response.text_content || response.text || response.caption || existing?.text,

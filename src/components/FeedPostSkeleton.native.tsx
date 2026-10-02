@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
+import { RATIO_FALLBACK } from '../utils/mediaAspectRatio';
 
 function FeedPostSkeletonCard() {
   const opacity = useRef(new Animated.Value(0.45)).current;
@@ -57,7 +58,9 @@ const styles = StyleSheet.create({
   },
   media: {
     width: '100%',
-    aspectRatio: 1,
+    // MUST equal mediaAspectRatio.RATIO_FALLBACK. If these two drift, the feed visibly
+    // jumps when the real card replaces the skeleton on first paint.
+    aspectRatio: RATIO_FALLBACK,
     borderRadius: 12,
     backgroundColor: 'rgba(55, 65, 81, 0.75)',
     marginTop: 4,

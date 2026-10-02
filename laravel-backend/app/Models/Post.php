@@ -22,6 +22,7 @@ class Post extends Model
     use HasFactory, SoftDeletes;
 
     protected $keyType = 'string';
+
     public $incrementing = false;
 
     protected static function booted(): void
@@ -46,6 +47,9 @@ class Post extends Model
         'thumbnail_url',
         'location_label',
         'place_id',
+        'width',
+        'height',
+        'aspect_ratio',
         'gazetteer_region_id',
         'latitude',
         'longitude',
@@ -95,6 +99,11 @@ class Post extends Model
         'video_captions_enabled' => 'boolean',
         'subtitles_enabled' => 'boolean',
         'latitude' => 'float',
+        // Intrinsic media dimensions, read from container metadata on upload.
+        // width/height are authoritative; aspect_ratio is a redundant convenience copy.
+        'width' => 'integer',
+        'height' => 'integer',
+        'aspect_ratio' => 'float',
         'longitude' => 'float',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -114,7 +123,7 @@ class Post extends Model
         $first = is_array($items[0] ?? null) ? $items[0] : null;
         if (is_array($first)) {
             foreach (['posterUrl', 'poster_url', 'thumbnail_url', 'thumbnailUrl'] as $key) {
-                if (!empty($first[$key]) && is_string($first[$key])) {
+                if (! empty($first[$key]) && is_string($first[$key])) {
                     return $first[$key];
                 }
             }
@@ -155,10 +164,11 @@ class Post extends Model
     public static function applyEngagementCounts(array $postData, array $attrs): array
     {
         foreach (['likes', 'comments', 'shares', 'views', 'reclips'] as $metric) {
-            $col = $metric . '_count';
-            $rel = $metric . '_rel_count';
+            $col = $metric.'_count';
+            $rel = $metric.'_rel_count';
             $postData[$col] = max((int) ($attrs[$col] ?? $postData[$col] ?? 0), (int) ($attrs[$rel] ?? 0));
         }
+
         return $postData;
     }
 
@@ -188,32 +198,32 @@ class Post extends Model
     public function likes()
     {
         return $this->belongsToMany(User::class, 'post_likes')
-                    ->withTimestamps();
+            ->withTimestamps();
     }
 
     public function bookmarks()
     {
         return $this->belongsToMany(User::class, 'post_bookmarks')
-                    ->withTimestamps();
+            ->withTimestamps();
     }
 
     public function shares()
     {
         return $this->belongsToMany(User::class, 'post_shares')
-                    ->withTimestamps();
+            ->withTimestamps();
     }
 
     public function views()
     {
         return $this->belongsToMany(User::class, 'post_views')
-                    ->withTimestamps();
+            ->withTimestamps();
     }
 
     public function reclips()
     {
         return $this->belongsToMany(User::class, 'post_reclips')
-                    ->withPivot('user_handle')
-                    ->withTimestamps();
+            ->withPivot('user_handle')
+            ->withTimestamps();
     }
 
     public function originalPost()
@@ -230,8 +240,8 @@ class Post extends Model
     public function taggedUsers()
     {
         return $this->belongsToMany(User::class, 'post_tagged_users')
-                    ->withPivot('id', 'user_handle')
-                    ->withTimestamps();
+            ->withPivot('id', 'user_handle')
+            ->withTimestamps();
     }
 
     /**
@@ -469,8 +479,8 @@ class Post extends Model
     public function collections()
     {
         return $this->belongsToMany(Collection::class, 'collection_posts')
-                    ->withTimestamps()
-                    ->orderBy('collection_posts.created_at', 'desc');
+            ->withTimestamps()
+            ->orderBy('collection_posts.created_at', 'desc');
     }
 
     // Render job relationship

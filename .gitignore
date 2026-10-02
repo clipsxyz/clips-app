@@ -1,4 +1,7 @@
-node_modules
+# Dependencies
+node_modules/
+**/node_modules/
+
 env.zip
 src.zip
 .env
@@ -10,15 +13,31 @@ ios/GoogleService-Info.plist
 ios/**/GoogleService-Info.plist
 # Generated from public/firebase-messaging-sw.template.js (vite-plugin-firebase-sw)
 public/firebase-messaging-sw.js
+
+# JS / web build output
 dist/
+build/
+coverage/
+.expo/
+.tmp/
+tmp/
+.metro-health-check-*
+.DS_Store
 
 # PHPUnit coverage (Laravel backend)
 laravel-backend/coverage/
 laravel-backend/coverage.xml
-# Laravel local env and runtime
+# Laravel local env, vendor, and runtime (Composer deps must not be tracked)
 laravel-backend/.env
+laravel-backend/vendor/
 laravel-backend/database/database.sqlite
 laravel-backend/storage/
+laravel-backend/bootstrap/cache/*.php
+laravel-backend/build/
+laravel-backend/.phpunit.cache/
+laravel-backend/public/storage
+laravel-backend/serve.sh
+laravel-backend/.DS_Store
 
 # Local debug/release APKs (build artifacts)
 *.apk
@@ -32,7 +51,19 @@ android/build/
 android/app/build/
 android/app/.cxx/
 
+# iOS CocoaPods / Xcode build output
+ios/Pods/
+ios/build/
+ios/.xcode.env.local
+
 # FFmpeg Kit vendored binaries (npm run setup:ffmpeg-native)
 android/ffmpeg-kit-local-maven/
 ios/FFmpegKitVendor/
 .tmp-ffmpeg-setup/
+
+# Local sqlite at repo root
+database.sqlite
+
+# Generated JS bundle snapshot (rebuild with: npm run android:asset-bundle)
+android/app/src/main/assets/index.android.bundle
+android/app/src/main/assets/index.android.bundle.meta

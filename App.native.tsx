@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, useColorScheme, View, DeviceEventEmitter } from 'react-native';
+import { AppState, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, DeviceEventEmitter } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
@@ -207,9 +207,7 @@ function MainTabs() {
 }
 
 function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
+    const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
     schedulePushNotificationNavigation(() => navigationRef, data || {});
   }, []);
 
@@ -241,7 +239,7 @@ function App(): React.JSX.Element {
     <AuthProvider>
       <BottomSheetModalProvider>
       <SafeAreaProvider>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <StatusBar barStyle="light-content" />
         <UploadProgressToast />
         <NavigationContainer ref={navigationRef}>
           <Stack.Navigator
