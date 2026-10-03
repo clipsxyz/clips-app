@@ -1,31 +1,42 @@
 import React, { memo } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
-import { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
+
+/**
+ * Obsidian floor for the feed canvas.
+ *
+ * Neutral by design. The header morphs through a saturated accent palette, and the
+ * previous teal Passport wash fought those hues for attention — the accents now read as
+ * the only saturated thing on screen.
+ */
+export const FEED_AMBIENT_STATIC_HEX = '#0B0E14';
+
+/** Subtle vertical wash — smoked glass, darkening toward the tab bar. */
+const FEED_AMBIENT_WASH = ['#161B22', '#0B0E14', '#05070A'] as const;
+
+/** Faint sheen so cards read as floating on smoked glass rather than sitting on flat paint. */
+const FEED_AMBIENT_FROST = 'rgba(255, 255, 255, 0.02)';
 
 type Props = {
-    /** Ignored — canvas is locked to the share-card Passport wash. */
+    /** Ignored — the canvas is a fixed neutral wash, never sampled per post. */
     dominantColor?: string | null;
 };
 
-/** Same floor as native share / Passport sheets. */
-export const FEED_AMBIENT_STATIC_HEX = PASSPORT_ABYSS;
-
-/**
- * Full-bleed feed floor — identical Passport sheet wash as the share card canvas.
- */
+/** Full-bleed feed floor. */
 function FeedAmbientCanvasBase(_props: Props) {
     return (
-        <LinearGradient
-            colors={[...PASSPORT_SHEET_WASH]}
-            locations={[0, 0.22, 0.52, 0.78, 1]}
-            start={{ x: 0.05, y: 1 }}
-            end={{ x: 0.95, y: 0 }}
-            style={styles.canvas}
-            pointerEvents="none"
-            collapsable={false}
-        />
+        <>
+            <LinearGradient
+                colors={[...FEED_AMBIENT_WASH]}
+                locations={[0, 0.5, 1]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.canvas}
+                pointerEvents="none"
+                collapsable={false}
+            />
+            <View style={styles.frost} pointerEvents="none" />
+        </>
     );
 }
 
@@ -39,6 +50,16 @@ const styles = StyleSheet.create({
         zIndex: 0,
         elevation: 0,
         backgroundColor: FEED_AMBIENT_STATIC_HEX,
+    },
+    frost: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 0,
+        elevation: 0,
+        backgroundColor: FEED_AMBIENT_FROST,
     },
 });
 

@@ -11,7 +11,7 @@
  * not as a full-screen feed background.
  */
 
-import React, { type ReactNode } from 'react';
+import React, { type ReactNode, useEffect, useState } from 'react';
 import {
     Platform,
     StyleSheet,
@@ -22,11 +22,42 @@ import {
     type ViewStyle,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import Animated, {
+    Easing,
+    interpolateColor,
+    runOnJS,
+    useAnimatedReaction,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
+import { HEADER_GLASS_NEUTRAL } from '../utils/headerGlassPalette';
 
 /** News feed shell / ambient canvas floor — matches share-card Passport abyss. */
 export const FEED_PAGE_BG = '#060d16';
+
+/** Header tint morph cadence — matches the ambient canvas settle rhythm. */
+const HEADER_TINT_MORPH_MS = 350;
+
+/**
+ * Turns an interpolated tint into the header's three-stop ramp: ~95% at the status bar,
+ * ~50% glow behind the Stories row, then clear so it dissolves into the solid backdrop.
+ *
+ * `interpolateColor` emits `rgba(r, g, b, a)` rather than hex, so the alphas are rebuilt
+ * per stop instead of concatenating a hex suffix (which would produce an invalid colour and
+ * silently drop the gradient). The neutral fallback keeps the header readable when the
+ * interpolation has not produced a parseable colour yet.
+ */
+function headerTintStops(tint: string): [string, string, string] {
+    const channels = tint.match(/[\d.]+/g);
+    if (!channels || channels.length < 3) {
+        return [...FEED_CHROME_HEADER_GRADIENT];
+    }
+    const [r, g, b] = channels;
+    return [`rgba(${r}, ${g}, ${b}, 0.95)`, `rgba(${r}, ${g}, ${b}, 0.5)`, 'transparent'];
+}
 
 /** Web post card / article background — Gazetteer Swal sheet (`#060d16`). */
 export const FEED_CARD_BG = '#060d16';
@@ -41,10 +72,14 @@ export const FEED_CARD_CHROME_BG = '#060d16';
  * Solid fill kept only as a non-glass fallback token.
  */
 export const FEED_CHROME_GLASS = 'transparent';
+/**
+ * Neutral header ramp, applied before/without an active post tint. The live header stops
+ * are built at runtime by `headerTintStops` so the dominant colour can be interpolated.
+ */
 export const FEED_CHROME_HEADER_GRADIENT = [
-    'rgba(11, 14, 20, 0.92)',
-    'rgba(11, 14, 20, 0.65)',
-    'rgba(11, 14, 20, 0.0)',
+    'rgba(11, 14, 20, 0.95)',
+    'rgba(11, 14, 20, 0.5)',
+    'transparent',
 ] as const;
 export const FEED_CHROME_FOOTER_GRADIENT = [
     'rgba(11, 14, 20, 0.0)',
@@ -457,9 +492,6 @@ export const FEED_EMPTY_CREATE_GRADIENT = ['#EF4444', '#FACC15', '#EF4444'] as c
 /** Header pill-tabs row — same floor as feed chrome. */
 export const FEED_PILL_TABS_BG = '#161E2E';
 
-/** Web location pill: `bg-[#36454F]`. */
-export const FEED_LOCATION_PILL_BG = '#36454F';
-
 /** Web header title typography (PillTabs location label — 18px / 700). */
 export const FEED_HEADER_TITLE = {
     fontSize: 18,
@@ -500,7 +532,7 @@ export const FEED_HEADER_CENTER = {
     position: 'relative' as const,
 };
 
-/** Web location pill: rounded-lg bg-[#36454F] px-3 py-1.5 gap-2. */
+/** Web location pill: rounded-lg px-3 py-1.5 gap-2. */
 export const FEED_HEADER_LOCATION_PILL = {
     position: 'relative' as const,
     flexDirection: 'row' as const,
@@ -511,7 +543,12 @@ export const FEED_HEADER_LOCATION_PILL = {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: FEED_LOCATION_PILL_BG,
+    // Transparent on purpose (web parity was a solid `bg-[#36454F]`): the pinned chrome
+    // paints the animated header gradient behind this row, so an opaque pill would mask
+    // the accent colour and read as a grey notch punched out of the header. The crisp
+    // outline comes from `feedSwitchPillBorder` on the wrapper — no border here, or the
+    // two would stack into a double ring.
+    backgroundColor: 'transparent',
     overflow: 'hidden' as const,
 };
 
@@ -519,6 +556,7 @@ export const FEED_HEADER_ACTIVE_DOT = {
     width: 8,
     height: 8,
     borderRadius: 999,
+    backgroundColor: '#FFFFFF',
 };
 
 export const FEED_HEADER_LOCATION_TITLE = {
@@ -662,6 +700,12 @@ export type FeedPageLayoutProps = {
      * colour and both the header and the scroll area read as frosted glass.
      */
     backdrop?: ReactNode;
+    /**
+     * Active post's `dominant_color` (already validated/amplified by the caller). Drives
+     * the frosted tint on the pinned chrome only — the ambient canvas behind the feed is
+     * untouched. Falsy falls back to HEADER_GLASS_NEUTRAL so the header reads as neutral.
+     */
+    headerTint?: string | null;
     online?: boolean;
     error?: string | null;
     onRetry?: () => void;
@@ -672,6 +716,7 @@ export default function FeedPageLayout({
     header,
     children,
     backdrop,
+    headerTint = null,
     online = true,
     error = null,
     onRetry,
@@ -679,6 +724,46 @@ export default function FeedPageLayout({
 }: FeedPageLayoutProps) {
     const insets = useSafeAreaInsets();
     const glassScrollHost = backdrop ? styles.scrollHostGlass : null;
+
+    // --- Dynamic header tint -------------------------------------------------
+    // The morph itself runs on the UI thread (`tintMix` + `interpolateColor`); only the
+    // resolved colour crosses to JS, and only while the 350ms timing is in flight.
+    const tintMix = useSharedValue(1);
+    const tintFrom = useSharedValue<string>(HEADER_GLASS_NEUTRAL);
+    const tintTo = useSharedValue<string>(HEADER_GLASS_NEUTRAL);
+
+    useEffect(() => {
+        const next = headerTint ?? HEADER_GLASS_NEUTRAL;
+        // Chain from the previous target so rapid scroll reversals interpolate smoothly
+        // instead of snapping back to the base colour.
+        tintFrom.value = tintTo.value;
+        tintTo.value = next;
+        tintMix.value = 0;
+        tintMix.value = withTiming(1, {
+            duration: HEADER_TINT_MORPH_MS,
+            easing: Easing.out(Easing.cubic),
+        });
+    }, [headerTint, tintFrom, tintMix, tintTo]);
+
+    const [headerTintRgba, setHeaderTintRgba] = useState<string>(HEADER_GLASS_NEUTRAL);
+
+    useAnimatedReaction(
+        () => interpolateColor(tintMix.value, [0, 1], [tintFrom.value, tintTo.value]),
+        (current, previous) => {
+            if (current !== previous) runOnJS(setHeaderTintRgba)(current);
+        },
+        [tintFrom, tintTo],
+    );
+
+    const headerTintStopsMemo = headerTintStops(headerTintRgba);
+
+    // Opaque path (no ambient canvas) has no gradient to tint, so morph a flat colour.
+    const pinnedChromeSolidStyle = useAnimatedStyle(() => ({
+        backgroundColor: interpolateColor(tintMix.value, [0, 1], [
+            tintFrom.value,
+            tintTo.value,
+        ]),
+    }));
 
     const chromeBody = (
         <>
@@ -736,7 +821,7 @@ export default function FeedPageLayout({
             */}
             {backdrop ? (
                 <LinearGradient
-                    colors={[...FEED_CHROME_HEADER_GRADIENT]}
+                    colors={headerTintStopsMemo}
                     locations={[0, 0.55, 1]}
                     pointerEvents="box-none"
                     collapsable={false}
@@ -745,12 +830,16 @@ export default function FeedPageLayout({
                     {chromeBody}
                 </LinearGradient>
             ) : (
-                <View
-                    style={[styles.pinnedChrome, { paddingTop: insets.top }]}
+                <Animated.View
+                    style={[
+                        styles.pinnedChrome,
+                        pinnedChromeSolidStyle,
+                        { paddingTop: insets.top },
+                    ]}
                     collapsable={false}
                 >
                     {chromeBody}
-                </View>
+                </Animated.View>
             )}
 
             {/* Inner scroll host — web: flex-1 min-h-0 overflow-y-auto pb-2 */}
@@ -829,7 +918,11 @@ const styles = StyleSheet.create({
         borderBottomWidth: 0,
         borderBottomColor: 'transparent',
         overflow: 'visible',
-        backgroundColor: 'transparent',
+        // Opaque obsidian backdrop. Scrolling cards pass fully behind this band and are
+        // hidden rather than showing through it. The animated gradient is painted ON TOP
+        // of this fill, so its transparent final stop reveals the solid colour below —
+        // which is why no extra wrapper view (and no zIndex'd offscreen layer) is needed.
+        backgroundColor: HEADER_GLASS_NEUTRAL,
     },
     bottomChromeGlass: {
         position: 'absolute',
