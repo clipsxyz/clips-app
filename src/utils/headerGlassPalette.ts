@@ -8,12 +8,18 @@ import { normalizeHex } from './feedAmbientPalette';
  * identical dark tones back to back, which reads as "the header stopped working".
  */
 export const HEADER_GLASS_PALETTE = [
-    '#00B4D8',
-    '#FF4D6D',
-    '#7209B7',
-    '#10B981',
-    '#F72585',
-    '#FFB703',
+    '#FF4D6D', // 0: Vivid Pink
+    '#7209B7', // 1: Deep Purple
+    '#FFB703', // 2: Warm Amber
+    '#F72585', // 3: Neon Magenta
+    '#00B4D8', // 4: Vivid Cyan
+    '#10B981', // 5: Emerald Green
+    '#4338CA', // 6: Deep Indigo
+    '#FF6B35', // 7: Sunset Orange
+    '#00F5D4', // 8: Bright Turquoise
+    '#E11D48', // 9: Crimson Red
+    '#84CC16', // 10: Lime Green
+    '#3A86EF', // 11: Electric Sky Blue
 ] as const;
 
 /**

@@ -20,15 +20,26 @@ describe('headerGlassPalette tokens', () => {
 });
 
 describe('headerGlassColorAt', () => {
-    it('exposes the six vibrant accents in order', () => {
+    it('exposes the twelve vibrant accents in order', () => {
         expect([...HEADER_GLASS_PALETTE]).toEqual([
-            '#00B4D8',
             '#FF4D6D',
             '#7209B7',
-            '#10B981',
-            '#F72585',
             '#FFB703',
+            '#F72585',
+            '#00B4D8',
+            '#10B981',
+            '#4338CA',
+            '#FF6B35',
+            '#00F5D4',
+            '#E11D48',
+            '#84CC16',
+            '#3A86EF',
         ]);
+    });
+
+    it('holds twelve distinct hex accents', () => {
+        expect(HEADER_GLASS_PALETTE).toHaveLength(12);
+        expect(new Set(HEADER_GLASS_PALETTE).size).toBe(12);
     });
 
     it('maps ordinals onto distinct consecutive colours', () => {
@@ -37,14 +48,18 @@ describe('headerGlassColorAt', () => {
     });
 
     it('cycles once the palette is exhausted', () => {
-        expect(headerGlassColorAt(6)).toBe(headerGlassColorAt(0));
-        expect(headerGlassColorAt(13)).toBe(headerGlassColorAt(1));
-        expect(headerGlassColorAt(600)).toBe(headerGlassColorAt(0));
+        const count = HEADER_GLASS_PALETTE.length;
+        expect(headerGlassColorAt(count)).toBe(headerGlassColorAt(0));
+        expect(headerGlassColorAt(count + 1)).toBe(headerGlassColorAt(1));
+        expect(headerGlassColorAt(count * 2 + 3)).toBe(headerGlassColorAt(3));
+        expect(headerGlassColorAt(600)).toBe(headerGlassColorAt(600 % count));
     });
 
     it('wraps negative ordinals instead of indexing out of bounds', () => {
-        expect(headerGlassColorAt(-1)).toBe(HEADER_GLASS_PALETTE[5]);
-        expect(headerGlassColorAt(-6)).toBe(HEADER_GLASS_PALETTE[0]);
+        const count = HEADER_GLASS_PALETTE.length;
+        expect(headerGlassColorAt(-1)).toBe(HEADER_GLASS_PALETTE[count - 1]);
+        expect(headerGlassColorAt(-count)).toBe(HEADER_GLASS_PALETTE[0]);
+        expect(headerGlassColorAt(-count - 2)).toBe(HEADER_GLASS_PALETTE[count - 2]);
     });
 
     it('falls back to the first accent for non-finite input', () => {

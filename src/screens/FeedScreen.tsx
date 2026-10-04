@@ -141,6 +141,7 @@ import FeedPageLayout, {
     FEED_HEADER_LOCATION_PILL,
     FEED_HEADER_LOCATION_TITLE,
     FEED_HEADER_PASSPORT_AVATAR,
+    FEED_HEADER_PASSPORT_AVATAR_RING,
     FEED_HEADER_PASSPORT_INITIALS,
     FEED_HEADER_PICKER_ROW,
     FEED_HEADER_RIGHT_ACTIONS,
@@ -736,7 +737,7 @@ function PillTabs({
                     accessibilityLabel="Stories 24"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Stories24HeaderIcon size={FEED_UI.icon.headerStories} />
+                        <Stories24HeaderIcon size={FEED_HEADER_PASSPORT_AVATAR.width} />
                         <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
                     </View>
                 </TouchableOpacity>
@@ -1012,6 +1013,10 @@ function PillTabs({
                                 ) : (
                                     <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
                                 )}
+                                <View
+                                    pointerEvents="none"
+                                    style={FEED_HEADER_PASSPORT_AVATAR_RING}
+                                />
                             </View>
                             <Text style={FEED_HEADER_SIDE_LABEL}>Passport</Text>
                         </View>
@@ -2681,10 +2686,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     }, [user?.national, user?.regional, user?.local]);
 
+    /**
+     * Last `resetHomeFeedAt` token this screen has already acted on.
+     *
+     * The reset token is normally cleared again below, but React Navigation can leave it on
+     * the route when `setParams` is dispatched while this navigator is detached — which is
+     * exactly what happens as the Home stack is rebuilt on the way back from Stories. A token
+     * that survives then re-runs this effect on every remount (re-fetching and clearing the
+     * feed repeatedly) *and* re-dispatches the unhandled `SET_PARAMS`, so consumption is
+     * tracked separately from the navigator-facing clear.
+     */
+    const consumedResetHomeFeedTokenRef = React.useRef<number | string | null>(null);
+
     /** Footer Home tab — same as web `goHomeFeed` / `resetFeed`. */
     useEffect(() => {
         const token = route?.params?.resetHomeFeedAt;
         if (token == null) return;
+        if (consumedResetHomeFeedTokenRef.current === token) return;
+        consumedResetHomeFeedTokenRef.current = token;
         void (async () => {
             await clearPendingLocationFeed();
             setShowFollowingFeed(false);
@@ -2698,20 +2717,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setEnd(false);
             setError(null);
             setReloadTick((t) => t + 1);
-            try {
-                navigation?.setParams?.({
-                    resetHomeFeedAt: null,
-                    location: undefined,
-                    locationLabel: undefined,
-                    locationScope: undefined,
-                    filterType: undefined,
-                    placeId: undefined,
-                });
-            } catch {
-                // ignore
-            }
         })();
-    }, [route?.params?.resetHomeFeedAt, navigation, user?.national, defaultNational]);
+    }, [route?.params?.resetHomeFeedAt, user?.national, defaultNational]);
+
+    /**
+     * Clear the reset/location params once this screen is focused again.
+     *
+     * `SET_PARAMS` only reaches a navigator while the route is attached to it. Dispatching
+     * while the Home stack is detached (mid-return from Stories) produces React Navigation's
+     * "was not handled by any navigator" warning, so the clear waits for focus — at which
+     * point the navigator is guaranteed to be mounted and consuming params again. Deferring
+     * is safe because the reset itself is idempotent and already handled above.
+     */
+    useEffect(() => {
+        if (!isFeedFocused) return;
+        const token = route?.params?.resetHomeFeedAt;
+        if (token == null) return;
+        try {
+            navigation?.setParams?.({
+                resetHomeFeedAt: null,
+                location: undefined,
+                locationLabel: undefined,
+                locationScope: undefined,
+                filterType: undefined,
+                placeId: undefined,
+            });
+        } catch {
+            // ignore
+        }
+    }, [isFeedFocused, route?.params?.resetHomeFeedAt, navigation]);
 
     useEffect(() => {
         // A live Home-tab reset token must win; null/undefined means apply location.

@@ -663,10 +663,20 @@ export const FEED_HEADER_PASSPORT_AVATAR = {
     borderRadius: 10,
     overflow: 'hidden' as const,
     backgroundColor: '#374151',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+};
+
+/** Drawn above the avatar image so the glass ring is never painted over. */
+export const FEED_HEADER_PASSPORT_AVATAR_RING = {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
 };
 
 export const FEED_HEADER_PASSPORT_INITIALS = {
