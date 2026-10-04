@@ -19,6 +19,8 @@ type Props = {
     onToggleMetrics?: () => void;
     /** NOW TV frosted pill chrome. */
     pillChrome?: boolean;
+    /** Slate icons/counts for under-media engagement bar. */
+    tone?: 'feed' | 'slate';
 };
 
 /** Web EngagementBar right cluster: external share + optional boost metrics. */
@@ -29,8 +31,10 @@ export default function FeedEngagementRightActions({
     metricsOpen = false,
     onToggleMetrics,
     pillChrome = false,
+    tone = 'feed',
 }: Props) {
     const iconSize = pillChrome ? PILL_ACTION_ICON : ACTION_ICON;
+    const idleColor = tone === 'slate' ? '#94A3B8' : '#FFFFFF';
 
     return (
         <View style={[styles.row, pillChrome && styles.rowPill]}>
@@ -41,8 +45,17 @@ export default function FeedEngagementRightActions({
                     accessibilityLabel={`Share post, ${shares} shares`}
                     accessibilityRole="button"
                 >
-                    <FeedLiveShareIcon size={iconSize} color="#FFFFFF" />
-                    <Text style={[styles.count, pillChrome && styles.countPill]}>{shares}</Text>
+                    <FeedLiveShareIcon size={iconSize} color={idleColor} />
+                    <Text
+                        style={[
+                            styles.count,
+                            pillChrome && styles.countPill,
+                            tone === 'slate' && styles.countSlate,
+                            { color: idleColor },
+                        ]}
+                    >
+                        {shares}
+                    </Text>
                 </TouchableOpacity>
             ) : null}
             {showMetrics && onToggleMetrics ? (
@@ -51,7 +64,10 @@ export default function FeedEngagementRightActions({
                     style={[styles.button, pillChrome && styles.pill]}
                     accessibilityLabel="Toggle boost metrics"
                 >
-                    <FeedBarChartIcon size={iconSize} color={metricsOpen ? BRAND_ACTIVE : '#FFFFFF'} />
+                    <FeedBarChartIcon
+                        size={iconSize}
+                        color={metricsOpen ? BRAND_ACTIVE : idleColor}
+                    />
                 </TouchableOpacity>
             ) : null}
         </View>
@@ -103,6 +119,10 @@ const styles = StyleSheet.create({
         fontWeight: '400',
         color: '#FFFFFF',
         fontVariant: ['tabular-nums'],
+    },
+    countSlate: {
+        fontSize: 13,
+        fontWeight: '500',
     },
     countPill: {
         fontSize: 11,

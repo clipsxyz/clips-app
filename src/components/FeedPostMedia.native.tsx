@@ -634,16 +634,18 @@ const FeedPostMedia = React.memo(
     );
 
     const renderFeedTapOverlay = () => {
-        // Non-carousel: transparent overlay (Image/Video steal touches on Android).
+        // Non-carousel: dedicated tap surface (Image/Video steal touches on Android).
         // Carousel: GestureDetector wraps the ScrollView instead (see return).
         if (!feedTapCapture || hasCarousel) return null;
         return (
             <GestureDetector gesture={mediaTapGesture}>
-                <View
+                <Pressable
                     style={FEED_CARD_MEDIA_TAP_LAYER}
                     collapsable={false}
                     accessibilityRole="button"
-                    accessibilityLabel="Double tap to like"
+                    accessibilityLabel="Tap for fullscreen, double tap to like"
+                    // Single/double discrimination is handled by mediaTapGesture (Exclusive).
+                    // Pressable provides a reliable native hit target under the detector.
                 />
             </GestureDetector>
         );
@@ -1016,6 +1018,8 @@ const FeedPostMedia = React.memo(
             prev.muted === next.muted &&
             prev.suspendNativeVideo === next.suspendNativeVideo &&
             prev.carouselIndex === next.carouselIndex &&
+            prev.onSingleTap === next.onSingleTap &&
+            prev.onDoubleLike === next.onDoubleLike &&
             JSON.stringify(a.mediaItems) === JSON.stringify(b.mediaItems)
         );
     },

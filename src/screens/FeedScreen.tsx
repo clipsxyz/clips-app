@@ -110,13 +110,10 @@ import { FlatList, RefreshControl } from 'react-native-gesture-handler';
 import FeedPageLayout, {
     FEED_CARD_BODY,
     FEED_CARD_CAPTION_PADDING,
-    FEED_CARD_ENGAGEMENT_BAR,
     FEED_CARD_ENGAGEMENT_BAR_DIMMED,
     FEED_CARD_ENGAGEMENT_LEFT,
-    FEED_CARD_ENGAGEMENT_OVERLAY,
     FEED_CARD_HEADER_OVERLAY,
     FEED_CARD_MEDIA_WRAP,
-    FEED_CARD_OVERLAY_FOOTER_GRADIENT,
     FEED_CARD_OVERLAY_HEADER_GRADIENT,
     FEED_CARD_SPONSORED_FEED_TYPE,
     FEED_CARD_SPONSORED_PILL,
@@ -1260,7 +1257,7 @@ const FeedCard = React.memo(function FeedCard({
     }, [carouselIndex, handleOpenScenesPress, openStillFullscreen, post]);
 
     return (
-        <View style={FEED_CARD_FLOAT_WRAP}>
+        <View style={textOnlyPost ? styles.textOnlyFloatWrap : FEED_CARD_FLOAT_WRAP}>
         <View style={FEED_POST_CARD_STYLE}>
             <FeedPostTagRow tags={postTags} />
 
@@ -1276,6 +1273,7 @@ const FeedCard = React.memo(function FeedCard({
             )}
 
             {textOnlyPost ? (
+                <>
                 <FeedTextOnlyFeedLayout
                     post={post}
                     viewerHandle={viewerHandle}
@@ -1292,6 +1290,48 @@ const FeedCard = React.memo(function FeedCard({
                     onShowTaggedUsers={() => onOpenTaggedSheet?.()}
                     menuAnchorRef={profileMenuAnchorRef}
                 />
+                <View style={styles.textOnlyEngagementRow}>
+                    <View style={styles.textOnlyEngagementLeft}>
+                        <FeedEngagementRow
+                            likeButtonRef={likeButtonRef}
+                            likes={post.stats.likes}
+                            comments={post.stats.comments}
+                            shares={post.stats.shares}
+                            reclips={post.stats.reclips}
+                            views={post.stats.views}
+                            userLiked={post.userLiked}
+                            userReclipped={post.userReclipped}
+                            isSaved={post.isBookmarked}
+                            onLike={() => {
+                                void onLike();
+                            }}
+                            onLikesPress={() => {
+                                if (post.stats.likes > 0) onOpenLikesSheet?.();
+                            }}
+                            onComment={onComment}
+                            onShareToStories={() => onShareToStories?.()}
+                            onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                            reclipDisabled={isCurrentUser}
+                            onSave={() => {
+                                void onBookmark();
+                            }}
+                            showReclip
+                            showSaveLabel={!showBoostMetrics}
+                            compact={showBoostMetrics}
+                            tone="feed"
+                        />
+                    </View>
+                    <FeedEngagementRightActions
+                        showMetrics={showBoostMetrics}
+                        metricsOpen={isMetricsOpen}
+                        onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
+                        shares={post.stats.shares}
+                        onShare={() => {
+                            void onShare();
+                        }}
+                    />
+                </View>
+                </>
             ) : (
                 <View style={FEED_CARD_BODY}>
                     {hasFeedMedia ? (
@@ -1369,62 +1409,6 @@ const FeedCard = React.memo(function FeedCard({
                                 />
                             </View>
 
-                            <View
-                                style={[
-                                    FEED_CARD_ENGAGEMENT_OVERLAY,
-                                    (isClientUploading || isClientUploadFailed) &&
-                                        FEED_CARD_ENGAGEMENT_BAR_DIMMED,
-                                ]}
-                                pointerEvents="box-none"
-                            >
-                                <LinearGradient
-                                    colors={[...FEED_CARD_OVERLAY_FOOTER_GRADIENT]}
-                                    style={StyleSheet.absoluteFill}
-                                    pointerEvents="none"
-                                />
-                                <View style={FEED_CARD_ENGAGEMENT_LEFT}>
-                                    <FeedEngagementRow
-                                        likeButtonRef={likeButtonRef}
-                                        likes={post.stats.likes}
-                                        comments={post.stats.comments}
-                                        shares={post.stats.shares}
-                                        reclips={post.stats.reclips}
-                                        views={post.stats.views}
-                                        userLiked={post.userLiked}
-                                        userReclipped={post.userReclipped}
-                                        isSaved={post.isBookmarked}
-                                        onLike={() => {
-                                            void onLike();
-                                        }}
-                                        onLikesPress={() => {
-                                            if (post.stats.likes > 0) onOpenLikesSheet?.();
-                                        }}
-                                        onComment={onComment}
-                                        onShareToStories={() => onShareToStories?.()}
-                                        onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
-                                        reclipDisabled={isCurrentUser}
-                                        onSave={() => {
-                                            void onBookmark();
-                                        }}
-                                        showReclip
-                                        showSaveLabel={!showBoostMetrics}
-                                        compact={showBoostMetrics}
-                                        tone="feed"
-                                        pillChrome
-                                    />
-                                </View>
-                                <FeedEngagementRightActions
-                                    showMetrics={showBoostMetrics}
-                                    metricsOpen={isMetricsOpen}
-                                    onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
-                                    shares={post.stats.shares}
-                                    onShare={() => {
-                                        void onShare();
-                                    }}
-                                    pillChrome
-                                />
-                            </View>
-
                             {hasTaggedUsers ? (
                                 <FeedTaggedMediaBadge
                                     count={post.taggedUsers!.length}
@@ -1451,6 +1435,57 @@ const FeedCard = React.memo(function FeedCard({
                                     />
                                 </Pressable>
                             ) : null}
+                        </View>
+                    ) : null}
+
+                    {hasFeedMedia ? (
+                        <View
+                            style={[
+                                styles.mediaEngagementBelow,
+                                (isClientUploading || isClientUploadFailed) &&
+                                    FEED_CARD_ENGAGEMENT_BAR_DIMMED,
+                            ]}
+                        >
+                            <View style={FEED_CARD_ENGAGEMENT_LEFT}>
+                                <FeedEngagementRow
+                                    likeButtonRef={likeButtonRef}
+                                    likes={post.stats.likes}
+                                    comments={post.stats.comments}
+                                    shares={post.stats.shares}
+                                    reclips={post.stats.reclips}
+                                    views={post.stats.views}
+                                    userLiked={post.userLiked}
+                                    userReclipped={post.userReclipped}
+                                    isSaved={post.isBookmarked}
+                                    onLike={() => {
+                                        void onLike();
+                                    }}
+                                    onLikesPress={() => {
+                                        if (post.stats.likes > 0) onOpenLikesSheet?.();
+                                    }}
+                                    onComment={onComment}
+                                    onShareToStories={() => onShareToStories?.()}
+                                    onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                                    reclipDisabled={isCurrentUser}
+                                    onSave={() => {
+                                        void onBookmark();
+                                    }}
+                                    showReclip
+                                    showSaveLabel={!showBoostMetrics}
+                                    compact={showBoostMetrics}
+                                    tone="slate"
+                                />
+                            </View>
+                            <FeedEngagementRightActions
+                                showMetrics={showBoostMetrics}
+                                metricsOpen={isMetricsOpen}
+                                onToggleMetrics={() => setIsMetricsOpen((v) => !v)}
+                                shares={post.stats.shares}
+                                onShare={() => {
+                                    void onShare();
+                                }}
+                                tone="slate"
+                            />
                         </View>
                     ) : null}
 
@@ -5174,7 +5209,7 @@ const styles = StyleSheet.create({
     feedMuteButton: {
         position: 'absolute',
         right: 10,
-        bottom: 58,
+        bottom: 12,
         width: 36,
         height: 36,
         borderRadius: 18,
@@ -5185,6 +5220,49 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255, 255, 255, 0.55)',
         zIndex: 80,
         elevation: Platform.OS === 'android' ? 80 : 0,
+    },
+    /** Action bar sits under media as a sibling — never absolute over the poster. */
+    mediaEngagementBelow: {
+        position: 'relative',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: 'transparent',
+        minWidth: 0,
+        zIndex: 0,
+    },
+    /** Text posts: bounded card so consecutive items don't blend into one block. */
+    textOnlyFloatWrap: {
+        marginHorizontal: 16,
+        marginVertical: 6,
+        marginBottom: 12,
+        paddingTop: 8,
+        paddingBottom: 4,
+        backgroundColor: '#121721',
+        borderWidth: 1,
+        borderColor: '#1E293B',
+        borderRadius: 12,
+        overflow: 'hidden' as const,
+        borderBottomWidth: 1,
+        borderBottomColor: '#21262D',
+    },
+    textOnlyEngagementRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        paddingTop: 4,
+        paddingBottom: 10,
+        backgroundColor: 'transparent',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#1F2937',
+    },
+    textOnlyEngagementLeft: {
+        flex: 1,
+        minWidth: 0,
+        marginRight: 8,
     },
     mediaBurstPortal: {
         ...StyleSheet.absoluteFillObject,

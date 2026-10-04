@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
         zIndex: 22,
     },
     wrapAboveMute: {
-        bottom: 100,
+        bottom: 56,
     },
     circle: {
         width: 32,

@@ -170,9 +170,11 @@ export const FEED_CARD_HEADER_OVERLAY = {
     top: 0,
     left: 0,
     right: 0,
+    // Height follows header content only — must not stretch over the media canvas.
     zIndex: 30,
     elevation: Platform.OS === 'android' ? 30 : 0,
     backgroundColor: 'transparent',
+    pointerEvents: 'box-none' as const,
 } as const;
 
 /** Default media frame while sizing / for letterboxing. */
@@ -224,12 +226,13 @@ export const FEED_CARD_MEDIA_FX_LAYER = {
 /** Transparent tap layer above media (header/footer overlays sit outside this inset). */
 export const FEED_CARD_MEDIA_TAP_LAYER = {
     position: 'absolute' as const,
+    // Clear overlaid header chrome; engagement now lives below the media frame.
     top: 56,
     left: 0,
     right: 0,
-    // Leave bottom chrome clear for engagement overlay + mute.
-    bottom: 72,
-    zIndex: 15,
+    // Leave only the mute control corner clear (engagement is a sibling under media).
+    bottom: 52,
+    zIndex: 20,
     // Android skips fully transparent views for hit-testing.
     backgroundColor: 'rgba(0,0,0,0.01)',
 } as const;

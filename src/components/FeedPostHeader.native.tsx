@@ -26,7 +26,7 @@ export type FeedPostHeaderProps = {
     viewerHandle?: string | null;
     isCurrentUser: boolean;
     isOverlaid?: boolean;
-    /** Top chrome only (text-only feed); avatar lives beside the bubble. */
+    /** Top chrome for text-only feed (avatar + handle on transparent canvas). */
     variant?: 'default' | 'textOnlyChrome';
     onFollow?: () => Promise<void>;
     onOpenDM?: (handle: string, postId: string) => void;
@@ -126,7 +126,7 @@ export default function FeedPostHeader({
         };
     }, [post.isFollowing, isCurrentUser, onFollow]);
 
-    const showAvatar = variant === 'default';
+    const showAvatar = variant === 'default' || variant === 'textOnlyChrome';
 
     const avatarBlock = showAvatar ? (
         <View
@@ -284,9 +284,11 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     textOnlyChromeWrap: {
-        paddingHorizontal: 4,
-        paddingTop: 4,
-        marginBottom: 8,
+        paddingHorizontal: 12,
+        paddingTop: 8,
+        paddingBottom: 0,
+        marginBottom: 0,
+        backgroundColor: 'transparent',
         zIndex: 10,
     },
     textOnlyRow: {

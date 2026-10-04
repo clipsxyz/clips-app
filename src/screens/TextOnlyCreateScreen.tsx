@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -13,14 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
-import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar.native';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
@@ -36,9 +28,7 @@ import {
 import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
 import { navigateMainTab } from '../navigation/mainTabs';
-import { TEXT_STORY_TEMPLATES, type TextStoryTemplate } from '../textStoryTemplates';
 import { publishTextStory24 } from '../utils/publishStoryNative';
-import { gradientColorsFromCss } from '../utils/storyTextStyleNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
@@ -47,35 +37,14 @@ import { ox } from '../constants/nativeOpticalScale';
 
 type TagUser = { handle: string; displayName?: string; avatarUrl?: string };
 
-function templateFontSize(size: TextStoryTemplate['textSize']): number {
-  if (size === 'small') return 14;
-  if (size === 'large') return 20;
-  return 17;
-}
-
-function TemplateComposerBackground({
-  template,
-  children,
-}: {
-  template?: TextStoryTemplate;
-  children: React.ReactNode;
-}) {
-  const background = template?.background || '#000000';
-  const colors = gradientColorsFromCss(background);
-  const isGradient = background.includes('gradient');
-  if (isGradient && colors.length >= 2) {
-    return (
-      <LinearGradient colors={colors} style={styles.composerSurface}>
-        {children}
-      </LinearGradient>
-    );
-  }
-  return (
-    <View style={[styles.composerSurface, { backgroundColor: colors[0] || '#000000' }]}>
-      {children}
-    </View>
-  );
-}
+/** Plain Bluesky-style text posts — no canvas templates. */
+const PLAIN_TEXT_STYLE = {
+  color: '#F1F5F9',
+  size: 'medium' as const,
+  background: 'transparent',
+};
+const COMPOSER_BG = '#0B0E14';
+const COMPOSER_TEXT = '#F1F5F9';
 
 export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const { user } = useAuth();
@@ -91,15 +60,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       ? route.params.taggedUsers.map((h: string) => String(h).replace(/^@+/, ''))
       : [],
   );
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
-    route.params?.textTemplateId || route.params?.templateId || null,
-  );
   const [showLocationSheet, setShowLocationSheet] = useState(false);
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
-  const [showTemplateCue, setShowTemplateCue] = useState(false);
-  const cueScale = useSharedValue(0.6);
-  const cueOpacity = useSharedValue(0);
-  const cueTranslateY = useSharedValue(6);
   const [tagSearchQuery, setTagSearchQuery] = useState('');
   const [tagSearchUsers, setTagSearchUsers] = useState<TagUser[]>([]);
   const [tagSearchLoading, setTagSearchLoading] = useState(false);
@@ -107,49 +68,9 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const [draftAlert, setDraftAlert] = useState<DraftSaveSheetState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const activeTemplate = useMemo(
-    () => (selectedTemplateId ? TEXT_STORY_TEMPLATES.find((t) => t.id === selectedTemplateId) : undefined),
-    [selectedTemplateId],
-  );
-
   useEffect(() => {
     if (route.params?.text != null) setText(String(route.params.text));
   }, [route.params?.text]);
-
-  useEffect(() => {
-    const appears = setTimeout(() => setShowTemplateCue(true), 500);
-    const hides = setTimeout(() => setShowTemplateCue(false), 4300);
-    return () => {
-      clearTimeout(appears);
-      clearTimeout(hides);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!showTemplateCue) return;
-    cueScale.value = 0.6;
-    cueOpacity.value = 0;
-    cueTranslateY.value = 6;
-    cueScale.value = withTiming(1, { duration: 420, easing: Easing.out(Easing.cubic) });
-    cueOpacity.value = withTiming(1, { duration: 420 });
-    cueTranslateY.value = withTiming(0, { duration: 420, easing: Easing.out(Easing.cubic) });
-
-    const burstTimer = setTimeout(() => {
-      cueScale.value = withTiming(1.35, { duration: 220, easing: Easing.out(Easing.quad) });
-      cueOpacity.value = withTiming(0, { duration: 220 });
-      cueTranslateY.value = withTiming(-4, { duration: 220 });
-    }, 2900);
-
-    return () => clearTimeout(burstTimer);
-  }, [showTemplateCue, cueOpacity, cueScale, cueTranslateY]);
-
-  const templateCueStyle = useAnimatedStyle(() => ({
-    opacity: cueOpacity.value,
-    transform: [
-      { translateY: cueTranslateY.value },
-      { scale: cueScale.value },
-    ],
-  }));
 
   useEffect(() => {
     if (!showLocationSheet) return;
@@ -202,18 +123,6 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
     navigateMainTab(navigation, 'Home', { forceRefreshAt: Date.now() });
   }, [isStory24, navigation]);
 
-  const buildTextStyle = useCallback(() => {
-    if (activeTemplate) {
-      return {
-        color: activeTemplate.textColor,
-        size: activeTemplate.textSize,
-        background: activeTemplate.background,
-        fontFamily: activeTemplate.fontFamily,
-      };
-    }
-    return { color: '#ffffff', size: 'medium' as const, background: '#000000' };
-  }, [activeTemplate]);
-
   const handleSaveToDrafts = async () => {
     if (!text.trim()) {
       setDraftAlert(nothingToSaveSheet('Add some text to save a draft.'));
@@ -231,7 +140,6 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         venue: venueText.trim() || undefined,
         landmark: landmarkText.trim() || undefined,
         taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
-        textTemplateId: selectedTemplateId || undefined,
       });
       hapticLight();
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -249,7 +157,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       Alert.alert('Login required', 'Please log in to create a post.');
       return;
     }
-    const textStyle = buildTextStyle();
+    const textStyle = PLAIN_TEXT_STYLE;
     const locationLabel =
       locationText.trim() || user.regional || user.local || user.national || 'Unknown';
 
@@ -278,7 +186,6 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
 
     setIsSubmitting(true);
     const tempId = `pending-text-${Date.now()}`;
-    const previewColors = gradientColorsFromCss(textStyle.background);
     addPendingFeedUpload({
       tempId,
       userId: user.id,
@@ -298,13 +205,12 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
       landmark: landmarkText.trim() || undefined,
       isTextOnly: true,
       textStyle,
-      templateId: selectedTemplateId || undefined,
     });
     showUploadOverlayNative({
       jobId: tempId,
       initialMessage: 'Posting to Gazetteer…',
-      textThumbBackground: previewColors[0] || '#000000',
-      textThumbLabel: activeTemplate?.name?.charAt(0).toUpperCase() || 'Aa',
+      textThumbBackground: COMPOSER_BG,
+      textThumbLabel: 'Aa',
     });
     hapticLight();
     finishToFeed();
@@ -340,9 +246,6 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
     setTaggedUsers((prev) => prev.filter((h) => h !== handle));
   };
 
-  const inputColor = activeTemplate?.textColor || '#FFFFFF';
-  const inputFontSize = activeTemplate ? templateFontSize(activeTemplate.textSize) : 17;
-
   return (
     <View style={styles.root}>
       <KeyboardAvoidingView
@@ -350,35 +253,9 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
-          <View style={styles.headerLeft}>
-            <TouchableOpacity onPress={handleCancel} hitSlop={8}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <View style={styles.templateBtnWrap}>
-              {showTemplateCue ? (
-                <Animated.View style={[styles.templateCueBubble, templateCueStyle]} pointerEvents="none">
-                  <LinearGradient
-                    colors={['#f6e27a', '#d4af37', '#d8dde3']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.templateCueGradient}
-                  >
-                    <Text style={styles.templateCueText} numberOfLines={1}>
-                      Try template
-                    </Text>
-                  </LinearGradient>
-                  <View style={styles.templateCueTail} />
-                </Animated.View>
-              ) : null}
-              <TouchableOpacity
-                style={[styles.templateBtn, selectedTemplateId && styles.templateBtnActive]}
-                onPress={() => setShowTemplatePicker(true)}
-                accessibilityLabel="Choose template"
-              >
-                <Icon name="layers-outline" size={ox(20)} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
+          <TouchableOpacity onPress={handleCancel} hitSlop={8}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
           <View style={styles.headerRight}>
             <TouchableOpacity
               style={styles.headerIconBtn}
@@ -425,19 +302,17 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
               />
             </View>
             <View style={styles.composerCol}>
-              <TemplateComposerBackground template={activeTemplate}>
-                <TextInput
-                  value={text}
-                  onChangeText={setText}
-                  placeholder="What's up?"
-                  placeholderTextColor="#9CA3AF"
-                  style={[styles.textInput, { color: inputColor, fontSize: inputFontSize }]}
-                  multiline
-                  maxLength={TEXT_POST_BODY_MAX_LENGTH}
-                  autoFocus
-                  textAlignVertical="top"
-                />
-              </TemplateComposerBackground>
+              <TextInput
+                value={text}
+                onChangeText={setText}
+                placeholder="What's up?"
+                placeholderTextColor="#6B7280"
+                style={styles.textInput}
+                multiline
+                maxLength={TEXT_POST_BODY_MAX_LENGTH}
+                autoFocus
+                textAlignVertical="top"
+              />
               <View style={styles.counterRow}>
                 <Text
                   style={[
@@ -570,60 +445,6 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
         </View>
       </Modal>
 
-      <Modal
-        visible={showTemplatePicker}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowTemplatePicker(false)}
-      >
-        <View style={styles.sheetOverlay}>
-          <TouchableOpacity style={styles.sheetDismiss} onPress={() => setShowTemplatePicker(false)} />
-          <View style={[styles.templateSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Choose a template</Text>
-              <TouchableOpacity onPress={() => setShowTemplatePicker(false)} hitSlop={8}>
-                <Icon name="close" size={ox(22)} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-            <FlatList
-              data={TEXT_STORY_TEMPLATES}
-              keyExtractor={(item) => item.id}
-              numColumns={2}
-              columnWrapperStyle={styles.templateGridRow}
-              contentContainerStyle={styles.templateGrid}
-              renderItem={({ item }) => {
-                const isSelected = selectedTemplateId === item.id;
-                const previewColors = gradientColorsFromCss(item.background);
-                return (
-                  <TouchableOpacity
-                    style={[styles.templateCard, isSelected && styles.templateCardActive]}
-                    onPress={() => {
-                      setSelectedTemplateId(item.id);
-                      setShowTemplatePicker(false);
-                    }}
-                  >
-                    {item.background.includes('gradient') ? (
-                      <LinearGradient
-                        colors={previewColors}
-                        style={styles.templatePreview}
-                      >
-                        <Text style={[styles.templateAa, { color: item.textColor }]}>Aa</Text>
-                      </LinearGradient>
-                    ) : (
-                      <View style={[styles.templatePreview, { backgroundColor: previewColors[0] }]}>
-                        <Text style={[styles.templateAa, { color: item.textColor }]}>Aa</Text>
-                      </View>
-                    )}
-                    <Text style={styles.templateName} numberOfLines={1}>
-                      {item.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          </View>
-        </View>
-      </Modal>
       <GazetteerAlertSheet
         visible={draftAlert != null}
         title={draftAlert?.title ?? ''}
@@ -644,7 +465,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: COMPOSER_BG,
   },
   flex: { flex: 1 },
   header: {
@@ -653,19 +474,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: ox(16),
     paddingBottom: ox(12),
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(0,0,0,0.95)',
-    overflow: 'visible',
-    zIndex: 10,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: ox(12),
-    flexShrink: 1,
-    overflow: 'visible',
-    zIndex: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: COMPOSER_BG,
   },
   headerRight: {
     flexDirection: 'row',
@@ -677,63 +488,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: ox(16),
     fontWeight: '500',
-  },
-  templateBtnWrap: {
-    position: 'relative',
-    width: ox(34),
-    height: ox(34),
-    overflow: 'visible',
-    zIndex: 30,
-  },
-  templateCueBubble: {
-    position: 'absolute',
-    top: 38,
-    left: -40,
-    width: 114,
-    alignItems: 'center',
-    zIndex: 40,
-    shadowColor: '#d4af37',
-    shadowOpacity: 0.42,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-  },
-  templateCueGradient: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: ox(16),
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: ox(14),
-    paddingVertical: ox(5),
-  },
-  templateCueText: {
-    color: '#111827',
-    fontSize: ox(11),
-    fontWeight: '700',
-    flexShrink: 0,
-    includeFontPadding: false,
-  },
-  templateCueTail: {
-    width: 8,
-    height: 8,
-    backgroundColor: '#d8dde3',
-    transform: [{ rotate: '45deg' }],
-    marginTop: ox(-4),
-    borderRadius: ox(2),
-  },
-  templateBtn: {
-    width: ox(34),
-    height: ox(34),
-    borderRadius: ox(17),
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  templateBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   headerIconBtn: {
     padding: ox(6),
@@ -767,11 +521,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: ox(16),
     paddingTop: ox(16),
     paddingBottom: ox(24),
+    flexGrow: 1,
   },
   composerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: ox(12),
+    flex: 1,
   },
   avatarCol: {
     paddingTop: ox(4),
@@ -779,21 +535,22 @@ const styles = StyleSheet.create({
   composerCol: {
     flex: 1,
     minWidth: 0,
-  },
-  composerSurface: {
-    paddingHorizontal: ox(12),
-    paddingVertical: ox(8),
-    minHeight: ox(96),
+    backgroundColor: 'transparent',
   },
   textInput: {
-    minHeight: ox(80),
-    lineHeight: ox(22),
+    flexGrow: 1,
+    minHeight: ox(180),
+    color: COMPOSER_TEXT,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '400',
     padding: 0,
     margin: 0,
+    backgroundColor: 'transparent',
   },
   counterRow: {
     alignItems: 'flex-end',
-    marginTop: ox(4),
+    marginTop: ox(8),
   },
   counterText: {
     color: '#6B7280',
@@ -811,15 +568,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '85%',
-    backgroundColor: '#000000',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  templateSheet: {
-    maxHeight: '75%',
-    backgroundColor: '#020617',
+    backgroundColor: COMPOSER_BG,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 1,
@@ -862,7 +611,7 @@ const styles = StyleSheet.create({
     borderRadius: ox(10),
     paddingHorizontal: ox(12),
     paddingVertical: ox(10),
-    backgroundColor: '#000000',
+    backgroundColor: COMPOSER_BG,
   },
   tagSearchInput: {
     flex: 1,
@@ -928,41 +677,5 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: ox(14),
     fontWeight: '700',
-  },
-  templateGrid: {
-    padding: ox(16),
-    gap: ox(12),
-  },
-  templateGridRow: {
-    gap: ox(12),
-  },
-  templateCard: {
-    flex: 1,
-    borderRadius: ox(12),
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: ox(8),
-    alignItems: 'center',
-    gap: ox(6),
-  },
-  templateCardActive: {
-    borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  templatePreview: {
-    width: '100%',
-    height: ox(96),
-    borderRadius: ox(8),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  templateAa: {
-    fontSize: ox(12),
-    fontWeight: '700',
-  },
-  templateName: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: ox(12),
-    textAlign: 'center',
   },
 });

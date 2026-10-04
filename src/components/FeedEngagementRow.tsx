@@ -39,8 +39,8 @@ type FeedEngagementRowProps = {
     /** Tighter gaps when the right cluster includes boost metrics / share. */
     compact?: boolean;
     likeButtonRef?: React.RefObject<View | null>;
-    /** White icons for feed bar (web EngagementBar); gray for profile cards. */
-    tone?: 'feed' | 'muted';
+    /** White icons for feed bar; gray for profile; slate for under-media bar. */
+    tone?: 'feed' | 'muted' | 'slate';
     /** NOW TV frosted pill chrome for each action cluster. */
     pillChrome?: boolean;
 };
@@ -71,15 +71,17 @@ export default function FeedEngagementRow({
     tone = 'feed',
     pillChrome = false,
 }: FeedEngagementRowProps) {
-    const iconColor = tone === 'feed' ? '#FFFFFF' : '#D1D5DB';
-    const countColor = tone === 'feed' ? '#FFFFFF' : '#D1D5DB';
-    const reclipIdleColor = tone === 'feed' ? '#9CA3AF' : '#D1D5DB';
-    const reclipCountColor = tone === 'feed' ? '#D1D5DB' : '#9CA3AF';
+    const slate = tone === 'slate';
+    const iconColor = tone === 'feed' ? '#FFFFFF' : slate ? '#94A3B8' : '#D1D5DB';
+    const countColor = tone === 'feed' ? '#FFFFFF' : slate ? '#94A3B8' : '#D1D5DB';
+    const reclipIdleColor = tone === 'feed' ? '#9CA3AF' : slate ? '#94A3B8' : '#D1D5DB';
+    const reclipCountColor = tone === 'feed' ? '#D1D5DB' : slate ? '#94A3B8' : '#9CA3AF';
+    const likeIconColor = slate && userLiked ? '#FFFFFF' : iconColor;
     const saveColor = isSaved ? '#7A8AF0' : iconColor;
     const pillStyle = pillChrome ? styles.itemPill : null;
     const iconSize = pillChrome ? PILL_ACTION_ICON : ACTION_ICON;
     const reclipInnerSize = pillChrome ? PILL_RECLIP_INNER : RECLIP_INNER_ICON;
-    const countTextStyle = pillChrome ? styles.textPill : styles.text;
+    const countTextStyle = pillChrome ? styles.textPill : slate ? styles.textSlate : styles.text;
     const showSaveText = showSaveLabel && !pillChrome;
 
     return (
@@ -90,7 +92,7 @@ export default function FeedEngagementRow({
                 style={[styles.item, compact && styles.itemCompact, pillStyle]}
             >
                 <TouchableOpacity onPress={onLike} disabled={!onLike} activeOpacity={0.7}>
-                    <FeedLikeThumbsIcon size={iconSize} filled={userLiked} color={iconColor} />
+                    <FeedLikeThumbsIcon size={iconSize} filled={userLiked} color={likeIconColor} />
                 </TouchableOpacity>
                 <TouchableOpacity
                     onPress={onLikesPress || onLike}
@@ -231,6 +233,11 @@ const styles = StyleSheet.create({
     text: {
         fontSize: FEED_UI.type.actionCount,
         fontWeight: '400',
+        fontVariant: ['tabular-nums'],
+    },
+    textSlate: {
+        fontSize: 13,
+        fontWeight: '500',
         fontVariant: ['tabular-nums'],
     },
     textPill: {

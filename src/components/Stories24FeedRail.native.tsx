@@ -7,10 +7,8 @@ import {
     Image,
     StyleSheet,
     Modal,
-    Platform,
     AppState,
     useWindowDimensions,
-    type LayoutChangeEvent,
 } from 'react-native';
 import Animated, {
     Easing,
@@ -23,7 +21,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { VideoRef } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
-import GoldChromeAmbientCanvas from './GoldChromeAmbientCanvas.native';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
 import type { Stories24RailItem, Stories24RailReturnPayload } from '../utils/stories24Rail';
@@ -38,9 +35,9 @@ import {
 } from '../utils/stories24Rail';
 import { storyVideoSource } from '../utils/storyMediaNative';
 import StorySafeVideo from './stories/StorySafeVideo.native';
-const CARD_W = 112;
-const CARD_H = 156;
-const CARD_RADIUS = 16;
+const CARD_W = 175;
+const CARD_H = 102;
+const CARD_RADIUS = 10;
 /** Idle / missing poster — never the old BBB rainbow test card. */
 const PREVIEW_POSTER_FALLBACK = '#121212';
 
@@ -48,21 +45,6 @@ const PREVIEW_POSTER_FALLBACK = '#121212';
 const EXPAND_EASE = Easing.bezier(0.16, 1, 0.3, 1);
 const COLLAPSE_EASE = Easing.bezier(0.22, 1, 0.36, 1);
 const COLLAPSE_HOLD_MS = 32;
-
-const GOLD_BORDER_GRADIENT = ['#f6e27a', '#d4af37', '#f4f4f4', '#bfc5cc', '#ffe8a3'] as const;
-const GOLD_BORDER_LOCATIONS = [0, 0.24, 0.48, 0.72, 1] as const;
-const GOLD_ICON_GRADIENT = [...GOLD_BORDER_GRADIENT] as string[];
-const GOLD_ICON_LOCATIONS = [...GOLD_BORDER_LOCATIONS] as number[];
-
-/** Web add-yours card chrome wash (exact rgba stops). */
-const ADD_YOURS_WASH = [
-    'rgba(246,226,122,0.22)',
-    'rgba(212,175,55,0.2)',
-    'rgba(244,244,244,0.15)',
-    'rgba(191,197,204,0.2)',
-    'rgba(255,232,163,0.22)',
-] as const;
-const ADD_YOURS_WASH_LOCATIONS = [0, 0.24, 0.48, 0.72, 1] as const;
 
 /** Web story card tint: bg-gradient-to-tr from-teal/sky/fuchsia. */
 const STORY_CARD_TINT = ['rgba(20,184,166,0.2)', 'rgba(56,189,248,0.2)', 'rgba(217,70,239,0.2)'] as const;
@@ -212,31 +194,13 @@ function StoryCard({
                     onPress={measureAndPress}
                     activeOpacity={0.9}
                 >
-                    <LinearGradient
-                        colors={['#0e1a30', '#12243f', '#1a1530']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={StyleSheet.absoluteFill}
-                    />
-                    <LinearGradient
-                        colors={[...ADD_YOURS_WASH]}
-                        locations={[...ADD_YOURS_WASH_LOCATIONS]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={StyleSheet.absoluteFill}
-                    />
                     <View style={styles.addYoursInner}>
-                        <LinearGradient
-                            colors={GOLD_ICON_GRADIENT}
-                            locations={GOLD_ICON_LOCATIONS}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.addYoursIconCircle}
-                        >
-                            <FeedPlusIcon size={20} color="#111827" strokeWidth={2} />
-                        </LinearGradient>
-                        <Text style={styles.addYoursTitle}>Add yours</Text>
-                        <Text style={styles.addYoursSub}>Post to Stories 24</Text>
+                        <View style={styles.addYoursIconCircle}>
+                            <FeedPlusIcon size={16} color="#FFFFFF" strokeWidth={2.5} />
+                        </View>
+                        <Text style={styles.addYoursTitle} numberOfLines={1}>
+                            Add yours
+                        </Text>
                     </View>
                 </TouchableOpacity>
             </View>
@@ -557,15 +521,6 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         payload: Stories24RailReturnPayload;
         rect: CardRect;
     } | null>(null);
-    const [ambientSize, setAmbientSize] = useState({ width: 0, height: 0 });
-    const onInnerLayout = useCallback((e: LayoutChangeEvent) => {
-        const { width, height } = e.nativeEvent.layout;
-        if (width > 0 && height > 0) {
-            setAmbientSize((prev) =>
-                prev.width === width && prev.height === height ? prev : { width, height },
-            );
-        }
-    }, []);
     const expandingRef = useRef<ExpandingStory | null>(null);
     const cardRefs = useRef<Record<string, View | null>>({});
     /** Last card rect used to open a story — Android collapse fallback when measure fails. */
@@ -770,97 +725,54 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
     };
 
     return (
-        <View collapsable={false}>
-            <LinearGradient
-                colors={[...GOLD_BORDER_GRADIENT]}
-                locations={[...GOLD_BORDER_LOCATIONS]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.outerBorder}
+        <View collapsable={false} style={styles.root}>
+            <View style={styles.headerRow}>
+                <Stories24MapPinIcon size={16} color="#FFFFFF" />
+                <Text style={styles.railTitle}>Stories 24</Text>
+            </View>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+                onScrollBeginDrag={() => setRailScrolling(true)}
+                onScrollEndDrag={() => setRailScrolling(false)}
+                onMomentumScrollEnd={() => setRailScrolling(false)}
             >
-                <View
-                    style={styles.inner}
-                    onLayout={onInnerLayout}
-                    collapsable={false}
-                    {...(Platform.OS === 'android' ? { needsOffscreenAlphaCompositing: true } : {})}
-                >
-                    {ambientSize.width > 0 && ambientSize.height > 0 ? (
-                        Platform.OS === 'android' ? (
-                            <View
-                                style={[StyleSheet.absoluteFill, styles.androidAmbientFill]}
-                                pointerEvents="none"
-                            />
-                        ) : (
-                            <GoldChromeAmbientCanvas
-                                width={ambientSize.width}
-                                height={ambientSize.height}
-                            />
-                        )
-                    ) : null}
-                    <View style={styles.contentLayer}>
-                        <View style={styles.headerRow}>
-                            <View style={styles.titleRow}>
-                                <Stories24MapPinIcon size={16} />
-                                <Text style={styles.railTitle}>Stories 24</Text>
-                            </View>
-                            <TouchableOpacity
-                                style={styles.addYoursBtn}
-                                onPress={onAddYours}
-                                activeOpacity={0.85}
-                            >
-                                <FeedPlusIcon size={12} color="#111827" strokeWidth={2.5} />
-                                <Text style={styles.addYoursBtnText}>Add yours</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.scrollContent}
-                            onScrollBeginDrag={() => setRailScrolling(true)}
-                            onScrollEndDrag={() => setRailScrolling(false)}
-                            onMomentumScrollEnd={() => setRailScrolling(false)}
-                        >
-                            {items.map((item) => {
-                                const handleKey = normalizeStories24Handle(item.handle);
-                                // Keep the source card visible until the morph clone has a paintable frame.
-                                const morphHidden =
-                                    (!!expanding &&
-                                        expandHideSource &&
-                                        normalizeStories24Handle(expanding.item.handle) ===
-                                            handleKey) ||
-                                    (!!collapsing &&
-                                        collapseHideSource &&
-                                        normalizeStories24Handle(collapsing.payload.handle) ===
-                                            handleKey);
-                                return (
-                                <StoryCard
-                                    key={
-                                        item.handle === STORIES24_ADD_YOURS_HANDLE
-                                            ? 'add-yours'
-                                            : item.handle
-                                    }
-                                    item={item}
-                                    registerCardRef={registerCardRef}
-                                    morphHidden={morphHidden}
-                                    playPreviewVideo={
-                                        !!item.previewVideoUrl &&
-                                        item.handle === firstStoryPreviewHandle
-                                    }
-                                    previewVideosPaused={previewsPaused || morphHidden}
-                                    onPress={(rect) => {
-                                        if (item.handle === STORIES24_ADD_YOURS_HANDLE) {
-                                            onAddYours();
-                                        } else {
-                                            handleStoryCardPress(item, rect);
-                                        }
-                                    }}
-                                />
-                                );
-                            })}
-                        </ScrollView>
-                    </View>
-                </View>
-            </LinearGradient>
+                {items.map((item) => {
+                    const handleKey = normalizeStories24Handle(item.handle);
+                    // Keep the source card visible until the morph clone has a paintable frame.
+                    const morphHidden =
+                        (!!expanding &&
+                            expandHideSource &&
+                            normalizeStories24Handle(expanding.item.handle) === handleKey) ||
+                        (!!collapsing &&
+                            collapseHideSource &&
+                            normalizeStories24Handle(collapsing.payload.handle) === handleKey);
+                    return (
+                        <StoryCard
+                            key={
+                                item.handle === STORIES24_ADD_YOURS_HANDLE
+                                    ? 'add-yours'
+                                    : item.handle
+                            }
+                            item={item}
+                            registerCardRef={registerCardRef}
+                            morphHidden={morphHidden}
+                            playPreviewVideo={
+                                !!item.previewVideoUrl && item.handle === firstStoryPreviewHandle
+                            }
+                            previewVideosPaused={previewsPaused || morphHidden}
+                            onPress={(rect) => {
+                                if (item.handle === STORIES24_ADD_YOURS_HANDLE) {
+                                    onAddYours();
+                                } else {
+                                    handleStoryCardPress(item, rect);
+                                }
+                            }}
+                        />
+                    );
+                })}
+            </ScrollView>
             {expanding ? (
                 <Stories24ExpandOverlay
                     key={`expand-${normalizeStories24Handle(expanding.item.handle)}`}
@@ -890,130 +802,89 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
 export default Stories24FeedRail;
 
 const styles = StyleSheet.create({
-    outerBorder: {
-        marginHorizontal: 12,
+    root: {
         marginVertical: 12,
-        borderRadius: 16,
-        padding: 1.5,
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 24,
-        elevation: 10,
-    },
-    inner: {
-        position: 'relative',
-        borderRadius: 16,
-        backgroundColor: '#0a1323',
-        padding: 12,
-        overflow: 'hidden',
-    },
-    androidAmbientFill: {
-        backgroundColor: '#0a1323',
-    },
-    contentLayer: {
-        position: 'relative',
-        zIndex: 2,
     },
     headerRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-    },
-    titleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
         columnGap: 6,
+        paddingHorizontal: 16,
+        marginBottom: 12,
     },
     railTitle: {
         color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    addYoursBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: 4,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#FFFFFF',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-    },
-    addYoursBtnText: {
-        color: '#111827',
-        fontSize: 11,
-        fontWeight: '600',
+        fontSize: 17,
+        fontWeight: '400',
+        letterSpacing: 0.2,
     },
     scrollContent: {
+        paddingLeft: 16,
+        paddingRight: 16,
+        gap: 8,
         columnGap: 8,
-        paddingBottom: 4,
     },
     card: {
         width: CARD_W,
         height: CARD_H,
         borderRadius: CARD_RADIUS,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
         backgroundColor: '#101b2f',
     },
     addYoursCard: {
-        borderColor: 'rgba(255,255,255,0.8)',
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderColor: '#FFFFFF',
+        borderStyle: 'solid',
     },
     addYoursInner: {
         flex: 1,
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        rowGap: 8,
+        columnGap: 8,
+        paddingHorizontal: 12,
     },
     addYoursIconCircle: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#FFFFFF',
+        backgroundColor: 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 4,
     },
     addYoursTitle: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: '600',
-    },
-    addYoursSub: {
-        color: 'rgba(255,255,255,0.8)',
-        fontSize: 10,
     },
     cardFooterGrad: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        height: 72,
+        height: 40,
     },
     cardFooter: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        padding: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
     },
     cardTitle: {
         color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '600',
-        lineHeight: 14,
+        lineHeight: 13,
     },
     cardSubtitle: {
         color: '#7A8AF0',
         fontSize: 10,
-        marginTop: 4,
+        marginTop: 1,
     },
     expandModalRoot: {
         flex: 1,
