@@ -14,6 +14,12 @@ export type Stories24RailItem = {
     subtitle?: string;
     thumb?: string;
     previewVideoUrl?: string;
+    /**
+     * Poster's real profile avatar. Preferred source for the rail ring and the
+     * StoriesPromoCard avatar stack. Deliberately separate from the mock-map
+     * avatar below, which is only ever used as a last-resort card thumbnail.
+     */
+    avatarUrl?: string;
 };
 
 /** RN AsyncStorage key — keep in sync with web `clips:stories24OpenedFromRailHandle` semantics. */
@@ -152,6 +158,14 @@ export async function buildStories24RailItems(
                   ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
                   : undefined;
         const avatarUrl = getAvatarForHandle(group.userHandle);
+        // Real poster avatar for the rings/badges. The API group already carries one;
+        // the seed mock map is only a fallback for handles it happens to know.
+        // Kept separate from `avatarUrl` above so thumbnail selection is unchanged.
+        const posterAvatarUrl =
+            group.avatarUrl ||
+            (latest as { avatarUrl?: string }).avatarUrl ||
+            avatarUrl ||
+            undefined;
         // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
         // the rail pauses previews and would flash the avatar instead of the shared clip.
         let thumb =
@@ -177,6 +191,7 @@ export async function buildStories24RailItems(
             subtitle,
             thumb,
             previewVideoUrl,
+            avatarUrl: posterAvatarUrl,
         });
         if (nextItems.length >= 12) break;
     }

@@ -35,6 +35,34 @@ export async function readPendingLocationFeed(): Promise<PendingLocationFeed | n
     }
 }
 
+/** Write pending feed target for Search/Discover → Feed handoff (mirrors web sessionStorage). */
+export async function writePendingLocationFeed(payload: PendingLocationFeed): Promise<void> {
+    try {
+        const filter = payload.filter?.trim();
+        if (!filter) return;
+
+        const label = payload.label?.trim() || filter;
+        const scope = payload.scope?.trim() || '';
+        const filterType =
+            payload.filterType === 'venue' || payload.filterType === 'landmark'
+                ? payload.filterType
+                : 'location';
+        const placeId = payload.placeId?.trim() || null;
+
+        await AsyncStorage.setItem(KEYS.location, filter);
+        await AsyncStorage.setItem(KEYS.label, label);
+        await AsyncStorage.setItem(KEYS.scope, scope);
+        await AsyncStorage.setItem(KEYS.filterType, filterType);
+        if (placeId) {
+            await AsyncStorage.setItem(KEYS.placeId, placeId);
+        } else {
+            await AsyncStorage.removeItem(KEYS.placeId);
+        }
+    } catch {
+        // ignore storage errors; caller still navigates
+    }
+}
+
 export async function clearPendingLocationFeed(): Promise<void> {
     try {
         await Promise.all(Object.values(KEYS).map((k) => AsyncStorage.removeItem(k)));

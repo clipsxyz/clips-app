@@ -86,6 +86,82 @@ describe('location core: postMatchesLocationTab', () => {
     });
 });
 
+describe('national scope resolves sub-locations', () => {
+    // Regression: Barry@Galway's Galway posts were returned by the Ireland feed but
+    // vanished client-side. The feed payload shipped no author location tiers, so
+    // postMatchesLocationTab saw '' for every tier and returned false — while Following,
+    // which skips the guard, kept working. Populating the tiers (backend toApiArray) is
+    // the fix; these lock the rule the payload now has to satisfy.
+    const galwayAuthor = post({
+        id: 'barry-galway',
+        userHandle: 'Barry@Galway',
+        locationLabel: 'Galway',
+        userLocal: 'Oranmore',
+        userRegional: 'Galway',
+        userNational: 'Ireland',
+    });
+
+    const corkAuthor = post({
+        id: 'cork-author',
+        userHandle: 'Ava@Cork',
+        locationLabel: 'Cork City',
+        userLocal: 'Cork City',
+        userRegional: 'Cork',
+        userNational: 'Ireland',
+    });
+
+    const englishAuthor = post({
+        id: 'english-author',
+        userHandle: 'Barry@London',
+        locationLabel: 'London, UK',
+        userLocal: 'London',
+        userRegional: 'England',
+        userNational: 'United Kingdom',
+    });
+
+    it('keeps Galway and Cork authors on the Ireland feed', () => {
+        expect(postMatchesLocationTab(galwayAuthor, 'ireland')).toBe(true);
+        expect(postMatchesLocationTab(corkAuthor, 'ireland')).toBe(true);
+        expect(filterPostsForLocationFeed([galwayAuthor, corkAuthor], 'ireland')).toHaveLength(2);
+        expect(findLocationFeedLeaks([galwayAuthor, corkAuthor], 'ireland')).toEqual([]);
+    });
+
+    it('does not pull non-Ireland authors onto the Ireland feed', () => {
+        expect(postMatchesLocationTab(englishAuthor, 'ireland')).toBe(false);
+    });
+
+    it('still scopes a Galway author to its own city feed', () => {
+        expect(postMatchesLocationTab(galwayAuthor, 'galway')).toBe(true);
+        expect(postMatchesLocationTab(galwayAuthor, 'cork')).toBe(false);
+    });
+
+    it('accepts a post tagged with the country even when the author sits abroad', () => {
+        const taggedAbroad = post({
+            id: 'tagged-abroad',
+            userHandle: 'Traveller@Dubai',
+            locationLabel: 'Ireland',
+            userLocal: 'Dubai',
+            userRegional: 'Dubai',
+            userNational: 'United Arab Emirates',
+        });
+        expect(postMatchesLocationTab(taggedAbroad, 'ireland')).toBe(true);
+    });
+
+    it('drops live posts whose author tiers never arrived', () => {
+        // Documents why the payload fix is load-bearing: with no tiers the guard
+        // rejects everything, which is what emptied the Ireland feed.
+        const noTiers = post({
+            id: 'no-tiers',
+            userHandle: 'Barry@Galway',
+            locationLabel: 'Galway',
+            userLocal: undefined,
+            userRegional: undefined,
+            userNational: undefined,
+        });
+        expect(postMatchesLocationTab(noTiers, 'ireland')).toBe(false);
+    });
+});
+
 describe('locationFeedGuard', () => {
     it('treats place feeds as location-scoped and Following as not', () => {
         expect(isLocationScopedFeedTab('rome')).toBe(true);

@@ -167,7 +167,6 @@ import { isDevMockFeedVideoPost } from '../api/posts';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigateMainTab } from '../navigation/mainTabs';
-import Stories24HeaderIcon from '../components/Stories24HeaderIcon.native';
 import { Dimensions } from 'react-native';
 import FeedEngagementRow from '../components/FeedEngagementRow';
 import FeedEngagementRightActions from '../components/FeedEngagementRightActions.native';
@@ -192,6 +191,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
 import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/Stories24FeedRail.native';
+import StoriesPromoCard from '../components/StoriesPromoCard.native';
 import { getInboxUnreadPollMs, getStoriesRailPollMs } from '../utils/backgroundPollMs';
 import {
     buildStories24RailItems,
@@ -316,6 +316,12 @@ const FEED_SWITCH_PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '
  * final card (and its action row) tappable above the bar.
  */
 const TAB_BAR_CLEARANCE = FEED_TAB_BAR_CLEARANCE;
+
+/**
+ * Inline Stories promo cadence. The rail now owns index 0, so the old header pill is
+ * re-surfaced in-feed as a full-width promo every N posts instead of every post.
+ */
+const STORIES24_PROMO_EVERY_POSTS = 10;
 
 type Tab = string;
 
@@ -729,13 +735,19 @@ function PillTabs({
         <View style={styles.tabContainer}>
             <View style={FEED_HEADER_PICKER_ROW}>
                 <TouchableOpacity
-                    onPress={() => onOpenStories24?.()}
+                    onPress={onOpenDiscover}
                     style={FEED_HEADER_SIDE_ACTION}
-                    accessibilityLabel="Stories 24"
+                    accessibilityLabel="Discover"
                 >
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Stories24HeaderIcon size={FEED_HEADER_PASSPORT_AVATAR.width} />
-                        <Text style={FEED_HEADER_SIDE_LABEL}>Stories</Text>
+                        <View style={styles.feedHeaderDiscoverGlyph}>
+                            <Icon
+                                name="compass-outline"
+                                size={ox(20)}
+                                color="#FFFFFF"
+                            />
+                        </View>
+                        <Text style={FEED_HEADER_SIDE_LABEL}>Discover</Text>
                     </View>
                 </TouchableOpacity>
 
@@ -1596,6 +1608,7 @@ type FeedListRow =
     | { kind: 'local_business'; posts: Post[]; pinnedPaidPostId?: string; useMockPreview?: boolean }
     | { kind: 'suggested_places'; bundleKey: string; suggestions: PlaceMatchedPost[] }
     | { kind: 'stories24'; id: string }
+    | { kind: 'stories_promo'; id: string }
     | { kind: 'interests'; id: string }
     | { kind: 'suggested_follower'; suggestion: SuggestedFollowerSuggestion };
 
@@ -2368,6 +2381,38 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             userNational: user?.national || 'Ireland',
         };
     }, [feedFetchFilter, userId, user?.handle, user?.local, user?.regional, user?.national]);
+
+    // Reset to the top when the feed scope changes (e.g. Following -> Ireland).
+    //
+    // Implementation note: scrollToOffset alone is NOT sufficient here. The reload is
+    // async, so a filter change scrolls the OLD rows to 0 first, and a second pass keyed
+    // to the new row count also loses the race — the rows are variable height, so they
+    // keep re-measuring as images/video metadata arrive and VirtualizedList re-anchors
+    // contentOffset. Observed on device: both passes ran (traced), no scroll-pin path
+    // interfered, and the list still settled mid-feed.
+    //
+    // So the list is remounted per scope via `key={feedScopeListKey}` below. A remount
+    // guarantees a clean list whose contentOffset starts at 0, with no race against row
+    // measurement. The scroll state this discards is the previous scope's position, which
+    // we want gone; within-feed position (Scenes return, rail collapse snapshot, video
+    // autoplay handoff) is owned by its own refs and re-establishes itself on return.
+    const feedScopeListKey = feedFetchFilter;
+
+    // Keep the mirrored offset honest across the remount so any pin/return path that
+    // reads it cannot re-apply the previous scope's position.
+    const feedScopeResetSeenRef = useRef(false);
+    useEffect(() => {
+        if (!feedScopeResetSeenRef.current) {
+            feedScopeResetSeenRef.current = true;
+            return;
+        }
+        feedScrollYRef.current = 0;
+        feedScrollingRef.current = false;
+        if (feedScrollIdleTimerRef.current) {
+            clearTimeout(feedScrollIdleTimerRef.current);
+            feedScrollIdleTimerRef.current = null;
+        }
+    }, [feedFetchFilter]);
 
     React.useEffect(() => {
         if (!user) {
@@ -3548,14 +3593,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         let postCount = 0;
         let interestsInserted = false;
         let followerInserted = false;
-        let stories24Inserted = false;
+        // Rail is pinned to index 0 (above post #1), so it is never injected mid-loop.
+        if (showStories24Rail) {
+            out.push({ kind: 'stories24', id: 'stories24-feed-rail' });
+        }
         for (const item of flatWithSuggested) {
             if (item.type === 'post') {
                 out.push({ kind: 'post', post: item.item });
                 postCount += 1;
-                if (!stories24Inserted && showStories24Rail && postCount === 1) {
-                    out.push({ kind: 'stories24', id: 'stories24-feed-rail' });
-                    stories24Inserted = true;
+                // Inline Stories promo replaces the old header pill: every 10 posts.
+                if (
+                    !customLocation &&
+                    postCount > STORIES24_PROMO_EVERY_POSTS &&
+                    postCount % STORIES24_PROMO_EVERY_POSTS === 0
+                ) {
+                    out.push({ kind: 'stories_promo', id: `stories-promo-${postCount}` });
                 }
                 if (
                     previewSuggestedCards &&
@@ -3613,6 +3665,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         previewLocalBusinessPosts,
         previewSuggestedPlaces,
     ]);
+
     flatForRenderRef.current = flatForRender;
 
     /**
@@ -3894,6 +3947,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             });
                         }}
                         onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
+                    />,
+                );
+            }
+            if (item.kind === 'stories_promo') {
+                return wrapRow(
+                    <StoriesPromoCard
+                        onPress={() => {
+                            void openStories24FromHeader();
+                        }}
+                        storyCount={stories24Items.length}
+                        storyAvatars={stories24Items
+                            .filter((s) => !isStories24AddYoursHandle(s.handle))
+                            .map((s) => s.avatarUrl)
+                            .filter((url): url is string => Boolean(url))}
+                        storyHandles={stories24Items
+                            .filter((s) => !isStories24AddYoursHandle(s.handle))
+                            .map((s) => s.handle)
+                            .filter(Boolean)}
                     />,
                 );
             }
@@ -4380,13 +4451,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             >
 <View style={[styles.feedListShell, { paddingBottom: TAB_BAR_CLEARANCE + insets.bottom }]}>
               <FlatList
+                // Remount per feed scope so switching tabs always lands on post #1.
+                key={feedScopeListKey}
                 ref={flatListRef}
                 style={styles.feedList}
                 data={flatForRender}
                 renderItem={renderItem}
                 keyExtractor={(item) => {
                     if (item.kind === 'post') return `post:${item.post.id}`;
-                    if (item.kind === 'interests' || item.kind === 'stories24') {
+                    // stories_promo MUST be keyed here: it previously fell through to the
+                    // 'feed-row' fallback, so two promos in the render window collided and
+                    // React duplicated/omitted rows.
+                    if (
+                        item.kind === 'interests' ||
+                        item.kind === 'stories24' ||
+                        item.kind === 'stories_promo'
+                    ) {
                         return `${item.kind}:${item.id}`;
                     }
                     if (item.kind === 'suggested_follower') {
@@ -4405,10 +4485,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 // Keep the render window tight for max FPS while flinging; clip offscreen cells.
                 initialNumToRender={2}
-                maxToRenderPerBatch={2}
+                maxToRenderPerBatch={3}
                 windowSize={5}
                 updateCellsBatchingPeriod={50}
-                removeClippedSubviews
+                // Android-only clipping: frees off-screen cell memory while flinging, and
+                // avoids the iOS blank-cell behaviour of clipping nested/overflow views.
+                removeClippedSubviews={Platform.OS === 'android'}
                 onScrollBeginDrag={() => {
                     feedScrollingRef.current = true;
                     setFeedScrollBusy(true);
@@ -5329,6 +5411,21 @@ const styles = StyleSheet.create({
     },
     feedHeaderNotifWrap: {
         alignItems: 'center',
+    },
+    /**
+     * Discover glyph container. Deliberately translucent (not a solid fill) so the
+     * header's ambient background gradient reads through, matching how the Passport
+     * avatar on the right sits on its ring rather than on an opaque plate.
+     */
+    feedHeaderDiscoverGlyph: {
+        width: FEED_HEADER_PASSPORT_AVATAR.width,
+        height: FEED_HEADER_PASSPORT_AVATAR.width,
+        borderRadius: FEED_HEADER_PASSPORT_AVATAR.borderRadius,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     feedHeaderIconGroup: {
         flexDirection: 'row',

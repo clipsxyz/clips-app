@@ -751,7 +751,23 @@ export type StoriesPage = {
     hasMore: boolean;
 };
 
-function mapLaravelStoryToStory(story: any): Story {
+/**
+ * `avatarUrl` is not on the shared `Story` type, so it is carried as an intersection
+ * here rather than editing types.ts. Story is structurally a subset, so this stays
+ * assignable everywhere a Story is expected.
+ */
+type StoryWithAvatar = Story & { avatarUrl?: string };
+
+/**
+ * Reads the mapped avatar off a Story without scattering casts. Arrays typed as
+ * `Story[]` erase the intersection, so the four group builders below would otherwise
+ * fail to see `avatarUrl`.
+ */
+function storyAvatarUrl(story: Story): string | undefined {
+    return (story as StoryWithAvatar).avatarUrl;
+}
+
+function mapLaravelStoryToStory(story: any): StoryWithAvatar {
     return {
         id: story.id,
         userId: story.user_id,
@@ -773,6 +789,16 @@ function mapLaravelStoryToStory(story: any): Story {
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
         taggedUsers: story.tagged_users || undefined,
+        // Real poster avatar. The stories endpoint eager-loads
+        // `user:id,handle,display_name,avatar_url`, so prefer the payload over the
+        // seed mock map, which only resolves the 8 mock handles.
+        avatarUrl:
+            story.avatar_url ||
+            story.avatarUrl ||
+            story.user?.avatar_url ||
+            story.user?.avatarUrl ||
+            getAvatarForHandle(story.user_handle) ||
+            undefined,
     };
 }
 
@@ -804,7 +830,7 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
                 userId: story.userId,
                 userHandle: story.userHandle,
                 name: story.userHandle.split('@')[0],
-                avatarUrl: getAvatarForHandle(story.userHandle),
+                avatarUrl: storyAvatarUrl(story) || getAvatarForHandle(story.userHandle),
                 stories: [story]
             });
         }
@@ -877,7 +903,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
                 userId: stories[0].userId,
                 userHandle: stories[0].userHandle,
                 name: stories[0].userHandle.split('@')[0],
-                avatarUrl: getAvatarForHandle(stories[0].userHandle),
+                avatarUrl: storyAvatarUrl(stories[0]) || getAvatarForHandle(stories[0].userHandle),
                 stories: sortStoriesNewestFirst(stories),
             };
         } catch (error) {
@@ -898,7 +924,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
         userId: activeStories[0].userId,
         userHandle: activeStories[0].userHandle,
         name: activeStories[0].userHandle.split('@')[0],
-        avatarUrl: getAvatarForHandle(activeStories[0].userHandle),
+        avatarUrl: storyAvatarUrl(activeStories[0]) || getAvatarForHandle(activeStories[0].userHandle),
         stories: activeStories.sort((a, b) => b.createdAt - a.createdAt),
     };
 }
@@ -1483,7 +1509,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                         userId: story.userId,
                         userHandle: story.userHandle,
                         name: story.userHandle.split('@')[0],
-                        avatarUrl: getAvatarForHandle(story.userHandle),
+                        avatarUrl: storyAvatarUrl(story) || getAvatarForHandle(story.userHandle),
                         stories: [story],
                     });
                 }
@@ -1524,7 +1550,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                 userId: story.userId,
                 userHandle: story.userHandle,
                 name: story.userHandle.split('@')[0],
-                avatarUrl: getAvatarForHandle(story.userHandle),
+                avatarUrl: storyAvatarUrl(story) || getAvatarForHandle(story.userHandle),
                 stories: [story]
             });
         }

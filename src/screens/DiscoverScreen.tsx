@@ -9,20 +9,22 @@ import {
     ActivityIndicator,
     Keyboard,
     Platform,
+    KeyboardAvoidingView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { searchLocations, searchLocalGazetteer, type LocationSuggestion } from '../api/locations';
 import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import Avatar from '../components/Avatar.native';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
-import { clearPendingLocationFeed } from '../utils/pendingLocationNative';
+import {
+    clearPendingLocationFeed,
+    writePendingLocationFeed,
+} from '../utils/pendingLocationNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 const POPULAR = [
@@ -35,13 +37,9 @@ const ROTATING_CITIES = [
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
 
-/** Same wash as View Profile / GazetteerScreenShell passport (Android parent gradient). */
-const ANDROID_WASH = ['#060d16', '#0f2430', '#1a3f3c', '#12263a', '#060d16'] as const;
+/** Gemini-style canvas: black field, Gazetteer sea-glass only in the lower third. */
+const DISCOVER_WASH = ['#000000', '#020807', '#0a2e28', '#14756a'] as const;
 
-/**
- * iOS: animated canvas behind UI.
- * Android: LinearGradient as PARENT of UI (absolute ambient siblings hide all text on Nokia).
- */
 export default function DiscoverScreen({ navigation }: any) {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
@@ -50,6 +48,7 @@ export default function DiscoverScreen({ navigation }: any) {
     const [loading, setLoading] = useState(false);
     const [activeIndex, setActiveIndex] = useState(-1);
     const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
+    const [hideSuggestions, setHideSuggestions] = useState(false);
     const [placeholderCityIndex, setPlaceholderCityIndex] = useState(0);
     const [keyboardOpen, setKeyboardOpen] = useState(false);
     const inputRef = useRef<TextInput>(null);
@@ -60,8 +59,8 @@ export default function DiscoverScreen({ navigation }: any) {
     );
 
     const hasSearchQuery = query.trim().length > 0;
-    const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker;
-    const keyboardLayout = keyboardOpen && hasSearchQuery;
+    const showSuggestionsPanel = query.trim().length >= 2 && !scopePicker && !hideSuggestions;
+    const keyboardLayout = keyboardOpen;
     const placeholderLabel = `Discover · ${ROTATING_CITIES[placeholderCityIndex]}`;
 
     useEffect(() => {
@@ -122,46 +121,53 @@ export default function DiscoverScreen({ navigation }: any) {
         };
     }, [query]);
 
-    const openFeedSelection = async (selection: PlaceFeedSelection) => {
-        try {
-            await AsyncStorage.setItem('pendingLocation', selection.filter);
-            await AsyncStorage.setItem('pendingLocationLabel', selection.label);
-            await AsyncStorage.setItem('pendingLocationScope', selection.scope);
-            await AsyncStorage.setItem('pendingFilterType', 'location');
-            if (selection.placeId) {
-                await AsyncStorage.setItem('pendingLocationPlaceId', selection.placeId);
-            } else {
-                await AsyncStorage.removeItem('pendingLocationPlaceId');
-            }
-            // Discover is a root stack screen — "Home" lives under MainTabs → Feed.
-            // Explicitly null out resetHomeFeedAt so a prior Home-tab reset doesn't
-            // win the param merge and wipe this Discover/Local location.
-            navigateMainTab(navigation, 'Home', {
-                screen: 'Feed',
-                params: {
-                    location: selection.filter,
-                    locationLabel: selection.label,
-                    locationScope: selection.scope,
-                    filterType: 'location',
-                    placeId: selection.placeId || undefined,
-                    resetHomeFeedAt: null,
-                },
+    const openFeedSelection = (selection: PlaceFeedSelection) => {
+        if (typeof writePendingLocationFeed === 'function') {
+            void writePendingLocationFeed({
+                filter: selection.filter,
+                label: selection.label,
+                scope: selection.scope,
+                placeId: selection.placeId || null,
+                filterType: 'location',
             });
-        } catch (err) {
-            console.error('Error saving location:', err);
+        } else {
+            console.warn('writePendingLocationFeed is not defined');
         }
+        // Discover is a root stack screen — "Home" lives under MainTabs → Feed.
+        // Explicitly null out resetHomeFeedAt so a prior Home-tab reset doesn't
+        // win the param merge and wipe this Discover/Local location.
+        navigateMainTab(navigation, 'Home', {
+            screen: 'Feed',
+            params: {
+                location: selection.filter,
+                locationLabel: selection.label,
+                locationScope: selection.scope,
+                filterType: 'location',
+                placeId: selection.placeId || undefined,
+                resetHomeFeedAt: null,
+            },
+        });
+    };
+
+    const dismissSuggestionList = () => {
+        setHideSuggestions(true);
+        setActiveIndex(-1);
+        inputRef.current?.blur();
+        Keyboard.dismiss();
     };
 
     const onSuggestionSelected = (suggestion: LocationSuggestion) => {
+        dismissSuggestionList();
         if (getPlaceFeedPickerOptions(suggestion)) {
             setScopePicker(suggestion);
             return;
         }
-        void openFeedSelection(resolvePlaceFeedSelection(suggestion));
+        openFeedSelection(resolvePlaceFeedSelection(suggestion));
     };
 
     const selectPopularCity = (name: string) => {
-        void openFeedSelection(
+        dismissSuggestionList();
+        openFeedSelection(
             resolvePlaceFeedSelection({
                 name,
                 type: 'location',
@@ -177,6 +183,7 @@ export default function DiscoverScreen({ navigation }: any) {
         setQuery('');
         setSuggestions([]);
         setActiveIndex(-1);
+        setHideSuggestions(false);
         inputRef.current?.blur();
         Keyboard.dismiss();
     };
@@ -192,15 +199,18 @@ export default function DiscoverScreen({ navigation }: any) {
         selectPopularCity(trimmed);
     };
 
-    const goHomeFeed = async () => {
-        try {
-            await clearPendingLocationFeed();
-        } catch {
-            // ignore
-        }
+    const goHomeFeed = () => {
+        void clearPendingLocationFeed();
         navigateMainTab(navigation, 'Home', {
             screen: 'Feed',
-            params: { resetHomeFeedAt: Date.now() },
+            params: {
+                resetHomeFeedAt: Date.now(),
+                location: null,
+                locationLabel: null,
+                locationScope: null,
+                filterType: null,
+                placeId: null,
+            },
         });
     };
 
@@ -221,69 +231,82 @@ export default function DiscoverScreen({ navigation }: any) {
 
     const rawName = user?.name || 'Friend';
     const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
-    const localLabel = user?.local || 'Local';
+    const username = (user?.handle || '').replace(/^@/, '').trim() || firstName;
+    const promptSuggestions = useMemo(() => {
+        const local = (user?.local || '').trim();
+        const third =
+            local && !/^paris|new york$/i.test(local)
+                ? { city: local, label: `Drop into ${local}` }
+                : { city: 'Dublin', label: 'Drop into Dublin' };
+        return [
+            { city: 'Paris', label: "Let's go to the Paris feed" },
+            { city: 'New York', label: "What's happening in New York" },
+            third,
+        ];
+    }, [user?.local]);
 
     const showApiRows = suggestions.length > 0;
     const showPopularFallback = !loading && suggestions.length === 0 && popularResults.length > 0;
     const showEmpty = !loading && suggestions.length === 0 && popularResults.length === 0;
 
+    const avatarName = (user?.handle || user?.name || 'User').split('@')[0];
+
     const ui = (
         <View
             style={[
                 styles.ui,
-                { paddingBottom: Math.max(insets.bottom, 20) },
+                keyboardLayout ? styles.uiKeyboard : null,
+                { paddingBottom: Math.max(insets.bottom, 16) },
             ]}
             collapsable={false}
         >
-            {/* Web TopBar discover chrome: Home · Local · Avatar */}
             <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 8) }]}>
                 <TouchableOpacity
-                    onPress={() => void goHomeFeed()}
+                    onPress={() => goHomeFeed()}
                     style={styles.topBarBtn}
                     accessibilityLabel="Back to Feed"
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     <Icon name="home-outline" size={ox(22)} color="#E5E7EB" />
                 </TouchableOpacity>
-                <View style={styles.topBarRight}>
-                    <TouchableOpacity
-                        onPress={goLocalFeed}
-                        style={styles.localChip}
-                        accessibilityLabel={`View ${localLabel} feed`}
-                    >
-                        <Text style={styles.localChipText} numberOfLines={1}>
-                            {localLabel}
-                        </Text>
-                    </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={goLocalFeed}
+                    style={styles.localChip}
+                    accessibilityLabel="View nearby feed"
+                >
+                    <Text style={styles.localChipText} numberOfLines={1}>
+                        Nearby
+                    </Text>
+                </TouchableOpacity>
+            </View>
+
+            {!keyboardLayout ? (
+                <View style={styles.hero}>
                     <TouchableOpacity
                         onPress={() => navigatePassport(navigation, 'Home')}
                         accessibilityLabel="Open Passport"
+                        style={styles.heroAvatar}
                     >
                         <Avatar
                             src={user?.avatarUrl}
-                            name={(user?.handle || user?.name || 'User').split('@')[0]}
-                            size="sm"
+                            name={avatarName}
+                            handle={user?.handle}
+                            size={ox(72)}
                         />
                     </TouchableOpacity>
+                    <Text style={styles.greetingText}>Let's go social traveling,</Text>
+                    <Text style={styles.greetingText}>{username}</Text>
                 </View>
-            </View>
-
-            <View style={[styles.greetingBlock, keyboardLayout && styles.greetingBlockCompact]}>
-                <Text style={styles.greetingText}>{`Hi ${firstName},`}</Text>
-                {!keyboardLayout ? (
-                    <Text style={styles.greetingText}>let's go social traveling</Text>
-                ) : null}
-                <Text style={styles.greetingSub}>Where to for your news?</Text>
-            </View>
+            ) : (
+                <View style={styles.heroSpacer} />
+            )}
 
             <View style={styles.searchDock}>
                 {showSuggestionsPanel ? (
                     <View
                         style={[
-                            styles.suggestionsPanel,
-                            keyboardLayout
-                                ? styles.suggestionsPanelKeyboard
-                                : styles.suggestionsPanelAbove,
+                            styles.resultsPanel,
+                            keyboardLayout ? styles.resultsPanelKeyboard : styles.resultsPanelOpen,
                         ]}
                     >
                         <ScrollView keyboardShouldPersistTaps="always" nestedScrollEnabled bounces={false}>
@@ -302,12 +325,12 @@ export default function DiscoverScreen({ navigation }: any) {
                                           <TouchableOpacity
                                               key={`api-${s.type}-${s.place_id || s.name}-${idx}`}
                                               onPress={() => onSuggestionSelected(s)}
-                                              style={styles.suggestionItem}
+                                              style={styles.resultRow}
                                           >
-                                              <Icon name="location" size={ox(16)} color="#f472b6" />
-                                              <View style={styles.suggestionContent}>
-                                                  <Text style={styles.suggestionPrimary}>{primary}</Text>
-                                                  <Text style={styles.suggestionSecondary}>{s.name}</Text>
+                                              <Icon name="location-outline" size={ox(16)} color={PASSPORT_PALETTE.wavePrimary} />
+                                              <View style={styles.resultCopy}>
+                                                  <Text style={styles.resultPrimary}>{primary}</Text>
+                                                  <Text style={styles.resultSecondary}>{s.name}</Text>
                                               </View>
                                           </TouchableOpacity>
                                       );
@@ -318,30 +341,45 @@ export default function DiscoverScreen({ navigation }: any) {
                                       <TouchableOpacity
                                           key={name}
                                           onPress={() => selectPopularCity(name)}
-                                          style={styles.suggestionItem}
+                                          style={styles.resultRow}
                                       >
-                                          <Icon name="location" size={ox(16)} color="#f472b6" />
-                                          <Text style={styles.suggestionPrimary}>{name}</Text>
+                                          <Icon name="location-outline" size={ox(16)} color={PASSPORT_PALETTE.wavePrimary} />
+                                          <Text style={styles.resultPrimary}>{name}</Text>
                                       </TouchableOpacity>
                                   ))
                                 : null}
                         </ScrollView>
                     </View>
-                ) : null}
+                ) : (
+                    <View style={styles.promptList}>
+                        {promptSuggestions.map((item) => (
+                            <TouchableOpacity
+                                key={item.city}
+                                onPress={() => selectPopularCity(item.city)}
+                                style={styles.promptRow}
+                                accessibilityLabel={item.label}
+                            >
+                                <Icon name="return-down-forward-outline" size={ox(18)} color="rgba(255,255,255,0.72)" />
+                                <Text style={styles.promptText}>{item.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
 
                 <View style={styles.searchPill}>
-                    <Icon name="search" size={ox(20)} color="#9CA3AF" style={styles.searchIcon} />
+                    <Icon name="add" size={ox(22)} color="#E5E7EB" style={styles.searchIcon} />
                     <TextInput
                         ref={inputRef}
                         value={query}
                         onChangeText={(text) => {
                             setQuery(text);
                             setActiveIndex(-1);
+                            setHideSuggestions(false);
                         }}
                         placeholder={hasSearchQuery ? '' : placeholderLabel}
-                        placeholderTextColor="#B0B0B0"
+                        placeholderTextColor="rgba(229,231,235,0.55)"
                         style={styles.searchInput}
-                        selectionColor="#d91b5c"
+                        selectionColor={PASSPORT_PALETTE.wavePrimary}
                         onSubmitEditing={chooseFromQuery}
                         returnKeyType="search"
                         autoCorrect={false}
@@ -353,7 +391,14 @@ export default function DiscoverScreen({ navigation }: any) {
                             <Icon name="close" size={ox(16)} color="#9CA3AF" />
                         </TouchableOpacity>
                     ) : null}
-                    {loading ? <ActivityIndicator size="small" color="#d91b5c" /> : null}
+                    {loading ? <ActivityIndicator size="small" color={PASSPORT_PALETTE.wavePrimary} /> : null}
+                    <TouchableOpacity
+                        onPress={chooseFromQuery}
+                        style={styles.goBtn}
+                        accessibilityLabel="Search places"
+                    >
+                        <Icon name="arrow-forward" size={ox(18)} color="#04110f" />
+                    </TouchableOpacity>
                 </View>
             </View>
         </View>
@@ -361,32 +406,31 @@ export default function DiscoverScreen({ navigation }: any) {
 
     return (
         <>
-            {Platform.OS === 'ios' ? (
-                <View style={styles.root} collapsable={false}>
-                    <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
-                        <DiscoverAmbientCanvas variant="passport" fillParent />
-                    </View>
-                    {ui}
-                </View>
-            ) : (
-                <LinearGradient
-                    colors={[...ANDROID_WASH]}
-                    locations={[0, 0.28, 0.55, 0.78, 1]}
-                    start={{ x: 0.1, y: 1 }}
-                    end={{ x: 0.9, y: 0 }}
-                    style={styles.root}
+            <LinearGradient
+                colors={[...DISCOVER_WASH]}
+                locations={[0, 0.38, 0.74, 1]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.root}
+            >
+                <KeyboardAvoidingView
+                    style={styles.flex}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 >
                     {ui}
-                </LinearGradient>
-            )}
+                </KeyboardAvoidingView>
+            </LinearGradient>
 
             <PlaceFeedScopePickerModal
                 visible={!!scopePicker}
                 suggestion={scopePicker}
-                onClose={() => setScopePicker(null)}
+                onClose={() => {
+                    setHideSuggestions(false);
+                    setScopePicker(null);
+                }}
                 onSelectScope={(scope) => {
                     if (!scopePicker) return;
-                    void openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope));
+                    openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope));
                     setScopePicker(null);
                 }}
             />
@@ -395,70 +439,59 @@ export default function DiscoverScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    flex: { flex: 1 },
     root: {
         flex: 1,
-        backgroundColor: PASSPORT_ABYSS,
-    },
-    ambientBack: {
-        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#000000',
     },
     ui: {
         flex: 1,
-        paddingHorizontal: ox(16),
+        paddingHorizontal: ox(20),
         justifyContent: 'space-between',
+    },
+    uiKeyboard: {
+        justifyContent: 'flex-start',
     },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         minHeight: ox(44),
-        marginBottom: ox(4),
     },
     topBarBtn: {
         padding: ox(8),
         marginLeft: -4,
-    },
-    topBarRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: ox(10),
     },
     localChip: {
         paddingHorizontal: ox(12),
         paddingVertical: ox(6),
         borderRadius: ox(8),
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.85)',
-        backgroundColor: 'rgba(3, 7, 18, 0.55)',
+        borderColor: 'rgba(255,255,255,0.55)',
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
         maxWidth: 140,
     },
     localChipText: {
-        color: '#D1D5DB',
+        color: '#E5E7EB',
         fontSize: ox(12),
         fontWeight: '600',
     },
-    greetingBlock: {
+    hero: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        paddingBottom: ox(12),
     },
-    greetingBlockCompact: {
-        flex: 0,
-        paddingTop: ox(8),
-        justifyContent: 'flex-start',
+    heroSpacer: {
+        height: ox(8),
+    },
+    heroAvatar: {
+        marginBottom: ox(18),
     },
     greetingText: {
-        color: '#FFFFFF',
-        fontSize: ox(30),
-        lineHeight: ox(38),
-        fontWeight: '400',
-        textAlign: 'center',
-        includeFontPadding: false,
-    },
-    greetingSub: {
-        marginTop: ox(12),
-        color: '#EEEEEE',
-        fontSize: ox(14),
+        color: '#F3F4F6',
+        fontSize: ox(28),
+        lineHeight: ox(36),
         fontWeight: '400',
         textAlign: 'center',
         includeFontPadding: false,
@@ -467,50 +500,69 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 480,
         alignSelf: 'center',
+        paddingBottom: ox(8),
     },
-    suggestionsPanel: {
+    promptList: {
+        marginBottom: ox(22),
+        paddingHorizontal: ox(4),
+        gap: ox(22),
+    },
+    promptRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(14),
+        paddingVertical: ox(2),
+    },
+    promptText: {
+        flex: 1,
+        color: 'rgba(243,244,246,0.92)',
+        fontSize: ox(16),
+        lineHeight: ox(22),
+        fontWeight: '400',
+        includeFontPadding: false,
+    },
+    resultsPanel: {
         borderRadius: ox(16),
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: '#1a1524',
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(8, 18, 16, 0.88)',
         overflow: 'hidden',
-        marginBottom: ox(8),
+        marginBottom: ox(10),
     },
-    suggestionsPanelAbove: { maxHeight: 256 },
-    suggestionsPanelKeyboard: { maxHeight: 180 },
+    resultsPanelOpen: { maxHeight: 256 },
+    resultsPanelKeyboard: { maxHeight: 180 },
     suggestionEmpty: {
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
         color: '#9CA3AF',
         fontSize: ox(14),
     },
-    suggestionItem: {
+    resultRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(12),
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(255,255,255,0.05)',
+        borderTopColor: 'rgba(255,255,255,0.06)',
     },
-    suggestionContent: { flex: 1, minWidth: 0 },
-    suggestionPrimary: { color: '#F3F4F6', fontSize: ox(14), fontWeight: '500' },
-    suggestionSecondary: { color: '#6B7280', fontSize: ox(11), marginTop: ox(2) },
+    resultCopy: { flex: 1, minWidth: 0 },
+    resultPrimary: { color: '#F3F4F6', fontSize: ox(14), fontWeight: '500' },
+    resultSecondary: { color: '#6B7280', fontSize: ox(11), marginTop: ox(2) },
     searchPill: {
         flexDirection: 'row',
         alignItems: 'center',
         borderRadius: ox(999),
-        backgroundColor: '#1c1624',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.18)',
-        paddingHorizontal: ox(14),
-        minHeight: ox(52),
+        backgroundColor: '#1c1c1e',
+        paddingLeft: ox(14),
+        paddingRight: ox(6),
+        minHeight: ox(54),
     },
     searchIcon: { marginRight: 8 },
     searchInput: {
         flex: 1,
         color: '#FFFFFF',
-        fontSize: ox(15),
+        fontSize: ox(16),
         fontWeight: '400',
         paddingVertical: ox(12),
         backgroundColor: 'transparent',
@@ -523,6 +575,15 @@ const styles = StyleSheet.create({
         borderRadius: ox(14),
         alignItems: 'center',
         justifyContent: 'center',
+        marginRight: ox(4),
         backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    goBtn: {
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: PASSPORT_PALETTE.wavePrimary,
     },
 });

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Models;
 
+use App\Http\Controllers\Api\PostController;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -130,6 +131,88 @@ public function test_by_location_scope_filters_by_location_label(): void
         $author->followers()->attach($follower->id, ['status' => 'accepted']);
 
         $this->assertTrue($post->fresh()->isFollowingAuthor($follower));
+    }
+
+    public function test_to_api_array_emits_author_location_tiers(): void
+    {
+        // Regression: the feed payload carried only handle/display_name/avatar_url, so
+        // transformLaravelPost resolved every tier to undefined and the client-side
+        // location guard dropped the entire Ireland feed. Following kept working because
+        // it skips that guard, which is exactly the reported symptom.
+        $user = User::factory()->create([
+            'location_local' => 'Oranmore',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
+        ]);
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+        $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national']);
+
+        $payload = PostController::toApiArray($post, null);
+
+        // camelCase nested keys: what the RN client reads from the author object.
+        $this->assertSame('Oranmore', $payload['user']['local']);
+        $this->assertSame('Galway', $payload['user']['regional']);
+        $this->assertSame('Ireland', $payload['user']['national']);
+
+        // Top-level duplicates: the `|| response.userLocal` fallback in transformLaravelPost.
+        $this->assertSame('Oranmore', $payload['userLocal']);
+        $this->assertSame('Galway', $payload['userRegional']);
+        $this->assertSame('Ireland', $payload['userNational']);
+    }
+
+    public function test_to_api_array_omits_author_location_when_relation_not_loaded(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+
+        $payload = PostController::toApiArray($post, null);
+
+        $this->assertArrayNotHasKey('userLocal', $payload);
+        $this->assertArrayNotHasKey('userRegional', $payload);
+        $this->assertArrayNotHasKey('userNational', $payload);
+    }
+
+    public function test_by_location_national_scope_includes_sub_location_authors(): void
+    {
+        // A Galway author is not "Ireland" by string equality on the post label, but the
+        // national scope must still resolve them via the author's location_national tier.
+        $galway = User::factory()->create([
+            'location_local' => 'Oranmore',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
+        ]);
+        $galwayPost = Post::factory()->create([
+            'user_id' => $galway->id,
+            'user_handle' => $galway->handle,
+            'location_label' => 'Galway',
+        ]);
+
+        $english = User::factory()->create([
+            'location_local' => 'London',
+            'location_regional' => 'England',
+            'location_national' => 'United Kingdom',
+        ]);
+        Post::factory()->create([
+            'user_id' => $english->id,
+            'user_handle' => $english->handle,
+            'location_label' => 'London, UK',
+        ]);
+
+        $irelandIds = Post::notReclipped()->byLocation('Ireland')->pluck('id')->all();
+
+        $this->assertContains($galwayPost->id, $irelandIds);
+
+        // Sanity: the same author's post is reachable from the city scope too.
+        $this->assertContains(
+            $galwayPost->id,
+            Post::notReclipped()->byLocation('Galway')->pluck('id')->all()
+        );
     }
 
     public function test_resolved_thumbnail_url_prefers_column_then_media_items_poster(): void

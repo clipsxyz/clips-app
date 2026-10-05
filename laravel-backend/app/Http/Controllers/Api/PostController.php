@@ -177,6 +177,50 @@ class PostController extends Controller
     /**
      * Normalize a post model for feed / suggestion API responses (snake_case + relations).
      */
+    /**
+     * Attach the author's location tiers to a serialized post.
+     *
+     * The RN client decides whether a post belongs to a location feed from these
+     * tiers (postMatchesLocationTab reads userLocal/userRegional/userNational).
+     * The feed payload used to carry only handle/display_name/avatar_url, so for live
+     * Laravel posts every tier resolved to undefined and the client-side guard
+     * discarded the entire Ireland/Dublin/custom feed — while Following, which skips
+     * that guard, still worked. Emitting them in both the nested camelCase shape the
+     * client reads (user.local/regional/national) and at the top level keeps the
+     * `|| response.userLocal` fallback in transformLaravelPost working too.
+     *
+     * Only emits when the relation is actually loaded and the columns were selected,
+     * so endpoints that skip the eager load are unaffected (they simply omit them).
+     */
+    private static function withAuthorLocation(array $postData, Post $post): array
+    {
+        if (! $post->relationLoaded('user') || ! $post->user) {
+            return $postData;
+        }
+
+        $author = $post->user;
+        $local = $author->location_local;
+        $regional = $author->location_regional;
+        $national = $author->location_national;
+
+        if (is_array($postData['user'] ?? null)) {
+            // camelCase: what transformLaravelPost reads from the nested author.
+            $postData['user']['local'] = $local;
+            $postData['user']['regional'] = $regional;
+            $postData['user']['national'] = $national;
+            // snake_case duplicates so any consumer reading raw column names still works.
+            $postData['user']['location_local'] = $local;
+            $postData['user']['location_regional'] = $regional;
+            $postData['user']['location_national'] = $national;
+        }
+
+        $postData['userLocal'] = $local;
+        $postData['userRegional'] = $regional;
+        $postData['userNational'] = $national;
+
+        return $postData;
+    }
+
     public static function toApiArray(Post $post, ?User $viewer): array
     {
         $postData = $post->toArray();
@@ -198,6 +242,7 @@ class PostController extends Controller
         $postData['taggedUsers'] = $post->relationLoaded('taggedUsers')
             ? $post->taggedUsers->pluck('handle')->toArray()
             : [];
+        $postData = self::withAuthorLocation($postData, $post);
         if ($viewer) {
             $postData['user_liked'] = array_key_exists('user_liked', $attrs)
                 ? (bool) $attrs['user_liked']
@@ -308,7 +353,7 @@ class PostController extends Controller
         // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
         // Location feeds: only original posts from that location.
         $query = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($filter === 'Following' && $userId) {
@@ -439,7 +484,7 @@ class PostController extends Controller
         $userId = $request->get('userId');
         $hasViewer = ! empty($userId);
 
-        $query = Post::with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
+        $query = Post::with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(Post::engagementWithCounts());
 
         if ($hasViewer) {
@@ -480,7 +525,7 @@ class PostController extends Controller
         }
 
         $post = Post::query()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national'])
             ->withCount(Post::engagementWithCounts())
             ->where('public_share_token', $token)
             ->first();
@@ -1060,7 +1105,7 @@ class PostController extends Controller
             BoostAnalyticsService::incrementForPost($post->id, 'shares_count');
         });
 
-        $post->load(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url']);
+        $post->load(['user:id,handle,display_name,avatar_url,location_local,location_regional,location_national', 'taggedUsers:id,handle,display_name,avatar_url']);
         $post->loadCount(Post::engagementWithCounts());
         Post::bumpFeedCache();
         $postData = self::toApiArray($post, $user instanceof User ? $user : null);

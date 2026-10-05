@@ -1738,6 +1738,9 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
       if (userNationalLower === 'ireland') return true;
       // Match mock-feed rules: Dublin-area authors also appear on Ireland tab.
       if (userRegionalLower === 'dublin' || userLocalLower === 'dublin') return true;
+      // A post tagged with the country itself is a server-accepted national hit even when
+      // its author sits abroad, so it must not be dropped here.
+      if (normalize((p as any).locationLabel) === 'ireland') return true;
       return false;
     }
     return false;
