@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import {
     View,
     Text,
-    Image,
     Pressable,
     StyleSheet,
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import CachedImage from './CachedImage.native';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 
@@ -27,7 +27,7 @@ export default function Avatar({
     const inner = (
         <View style={[styles.innerClip, { width: dim, height: dim, borderRadius: dim / 2 }]}>
             {showImage ? (
-                <Image
+                <CachedImage
                     source={{ uri: src }}
                     style={StyleSheet.absoluteFill}
                     resizeMode="cover"

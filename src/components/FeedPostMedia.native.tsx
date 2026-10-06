@@ -18,6 +18,7 @@ import { runOnJS } from 'react-native-reanimated';
 import type { Post, PostMediaItem, StickerOverlay } from '../types';
 import FeedStickerOverlays from './FeedStickerOverlays.native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import CachedImage from './CachedImage.native';
 import Video, { type VideoRef } from 'react-native-video';
 import {
     getActiveFeedVideoPostId,
@@ -758,12 +759,11 @@ const FeedPostMedia = React.memo(
             !playFailed &&
             (mode === 'detail' ||
                 (mode === 'feed' && !suspendNativeVideo && isViewable));
-
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
             return (
                 <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
-                    <Image
+                    <CachedImage
                         source={{ uri: slideUrl }}
                         style={styles.stillImage}
                         resizeMode="cover"
@@ -878,7 +878,7 @@ const FeedPostMedia = React.memo(
 
                 {slidePosterUri && showBufferCover ? (
                     <Animated.Image
-                        source={{ uri: slidePosterUri }}
+                        source={{ uri: slidePosterUri, cache: 'force-cache' }}
                         style={[
                             styles.posterCover,
                             { opacity: slideMountVideo ? posterOpacity : 1 },
@@ -886,6 +886,7 @@ const FeedPostMedia = React.memo(
                         resizeMode="cover"
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         pointerEvents="none"
+                        fadeDuration={0}
                         onLoad={() => markUrlLoaded(slideRawUrl)}
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />

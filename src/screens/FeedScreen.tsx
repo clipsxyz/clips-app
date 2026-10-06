@@ -1882,8 +1882,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFeedAutoplayAtMsRef = useRef(0);
     const viewabilityConfigRef = useRef({
-        // Play only when a post is mostly on screen (in-cell Video, no portal).
-        itemVisiblePercentThreshold: 70,
+        // Play only a post that is at least 60% on screen (in-cell Video, no portal).
+        itemVisiblePercentThreshold: 60,
         minimumViewTime: 80,
     });
 
@@ -2632,22 +2632,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const toggleCollectionsSaveForPost = React.useCallback(
         async (target: Post) => {
+            const idKey = String(target.id);
+            const prevSaved = savedByPostId[idKey] ?? target.isBookmarked === true;
+            const nextSaved = !prevSaved;
+            // Optimistic flip: reflect the tap in the card icon immediately, before the
+            // Laravel request round-trips. Rolled back below if the request fails.
+            setSavedByPostId((prev) => ({ ...prev, [idKey]: nextSaved }));
+            updatePost(target.id, (p) => ({ ...p, isBookmarked: nextSaved }));
             try {
-                const cols = await getCollectionsForPost(userId, target.id);
-                if (cols.length > 0) {
-                    await unsavePost(userId, target.id);
-                    setSavedByPostId((prev) => ({ ...prev, [target.id]: false }));
-                    updatePost(target.id, (p) => ({ ...p, isBookmarked: false }));
-                } else {
+                if (nextSaved) {
                     await savePostToDefaultCollection(userId, target.id, target);
-                    setSavedByPostId((prev) => ({ ...prev, [target.id]: true }));
-                    updatePost(target.id, (p) => ({ ...p, isBookmarked: true }));
+                } else {
+                    await unsavePost(userId, target.id);
                 }
             } catch (err) {
                 console.error('Collections save toggle failed:', err);
+                setSavedByPostId((prev) => ({ ...prev, [idKey]: prevSaved }));
+                updatePost(target.id, (p) => ({ ...p, isBookmarked: prevSaved }));
             }
         },
-        [userId, updatePost]
+        [userId, updatePost, savedByPostId]
     );
 
     useEffect(() => {
@@ -5148,11 +5152,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     userId={userId}
                     visible={!!saveModalPost}
                     onClose={() => setSaveModalPost(null)}
-                    onSaved={async () => {
-                        const cols = await getCollectionsForPost(userId, saveModalPost.id);
-                        const saved = cols.length > 0;
-                        setSavedByPostId((prev) => ({ ...prev, [saveModalPost.id]: saved }));
-                        updatePost(saveModalPost.id, (p) => ({ ...p, isBookmarked: saved }));
+                    onSaved={async (saved?: boolean) => {
+                        const sp = saveModalPost;
+                        if (!sp) return;
+                        const v =
+                            saved !== undefined
+                                ? saved
+                                : ((await getCollectionsForPost(userId, sp.id)).length > 0);
+                        setSavedByPostId((prev) => ({ ...prev, [sp.id]: v }));
+                        updatePost(sp.id, (p) => ({ ...p, isBookmarked: v }));
                     }}
                 />
             ) : null}

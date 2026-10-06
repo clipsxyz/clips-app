@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { getPostById } from '../api/posts';
@@ -88,7 +89,7 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
                     <View style={styles.mediaWrap}>
                         {isVideo ? (
                             <View style={styles.videoFrame}>
-                                <Image source={{ uri: displayUrl }} style={styles.mediaImage} />
+                                <CachedImage source={{ uri: displayUrl }} style={styles.mediaImage} />
                                 <View style={styles.playOverlay}>
                                     <View style={styles.playCircle}>
                                         <Icon name="play" size={ox(22)} color="#FFFFFF" />
@@ -96,7 +97,7 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
                                 </View>
                             </View>
                         ) : (
-                            <Image source={{ uri: displayUrl }} style={styles.mediaImage} />
+                            <CachedImage source={{ uri: displayUrl }} style={styles.mediaImage} />
                         )}
                     </View>
                 ) : null}
@@ -148,7 +149,7 @@ export function DmSharedPostPreviewCard({ postId, userId, onTap }: PreviewProps)
             {hasMedia ? (
                 <View style={styles.previewMediaBlock}>
                     <View style={styles.previewAspect}>
-                        <Image source={{ uri: displayUrl }} style={styles.mediaImage} />
+                        <CachedImage source={{ uri: displayUrl }} style={styles.mediaImage} />
                         {isVideo ? (
                             <View style={styles.playOverlay}>
                                 <View style={styles.playCircle}>

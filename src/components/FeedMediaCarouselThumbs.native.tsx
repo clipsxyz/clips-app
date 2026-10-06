@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import CachedImage from './CachedImage.native';
 import {
     FEED_CARD_CAROUSEL_COUNT,
     FEED_CARD_CAROUSEL_HEADER,
@@ -44,13 +45,13 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
                         >
                             {item.type === 'video' ? (
                                 <View style={styles.thumbImgWrap}>
-                                    <Image source={{ uri: item.url }} style={styles.thumbImg} />
+                                    <CachedImage source={{ uri: item.url }} style={styles.thumbImg} />
                                     <View style={styles.vidBadge}>
                                         <Text style={styles.vidBadgeText}>VID</Text>
                                     </View>
                                 </View>
                             ) : (
-                                <Image source={{ uri: item.url }} style={styles.thumbImg} />
+                                <CachedImage source={{ uri: item.url }} style={styles.thumbImg} />
                             )}
                         </TouchableOpacity>
                     );

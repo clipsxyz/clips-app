@@ -4,10 +4,10 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Image,
   ActivityIndicator,
   LayoutChangeEvent,
 } from 'react-native';
+import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
@@ -155,7 +155,7 @@ export default function SuggestedFollowerFeedCard({
               {needsVideoFrame ? (
                 <SuggestedThumbPreviewVideo url={videoUrl} />
               ) : stillIsImage ? (
-                <Image
+                <CachedImage
                   source={{ uri: preview.thumbnailUrl }}
                   style={styles.thumbImage}
                   resizeMode="cover"

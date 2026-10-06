@@ -8,6 +8,7 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import CachedImage from './CachedImage.native';
 import FeedPostMedia from './FeedPostMedia.native';
 import { timeAgo } from '../utils/timeAgo';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
@@ -72,7 +73,7 @@ export default function FeedAdCard({ ad, onImpression, onClick }: Props) {
             muted
           />
         ) : (
-          <Image
+          <CachedImage
             source={{ uri: ad.mediaUrl }}
             style={{ width: mediaWidth, height: mediaHeight }}
             resizeMode="cover"

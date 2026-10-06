@@ -4,7 +4,6 @@ import {
     Text,
     ScrollView,
     TouchableOpacity,
-    Image,
     StyleSheet,
     Modal,
     AppState,
@@ -19,6 +18,7 @@ import Animated, {
     useSharedValue,
     withTiming,
 } from 'react-native-reanimated';
+import CachedImage from './CachedImage.native';
 import type { VideoRef } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
@@ -107,7 +107,7 @@ function StoryPreviewVideo({
     // When paused without a real still, keep a paused video frame (not profile avatar / empty).
     if (effectivelyPaused && posterSource) {
         return (
-            <Image
+            <CachedImage
                 source={posterSource}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
@@ -223,7 +223,7 @@ function StoryCard({
                         paused={previewVideosPaused || !playPreviewVideo}
                     />
                 ) : item.thumb ? (
-                    <Image
+                    <CachedImage
                         source={{ uri: item.thumb }}
                         style={StyleSheet.absoluteFill}
                         resizeMode="cover"
@@ -345,7 +345,7 @@ function Stories24ExpandOverlay({
                         style={StyleSheet.absoluteFill}
                     />
                     {stillUri ? (
-                        <Image source={{ uri: stillUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                        <CachedImage source={{ uri: stillUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                     ) : (
                         <View style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]} />
                     )}
@@ -478,7 +478,7 @@ function Stories24CollapseOverlay({
                                 style={StyleSheet.absoluteFill}
                             />
                             {stillUri ? (
-                                <Image
+                                <CachedImage
                                     source={{ uri: stillUri }}
                                     style={StyleSheet.absoluteFill}
                                     resizeMode="cover"

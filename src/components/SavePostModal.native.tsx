@@ -58,7 +58,7 @@ type Props = {
     userId: string;
     visible: boolean;
     onClose: () => void;
-    onSaved?: () => void;
+    onSaved?: (saved?: boolean) => void;
 };
 
 export default function SavePostModal({ post, userId, visible, onClose, onSaved }: Props) {
@@ -110,12 +110,16 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         const def = collections.find((c) => c.name === DEFAULT_COLLECTION_NAME);
         if (!def || postCollectionIds.includes(def.id)) return;
         autoSavedRef.current = true;
+        // Optimistic: flip the saved state before the Laravel round-trip; roll back below
+        // if the auto-save fails.
+        onSaved?.(true);
         void (async () => {
             try {
                 await savePostToDefaultCollection(userId, post.id, post);
                 await load();
-                onSaved?.();
+                onSaved?.(true);
             } catch (e) {
+                onSaved?.(false);
                 console.error('Auto-save failed:', e);
             }
         })();
@@ -183,7 +187,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                 await addPostToCollection(collectionId, post.id, post);
             }
             await load();
-            onSaved?.();
+            onSaved?.(postCollectionIds.length > 0);
         } catch {
             Alert.alert('Save', 'Could not update collection.');
         } finally {
@@ -210,7 +214,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
             setNewName('');
             setMode('picker');
             await load();
-            onSaved?.();
+            onSaved?.(true);
         } catch {
             Alert.alert('Collections', 'Could not create collection.');
         } finally {
