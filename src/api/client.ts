@@ -19,6 +19,7 @@ function throwMockConnectionRefused(): never {
  */
 const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/posts',
+    '/stories',
     '/upload/single',
     '/locations/search',
     '/locations/geocode',
@@ -53,10 +54,12 @@ const LIVE_API_PATH_PREFIXES = [
     '/public/posts/',
 ] as const;
 
-function isMigratedApiRequestPath(endpoint: string): boolean {
+export function isMigratedApiRequestPath(endpoint: string): boolean {
     const path = (endpoint.split('?')[0] || '').replace(/\/$/, '') || '/';
     if (LIVE_API_REQUEST_PATHS.has(path)) return true;
-    return LIVE_API_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+    return LIVE_API_PATH_PREFIXES.some(
+        (prefix) => path.startsWith(prefix) || prefix.replace(/\/$/, '') === path,
+    );
 }
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)

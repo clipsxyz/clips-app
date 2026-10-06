@@ -767,7 +767,7 @@ function storyAvatarUrl(story: Story): string | undefined {
     return (story as StoryWithAvatar).avatarUrl;
 }
 
-function mapLaravelStoryToStory(story: any): StoryWithAvatar {
+export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
     return {
         id: story.id,
         userId: story.user_id,
@@ -789,6 +789,10 @@ function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         textStyle: story.text_style || undefined,
         stickers: normalizeStoryStickers(story.stickers),
         taggedUsers: story.tagged_users || undefined,
+        videoPosterUrl: resolveStoryMediaUrl(story.video_poster_url) || undefined,
+        audience: story.audience || 'public',
+        sharedFromPost: story.shared_from_post_id || undefined,
+        sharedFromUser: story.shared_from_user_handle || undefined,
         // Real poster avatar. The stories endpoint eager-loads
         // `user:id,handle,display_name,avatar_url`, so prefer the payload over the
         // seed mock map, which only resolves the 8 mock handles.
@@ -1019,7 +1023,7 @@ export async function createStory(
 
     // Use real Laravel API
     const { apiRequest } = await import('./client');
-    
+
     try {
         const response = await apiRequest('/stories', {
             method: 'POST',
