@@ -2009,7 +2009,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     );
 
     React.useEffect(() => {
-        if (!user?.id || customLocation || showFollowingFeed) {
+        if (!user?.id) {
             setStories24Items([]);
             return;
         }
@@ -2028,13 +2028,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
-    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
+    }, [user?.id, user?.handle]);
 
     useFocusEffect(
         React.useCallback(() => {
-            if (!user?.id || customLocation || showFollowingFeed) return;
+            if (!user?.id) return;
             void buildStories24RailItems(user.id, user.handle).then(setStories24Items);
-        }, [user?.id, user?.handle, customLocation, showFollowingFeed]),
+        }, [user?.id, user?.handle]),
     );
 
     React.useEffect(() => {
@@ -3495,7 +3495,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const showSuggestedFollowerCard = Boolean(suggestedFollowerSuggestion);
 
-    const showStories24Rail = !customLocation && !showFollowingFeed && stories24Items.length > 0;
+    const showStories24Rail = stories24Items.length > 0;
 
     React.useEffect(() => {
         const pending = pendingStories24CollapseRef.current;

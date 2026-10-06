@@ -36,6 +36,88 @@ class StoryControllerTest extends TestCase
         ]);
     }
 
+    public function test_can_create_shared_story_and_persists_reference_scope_and_poster(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'media_url' => 'https://example.com/shared.jpg',
+                'media_type' => 'image',
+                'text' => 'Shared from feed',
+                'shared_from_post_id' => $post->id,
+                'shared_from_user_handle' => $post->user_handle,
+                'audience' => 'close_friends',
+                'video_poster_url' => 'https://example.com/poster.jpg',
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonFragment([
+                'shared_from_post_id' => $post->id,
+                'audience' => 'close_friends',
+                'video_poster_url' => 'https://example.com/poster.jpg',
+            ]);
+
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'shared_from_post_id' => $post->id,
+            'shared_from_user_handle' => $post->user_handle,
+            'audience' => 'close_friends',
+            'video_poster_url' => 'https://example.com/poster.jpg',
+        ]);
+
+        $story = Story::where('user_id', $user->id)->firstOrFail();
+        $this->assertTrue($story->expires_at->isAfter(now()->addHours(23)));
+        $this->assertTrue($story->expires_at->isBefore(now()->addHours(25)));
+    }
+
+    public function test_shared_story_with_unknown_post_id_still_persists(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'media_url' => 'https://example.com/shared.jpg',
+                'media_type' => 'image',
+                'text' => 'Shared a mock post',
+                'shared_from_post_id' => 'local-post-123',
+                'shared_from_user_handle' => 'Someone@Elsewhere',
+            ]);
+
+        // Must NOT 400 on a non-UUID / missing post reference (the FK cannot hold a
+        // dangling id), otherwise the client silently falls back to the in-memory mock.
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'shared_from_post_id' => null,
+            'shared_from_user_handle' => 'Someone@Elsewhere',
+        ]);
+    }
+
+    public function test_shared_story_accepts_local_video_poster(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/stories', [
+                'media_url' => 'https://example.com/clip.mp4',
+                'media_type' => 'video',
+                'text' => 'Shared clip',
+                'video_poster_url' => 'file:///data/user/0/com.clipsapp/cache/poster.jpg',
+            ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('stories', [
+            'user_id' => $user->id,
+            'media_type' => 'video',
+            'video_poster_url' => 'file:///data/user/0/com.clipsapp/cache/poster.jpg',
+        ]);
+    }
+
     public function test_cannot_create_empty_story(): void
     {
         $user = User::factory()->create();

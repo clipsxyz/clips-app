@@ -12,6 +12,7 @@ import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { incrementShares } from '../api/posts';
 import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
+import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import type { Post } from '../types';
@@ -51,6 +52,23 @@ export default function ShareToStoriesModal({
         }
         if (payloadMediaUrl) return payloadMediaUrl;
         return firstImageItem || targetPost.videoPosterUrl;
+    };
+
+    /**
+     * A story is persisted server-side, so media_url MUST be a URL Laravel can serve.
+     * Locally-captured stills (file://) or content:// URIs would fail `nullable|url`
+     * validation, 400 the request, and make the story silently fall back to the
+     * in-memory mock — vanishing on the next refresh. Upload any local URI first.
+     */
+    const ensureRemoteUrl = async (
+        uri: string | undefined,
+        mimeType: 'image' | 'video',
+    ): Promise<string | undefined> => {
+        if (!uri) return uri;
+        if (!/^(file|content|ph|blob|data):/i.test(uri)) return uri;
+        const ext = mimeType === 'video' ? 'mp4' : 'jpg';
+        const uploaded = await uploadFileFromUri(uri, `${mimeType}/${ext}`, `story-share-${Date.now()}.${ext}`);
+        return uploaded.fileUrl || uploaded.url || undefined;
     };
 
     const handleShare = async () => {
@@ -93,6 +111,13 @@ export default function ShareToStoriesModal({
                 }
                 payload = { ...payload, mediaUrl: generated, mediaType: 'image' };
             }
+
+            // Persisted stories must carry a remotely-servable URL (see ensureRemoteUrl).
+            payload = {
+                ...payload,
+                mediaUrl: await ensureRemoteUrl(payload.mediaUrl, payload.mediaType === 'video' ? 'video' : 'image'),
+                videoPosterUrl: await ensureRemoteUrl(payload.videoPosterUrl, 'image'),
+            };
 
             overlay = showUploadOverlayNative({
                 thumbUri: resolveOverlayThumbUri(post, payload.mediaUrl, payload.mediaType),

@@ -85,6 +85,17 @@ module.exports = function importMetaEnvForHermes({ types: t }) {
     return null;
   }
 
+  // Hermes cannot resolve `process.env[someVariable]`. Build an object literal of all inlined
+  // public env keys so computed reads (e.g. getRuntimeEnv) work at runtime.
+  function buildEnvObject(t) {
+    const fileEnv = loadDotEnv();
+    return t.objectExpression(
+      Object.keys(fileEnv).map((key) =>
+        t.objectProperty(t.stringLiteral(key), t.stringLiteral(String(fileEnv[key]))),
+      ),
+    );
+  }
+
   function rewritePath(pathNode) {
     const { node } = pathNode;
 
@@ -105,6 +116,19 @@ module.exports = function importMetaEnvForHermes({ types: t }) {
 
     if (isImportMetaEnvMember(node)) {
       pathNode.replaceWith(processEnv());
+      return;
+    }
+
+    // process.env[computedVariable] → ({ ...inlinedEnv })[computedVariable]
+    if (
+      (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) &&
+      node.computed &&
+      !t.isStringLiteral(node.property) &&
+      t.isMemberExpression(node.object) &&
+      t.isIdentifier(node.object.object, { name: 'process' }) &&
+      t.isIdentifier(node.object.property, { name: 'env' })
+    ) {
+      node.object = buildEnvObject(t);
       return;
     }
 

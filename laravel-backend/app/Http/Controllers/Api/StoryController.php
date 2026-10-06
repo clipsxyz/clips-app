@@ -218,6 +218,10 @@ class StoryController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        \Log::info('DEBUG stories.store request', [
+            'user' => optional(Auth::user())->id,
+            'body' => $request->all(),
+        ]);
         $validator = Validator::make($request->all(), [
             'media_url' => 'nullable|url|max:500', // Made nullable for text-only stories
             'media_type' => 'nullable|in:image,video', // Made nullable for text-only stories
@@ -226,7 +230,12 @@ class StoryController extends Controller
             'text_size' => 'nullable|in:small,medium,large',
             'location' => 'nullable|string|max:200',
             'venue' => 'nullable|string|max:200',
-            'shared_from_post_id' => 'nullable|uuid|exists:posts,id',
+            // Lenient: RN may share a mock/local/optimistic post whose id is not a DB UUID.
+            // A strict uuid|exists rule would 400 the whole story, silently falling back to the
+            // in-memory mock and making the story vanish on the next refresh. We resolve the
+            // real post below and only persist a reference when it actually exists.
+            'shared_from_post_id' => 'nullable|string|max:255',
+            'shared_from_user_handle' => 'nullable|string|max:255',
             'textStyle' => 'nullable|array',
             'textStyle.color' => 'nullable|string|max:50',
             'textStyle.size' => 'nullable|in:small,medium,large',
@@ -234,20 +243,34 @@ class StoryController extends Controller
             'stickers' => 'nullable|array',
             'taggedUsers' => 'nullable|array',
             'taggedUsers.*' => 'required|string|exists:users,handle',
+            'audience' => 'nullable|in:public,close_friends,only_me',
+            // Poster is optional decoration; never reject a story just because the still is
+            // not an absolute URL (local file://, blob:, or empty are all acceptable).
+            'video_poster_url' => 'nullable|string|max:500',
         ]);
 
         if ($validator->fails()) {
+            \Log::warning('DEBUG stories.store validation failed', $validator->errors()->toArray());
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
         // Validate that either media or text/stickers are provided
         if (!$request->media_url && !$request->text && (!$request->stickers || count($request->stickers) === 0)) {
+            \Log::warning('DEBUG stories.store empty body', $request->all());
             return response()->json(['error' => 'Story must have media, text, or stickers'], 400);
         }
 
         $user = Auth::user();
 
-        $story = DB::transaction(function () use ($request, $user) {
+        // Resolve the referenced post ourselves instead of a strict `exists` rule so a
+        // story is never rejected just because the share references a post we can't find
+        // (mock/local/optimistic card). The FK on stories.shared_from_post_id requires a
+        // real row, so store NULL when unresolved and keep the media/text instead.
+        $sharedPost = $request->shared_from_post_id
+            ? Post::find($request->shared_from_post_id)
+            : null;
+
+        $story = DB::transaction(function () use ($request, $user, $sharedPost) {
             $story = Story::create([
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
@@ -258,13 +281,14 @@ class StoryController extends Controller
                 'text_size' => $request->text_size,
                 'location' => $request->location,
                 'venue' => $request->venue,
-                'shared_from_post_id' => $request->shared_from_post_id,
-                'shared_from_user_handle' => $request->shared_from_post_id 
-                    ? Post::find($request->shared_from_post_id)?->user_handle 
-                    : null,
+                'shared_from_post_id' => $sharedPost?->id,
+                'shared_from_user_handle' => $sharedPost?->user_handle
+                    ?? $request->shared_from_user_handle,
                 'text_style' => $request->textStyle,
                 'stickers' => $request->stickers,
                 'tagged_users' => $request->taggedUsers,
+                'audience' => $request->audience ?: 'public',
+                'video_poster_url' => $request->video_poster_url,
                 'expires_at' => now()->addHours(24), // 24 hours from now
             ]);
 

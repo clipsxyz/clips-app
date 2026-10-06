@@ -39,6 +39,8 @@ class Story extends Model
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers', // JSON array of StickerOverlay objects
         'tagged_users', // JSON array of user handles
+        'audience', // public | close_friends | only_me
+        'video_poster_url', // still frame for Stories 24 rail thumbs
     ];
 
     protected $casts = [

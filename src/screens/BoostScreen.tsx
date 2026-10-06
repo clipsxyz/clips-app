@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -24,6 +24,9 @@ import {
 import BoostInsightsSheet from '../components/BoostInsightsSheet.native';
 import { ox } from '../constants/nativeOpticalScale';
 
+/** Minimum gap between silent focus-triggered refreshes (ms). Prevents API thrashing. */
+const SILENT_REFRESH_MS = 3000;
+
 const BoostScreen: React.FC = ({ navigation }: any) => {
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
@@ -38,11 +41,23 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [insightsPost, setInsightsPost] = useState<Post | null>(null);
     const [insightsVisible, setInsightsVisible] = useState(false);
 
+    // Guard against overlapping/duplicate fetches — an unguarded load loop here is what
+    // exhausts the API throttle and surfaces as HTTP 429 "Too Many Attempts".
+    const inFlightRef = useRef(false);
+    const lastLoadRef = useRef(0);
+
     const loadUserPosts = useCallback(async (opts?: { silent?: boolean }) => {
         if (!user?.handle) {
             setLoading(false);
             return;
         }
+        // Short-circuit overlapping requests (focus + effect + tab re-renders used to
+        // fire this repeatedly and hammer the API into a 429 "Too Many Attempts").
+        if (inFlightRef.current) return;
+        // Debounce silent focus refreshes so rapid re-renders can't thrash the endpoint.
+        if (opts?.silent && Date.now() - lastLoadRef.current < SILENT_REFRESH_MS) return;
+        inFlightRef.current = true;
+        lastLoadRef.current = Date.now();
         if (!opts?.silent) {
             setLoading(true);
         }
@@ -66,6 +81,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             console.error('Error loading user posts:', err);
             setError('Failed to load your posts');
         } finally {
+            inFlightRef.current = false;
             setLoading(false);
         }
     }, [user?.handle, userId]);
@@ -75,6 +91,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     }, [loadUserPosts]);
 
     // Soft refresh on focus — keep existing tiles visible (no full-screen spinner).
+    // Guarded by the in-flight flag + debounce above, so it never loops.
     useFocusEffect(
         useCallback(() => {
             void loadUserPosts({ silent: true });
