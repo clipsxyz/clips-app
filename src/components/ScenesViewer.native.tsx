@@ -1378,7 +1378,7 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     commentsVideoCover: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: '#121212',
         zIndex: 4,
         elevation: Platform.OS === 'android' ? 4 : 0,
@@ -1398,11 +1398,11 @@ const styles = StyleSheet.create({
         fontSize: 11,
     },
     fxLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 60,
     },
     page: { width: '100%', backgroundColor: '#000' },
-    fallback: { ...StyleSheet.absoluteFillObject, backgroundColor: '#111' },
+    fallback: { ...StyleSheet.absoluteFill, backgroundColor: '#111' },
     progressTrack: {
         position: 'absolute',
         left: 0,

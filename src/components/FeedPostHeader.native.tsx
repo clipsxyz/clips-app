@@ -79,8 +79,8 @@ export default function FeedPostHeader({
     );
 
     const avatarSrc = isCurrentUser
-        ? user?.avatarUrl
-        : getAvatarForHandle(safeProfileHandle);
+        ? user?.avatarUrl || post.avatarUrl || getAvatarForHandle(safeProfileHandle)
+        : post.avatarUrl || getAvatarForHandle(safeProfileHandle);
 
     const verifiedAccountType = resolveVerifiedAccountType(
         isCurrentUser ? user?.accountType : post.userAccountType,
@@ -130,14 +130,18 @@ export default function FeedPostHeader({
 
     const avatarBlock = showAvatar ? (
         <View
-            style={styles.avatarWrap}
+            style={[styles.avatarWrap, { width: FEED_UI.icon.avatar, height: FEED_UI.icon.avatar }]}
             ref={(r) => {
                 onRegisterDmAnchor?.(`post:${post.id}`, r);
                 onRegisterDmAnchor?.(`handle:${post.userHandle || safeHandle}`, r);
             }}
             collapsable={false}
         >
-            <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
+            <TouchableOpacity
+                onPress={onProfileMenuPress}
+                activeOpacity={0.85}
+                style={styles.avatarHit}
+            >
                 <Avatar
                     src={avatarSrc}
                     name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
@@ -182,36 +186,36 @@ export default function FeedPostHeader({
 
     const chrome = (
         <View style={[styles.row, variant === 'textOnlyChrome' && styles.textOnlyRow]}>
-            <View style={[styles.left, showAvatar && styles.leftWithAvatar]}>
-                {avatarBlock}
-                <View style={styles.infoCol}>
-                    {isReclip ? (
-                        <View style={styles.reclipRow}>
-                            <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
-                            <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
-                                {String(post.userHandle || safeHandle).trim() || 'User'} reclipped
-                            </Text>
-                        </View>
-                    ) : null}
+            <View style={styles.left}>
+                {isReclip ? (
+                    <View style={styles.reclipRow}>
+                        <Icon name="repeat" size={FEED_UI.type.reclip} color={reclipColor} />
+                        <Text style={[styles.reclipText, { color: reclipColor }]} numberOfLines={1}>
+                            {String(post.userHandle || safeHandle).trim() || 'User'} reclipped
+                        </Text>
+                    </View>
+                ) : null}
+                <View style={styles.identityRow}>
+                    {avatarBlock}
                     {handleRow}
-                    {socialSourceLabel ? (
-                        <View
+                </View>
+                {socialSourceLabel ? (
+                    <View
+                        style={[
+                            styles.socialPill,
+                            isOverlaid ? styles.socialPillOverlay : styles.socialPillDefault,
+                        ]}
+                    >
+                        <Text
                             style={[
-                                styles.socialPill,
-                                isOverlaid ? styles.socialPillOverlay : styles.socialPillDefault,
+                                styles.socialPillText,
+                                { color: isOverlaid ? 'rgba(255,255,255,0.95)' : '#D1D5DB' },
                             ]}
                         >
-                            <Text
-                                style={[
-                                    styles.socialPillText,
-                                    { color: isOverlaid ? 'rgba(255,255,255,0.95)' : '#D1D5DB' },
-                                ]}
-                            >
-                                {socialSourceLabel}
-                            </Text>
-                        </View>
-                    ) : null}
-                </View>
+                            {socialSourceLabel}
+                        </Text>
+                    </View>
+                ) : null}
             </View>
             <View style={styles.right}>
                 {metadataItems.length > 0 ? (
@@ -296,32 +300,45 @@ const styles = StyleSheet.create({
     },
     row: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'space-between',
+        gap: 10,
     },
     left: {
         flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        justifyContent: 'center',
         minWidth: 0,
         paddingRight: 8,
+        gap: 2,
     },
-    // Web: `gap-3` between avatar and text
-    leftWithAvatar: {
-        gap: 12,
-    },
-    infoCol: {
-        flex: 1,
+    /** Avatar + handle share one baseline so the photo sits mid-line with the name. */
+    identityRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
         minWidth: 0,
-        gap: 0,
+        maxWidth: '100%',
+        height: FEED_UI.icon.avatar,
     },
     right: {
         alignItems: 'flex-end',
+        justifyContent: 'center',
         gap: 2,
         flexShrink: 0,
     },
     avatarWrap: {
         position: 'relative',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        // Fixed slot = photo size; story ring may paint outside without shifting the handle.
+        overflow: 'visible',
+    },
+    avatarHit: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     followPlus: {
         position: 'absolute',
@@ -395,14 +412,20 @@ const styles = StyleSheet.create({
     handleBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        maxWidth: '100%',
+        justifyContent: 'center',
+        gap: 4,
+        flexShrink: 1,
+        minWidth: 0,
+        height: FEED_UI.icon.avatar,
     },
     // Web feed: `text-xs font-semibold`
     handleText: {
         fontSize: FEED_UI.type.handle,
         fontWeight: '600',
         flexShrink: 1,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
+        lineHeight: FEED_UI.type.handle + 2,
     },
     socialPill: {
         alignSelf: 'flex-start',

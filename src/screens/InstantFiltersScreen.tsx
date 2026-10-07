@@ -184,7 +184,6 @@ const styles = StyleSheet.create({
         maxHeight: '70%',
         borderRadius: ox(16),
         overflow: 'hidden',
-        backgroundColor: '#000000',
         ...glassPanel,
     },
     video: {

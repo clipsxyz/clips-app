@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import CachedImage from './CachedImage.native';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 
@@ -22,13 +23,17 @@ export default function Avatar({
     const { dim, fontSize } = resolveAvatarDimensions(size);
     const initials = getAvatarInitials(name);
     const [imageFailed, setImageFailed] = useState(false);
-    const showImage = src && !imageFailed;
+    const resolvedSrc = src ? resolvePublicMediaUrl(src) || src : undefined;
+    useEffect(() => {
+        setImageFailed(false);
+    }, [resolvedSrc]);
+    const showImage = !!resolvedSrc && !imageFailed;
 
     const inner = (
         <View style={[styles.innerClip, { width: dim, height: dim, borderRadius: dim / 2 }]}>
             {showImage ? (
                 <CachedImage
-                    source={{ uri: src }}
+                    source={{ uri: resolvedSrc }}
                     style={StyleSheet.absoluteFill}
                     resizeMode="cover"
                     onError={() => setImageFailed(true)}
@@ -102,12 +107,12 @@ const styles = StyleSheet.create({
     },
     innerClip: {
         overflow: 'hidden',
-        backgroundColor: '#0b0b0f',
+        backgroundColor: '#2A2F38',
         alignItems: 'center',
         justifyContent: 'center',
     },
     initialsWrap: {
-        backgroundColor: '#000000',
+        backgroundColor: '#2A2F38',
         alignItems: 'center',
         justifyContent: 'center',
     },

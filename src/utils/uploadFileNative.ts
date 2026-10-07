@@ -1,7 +1,14 @@
 import { Platform } from 'react-native';
-import { getApiBaseUrl } from '../api/apiBaseUrl';
+import {
+    getApiBaseUrl,
+    getApiBaseUrlCandidates,
+    rememberSuccessfulApiBaseUrl,
+    resolvePublicMediaUrl,
+} from '../api/apiBaseUrl';
+import { DEV_LAN_API_BASE_URL } from '../config/runtimeEnv';
 import { isMockMode } from '../api/apiMode';
 import { getAuthorizationHeader } from './authTokenBridge';
+import { resolveLocalMediaUriForFfmpeg } from './resolveLocalMediaUriForFfmpegNative';
 
 export type NativeUploadResult = {
     success?: boolean;
@@ -11,22 +18,26 @@ export type NativeUploadResult = {
 };
 
 /** RN multipart file shape — must not be sent as a Blob/JSON. */
-type RnFormFile = {
+export type RnFormFile = {
     uri: string;
     type: string;
     name: string;
 };
 
-function normalizeUploadUri(uri: string): string {
+export function normalizeNativeUploadUri(uri: string): string {
     const trimmed = String(uri || '').trim();
     if (!trimmed) return trimmed;
-    // Remote / Android content / Photos stay as-is
     if (/^(https?|content|ph):\/\//i.test(trimmed)) return trimmed;
     if (trimmed.startsWith('file://')) return trimmed;
-    // Absolute filesystem path → file:// (required by Android OkHttp)
     if (trimmed.startsWith('/')) return `file://${trimmed}`;
+    if (Platform.OS === 'android' && !trimmed.includes('://')) {
+        return `file://${trimmed}`;
+    }
     return trimmed;
 }
+
+/** Alias used by prepareMediaForPostNative / carousel upload. */
+export const normalizeUploadUri = normalizeNativeUploadUri;
 
 function inferMimeAndName(
     uri: string,
@@ -43,7 +54,6 @@ function inferMimeAndName(
             fileName && /\.(mp4|mov|m4v|webm)$/i.test(fileName)
                 ? fileName.replace(/\.(mov|m4v|webm)$/i, '.mp4')
                 : `clip-${Date.now()}.mp4`;
-        // Always advertise video/mp4 for RN uploads (Laravel accepts mp4 extension).
         return { type: 'video/mp4', name: name.replace(/[^\w.\-]+/g, '_') };
     }
 
@@ -61,8 +71,44 @@ function inferMimeAndName(
 }
 
 /**
+ * Every RN FormData file part must be `{ uri, name, type }` with a `file://` path on Android.
+ * Returns null for empty/data URIs that OkHttp rejects as "Network request failed".
+ */
+export function buildNativeFormFile(
+    uri: string,
+    mimeType?: string,
+    fileName?: string,
+): RnFormFile | null {
+    let normalized = normalizeNativeUploadUri(uri);
+    if (!normalized) return null;
+    if (/^data:/i.test(normalized)) return null;
+    if (normalized.startsWith('/') && !normalized.includes('://')) {
+        normalized = `file://${normalized}`;
+    }
+    // Android multipart uploads must use file:// (content:// often yields Network request failed).
+    if (Platform.OS === 'android' && !normalized.startsWith('file://') && !/^https?:\/\//i.test(normalized)) {
+        return null;
+    }
+    if (!/^(file|content|ph|https?):\/\//i.test(normalized)) return null;
+    const { type, name } = inferMimeAndName(normalized, mimeType, fileName);
+    if (!type || !name) return null;
+    return { uri: normalized, type, name };
+}
+
+/** Multipart fetch headers: Accept + optional Auth only — never Content-Type. */
+function stripContentType(headers: Record<string, string>): Record<string, string> {
+    const next: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+        if (key.toLowerCase() === 'content-type') continue;
+        next[key] = value;
+    }
+    return next;
+}
+
+/**
  * Auth-only headers for multipart upload.
- * Never set Content-Type — fetch must add multipart/form-data with boundary.
+ * Never set Content-Type / multipart/form-data / application/json —
+ * React Native must generate the multipart boundary automatically.
  */
 async function uploadAuthHeaders(): Promise<Record<string, string>> {
     const auth = await getAuthorizationHeader();
@@ -72,10 +118,135 @@ async function uploadAuthHeaders(): Promise<Record<string, string>> {
     if (auth.Authorization) {
         headers.Authorization = auth.Authorization;
     }
-    // Strip any Content-Type that might leak from shared helpers.
-    delete (headers as any)['Content-Type'];
-    delete (headers as any)['content-type'];
-    return headers;
+    return stripContentType(headers);
+}
+
+function isTransientNetworkError(err: unknown): boolean {
+    const anyErr = err as any;
+    const message = String(anyErr?.message || '');
+    const name = String(anyErr?.name || '');
+    return (
+        name === 'AbortError' ||
+        message === 'Network request failed' ||
+        message.includes('Network request failed') ||
+        message === 'Failed to fetch' ||
+        message.includes('Failed to fetch') ||
+        message.includes('ECONNREFUSED') ||
+        message.includes('CONNECTION_REFUSED') ||
+        /timed out/i.test(message)
+    );
+}
+
+async function postMultipartToUrl(
+    uploadUrl: string,
+    formFile: RnFormFile,
+    headers: Record<string, string>,
+    timeoutMs: number,
+): Promise<NativeUploadResult> {
+    if (!formFile.uri || !formFile.type || !formFile.name) {
+        throw new Error('FormData file must be { uri, type, name }');
+    }
+    if (Platform.OS === 'android' && !formFile.uri.startsWith('file://') && !/^https?:\/\//i.test(formFile.uri)) {
+        throw new Error(
+            `Android upload requires file:// URI, got: ${formFile.uri.slice(0, 64)}`,
+        );
+    }
+
+    const formData = new FormData();
+    // React Native native shape — not a Blob/File from the DOM.
+    // Do NOT set Content-Type; the runtime must generate multipart/form-data; boundary=…
+    formData.append('file', {
+        uri: formFile.uri,
+        type: formFile.type,
+        name: formFile.name,
+    } as unknown as Blob);
+
+    // Final guard: never send application/json or multipart/form-data without boundary.
+    const safeHeaders = stripContentType(headers);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const response = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: safeHeaders,
+            body: formData,
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            let message = `Upload failed (${response.status})`;
+            try {
+                const data = await response.json();
+                message =
+                    [data.error, data.message, data.detail].filter(Boolean).join(': ') || message;
+            } catch {
+                /* ignore parse errors */
+            }
+            const httpErr = new Error(message);
+            (httpErr as any).status = response.status;
+            throw httpErr;
+        }
+
+        const result = (await response.json()) as NativeUploadResult;
+        const rawRemote = result.fileUrl || result.url || '';
+        const remote =
+            typeof resolvePublicMediaUrl === 'function'
+                ? resolvePublicMediaUrl(rawRemote) || rawRemote
+                : rawRemote;
+        return { ...result, fileUrl: remote, url: remote };
+    } catch (err: unknown) {
+        clearTimeout(timeoutId);
+        throw err;
+    }
+}
+
+/**
+ * Ensure gallery / absolute paths become a local `file://…` URI before FormData upload.
+ * Android OkHttp often fails multipart with bare content:// without a readable file path.
+ */
+async function resolveUriForMultipartUpload(uri: string): Promise<string> {
+    const normalized = normalizeNativeUploadUri(uri);
+    if (!normalized) {
+        throw new Error('Missing local media URI for upload');
+    }
+    if (/^https?:\/\//i.test(normalized) || /^data:/i.test(normalized)) {
+        return normalized;
+    }
+    if (normalized.startsWith('file://')) {
+        return normalized;
+    }
+    if (normalized.startsWith('/') && !normalized.includes('://')) {
+        return `file://${normalized}`;
+    }
+    // content:// / ph:// → on-disk file:// before FormData (required on Android).
+    try {
+        const resolved = await resolveLocalMediaUriForFfmpeg(normalized);
+        if (resolved.startsWith('file://') || resolved.startsWith('/')) {
+            return resolved.startsWith('file://') ? resolved : `file://${resolved}`;
+        }
+        return resolved;
+    } catch (err) {
+        console.warn('[uploadFileFromUri] could not materialize content URI', err);
+        throw new Error(
+            'Could not convert gallery content:// URI to a local file:// path for upload.',
+        );
+    }
+}
+
+function resolveUploadCandidates(): string[] {
+    const primary = String(getApiBaseUrl() || DEV_LAN_API_BASE_URL).replace(/\/$/, '');
+    const fromCandidates =
+        typeof getApiBaseUrlCandidates === 'function'
+            ? getApiBaseUrlCandidates()
+            : [primary];
+    const ordered = fromCandidates
+        .map((u) => String(u || '').replace(/\/$/, ''))
+        .filter((u) => /^https?:\/\//i.test(u));
+    if (ordered.length > 0) return ordered;
+    return [primary || DEV_LAN_API_BASE_URL];
 }
 
 /** Upload a local file URI to Laravel `/upload/single` (React Native FormData). */
@@ -90,97 +261,47 @@ export async function uploadFileFromUri(
         throw err;
     }
 
-    const normalizedUri = normalizeUploadUri(uri);
-    const { type, name } = inferMimeAndName(normalizedUri, mimeType, fileName);
-    let apiBase = '';
-    try {
-        apiBase = String(getApiBaseUrl() || '').replace(/\/$/, '');
-    } catch (err) {
-        console.log('[uploadFileFromUri] getApiBaseUrl failed', err);
-    }
-    if (!apiBase || apiBase === '/api') {
-        apiBase = 'http://localhost:8000/api';
-    }
-    const uploadUrl = `${apiBase}/upload/single`;
-    if (!/^https?:\/\//i.test(uploadUrl)) {
-        throw new Error(`Invalid upload URL (missing host): ${uploadUrl}`);
+    const resolvedUri = await resolveUriForMultipartUpload(uri);
+    const formFile = buildNativeFormFile(resolvedUri, mimeType, fileName);
+    if (!formFile) {
+        throw new Error(
+            'Invalid upload file. Expected a local file:// URI with type and name for FormData.',
+        );
     }
 
-    const formFile: RnFormFile = {
-        uri: normalizedUri,
-        type,
-        name,
-    };
-
-    const formData = new FormData();
-    // React Native FormData accepts { uri, type, name } — cast for TypeScript DOM typings.
-    formData.append('file', formFile as unknown as Blob);
-
+    const candidates = resolveUploadCandidates();
     const headers = await uploadAuthHeaders();
-    console.log('[uploadFileFromUri] POST', uploadUrl, {
-        platform: Platform.OS,
-        apiBase,
-        uriPreview: normalizedUri.slice(0, 80),
-        type,
-        name,
-        headerKeys: Object.keys(headers),
-        hasContentType: Object.keys(headers).some((k) => k.toLowerCase() === 'content-type'),
-    });
+    const timeoutMs = formFile.type.startsWith('video/') ? 120000 : 60000;
 
-    const controller = new AbortController();
-    const timeoutMs = type.startsWith('video/') ? 120000 : 60000;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let lastError: unknown = null;
 
-    try {
-        const response = await fetch(uploadUrl, {
-            method: 'POST',
-            headers,
-            body: formData,
-            signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            let message = `Upload failed (${response.status})`;
-            try {
-                const data = await response.json();
-                message =
-                    [data.error, data.message, data.detail].filter(Boolean).join(': ') || message;
-                console.log('[uploadFileFromUri] error body', data);
-            } catch {
-                /* ignore parse errors */
+    for (const apiBase of candidates) {
+        const uploadUrl = `${apiBase}/upload/single`;
+        try {
+            const result = await postMultipartToUrl(uploadUrl, formFile, headers, timeoutMs);
+            if (typeof rememberSuccessfulApiBaseUrl === 'function') {
+                rememberSuccessfulApiBaseUrl(apiBase);
             }
-            console.log('[uploadFileFromUri] response status=', response.status, message);
-            throw new Error(message);
-        }
+            return result;
+        } catch (err: unknown) {
+            lastError = err;
 
-        const result = (await response.json()) as NativeUploadResult;
-        console.log('[uploadFileFromUri] ok', {
-            status: response.status,
-            fileUrl: result.fileUrl || result.url,
-        });
-        return result;
-    } catch (err: unknown) {
-        clearTimeout(timeoutId);
-        const anyErr = err as any;
-        console.log('[uploadFileFromUri] fetch error', {
-            url: uploadUrl,
-            name: anyErr?.name,
-            message: anyErr?.message,
-            stack: typeof anyErr?.stack === 'string' ? anyErr.stack.slice(0, 300) : undefined,
-        });
-        if (err instanceof Error && err.name === 'AbortError') {
-            throw new Error('Upload timed out. Check your connection and try again.');
+            // Host answered (HTTP / validation) — do not try other bases.
+            if (typeof (err as any)?.status === 'number') {
+                throw err;
+            }
+            if (!isTransientNetworkError(err)) {
+                throw err;
+            }
+            // Connectivity failure — try next LAN / emulator / loopback candidate.
         }
-        if (
-            anyErr?.message === 'Network request failed' ||
-            anyErr?.message?.includes('Network request failed') ||
-            anyErr?.message === 'Failed to fetch'
-        ) {
-            throw new Error(
-                `Network request failed uploading to ${uploadUrl}. Check Laravel is reachable from this device and FormData uses uri/type/name (no JSON Content-Type).`,
-            );
-        }
-        throw err;
     }
+
+    if (lastError instanceof Error && lastError.name === 'AbortError') {
+        throw new Error('Upload timed out. Check your connection and try again.');
+    }
+    const tried = candidates.map((c) => `${c}/upload/single`).join(', ');
+    throw new Error(
+        `Network request failed uploading (${tried}). Check Laravel is reachable from this device, cleartext HTTP is allowed, and FormData uses { uri, type, name } with no Content-Type header.`,
+    );
 }

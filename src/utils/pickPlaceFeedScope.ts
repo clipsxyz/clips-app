@@ -29,11 +29,7 @@ export function warmPlaceGeocode(suggestion: LocationSuggestion | PlaceFeedSelec
     const q =
         'name' in suggestion
             ? suggestion.name
-            : 'fullName' in suggestion
-              ? suggestion.fullName
-              : 'label' in suggestion
-                ? suggestion.label
-                : '';
+            : suggestion.fullName || suggestion.label;
     void geocodeLocation({ placeId: placeId ?? null, q: q || null });
 }
 

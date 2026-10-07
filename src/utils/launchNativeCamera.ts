@@ -1,4 +1,4 @@
-import { launchCamera, type CameraOptions, type ImagePickerResponse } from 'react-native-image-picker';
+import { launchCamera, type CameraOptions, type ImagePickerResponse, type PhotoQuality } from 'react-native-image-picker';
 
 const VIDEO_DURATION_LIMIT_SEC = 60;
 
@@ -32,7 +32,8 @@ export function buildNativeCameraOptions(input: LaunchNativeCameraInput): Camera
 
     return {
         mediaType: isVideo ? 'video' : 'photo',
-        quality: Number(input.quality ?? (isVideo ? 0.8 : 0.9)),
+        // PhotoQuality only lists tenths in its TS union; native accepts any 0..1 double.
+        quality: Number(input.quality ?? (isVideo ? 0.8 : 0.9)) as PhotoQuality,
         videoQuality: 'high',
         maxWidth: nativeInt(0),
         maxHeight: nativeInt(0),
@@ -40,7 +41,6 @@ export function buildNativeCameraOptions(input: LaunchNativeCameraInput): Camera
         includeExtra: false,
         saveToPhotos: input.saveToPhotos !== false,
         cameraType: input.cameraType === 'front' ? 'front' : 'back',
-        selectionLimit: nativeInt(1, 1),
         durationLimit,
     };
 }

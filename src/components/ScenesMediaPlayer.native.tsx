@@ -119,7 +119,7 @@ export default function ScenesMediaPlayer({
         enabled && onMediaPress ? (
             <Pressable
                 style={styles.tapCapture}
-                onPress={onMediaPress}
+                onPress={(event) => onMediaPress?.(event as unknown as GestureResponderEvent)}
                 onLongPress={onMediaLongPress}
                 onPressOut={onMediaPressOut}
                 delayLongPress={320}
@@ -176,22 +176,24 @@ export default function ScenesMediaPlayer({
                             }}
                         />
                     ) : poster ? (
-                        <Image
-                            source={{ uri: poster }}
-                            style={StyleSheet.absoluteFill}
-                            resizeMode="cover"
-                            pointerEvents="none"
-                        />
+                        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                            <Image
+                                source={{ uri: poster }}
+                                style={StyleSheet.absoluteFill}
+                                resizeMode="cover"
+                            />
+                        </View>
                     ) : (
                         <View style={styles.fallback} />
                     )
                 ) : playbackUrl ? (
-                    <Image
-                        source={{ uri: playbackUrl }}
-                        style={StyleSheet.absoluteFill}
-                        resizeMode="contain"
-                        pointerEvents="none"
-                    />
+                    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                        <Image
+                            source={{ uri: playbackUrl }}
+                            style={StyleSheet.absoluteFill}
+                            resizeMode="contain"
+                        />
+                    </View>
                 ) : (
                     <View style={styles.fallback} />
                 )}
@@ -390,7 +392,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#000',
     },
     fallback: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: '#121212',
     },
     dotsRow: {
@@ -413,11 +415,11 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     tapCapture: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 10,
     },
     pauseOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.15)',

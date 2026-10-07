@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     opaqueBackdrop: {
-          // Spelled out rather than `...StyleSheet.absoluteFillObject`: that property is
+          // Spelled out rather than `...StyleSheet.absoluteFill`: that property is
           // absent from this RN version's StyleSheet type (it only exists on some versions),
           // and `absoluteFill` is a registered style ID, so it cannot be spread here.
           position: 'absolute',

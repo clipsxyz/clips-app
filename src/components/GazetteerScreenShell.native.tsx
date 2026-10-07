@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
         backgroundColor: GAZETTEER_ABYSS,
     },
     ambientSlot: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     androidWash: {

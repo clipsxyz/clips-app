@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
         padding: 16,
     },
     backdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.72)',
     },
     card: {
@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     ambientBack: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     cardContent: {

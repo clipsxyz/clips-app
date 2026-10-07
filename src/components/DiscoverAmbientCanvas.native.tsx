@@ -135,7 +135,7 @@ export default function DiscoverAmbientCanvas({
 
 const styles = StyleSheet.create({
     parentClip: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         overflow: 'hidden',
     },
     layer: {

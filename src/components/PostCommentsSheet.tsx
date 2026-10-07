@@ -22,6 +22,7 @@ import {
     BottomSheetFooter,
     BottomSheetTextInput,
     type BottomSheetFooterProps,
+    type BottomSheetFlatListMethods,
 } from '@gorhom/bottom-sheet';
 import GazetteerBottomSheetModal, {
     GAZETTEER_SHEET_PASSPORT,
@@ -495,7 +496,7 @@ export default function PostCommentsSheet({
     const insets = useSafeAreaInsets();
     const insetsBottomRef = useRef(insets.bottom);
     insetsBottomRef.current = insets.bottom;
-    const listRef = useRef<FlatList<Comment> | null>(null);
+    const listRef = useRef<(FlatList<Comment> & BottomSheetFlatListMethods) | null>(null);
 
     const [post, setPost] = useState<Post | null>(postProp ?? null);
     const [comments, setComments] = useState<Comment[]>([]);
@@ -1240,7 +1241,7 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     backdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
     },
     sheet: {

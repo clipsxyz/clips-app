@@ -1,4 +1,5 @@
 import { uploadFile } from '../api/client';
+import { isMockMode } from '../api/apiMode';
 import { captureVideoFrameDataUrl } from './captureVideoFrame';
 
 type MediaKind = 'image' | 'video' | 'text';
@@ -25,29 +26,46 @@ type PrepareSingleMediaResult = {
   videoPosterUrl?: string;
 };
 
-function isConnectionError(error: any): boolean {
-  const msg = String(error?.message || '');
-  return (
-    error?.name === 'ConnectionRefused' ||
-    msg.includes('CONNECTION_REFUSED') ||
-    msg.includes('Failed to fetch') ||
-    msg.includes('NetworkError') ||
-    msg.includes('Network error') ||
-    (error?.name === 'TypeError' && msg.includes('fetch'))
-  );
+function isHostedHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
 }
 
-async function uploadVideoUrlToBackend(mediaUrl: string): Promise<string> {
+function needsHostedUpload(url: string): boolean {
+  const value = String(url || '').trim();
+  if (!value) return false;
+  if (value.startsWith('blob:') || value.startsWith('data:') || value.startsWith('file:')) return true;
+  return !isHostedHttpUrl(value);
+}
+
+function extensionForMime(mime: string, fallback: 'jpg' | 'webm'): string {
+  const type = mime.toLowerCase();
+  if (type.includes('png')) return 'png';
+  if (type.includes('webp')) return 'webp';
+  if (type.includes('gif')) return 'gif';
+  if (type.includes('jpeg') || type.includes('jpg')) return 'jpg';
+  if (type.includes('mp4')) return 'mp4';
+  if (type.includes('webm')) return 'webm';
+  if (type.includes('quicktime')) return 'mov';
+  return fallback;
+}
+
+async function urlToFile(mediaUrl: string, mediaType: 'image' | 'video'): Promise<File> {
   const response = await fetch(mediaUrl);
   if (!response.ok) {
     throw new Error(`Failed to fetch media: ${response.status} ${response.statusText}`);
   }
   const blob = await response.blob();
-  const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+  const mime = blob.type || (mediaType === 'video' ? 'video/webm' : 'image/jpeg');
+  const ext = extensionForMime(mime, mediaType === 'video' ? 'webm' : 'jpg');
+  return new File([blob], `${mediaType}-${Date.now()}.${ext}`, { type: mime });
+}
+
+async function uploadMediaUrlToBackend(mediaUrl: string, mediaType: 'image' | 'video'): Promise<string> {
+  const file = await urlToFile(mediaUrl, mediaType);
   const uploadResult = await uploadFile(file);
   const uploadedUrl = uploadResult?.fileUrl || uploadResult?.url;
   const uploadSucceeded = uploadResult?.success !== false;
-  if (uploadSucceeded && uploadedUrl) {
+  if (uploadSucceeded && typeof uploadedUrl === 'string' && isHostedHttpUrl(uploadedUrl)) {
     return uploadedUrl;
   }
   throw new Error(uploadResult?.error || 'Upload failed');
@@ -67,36 +85,49 @@ async function blobUrlToDataUrl(url: string): Promise<string> {
   });
 }
 
+async function hostedUrlOrThrow(url: string, mediaType: 'image' | 'video'): Promise<string> {
+  if (isHostedHttpUrl(url)) return url;
+  return uploadMediaUrlToBackend(url, mediaType);
+}
+
 export async function prepareMediaForPost({
   mediaUrl,
   mediaType,
   useBackendUpload = true,
-  appOrigin,
   generatePoster = true,
 }: PrepareSingleMediaArgs): Promise<PrepareSingleMediaResult> {
-  const isVideo = mediaType === 'video' || !mediaType;
+  const isVideo = mediaType === 'video' || (!mediaType && !mediaUrl.startsWith('data:image'));
+  const liveUpload = useBackendUpload && !isMockMode();
   let persistentMediaUrl = mediaUrl;
   let videoPosterUrl: string | undefined;
 
   if (isVideo && generatePoster) {
-    videoPosterUrl = await captureVideoFrameDataUrl(mediaUrl);
+    try {
+      videoPosterUrl = await captureVideoFrameDataUrl(mediaUrl);
+    } catch (error) {
+      console.warn('prepareMediaForPost: poster capture failed', error);
+    }
   }
 
-  if (mediaUrl.startsWith('blob:') && isVideo && useBackendUpload) {
-    try {
-      persistentMediaUrl = await uploadVideoUrlToBackend(mediaUrl);
-    } catch (error) {
-      if (!isConnectionError(error)) throw error;
-    }
-  } else if (isVideo && useBackendUpload && appOrigin && mediaUrl.startsWith(appOrigin)) {
-    try {
-      persistentMediaUrl = await uploadVideoUrlToBackend(mediaUrl);
-    } catch (error) {
-      if (!isConnectionError(error)) throw error;
-    }
-  } else if (mediaUrl.startsWith('blob:') && !isVideo) {
-    // Keep full photo; do not crop to Instagram aspect constraints.
+  if (liveUpload && needsHostedUpload(mediaUrl)) {
+    persistentMediaUrl = await uploadMediaUrlToBackend(mediaUrl, isVideo ? 'video' : 'image');
+  } else if (!liveUpload && mediaUrl.startsWith('blob:') && !isVideo) {
     persistentMediaUrl = await blobUrlToDataUrl(mediaUrl);
+  }
+
+  if (liveUpload && videoPosterUrl && needsHostedUpload(videoPosterUrl)) {
+    try {
+      videoPosterUrl = await uploadMediaUrlToBackend(videoPosterUrl, 'image');
+    } catch (error) {
+      console.warn('prepareMediaForPost: poster upload failed', error);
+      videoPosterUrl = undefined;
+    }
+  } else if (liveUpload && videoPosterUrl && !isHostedHttpUrl(videoPosterUrl)) {
+    videoPosterUrl = undefined;
+  }
+
+  if (liveUpload && persistentMediaUrl && needsHostedUpload(persistentMediaUrl)) {
+    throw new Error('Media must be uploaded to a public URL before posting.');
   }
 
   return { mediaUrl: persistentMediaUrl, videoPosterUrl };
@@ -106,11 +137,15 @@ export async function prepareMediaItemsForPost(items: MediaItemInput[]): Promise
   items: MediaItemInput[];
   videoPosterUrl?: string;
 }> {
+  const liveUpload = !isMockMode();
   const normalizedItems = await Promise.all(
     items.map(async (item) => {
-      if (!item.url?.startsWith('blob:')) return item;
-      if (item.type === 'image') {
-        // Keep full photo; do not crop to Instagram aspect constraints.
+      if (item.type === 'text' || !item.url) return item;
+      if (liveUpload && needsHostedUpload(item.url)) {
+        const url = await hostedUrlOrThrow(item.url, item.type === 'video' ? 'video' : 'image');
+        return { ...item, url };
+      }
+      if (item.url.startsWith('blob:') && item.type === 'image') {
         const dataUrl = await blobUrlToDataUrl(item.url);
         return { ...item, url: dataUrl };
       }
@@ -119,10 +154,20 @@ export async function prepareMediaItemsForPost(items: MediaItemInput[]): Promise
   );
 
   const firstVideoForPoster = normalizedItems.find((item) => item.type === 'video');
-  const videoPosterUrl = firstVideoForPoster?.url
-    ? await captureVideoFrameDataUrl(firstVideoForPoster.url)
-    : undefined;
+  let videoPosterUrl: string | undefined;
+  if (firstVideoForPoster?.url) {
+    try {
+      videoPosterUrl = await captureVideoFrameDataUrl(firstVideoForPoster.url);
+      if (liveUpload && videoPosterUrl && needsHostedUpload(videoPosterUrl)) {
+        videoPosterUrl = await uploadMediaUrlToBackend(videoPosterUrl, 'image');
+      } else if (liveUpload && videoPosterUrl && !isHostedHttpUrl(videoPosterUrl)) {
+        videoPosterUrl = undefined;
+      }
+    } catch (error) {
+      console.warn('prepareMediaItemsForPost: poster capture/upload failed', error);
+      videoPosterUrl = undefined;
+    }
+  }
 
   return { items: normalizedItems, videoPosterUrl };
 }
-

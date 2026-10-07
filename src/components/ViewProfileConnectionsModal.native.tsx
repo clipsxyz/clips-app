@@ -233,7 +233,7 @@ export default function ViewProfileConnectionsModal({
                                                     locations={[0, 0.22, 0.52, 0.78, 1]}
                                                     start={{ x: 0.1, y: 0 }}
                                                     end={{ x: 0.9, y: 1 }}
-                                                    style={StyleSheet.absoluteFillObject}
+                                                    style={StyleSheet.absoluteFill}
                                                 />
                                             ) : null}
                                             {actionLoading ? (

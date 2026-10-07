@@ -64,6 +64,13 @@
         ],
         "test:coverage": [
             "@php vendor/bin/phpunit --coverage-html coverage"
+        ],
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "bash bin/serve-dev.sh"
+        ],
+        "upload:limits": [
+            "bash -lc 'export PHP_INI_SCAN_DIR=\"$PWD/php-dev.d:${PHP_INI_SCAN_DIR:-}\"; php artisan upload:limits'"
         ]
     },
     "extra": {

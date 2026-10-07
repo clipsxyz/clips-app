@@ -278,7 +278,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const persistAuthUser = React.useCallback((next: User) => {
+    const toStore = { ...next };
+    if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
+      void db.set(AVATAR_KEY(next.id), toStore.avatarUrl).catch(() => {});
+      toStore.avatarUrl = undefined;
+    }
+    try {
+      const json = JSON.stringify(toStore);
+      localStorage.setItem(USER_STORAGE_KEY, json);
+      void persistUserToNativeStorage(json);
+    } catch {
+      /* quota / unavailable */
+    }
+  }, []);
+
+  /** Pull `/auth/me` so Passport avatar + handle match the server after login / account switch. */
+  const refreshAuthUserFromApi = React.useCallback(
+    (base: User, refreshGen: number) => {
+      if (!isLaravelApiEnabled()) return;
+      void getAuthTokenAsync().then((token) => {
+        if (!token || refreshGen !== authRefreshGenRef.current) return;
+        import('../api/client')
+          .then(({ getCurrentUser, mapLaravelUserToAppFields }) =>
+            getCurrentUser().then((apiUser: any) => {
+              if (refreshGen !== authRefreshGenRef.current) return;
+              const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+              const updated: User = { ...base };
+              for (const [key, val] of Object.entries(fromApi)) {
+                if (val === undefined || val === null) continue;
+                if (key === 'placesTraveled' && Array.isArray(val)) {
+                  updated.placesTraveled = val.length > 0 ? val : undefined;
+                  continue;
+                }
+                (updated as Record<string, unknown>)[key] = val;
+              }
+              // Keep a freshly uploaded local/data avatar if /auth/me has not caught up yet.
+              if (!updated.avatarUrl && base.avatarUrl) {
+                updated.avatarUrl = base.avatarUrl;
+              }
+              setUser(updated);
+              persistAuthUser(updated);
+              if (updated.handle && typeof updated.is_private === 'boolean') {
+                setProfilePrivacy(updated.handle, updated.is_private);
+              }
+            }),
+          )
+          .catch(() => {});
+      });
+    },
+    [persistAuthUser],
+  );
+
   const login = (userData: any) => {
+    authRefreshGenRef.current += 1;
+    const refreshGen = authRefreshGenRef.current;
     const resolvedAccountType =
       userData.accountType === 'business' ||
       userData.account_type === 'business' ||
@@ -304,7 +358,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       handle: userData.handle || `${(userData.name || '').trim().split(/\s+/)[0] || userData.name || 'User'}@Unknown`,
       countryFlag:
         normalizeCountryFlagInput(userData.countryFlag || '', userData.national || '') || undefined,
-      avatarUrl: userData.avatarUrl || undefined,
+      avatarUrl: userData.avatarUrl || userData.avatar_url || undefined,
       profileBackgroundUrl: userData.profileBackgroundUrl || undefined,
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
@@ -322,20 +376,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Drop stale in-memory follows before AsyncStorage hydrate so getState() reloads cleanly.
     clearUserState(u.id);
     setUser(u);
-    // Persist large base64 avatar in IndexedDB (survives refresh); strip from localStorage to avoid quota exceeded
-    const toStore = { ...u };
-    if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
-      db.set(AVATAR_KEY(u.id), toStore.avatarUrl).catch(() => {});
-      toStore.avatarUrl = undefined;
-    }
-    localStorage.setItem('user', JSON.stringify(toStore));
+    persistAuthUser(u);
 
     void (async () => {
-      try {
-        await persistUserToNativeStorage(JSON.stringify(toStore));
-      } catch {
-        // continue even if native storage persist fails
-      }
       try {
         await Promise.all([hydrateFollowsStorage(u.id), hydratePrivacyStorage()]);
       } catch {
@@ -343,6 +386,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       // Warm cache from hydrated storage (hydrateFollowsStorage also merges if cache already exists).
       getState(u.id);
+      // Restore oversized avatar for this account (stripped from AsyncStorage on persist).
+      if (!u.avatarUrl) {
+        try {
+          const storedAvatar = await db.get(AVATAR_KEY(u.id));
+          if (storedAvatar && refreshGen === authRefreshGenRef.current) {
+            setUser((prev) => {
+              if (!prev || prev.id !== u.id || prev.avatarUrl) return prev;
+              const next = { ...prev, avatarUrl: storedAvatar };
+              persistAuthUser(next);
+              return next;
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      // Always re-sync from /auth/me after account switch so Passport gets avatar_url.
+      refreshAuthUserFromApi(u, refreshGen);
       if (u.handle) {
         setProfilePrivacy(u.handle, !!u.is_private);
         try {

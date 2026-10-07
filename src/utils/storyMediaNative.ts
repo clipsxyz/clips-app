@@ -91,7 +91,7 @@ export function resolveStoryVideoPlaybackUrl(url?: string | null): string | unde
  * Preferred react-native-video `source` for story playback.
  * Demo MP4s use the same HTTPS slot map as the newsfeed (never bundled BBB).
  */
-export function storyVideoSource(url?: string | null): number | { uri: string } | null {
+export function storyVideoSource(url?: string | null): { uri: string } | null {
     const raw = (url || '').trim();
     if (!raw) return null;
     const demoPath = demoVideoPathFromUrl(raw);

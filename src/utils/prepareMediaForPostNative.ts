@@ -1,7 +1,17 @@
 import { extractVideoPosterFrame } from './extractVideoPosterNative';
 import { isFiltered, type InstantFilterInfo } from './instantFiltersNative';
-import { transcodeVideoForUploadNative } from './transcodeVideoForUploadNative';
-import { uploadFileFromUri } from './uploadFileNative';
+import {
+    compressImageForUploadNative,
+    transcodeVideoForUploadNative,
+} from './transcodeVideoForUploadNative';
+import { normalizeUploadUri, uploadFileFromUri } from './uploadFileNative';
+import {
+    hardTrimVideoWindowForUpload,
+    maxVideoDurationForDestination,
+    type VideoUploadDestination,
+} from './autoTrimVideoNative';
+import { probeLocalVideoBounds } from './validateLocalVideoNative';
+import { statLocalFileBytes } from './localFileNative';
 
 type NativeMediaType = 'image' | 'video' | null;
 
@@ -14,6 +24,11 @@ type PrepareNativeMediaArgs = {
     /** Cover frame time in seconds (used for FFmpeg poster fallback). */
     videoCoverTime?: number;
     onStage?: (stage: 'compress' | 'poster' | 'upload') => void;
+    /**
+     * Upload destination controls hard-trim caps:
+     * Stories 24 → 0–15s; newsfeed → 0–90s.
+     */
+    destination?: VideoUploadDestination;
 };
 
 type PrepareNativeMediaResult = {
@@ -21,7 +36,7 @@ type PrepareNativeMediaResult = {
     mediaType?: 'image' | 'video';
     videoPosterUrl?: string;
     filterExportFailed?: boolean;
-    /** True when Instagram-style FFmpeg compression could not run; original file may be uploaded. */
+    /** True when optional filter bake failed after a successful hard-trim. */
     videoCompressFailed?: boolean;
 };
 
@@ -34,8 +49,27 @@ function isLocalUri(uri: string): boolean {
         uri.startsWith('file://') ||
         uri.startsWith('content://') ||
         uri.startsWith('ph://') ||
-        uri.startsWith('data:')
+        uri.startsWith('data:') ||
+        (uri.startsWith('/') && !uri.includes('://'))
     );
+}
+
+/** Any non-remote video must be hard-trimmed — including odd Android media schemes. */
+function mustHardTrimVideo(uri: string, mediaType: NativeMediaType): boolean {
+    if (mediaType !== 'video' || !uri) return false;
+    if (isRemoteUrl(uri) || uri.startsWith('data:')) return false;
+    return true;
+}
+
+function normalizeLocalUri(uri: string): string {
+    if (typeof normalizeUploadUri === 'function') {
+        return normalizeUploadUri(uri);
+    }
+    const trimmed = String(uri || '').trim();
+    if (trimmed.startsWith('/') && !trimmed.includes('://')) {
+        return `file://${trimmed}`;
+    }
+    return trimmed;
 }
 
 async function uploadLocalUri(
@@ -46,7 +80,9 @@ async function uploadLocalUri(
     if (isRemoteUrl(uri)) {
         return uri;
     }
-    const result = await uploadFileFromUri(uri, mimeType, fileName);
+    const localUri = normalizeLocalUri(uri);
+    console.log('[MediaPrep] HTTP upload AFTER trim/compress:', localUri.slice(0, 120));
+    const result = await uploadFileFromUri(localUri, mimeType, fileName);
     const uploaded = result.fileUrl || result.url;
     if (result.success === false) {
         throw new Error('Upload failed');
@@ -65,26 +101,27 @@ async function resolveVideoPosterUrl(
     if (captureVideoPoster) {
         try {
             return await captureVideoPoster();
-        } catch (err) {
-            console.warn('prepareMediaForPostNative: preview poster capture failed', err);
+        } catch {
+            /* fall through to FFmpeg */
         }
     }
 
-    if (!isLocalUri(videoUri)) {
+    if (!isLocalUri(videoUri) && isRemoteUrl(videoUri)) {
         return undefined;
     }
 
     try {
         return await extractVideoPosterFrame(videoUri, videoCoverTime);
-    } catch (err) {
-        console.warn('prepareMediaForPostNative: FFmpeg poster extraction failed', err);
+    } catch {
         return undefined;
     }
 }
 
 /**
- * On-device pipeline: transcode local video (720p / bitrate cap / fps + optional filter bake),
- * attach poster, upload, then createPost uses remote URLs.
+ * On-device pipeline order (strict):
+ * 1) FFmpeg hard-trim + scale (always for local video)
+ * 2) optional filter bake / poster
+ * 3) HTTP upload (never of the raw gallery URI)
  */
 export async function prepareMediaForPostNative({
     mediaUrl,
@@ -93,12 +130,13 @@ export async function prepareMediaForPostNative({
     captureVideoPoster,
     videoCoverTime = 0,
     onStage,
+    destination = 'feed',
 }: PrepareNativeMediaArgs): Promise<PrepareNativeMediaResult> {
     if (!mediaUrl || !mediaType) {
         return {};
     }
 
-    const normalizedUrl = mediaUrl.trim();
+    const normalizedUrl = normalizeLocalUri(mediaUrl.trim());
     if (!normalizedUrl) {
         return {};
     }
@@ -107,6 +145,43 @@ export async function prepareMediaForPostNative({
     let videoPosterUrl: string | undefined;
     let filterExportFailed = false;
     let videoCompressFailed = false;
+    const maxSeconds = maxVideoDurationForDestination(destination);
+    const trimEndTime = maxSeconds;
+
+    // ─── STEP 1: FFmpeg first. No size gates before this. ───
+    if (mustHardTrimVideo(workingUrl, mediaType)) {
+        onStage?.('compress');
+        console.log(
+            '[MediaPrep] FFmpeg hard-trim FIRST (before any size check or upload)',
+            { destination, maxSeconds: trimEndTime, uri: workingUrl.slice(0, 96) },
+        );
+
+        const rawSize = await statLocalFileBytes(workingUrl);
+
+        if (typeof hardTrimVideoWindowForUpload !== 'function') {
+            throw new Error('Video trim is unavailable. Rebuild the app with FFmpeg linked.');
+        }
+
+        const hardTrim = await hardTrimVideoWindowForUpload(workingUrl, destination, {
+            startTime: 0,
+            endTime: trimEndTime,
+            notify: true,
+        });
+
+        if (!hardTrim.wasTrimmed || !hardTrim.uri || hardTrim.uri === workingUrl) {
+            throw new Error('Could not trim this video. Try another clip.');
+        }
+        workingUrl = hardTrim.uri;
+
+        const trimmedSize =
+            hardTrim.sizeBytes ?? (await statLocalFileBytes(workingUrl));
+        console.log(
+            '[MediaPrep] Original video size:',
+            rawSize,
+            'Trimmed video size:',
+            trimmedSize,
+        );
+    }
 
     const shouldBake = isFiltered(filterInfo);
     const coverTime = Math.max(0, Number(videoCoverTime) || 0);
@@ -114,21 +189,35 @@ export async function prepareMediaForPostNative({
     if (shouldBake && filterInfo && mediaType === 'image' && captureVideoPoster) {
         try {
             workingUrl = await captureVideoPoster();
-        } catch (err) {
-            console.warn('prepareMediaForPostNative: image filter bake failed', err);
+        } catch {
             filterExportFailed = true;
         }
     }
 
-    if (mediaType === 'video' && isLocalUri(workingUrl)) {
-        const filterName = shouldBake && filterInfo ? filterInfo.active : null;
+    if (mediaType === 'image' && isLocalUri(workingUrl) && !shouldBake) {
         try {
             onStage?.('compress');
-            workingUrl = await transcodeVideoForUploadNative(workingUrl, { filterName });
-        } catch (err) {
-            console.warn('prepareMediaForPostNative: video transcode/compress failed', err);
-            videoCompressFailed = true;
-            if (shouldBake) {
+            workingUrl = await compressImageForUploadNative(workingUrl);
+        } catch {
+            /* keep original image */
+        }
+    }
+
+    // Optional filter bake on already-trimmed clip — failure keeps the trimmed file (never raw).
+    if (mediaType === 'video' && mustHardTrimVideo(workingUrl, mediaType)) {
+        const filterName = shouldBake && filterInfo ? filterInfo.active : null;
+        if (filterName) {
+            try {
+                onStage?.('compress');
+                const filtered = await transcodeVideoForUploadNative(workingUrl, {
+                    filterName,
+                    maxDurationSec: trimEndTime,
+                });
+                if (filtered && filtered !== normalizedUrl) {
+                    workingUrl = filtered;
+                }
+            } catch {
+                videoCompressFailed = true;
                 filterExportFailed = true;
             }
         }
@@ -137,38 +226,44 @@ export async function prepareMediaForPostNative({
     if (mediaType === 'video') {
         onStage?.('poster');
         videoPosterUrl = await resolveVideoPosterUrl(workingUrl, coverTime, captureVideoPoster);
-        if (!videoPosterUrl && workingUrl !== normalizedUrl) {
-            videoPosterUrl = await resolveVideoPosterUrl(normalizedUrl, coverTime, captureVideoPoster);
-        }
     }
 
-    try {
-        if (isLocalUri(workingUrl)) {
-            const mime = mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
-            const name =
-                mediaType === 'video' ? `clip-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`;
-            onStage?.('upload');
-            console.log('[prepareMediaForPostNative] uploading media', {
-                mime,
-                name,
-                uriPreview: workingUrl.slice(0, 80),
-            });
-            workingUrl = await uploadLocalUri(workingUrl, mime, name);
+    if (mediaType === 'video' && workingUrl === normalizedUrl && !isRemoteUrl(workingUrl)) {
+        throw new Error('Refusing to upload untrimmed video. Trim step did not run.');
+    }
+
+    // ─── STEP 2: upload only the trimmed/compressed file ───
+    if (!isRemoteUrl(workingUrl) && (isLocalUri(workingUrl) || mediaType === 'video')) {
+        const mime = mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
+        const name =
+            mediaType === 'video' ? `clip-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`;
+        onStage?.('upload');
+
+        if (mediaType === 'video') {
+            try {
+                const bounds = await probeLocalVideoBounds(workingUrl);
+                const durationSec = bounds.durationSec;
+                if (durationSec != null && durationSec > trimEndTime + 0.5) {
+                    throw new Error(
+                        `Video is still ${Math.ceil(durationSec)}s after trim (max ${trimEndTime}s).`,
+                    );
+                }
+            } catch (err) {
+                if (err instanceof Error && err.message.includes('after trim')) {
+                    throw err;
+                }
+            }
         }
 
-        if (videoPosterUrl && isLocalUri(videoPosterUrl)) {
-            console.log('[prepareMediaForPostNative] uploading poster', {
-                uriPreview: videoPosterUrl.slice(0, 80),
-            });
-            videoPosterUrl = await uploadLocalUri(
-                videoPosterUrl,
-                'image/jpeg',
-                `poster-${Date.now()}.jpg`,
-            );
-        }
-    } catch (err) {
-        console.error('prepareMediaForPostNative: upload failed', err);
-        throw err;
+        workingUrl = await uploadLocalUri(workingUrl, mime, name);
+    }
+
+    if (videoPosterUrl && isLocalUri(videoPosterUrl)) {
+        videoPosterUrl = await uploadLocalUri(
+            videoPosterUrl,
+            'image/jpeg',
+            `poster-${Date.now()}.jpg`,
+        );
     }
 
     return {

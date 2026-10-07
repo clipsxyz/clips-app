@@ -11,11 +11,6 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Svg, { Defs, Path, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 
-type Props = {
-    onExplainTap: () => void;
-    shareLabel?: string;
-};
-
 const CAPCUT_APP_ICON = require('../assets/capcut-app-icon.jpg');
 
 const SOURCES = [
@@ -24,6 +19,11 @@ const SOURCES = [
     { key: 'capcut', label: 'CapCut' },
     { key: 'edits', label: 'Instagram Edits' },
 ] as const;
+
+type Props = {
+    onExplainTap: (sourceKey?: (typeof SOURCES)[number]['key']) => void;
+    shareLabel?: string;
+};
 
 const SLOT = 34;
 const AUTO_MS = 2600;
@@ -129,7 +129,10 @@ export default function CreateSourceAppsCarouselNative({
         <TouchableOpacity
             activeOpacity={0.9}
             style={styles.pill}
-            onPress={onExplainTap}
+            onPress={() => {
+                const key = SOURCES[indexRef.current]?.key ?? 'tiktok';
+                onExplainTap(key);
+            }}
             accessibilityRole="button"
             accessibilityLabel={`${shareLabel}. Swipe the logo to switch app.`}
             onPressIn={() => {

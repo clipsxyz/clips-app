@@ -82,12 +82,74 @@ export function isMockMode(): boolean {
   return String(raw ?? '').trim().toLowerCase() === 'true';
 }
 
+/** Mac LAN IP when the phone cannot reach localhost (adb reverse drops). */
+export const DEV_LAN_API_HOST = '192.168.1.5';
+export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
+export const DEV_LOOPBACK_API_BASE_URL = 'http://127.0.0.1:8000/api';
+export const DEV_ANDROID_EMULATOR_API_HOST = '10.0.2.2';
+export const DEV_ANDROID_EMULATOR_API_BASE_URL = `http://${DEV_ANDROID_EMULATOR_API_HOST}:8000/api`;
+
+/** Remember which API host last worked on this RN session (adb reverse ↔ LAN ↔ emulator). */
+export type RnApiHostPreference = 'loopback' | 'lan' | 'emulator';
+let preferredRnApiHost: RnApiHostPreference | null = null;
+
+export function getPreferredRnApiHost(): RnApiHostPreference | null {
+  return preferredRnApiHost;
+}
+
+export function setPreferredRnApiHost(pref: RnApiHostPreference | null): void {
+  preferredRnApiHost = pref;
+}
+
+export function rememberSuccessfulApiBaseUrl(apiBaseUrl: string): void {
+  try {
+    const host = new URL(String(apiBaseUrl || '').trim()).hostname;
+    if (host === '127.0.0.1' || host === 'localhost') {
+      preferredRnApiHost = 'loopback';
+    } else if (host === DEV_ANDROID_EMULATOR_API_HOST) {
+      preferredRnApiHost = 'emulator';
+    } else if (host === DEV_LAN_API_HOST || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+      preferredRnApiHost = 'lan';
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isLoopbackApiHost(url: string): boolean {
+  try {
+    const host = new URL(String(url || '').trim()).hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+/** Physical devices cannot use localhost; map loopback API URLs to the LAN host. */
+export function rewriteLoopbackApiUrlToLan(url: string): string {
+  const trimmed = String(url || '').trim().replace(/\/$/, '');
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      parsed.hostname = DEV_LAN_API_HOST;
+      if (!parsed.port) parsed.port = '8000';
+      return parsed.toString().replace(/\/$/, '');
+    }
+  } catch {
+    /* ignore malformed */
+  }
+  return trimmed;
+}
+
 /**
  * Prefer migration env `EXPO_PUBLIC_API_BASE_URL`, then legacy `VITE_API_URL`.
  */
 export function getConfiguredApiEnvUrl(): string | undefined {
   return (
     getRuntimeEnv('EXPO_PUBLIC_API_BASE_URL') ||
+    getRuntimeEnv('EXPO_PUBLIC_API_URL') ||
+    getRuntimeEnv('REACT_NATIVE_API_URL') ||
     getRuntimeEnv('VITE_API_URL') ||
     undefined
   );

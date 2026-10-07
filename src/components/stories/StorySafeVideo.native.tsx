@@ -11,7 +11,7 @@ import {
 import Video, { ViewType, type OnProgressData, type VideoRef } from 'react-native-video';
 
 type Props = {
-    source: number | { uri: string };
+    source: { uri: string };
     posterSource?: ImageSourcePropType | null;
     style?: StyleProp<ViewStyle>;
     muted?: boolean;
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     posterCover: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 4,
         elevation: Platform.OS === 'android' ? 6 : 0,
     },

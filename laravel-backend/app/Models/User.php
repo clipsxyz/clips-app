@@ -162,6 +162,38 @@ class User extends Authenticatable
             ->exists();
     }
 
+    /**
+     * Recompute follower/following counts from the follow graph.
+     *
+     * Count columns are maintained by increment/decrement at each follow call site, so they can
+     * drift (double-increment on retry, missed decrement, direct DB writes). This self-heals them
+     * from the single source of truth (`user_follows` with status = accepted).
+     *
+     * @param  bool  $force  When true, write the recomputed values back if they differ from the
+     *                        stored columns (used by /api/auth/me). When false, return the live
+     *                        counts without touching the row (used by read-only endpoints).
+     * @return array{followers: int, following: int}
+     */
+    public function syncLiveAudienceCounts(bool $force = false): array
+    {
+        $followers = (int) $this->followers()->count();
+        $following = (int) $this->following()->count();
+
+        if ($force
+            && ((int) $this->followers_count !== $followers
+                || (int) $this->following_count !== $following)) {
+            $this->forceFill([
+                'followers_count' => $followers,
+                'following_count' => $following,
+            ])->saveQuietly();
+        }
+
+        return [
+            'followers' => $followers,
+            'following' => $following,
+        ];
+    }
+
     public function canViewProfile(User $viewer)
     {
         // Users can always view their own profile

@@ -1,6 +1,9 @@
 import { createPost } from '../api/posts';
 import { isMockMode } from '../api/apiMode';
-import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPostNative';
+import {
+    prepareCarouselMediaForPostNative,
+    type UploadedCarouselItem,
+} from './prepareCarouselMediaForPostNative';
 import { prepareMediaForPostNative } from './prepareMediaForPostNative';
 import {
     completePendingFeedUpload,
@@ -25,6 +28,10 @@ function assertRemoteMediaForLive(url: string | undefined, label: string): void 
     }
 }
 
+/**
+ * Pipeline: prepareMediaForPostNative always runs FFmpeg hard-trim BEFORE multipart upload.
+ * There is no client-side UploadTooLarge / byte-size gate in this module.
+ */
 async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void> {
     if (job.isTextOnly) {
         const createdPost = await createPost(
@@ -64,7 +71,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
     const live = !isMockMode();
 
     if (isCarousel && job.localMediaItems) {
-        let uploaded = job.localMediaItems.map((item) => ({
+        let uploaded: UploadedCarouselItem[] = job.localMediaItems.map((item) => ({
             url: item.uri,
             type: item.type,
             duration: item.durationSec,
@@ -73,6 +80,9 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             job.localMediaItems.find((i) => i.type === 'video')?.uri || undefined;
 
         if (live) {
+            console.log(
+                '[FeedUpload] carousel: FFmpeg trim/scale first via prepareCarouselMediaForPostNative',
+            );
             const videoFilter =
                 job.mediaType === 'video' ||
                 job.localMediaItems.some((i) => i.type === 'video')
@@ -141,11 +151,18 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
 
     if (live && job.localMediaUri && job.mediaType) {
         const overlay = getUploadOverlayForJob(job.tempId);
+        console.log('[FeedUpload] FFmpeg hard-trim FIRST, then upload', {
+            tempId: job.tempId,
+            mediaType: job.mediaType,
+            destination: 'feed',
+            uriPreview: String(job.localMediaUri).slice(0, 96),
+        });
         const preparedMedia = await prepareMediaForPostNative({
             mediaUrl: job.localMediaUri,
             mediaType: job.mediaType,
             filterInfo: job.filterForExport,
             videoCoverTime: job.videoCoverTime,
+            destination: 'feed',
             onStage: (stage) => {
                 if (stage === 'compress') {
                     overlay?.progress('This may take a moment.', 'Posting your clip…');
@@ -161,7 +178,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         }
         if (preparedMedia.videoCompressFailed && job.mediaType === 'video') {
             console.warn(
-                'runBackgroundFeedUploadNative: video compression failed; uploading best-effort file',
+                'runBackgroundFeedUploadNative: filter bake failed after trim; uploading trimmed clip',
             );
         }
         mediaUrl = preparedMedia.mediaUrl || mediaUrl;
@@ -206,18 +223,48 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
     getUploadOverlayForJob(job.tempId)?.success();
 }
 
-/**
- * Compress, upload, and createPost in the background after navigating to the feed.
- */
+/** Map errors for the overlay — no custom 413 / size-specific messaging. */
+function messageForUploadError(err: unknown): string {
+    const raw = err instanceof Error ? err.message : '';
+    const name = err instanceof Error ? err.name : '';
+
+    if (
+        /Network request failed/i.test(raw) ||
+        /Failed to fetch/i.test(raw) ||
+        name === 'ConnectionRefused' ||
+        /CONNECTION_REFUSED/i.test(raw)
+    ) {
+        return 'Could not reach the upload server. Check Wi‑Fi / adb reverse and that Laravel is running on port 8000.';
+    }
+    if (raw) return raw;
+    return 'Failed to create post. Please try again.';
+}
+
+function reportBackgroundUploadFailure(tempId: string, err: unknown): void {
+    const message = messageForUploadError(err);
+    console.error('runBackgroundFeedUploadNative:', err);
+    try {
+        if (typeof failPendingFeedUpload === 'function') {
+            failPendingFeedUpload(tempId, message);
+        }
+    } catch (failErr) {
+        console.warn('runBackgroundFeedUploadNative: failPendingFeedUpload error', failErr);
+    }
+    try {
+        const overlay = getUploadOverlayForJob(tempId);
+        if (overlay && typeof overlay.error === 'function') {
+            overlay.error(message);
+        }
+    } catch (overlayErr) {
+        console.warn('runBackgroundFeedUploadNative: overlay error', overlayErr);
+    }
+}
+
 export function startBackgroundFeedUpload(tempId: string): void {
     const job = getPendingFeedUpload(tempId);
     if (!job || job.status !== 'uploading') return;
 
     void executePendingFeedUpload(job).catch((err: unknown) => {
-        const message =
-            err instanceof Error ? err.message : 'Failed to create post. Please try again.';
-        console.error('runBackgroundFeedUploadNative:', err);
-        failPendingFeedUpload(tempId, message);
-        getUploadOverlayForJob(tempId)?.error(message);
+        reportBackgroundUploadFailure(tempId, err);
     });
 }

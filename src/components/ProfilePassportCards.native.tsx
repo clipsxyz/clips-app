@@ -1225,7 +1225,7 @@ const styles = StyleSheet.create({
     cardSubtitle: { color: '#9CA3AF', fontSize: 12, marginTop: 2, textAlign: 'center' },
     cardCount: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginTop: 2, textAlign: 'center' },
     modalOverlay: { flex: 1, justifyContent: 'flex-end' },
-    modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+    modalBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.55)' },
     modalSheet: {
         backgroundColor: '#0b1220',
         borderTopLeftRadius: 20,

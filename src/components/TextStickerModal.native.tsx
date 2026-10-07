@@ -30,6 +30,8 @@ type Props = {
     onConfirm: (text: string, fontSize: 'small' | 'medium' | 'large', color: string) => void;
     /** `story` matches web ClipPage Add Text card; default keeps glass create styling. */
     variant?: 'glass' | 'story';
+    /** Prefill when editing an existing text/headline. */
+    initialText?: string;
 };
 
 const STORY_COLORS: Record<string, string> = {
@@ -50,6 +52,7 @@ export default function TextStickerModalNative({
     onClose,
     onConfirm,
     variant = 'glass',
+    initialText = '',
 }: Props) {
     const [text, setText] = useState('');
     const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>('medium');
@@ -58,11 +61,11 @@ export default function TextStickerModalNative({
 
     useEffect(() => {
         if (!visible) return;
-        setText('');
+        setText(String(initialText || ''));
         setFontSize('medium');
         setTextColor('#FFFFFF');
         setStoryColorKey('white');
-    }, [visible]);
+    }, [visible, initialText]);
 
     const handleConfirm = () => {
         if (!text.trim()) return;

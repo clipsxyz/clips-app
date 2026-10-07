@@ -75,6 +75,7 @@ export async function publishMediaStory24(options: {
     stickers?: StickerOverlay[];
     taggedUsers?: string[];
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>;
+    videoPosterUrl?: string;
     audience?: 'public' | 'close_friends' | 'only_me';
 }): Promise<Story> {
     const composerStickers = buildStoryComposerStickers({
@@ -88,19 +89,20 @@ export async function publishMediaStory24(options: {
         options.userHandle,
         options.mediaUrl,
         options.mediaType,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        undefined, // text
+        options.location, // location
+        undefined, // textColor
+        undefined, // textSize
+        undefined, // sharedFromPost
+        undefined, // sharedFromUser
+        undefined, // textStyle
         composerStickers.length > 0 ? composerStickers : undefined,
         options.taggedUsers?.length ? options.taggedUsers : undefined,
-        undefined,
+        undefined, // poll
         options.taggedUsersPositions?.length ? options.taggedUsersPositions : undefined,
-        undefined,
+        undefined, // question
         options.venue,
+        options.videoPosterUrl,
         options.audience ?? 'public',
     );
     notifyStoryCreated(options.userHandle);
@@ -142,6 +144,7 @@ export async function publishTextStory24(options: {
         undefined,
         undefined,
         options.venue || options.landmark,
+        undefined, // videoPosterUrl
         options.audience ?? 'public',
     );
 }
@@ -162,23 +165,25 @@ export async function publishPollStory24(options: {
         options.userHandle,
         options.backgroundUri,
         options.backgroundUri ? 'image' : undefined,
-        undefined,
+        undefined, // text
         options.location,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        undefined, // textColor
+        undefined, // textSize
+        undefined, // sharedFromPost
+        undefined, // sharedFromUser
+        undefined, // textStyle
+        undefined, // stickers
+        undefined, // taggedUsers
         {
             question: options.question,
             option1: options.option1,
             option2: options.option2,
             option3: options.option3,
         },
-        undefined,
-        undefined,
-        undefined,
+        undefined, // taggedUsersPositions
+        undefined, // question prompt
+        undefined, // venue
+        undefined, // videoPosterUrl
         options.audience ?? 'public',
     );
     notifyStoryCreated(options.userHandle);

@@ -795,7 +795,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     stageFill: {
-        // Explicit rather than `...StyleSheet.absoluteFillObject`: that property is absent
+        // Explicit rather than `...StyleSheet.absoluteFill`: that property is absent
         // from this RN version's StyleSheet type, and `absoluteFill` is a registered style ID
         // that cannot be spread inside StyleSheet.create.
         position: 'absolute',

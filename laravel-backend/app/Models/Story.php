@@ -41,11 +41,13 @@ class Story extends Model
         'tagged_users', // JSON array of user handles
         'audience', // public | close_friends | only_me
         'video_poster_url', // still frame for Stories 24 rail thumbs
+        'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
     ];
 
     protected $casts = [
         'views_count' => 'integer',
         'expires_at' => 'datetime',
+        'link_preview' => 'array',
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'stickers' => 'array', // Array of StickerOverlay objects
         'tagged_users' => 'array', // Array of user handles

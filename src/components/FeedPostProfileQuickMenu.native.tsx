@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     ambientBack: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     cardContent: {

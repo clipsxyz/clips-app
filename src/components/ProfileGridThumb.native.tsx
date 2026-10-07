@@ -88,12 +88,13 @@ export default function ProfileGridThumb({ post }: Props) {
     if (imageUri) {
         return (
             <View style={styles.cell}>
-                <Image
-                    source={{ uri: imageUri }}
-                    style={{ width: '100%', height: '100%' }}
-                    resizeMode="cover"
-                    pointerEvents="none"
-                />
+                <View style={{ width: '100%', height: '100%' }} pointerEvents="none">
+                    <Image
+                        source={{ uri: imageUri }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                    />
+                </View>
                 {locationBadge}
                 {isVideoPost(post) ? videoOverlays : null}
             </View>
@@ -172,7 +173,7 @@ const styles = StyleSheet.create({
         lineHeight: 13,
     },
     playCenter: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
     },

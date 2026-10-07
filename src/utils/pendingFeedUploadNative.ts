@@ -32,6 +32,10 @@ export type PendingFeedUploadJob = {
     taggedUsers?: string[];
     venue?: string;
     landmark?: string;
+    socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
+    placeId?: string;
+    latitude?: number;
+    longitude?: number;
     /** Text-only feed postcard (no media upload). */
     isTextOnly?: boolean;
     textStyle?: {

@@ -23,6 +23,6 @@ export default function GazetteerAmbientBackground({ variant = 'discover' }: Pro
 
 const styles = StyleSheet.create({
     layer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
 });

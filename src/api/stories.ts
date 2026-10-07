@@ -793,15 +793,14 @@ export function mapLaravelStoryToStory(story: any): StoryWithAvatar {
         audience: story.audience || 'public',
         sharedFromPost: story.shared_from_post_id || undefined,
         sharedFromUser: story.shared_from_user_handle || undefined,
-        // Real poster avatar. The stories endpoint eager-loads
-        // `user:id,handle,display_name,avatar_url`, so prefer the payload over the
-        // seed mock map, which only resolves the 8 mock handles.
+        // Real poster avatar from Laravel user relation. Never fall back to the mock
+        // Unsplash seed map while live API is on — that injects wrong faces for real users.
         avatarUrl:
             story.avatar_url ||
             story.avatarUrl ||
             story.user?.avatar_url ||
             story.user?.avatarUrl ||
-            getAvatarForHandle(story.user_handle) ||
+            (!isLaravelApiEnabled() ? getAvatarForHandle(story.user_handle || story.userHandle) : undefined) ||
             undefined,
     };
 }
@@ -1479,9 +1478,14 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
             const followedSet = new Set(
                 (followedUserHandles || []).map((h) => (h || '').trim().toLowerCase()).filter(Boolean),
             );
-            const filtered = collected.filter((story) =>
-                story.userId === userId || followedSet.has((story.userHandle || '').trim().toLowerCase()),
-            );
+            // The API (/stories/paged) is already scoped server-side to the viewer plus their
+            // accepted follows, so trust its results. The local follow cache can be empty or
+            // stale (e.g. follows made on another device), which previously hid followed users'
+            // stories from the rail. Only guard against other users' private (only_me) stories.
+            const filtered = collected.filter((story) => {
+                if (story.userId === userId) return true;
+                return (story.audience || 'public') !== 'only_me';
+            });
 
             // Merge in local stories so createStory mock fallbacks (API create failed) still show
             // immediately in RN Stories 24 rail/viewer while API mode is enabled.
@@ -1513,7 +1517,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
                         userId: story.userId,
                         userHandle: story.userHandle,
                         name: story.userHandle.split('@')[0],
-                        avatarUrl: storyAvatarUrl(story) || getAvatarForHandle(story.userHandle),
+                        avatarUrl: storyAvatarUrl(story) || undefined,
                         stories: [story],
                     });
                 }

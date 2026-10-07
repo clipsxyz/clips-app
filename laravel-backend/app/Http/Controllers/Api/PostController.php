@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\BoostAnalyticsService;
 use App\Services\GoogleMapsLocationService;
 use App\Services\InteractionPushService;
+use App\Services\LinkPreviewService;
 use App\Services\VideoThumbnailService;
 use App\Support\DominantColor;
 use App\Support\VideoDimensions;
@@ -564,11 +565,44 @@ class PostController extends Controller
     /**
      * Create new post
      */
+    /**
+     * Resolve the link preview for a new post: trust a client-supplied payload when present,
+     * otherwise derive it from the first URL in the text. A preview must never block or fail
+     * the post itself, so any error degrades to "no preview".
+     *
+     * @return array<string, mixed>|null
+     */
+    private function resolveLinkPreview(Request $request): ?array
+    {
+        $previews = app(LinkPreviewService::class);
+
+        try {
+            $fromClient = $request->input('link_preview');
+            if (is_array($fromClient) && $fromClient !== []) {
+                $normalized = $previews->normalizeClientPayload($fromClient);
+                if ($normalized !== null) {
+                    return $previews->toClientPayload($normalized);
+                }
+            }
+
+            $derived = $previews->previewFromText((string) ($request->input('text') ?? ''));
+
+            return $derived === null ? null : $previews->toClientPayload($derived);
+        } catch (\Throwable $e) {
+            \Log::info('posts.store link_preview_failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
+            // Optional composer-supplied preview. When absent we derive one from the first
+            // URL in `text` instead (see resolveLinkPreview).
+            'link_preview' => 'nullable|array',
             'placeId' => 'nullable|string|max:255',
             'place_id' => 'nullable|string|max:255',
             'latitude' => 'nullable|numeric|between:-90,90',
@@ -649,7 +683,10 @@ class PostController extends Controller
             'location' => $request->location,
         ]);
 
-        $post = DB::transaction(function () use ($request, $user) {
+        // Resolved outside the transaction: it may make outbound HTTP calls.
+        $linkPreview = $this->resolveLinkPreview($request);
+
+        $post = DB::transaction(function () use ($request, $user, $linkPreview) {
             $geo = $this->resolvePostGeoFields($request);
             $dimensions = $this->resolveMediaDimensions($request);
 
@@ -706,8 +743,9 @@ class PostController extends Controller
                 'subtitles_enabled' => $request->subtitlesEnabled ?? false,
                 'subtitle_text' => $request->subtitleText,
                 'edit_timeline' => $request->editTimeline,
-                'music_track_id' => $request->musicTrackId,
-            ]);
+'music_track_id' => $request->musicTrackId,
+                'link_preview' => $linkPreview,
+              ]);
 
             // Attach tagged users if provided
             if ($request->taggedUsers && is_array($request->taggedUsers) && count($request->taggedUsers) > 0) {

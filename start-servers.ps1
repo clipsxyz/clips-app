@@ -38,6 +38,8 @@ Write-Host "🚀 Starting Laravel Backend..." -ForegroundColor Yellow
 $laravelJob = Start-Job -ScriptBlock {
     Set-Location $using:PWD
     Set-Location laravel-backend
+    # artisan serve spawns php -S without -d flags; use scan dir so child loads 256M limits
+    $env:PHP_INI_SCAN_DIR = (Join-Path (Get-Location) "php-dev.d") + [IO.Path]::PathSeparator + $env:PHP_INI_SCAN_DIR
     php artisan serve --host=0.0.0.0 --port=8000
 }
 

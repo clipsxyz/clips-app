@@ -664,7 +664,12 @@ export default function MessagesPage() {
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
     const [recordingGestureHint, setRecordingGestureHint] = useState<'none' | 'cancel'>('none');
-    const [voiceDraft, setVoiceDraft] = useState<{ audioUrl: string; durationSeconds: number; canContinue?: boolean } | null>(null);
+    const [voiceDraft, setVoiceDraft] = useState<{
+        audioUrl: string;
+        durationSeconds: number;
+        segments?: Array<{ audioUrl: string; durationSeconds: number }>;
+        canContinue?: boolean;
+    } | null>(null);
     const [isPlayingVoiceDraft, setIsPlayingVoiceDraft] = useState(false);
     const [voiceDraftPlaySeconds, setVoiceDraftPlaySeconds] = useState(0);
     const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);

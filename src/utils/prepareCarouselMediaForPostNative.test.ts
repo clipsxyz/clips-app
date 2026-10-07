@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 vi.mock('./prepareMediaForPostNative', () => ({
-    prepareMediaForPostNative: vi.fn(async ({ mediaUrl }: { mediaUrl: string }) => ({
-        mediaUrl: `https://cdn.example/${mediaUrl}`,
+    prepareMediaForPostNative: vi.fn(async ({ mediaUrl }: { mediaUrl: string | null }) => ({
+        mediaUrl: `https://cdn.example/${mediaUrl ?? ''}`,
         mediaType: 'image' as const,
     })),
 }));
@@ -13,9 +13,9 @@ import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPost
 describe('prepareCarouselMediaForPostNative', () => {
     beforeEach(() => {
         vi.mocked(prepareMediaForPostNative).mockImplementation(
-            async ({ mediaUrl, mediaType }: { mediaUrl: string; mediaType: 'image' | 'video' }) => ({
-                mediaUrl: `https://cdn.example/${mediaUrl}`,
-                mediaType,
+            async ({ mediaUrl, mediaType }) => ({
+                mediaUrl: `https://cdn.example/${mediaUrl ?? ''}`,
+                mediaType: mediaType === 'video' ? 'video' : 'image',
                 videoPosterUrl:
                     mediaType === 'video' ? `https://cdn.example/poster-${mediaUrl}` : undefined,
             }),

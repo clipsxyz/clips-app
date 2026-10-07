@@ -36,6 +36,8 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/notifications/mark-all-read',
     '/users/privacy/toggle',
     '/users/check-follows-me',
+    '/link-preview',
+    '/v1/parse-link',
 ]);
 
 /** Prefixes for `/resource/{id}/…` routes that already exist in Laravel. */
@@ -658,6 +660,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
 export async function updateAuthProfile(data: {
     display_name?: string;
     handle?: string;
+    avatar_url?: string | null;
     bio?: string | null;
     places_traveled?: string[];
     location_local?: string | null;
@@ -806,6 +809,29 @@ export async function fetchStoriesPage(cursor: string | null = null, limit: numb
         ...(userId ? { userId } : {}),
     });
     return apiRequest(`/stories/paged?${params}`);
+}
+
+/** Raw `snake_case` payload returned by the link-preview endpoints. Map with `mapApiLinkPreview`. */
+export type ApiLinkPreview = {
+    url: string;
+    title?: string | null;
+    description?: string | null;
+    image_url?: string | null;
+    thumbnail_url?: string | null;
+    site_name?: string | null;
+    source?: string | null;
+    video_url?: string | null;
+    is_direct_video?: boolean;
+};
+
+/** `GET /api/link-preview` — Open Graph / oEmbed resolution for an arbitrary URL. */
+export async function fetchLinkPreview(url: string): Promise<ApiLinkPreview | null> {
+    return apiRequest(`/link-preview?url=${encodeURIComponent(url)}`);
+}
+
+/** Legacy `GET /api/v1/parse-link` — same payload; still the path the RN client uses for Instagram links. */
+export async function parseLinkPreview(url: string): Promise<ApiLinkPreview | null> {
+    return apiRequest(`/v1/parse-link?url=${encodeURIComponent(url)}`);
 }
 
 /** Check if the user with the given handle follows the current viewer (for mutual-follow DM icon). Requires auth. */

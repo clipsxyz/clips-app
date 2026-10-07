@@ -76,6 +76,7 @@ export async function prepareCarouselMediaForPostNative(
                     ? captureVideoPoster
                     : undefined,
             videoCoverTime: slideCoverTime,
+            destination: 'feed',
         });
 
         if (!prep.mediaUrl) {

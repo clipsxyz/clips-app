@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   ambientWash: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   content: {},
   header: {

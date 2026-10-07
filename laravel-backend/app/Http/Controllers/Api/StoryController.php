@@ -9,6 +9,7 @@ use App\Models\StoryReply;
 use App\Models\StoryView;
 use App\Models\User;
 use App\Models\Post;
+use App\Services\LinkPreviewService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -20,7 +21,32 @@ use Carbon\Carbon;
 class StoryController extends Controller
 {
     /**
+     * Author IDs visible on the viewer's Stories rail: self + accepted follows.
+     *
+     * @return \Illuminate\Support\Collection<int, string>
+     */
+    private function storyFeedAuthorIds(?User $viewer, ?string $userIdParam = null)
+    {
+        $viewerId = $viewer?->id ?: $userIdParam;
+        if (!$viewerId) {
+            return collect();
+        }
+
+        $author = $viewer ?: User::query()->find($viewerId);
+        $ids = collect([(string) $viewerId]);
+        if ($author) {
+            // allRelatedIds() returns following_id values without ambiguous users.id joins.
+            $ids = $ids->merge(
+                collect($author->following()->allRelatedIds())->map(fn ($id) => (string) $id)
+            );
+        }
+
+        return $ids->filter()->unique()->values();
+    }
+
+    /**
      * Get active stories with keyset cursor pagination.
+     * Scoped to the authenticated viewer (self + following), newest first.
      */
     public function paged(Request $request): JsonResponse
     {
@@ -36,12 +62,21 @@ class StoryController extends Controller
 
         $limit = (int) $request->get('limit', 20);
         $cursorState = $this->decodeStoryCursor((string) $request->get('cursor', ''));
-        $userId = $request->get('userId');
+        $viewer = Auth::user();
+        $userId = $viewer?->id ?: $request->get('userId');
         $hasViewer = !empty($userId);
+        $authorIds = $this->storyFeedAuthorIds($viewer instanceof User ? $viewer : null, $request->get('userId'));
 
         $query = Story::active()
             ->with(['user:id,handle,display_name,avatar_url'])
-            ->withCount(['reactions', 'replies', 'views']);
+            ->withCount(['reactions', 'replies', 'views'])
+            ->where('created_at', '>=', now()->subHours(24));
+
+        if ($authorIds->isNotEmpty()) {
+            $query->whereIn('user_id', $authorIds->all());
+        } elseif ($hasViewer) {
+            $query->where('user_id', $userId);
+        }
 
         if ($hasViewer) {
             $query->withExists([
@@ -101,15 +136,25 @@ class StoryController extends Controller
     }
 
     /**
-     * Get all active stories grouped by user
+     * Get active stories grouped by user (self + following), newest groups first.
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = $request->get('userId');
+        $viewer = Auth::user();
+        $userId = $viewer?->id ?: $request->get('userId');
         $hasViewer = !empty($userId);
+        $authorIds = $this->storyFeedAuthorIds($viewer instanceof User ? $viewer : null, $request->get('userId'));
+
         $query = Story::active()
             ->with(['user:id,handle,display_name,avatar_url'])
-            ->withCount(['reactions', 'replies', 'views']);
+            ->withCount(['reactions', 'replies', 'views'])
+            ->where('created_at', '>=', now()->subHours(24));
+
+        if ($authorIds->isNotEmpty()) {
+            $query->whereIn('user_id', $authorIds->all());
+        } elseif ($hasViewer) {
+            $query->where('user_id', $userId);
+        }
 
         if ($hasViewer) {
             $query->withExists([
@@ -123,18 +168,21 @@ class StoryController extends Controller
             }]);
         }
 
-        $stories = $query->orderBy('created_at', 'desc')->get();
+        // Newest stories first so groupBy preserves newest-author-first order.
+        $stories = $query->orderBy('created_at', 'desc')->orderBy('id', 'desc')->get();
 
         // Group by user
         $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($hasViewer) {
             $user = $userStories->first()->user;
             // Newest first within each user (viewer opens on latest slide).
             $ordered = $userStories->sortByDesc('created_at')->values();
+            $latestAt = optional($ordered->first())->created_at;
             return [
                 'user_id' => $userGroupId,
-                'user_handle' => $user->handle,
-                'user_name' => $user->display_name,
-                'avatar_url' => $user->avatar_url,
+                'user_handle' => $user?->handle,
+                'user_name' => $user?->display_name,
+                'avatar_url' => $user?->avatar_url,
+                'latest_created_at' => $latestAt ? Carbon::parse($latestAt)->toISOString() : null,
                 'stories' => $ordered->map(function ($story) use ($hasViewer) {
                     $storyData = $story->toArray();
                     if ($hasViewer) {
@@ -150,11 +198,19 @@ class StoryController extends Controller
                         $storyData['user_reaction'] = null;
                     }
                     return $storyData;
-                }),
+                })->values(),
             ];
-        })->values();
+        });
 
-        return response()->json($grouped);
+        // Strict newest → oldest by each author's latest story.
+        $sorted = $grouped->sortByDesc(function ($group) {
+            return $group['latest_created_at'] ?? '';
+        })->values()->map(function ($group) {
+            unset($group['latest_created_at']);
+            return $group;
+        });
+
+        return response()->json($sorted);
     }
 
     /**
@@ -216,16 +272,44 @@ class StoryController extends Controller
     /**
      * Create a new story
      */
+    /**
+     * Resolve the link preview for a new story: trust a client-supplied payload when present,
+     * otherwise derive it from the first URL in the text. A preview must never block or fail
+     * the story itself, so any error degrades to "no preview".
+     *
+     * @return array<string, mixed>|null
+     */
+    private function resolveLinkPreview(Request $request): ?array
+    {
+        $previews = app(LinkPreviewService::class);
+
+        try {
+            $fromClient = $request->input('link_preview');
+            if (is_array($fromClient) && $fromClient !== []) {
+                $normalized = $previews->normalizeClientPayload($fromClient);
+                if ($normalized !== null) {
+                    return $previews->toClientPayload($normalized);
+                }
+            }
+
+            $derived = $previews->previewFromText((string) ($request->input('text') ?? ''));
+
+            return $derived === null ? null : $previews->toClientPayload($derived);
+        } catch (\Throwable $e) {
+            \Log::info('stories.store link_preview_failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
     public function store(Request $request): JsonResponse
     {
-        \Log::info('DEBUG stories.store request', [
-            'user' => optional(Auth::user())->id,
-            'body' => $request->all(),
-        ]);
         $validator = Validator::make($request->all(), [
             'media_url' => 'nullable|url|max:500', // Made nullable for text-only stories
             'media_type' => 'nullable|in:image,video', // Made nullable for text-only stories
             'text' => 'nullable|string|max:500',
+            // Optional composer-supplied preview; derived from the first URL in `text` when absent.
+            'link_preview' => 'nullable|array',
             'text_color' => 'nullable|string|max:50',
             'text_size' => 'nullable|in:small,medium,large',
             'location' => 'nullable|string|max:200',
@@ -250,13 +334,13 @@ class StoryController extends Controller
         ]);
 
         if ($validator->fails()) {
-            \Log::warning('DEBUG stories.store validation failed', $validator->errors()->toArray());
+            \Log::warning('stories.store validation failed', $validator->errors()->toArray());
+
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
         // Validate that either media or text/stickers are provided
         if (!$request->media_url && !$request->text && (!$request->stickers || count($request->stickers) === 0)) {
-            \Log::warning('DEBUG stories.store empty body', $request->all());
             return response()->json(['error' => 'Story must have media, text, or stickers'], 400);
         }
 
@@ -270,7 +354,10 @@ class StoryController extends Controller
             ? Post::find($request->shared_from_post_id)
             : null;
 
-        $story = DB::transaction(function () use ($request, $user, $sharedPost) {
+        // Resolved outside the transaction: it may make outbound HTTP calls.
+        $linkPreview = $this->resolveLinkPreview($request);
+
+        $story = DB::transaction(function () use ($request, $user, $sharedPost, $linkPreview) {
             $story = Story::create([
                 'user_id' => $user->id,
                 'user_handle' => $user->handle,
@@ -290,6 +377,7 @@ class StoryController extends Controller
                 'audience' => $request->audience ?: 'public',
                 'video_poster_url' => $request->video_poster_url,
                 'expires_at' => now()->addHours(24), // 24 hours from now
+                'link_preview' => $linkPreview,
             ]);
 
             return $story;

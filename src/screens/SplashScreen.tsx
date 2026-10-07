@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
     backgroundColor: PASSPORT_ABYSS,
   },
   ambientSlot: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 0,
     overflow: 'hidden',
   },

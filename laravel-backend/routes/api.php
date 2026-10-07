@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\BoostController;
 use App\Http\Controllers\Api\SuggestedPlacesController;
 use App\Http\Controllers\Api\FeedContentPreferenceController;
 use App\Http\Controllers\Api\PostReportController;
+use App\Http\Controllers\Api\LinkPreviewController;
 
 /*
 |--------------------------------------------------------------------------
@@ -156,6 +157,7 @@ Route::prefix('music')->group(function () {
 
 // Public upload routes (allow unauthenticated for video editing workflow)
 Route::prefix('upload')->group(function () {
+    Route::get('/limits', [UploadController::class, 'limits']);
     Route::post('/single', [UploadController::class, 'single']);
     Route::post('/multiple', [UploadController::class, 'multiple']);
 });
@@ -241,6 +243,11 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
         Route::post('/logout', [AuthController::class, 'logout']);
     });
+
+    // Link preview (composer) routes. `/v1/parse-link` is the legacy path the RN client
+    // still calls for Instagram links; both return the same normalized client payload.
+    Route::get('/link-preview', [LinkPreviewController::class, 'show']);
+    Route::get('/v1/parse-link', [LinkPreviewController::class, 'show']);
 
     // Posts routes (protected - require auth for actions)
     Route::prefix('posts')->group(function () {

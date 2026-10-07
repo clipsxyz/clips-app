@@ -14,7 +14,6 @@ import {
     Keyboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import * as ImagePicker from 'react-native-image-picker';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import Video, { type VideoRef } from 'react-native-video';
 import VideoCoverControls from '../components/VideoCoverControls.native';
@@ -36,8 +35,10 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import StickerPickerNative from '../components/StickerPicker.native';
 import StickerOverlayNative from '../components/StickerOverlay.native';
+import CarouselSlideThumb from '../components/CarouselSlideThumb.native';
 import TextStickerModalNative from '../components/TextStickerModal.native';
 import type { Sticker, StickerOverlay } from '../types';
+import ComposerLinkPreview from '../components/ComposerLinkPreview.native';
 import { clampStickerY } from '../utils/stickerLayoutNative';
 import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
 import {
@@ -49,13 +50,18 @@ import {
     type InstantFilterName,
 } from '../utils/instantFiltersNative';
 import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNative';
-import { ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
+import { filterValidVideoAssets } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import type { LocationSuggestion } from '../api/locations';
+import { geoFieldsFromSuggestion } from '../api/locations';
+import { warmPlaceGeocode } from '../utils/pickPlaceFeedScope';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -97,12 +103,17 @@ export default function CreateScreen({ navigation, route }: any) {
         ? carouselItems[carouselActiveIndex]?.type ?? mediaType
         : mediaType;
     const activeCarouselSlide = isCarousel ? carouselItems[carouselActiveIndex] : undefined;
-    const [text, setText] = useState(route.params?.draftCaption || route.params?.draftTextBody || '');
+    const [text, setText] = useState<string>(
+        String(route.params?.draftCaption || route.params?.draftTextBody || ''),
+    );
     const [location, setLocation] = useState(route.params?.draftLocation || '');
     const [venue, setVenue] = useState(route.params?.draftVenue || '');
     const [landmark, setLandmark] = useState(route.params?.draftLandmark || '');
-    const [taggedUsersInput, setTaggedUsersInput] = useState(
-        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : ''
+    const [placeId, setPlaceId] = useState<string | undefined>(undefined);
+    const [placeLatitude, setPlaceLatitude] = useState<number | undefined>(undefined);
+    const [placeLongitude, setPlaceLongitude] = useState<number | undefined>(undefined);
+    const [taggedUsersInput, setTaggedUsersInput] = useState<string>(
+        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : '',
     );
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -393,53 +404,40 @@ export default function CreateScreen({ navigation, route }: any) {
     }, [previewCoverTime, previewType, previewUri, carouselActiveIndex]);
 
     const handleSelectMedia = useCallback(async () => {
-        const allowed = await ensureGalleryMediaPermission();
-        if (!allowed) {
-            Alert.alert(
-                'Gallery access needed',
-                'Allow photo and video access in Settings to upload from your gallery.',
-            );
-            return;
-        }
-
-        // Web-parity: open the system gallery directly (no Photo/Video/Carousel chooser).
-        ImagePicker.launchImageLibrary(
-            {
-                mediaType: 'mixed',
-                selectionLimit: isStory24Flow ? 1 : 10,
-                quality: 0.9,
-                videoQuality: 'high',
-                includeExtra: true,
-            },
-            (response) => {
-                if (response.didCancel) return;
-                if (response.errorCode) {
-                    Alert.alert(
-                        'Media error',
-                        response.errorMessage || 'Could not open your photo library.',
-                    );
-                    return;
-                }
-                const assets = response.assets || [];
-                if (assets.length === 0) {
-                    Alert.alert('Media error', 'No media was selected.');
-                    return;
-                }
-                if (!isStory24Flow && assets.length >= 2) {
-                    applyCarouselFromAssets(assets);
-                    return;
-                }
-                const asset = assets[0];
-                if (!asset?.uri) {
-                    Alert.alert('Media error', 'No media was selected.');
-                    return;
-                }
-                applySingleMedia(
-                    normalizeMediaUri(asset.uri),
-                    assetIsVideo(asset) ? 'video' : 'image',
+        try {
+            const picked = await pickFromFullGallery(isStory24Flow ? 1 : 10);
+            if (picked === 'denied') {
+                Alert.alert(
+                    'Gallery access needed',
+                    'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
                 );
-            },
-        );
+                return;
+            }
+            if (picked === 'cancel') return;
+            const { accepted: assets } = await filterValidVideoAssets(picked);
+            if (assets.length === 0) {
+                Alert.alert('Media error', 'No media was selected.');
+                return;
+            }
+            if (!isStory24Flow && assets.length >= 2) {
+                applyCarouselFromAssets(assets);
+                return;
+            }
+            const asset = assets[0];
+            if (!asset?.uri) {
+                Alert.alert('Media error', 'No media was selected.');
+                return;
+            }
+            applySingleMedia(
+                normalizeMediaUri(asset.uri),
+                assetIsVideo(asset) ? 'video' : 'image',
+            );
+            if (assetIsVideo(asset) && Number(asset.duration) > 0) {
+                setVideoDurationSec(Math.max(0.1, Number(asset.duration)));
+            }
+        } catch (err: any) {
+            Alert.alert('Media error', err?.message || 'Could not open your photo library.');
+        }
     }, [applyCarouselFromAssets, applySingleMedia, isStory24Flow]);
 
     const handleTakePhoto = async () => {
@@ -492,6 +490,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         ? captureVideoPoster
                         : undefined,
                 videoCoverTime,
+                destination: 'feed',
             });
         } catch (err) {
             // Live mode: never fall back to a device file:// URI (Laravel can't serve it).
@@ -557,6 +556,9 @@ export default function CreateScreen({ navigation, route }: any) {
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 venue: venue.trim() || undefined,
                 landmark: landmark.trim() || undefined,
+                placeId,
+                latitude: placeLatitude,
+                longitude: placeLongitude,
             });
             showUploadOverlayNative({
                 jobId: tempId,
@@ -570,7 +572,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         : 'Posting to Gazetteer…',
             });
             hapticLight();
-            resetToHomeFeed(navigation, { forceRefreshAt: Date.now() });
+            resetToHomeFeed(navigation);
             setIsUploading(false);
             startBackgroundFeedUpload(tempId);
             return;
@@ -587,7 +589,7 @@ export default function CreateScreen({ navigation, route }: any) {
             }
             if (preparedMedia.videoCompressFailed && mediaType === 'video') {
                 console.warn(
-                    'Video compression failed; original file was uploaded and may be larger than expected.',
+                    'Filter bake failed after trim; uploaded the trimmed clip without the filter.',
                 );
             }
 
@@ -599,6 +601,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 userHandle: user.handle,
                 mediaUrl: preparedMedia.mediaUrl,
                 mediaType: preparedMedia.mediaType,
+                videoPosterUrl: preparedMedia.videoPosterUrl,
                 caption: captionText,
                 location: locationLabel,
                 venue: venue.trim() || undefined,
@@ -788,8 +791,8 @@ export default function CreateScreen({ navigation, route }: any) {
                         <TouchableOpacity
                             onPress={() => {
                                 setMediaSourceMenu({
-                                    title: 'Add media',
-                                    subtitle: 'Choose a source',
+                                    title: isStory24Flow ? 'Add to your story' : 'Add to your post',
+                                    subtitle: isStory24Flow ? 'Photo, video, or a link' : 'Photo or video',
                                     options: [
                                         {
                                             label: 'Photo library',
@@ -806,7 +809,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                             },
                                         },
                                         {
-                                            label: 'Camera',
+                                            label: 'Take photo',
                                             icon: 'camera-outline',
                                             onPress: () => {
                                                 navigation.replace('GalleryPreview', {
@@ -819,6 +822,31 @@ export default function CreateScreen({ navigation, route }: any) {
                                                 });
                                             },
                                         },
+                                        {
+                                            label: 'Record video',
+                                            icon: 'videocam-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'video',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        ...(isStory24Flow
+                                            ? [
+                                                  {
+                                                      label: 'Paste a link',
+                                                      icon: 'link-outline' as const,
+                                                      onPress: () => {
+                                                          navigation.replace('StoryLinkCreate');
+                                                      },
+                                                  },
+                                              ]
+                                            : []),
                                     ],
                                 });
                             }}
@@ -829,15 +857,45 @@ export default function CreateScreen({ navigation, route }: any) {
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={() => {
-                                navigation.replace('GalleryPreview', {
-                                    autoStart: { source: 'camera', kind: 'single', mediaType: 'photo' },
-                                    story24: isStory24Flow || undefined,
+                                setMediaSourceMenu({
+                                    title: 'Camera',
+                                    subtitle: 'Photo or video',
+                                    options: [
+                                        {
+                                            label: 'Take photo',
+                                            icon: 'camera-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'photo',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                        {
+                                            label: 'Record video',
+                                            icon: 'videocam-outline',
+                                            onPress: () => {
+                                                navigation.replace('GalleryPreview', {
+                                                    autoStart: {
+                                                        source: 'camera',
+                                                        kind: 'single',
+                                                        mediaType: 'video',
+                                                    },
+                                                    story24: isStory24Flow || undefined,
+                                                });
+                                            },
+                                        },
+                                    ],
                                 });
                             }}
                             style={styles.mediaButton}
                         >
                             <Icon name="camera" size={ox(32)} color="#8B5CF6" />
-                            <Text style={styles.mediaButtonText}>Take Photo</Text>
+                            <Text style={styles.mediaButtonText}>Camera</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -885,17 +943,20 @@ export default function CreateScreen({ navigation, route }: any) {
                                             ]}
                                         >
                                             {item.type === 'video' ? (
-                                                <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={ox(22)} color="#E5E7EB" />
-                                                </View>
+                                                <>
+                                                    <CarouselSlideThumb
+                                                        size={ox(72)}
+                                                        uri={item.uri}
+                                                        type="video"
+                                                        allowPausedVideo
+                                                    />
+                                                    <View style={styles.carouselVidBadge}>
+                                                        <Text style={styles.carouselVidBadgeText}>MP4</Text>
+                                                    </View>
+                                                </>
                                             ) : (
-                                                <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
+                                                <CarouselSlideThumb size={ox(72)} uri={item.uri} type="image" />
                                             )}
-                                            {item.type === 'video' ? (
-                                                <View style={styles.carouselVidBadge}>
-                                                    <Text style={styles.carouselVidBadgeText}>MP4</Text>
-                                                </View>
-                                            ) : null}
                                             {isActive && item.type === 'video' ? (
                                                 <View style={styles.carouselCoverBadge}>
                                                     <Text style={styles.carouselCoverBadgeText}>Cover</Text>
@@ -1061,6 +1122,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         numberOfLines={6}
                         maxLength={TEXT_POST_BODY_MAX_LENGTH}
                     />
+                    <ComposerLinkPreview text={text} />
                     <View style={styles.captionCounterRow}>
                         <Text
                             style={[
@@ -1078,39 +1140,64 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Location Input */}
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="location" size={ox(20)} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="location"
                             value={location}
-                            onChangeText={setLocation}
+                            onChange={setLocation}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                const geo = geoFieldsFromSuggestion(s);
+                                setPlaceId(geo.placeId);
+                                setPlaceLatitude(geo.latitude);
+                                setPlaceLongitude(geo.longitude);
+                            }}
                             placeholder="Add location"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="business" size={ox(20)} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="venue"
                             value={venue}
-                            onChangeText={setVenue}
+                            onChange={setVenue}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                if (!placeId) {
+                                    const geo = geoFieldsFromSuggestion(s);
+                                    setPlaceId(geo.placeId);
+                                    setPlaceLatitude(geo.latitude);
+                                    setPlaceLongitude(geo.longitude);
+                                }
+                            }}
                             placeholder="Add venue"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
 
                 <View style={styles.inputContainer}>
                     <View style={styles.locationInputContainer}>
-                        <Icon name="pin" size={ox(20)} color="#8B5CF6" />
-                        <TextInput
+                        <PlaceAutocompleteField
+                            showIcon={false}
+                            mode="landmark"
                             value={landmark}
-                            onChangeText={setLandmark}
+                            onChange={setLandmark}
+                            onSelectSuggestion={(s: LocationSuggestion) => {
+                                warmPlaceGeocode(s);
+                                if (!placeId) {
+                                    const geo = geoFieldsFromSuggestion(s);
+                                    setPlaceId(geo.placeId);
+                                    setPlaceLatitude(geo.latitude);
+                                    setPlaceLongitude(geo.longitude);
+                                }
+                            }}
                             placeholder="Add landmark"
-                            placeholderTextColor="#6B7280"
-                            style={styles.locationInput}
+                            inputStyle={styles.locationInput}
                         />
                     </View>
                 </View>
@@ -1129,7 +1216,7 @@ export default function CreateScreen({ navigation, route }: any) {
                     </View>
                     {taggedUsers.length > 0 && (
                         <Text style={styles.taggedUsersPreview}>
-                            Tagged: {taggedUsers.map((u) => `@${u}`).join(', ')}
+                            Tagged: {taggedUsers.map((u: string) => `@${u}`).join(', ')}
                         </Text>
                     )}
                 </View>
@@ -1366,7 +1453,6 @@ const styles = StyleSheet.create({
         width: ox(72),
         height: ox(72),
         borderRadius: ox(10),
-        overflow: 'hidden',
         backgroundColor: '#111827',
         borderWidth: 2,
         borderColor: 'transparent',

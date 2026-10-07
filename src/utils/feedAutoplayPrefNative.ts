@@ -60,7 +60,7 @@ export async function resolveFeedAutoplayAllowed(pref: FeedAutoplayPref): Promis
         if (type === 'wifi' || type === 'ethernet') return true;
         if (type === 'cellular') return false;
         // Unknown / other: allow when not explicitly cellular (offline handled above).
-        return type !== 'cellular';
+        return true;
     } catch {
         return false;
     }

@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     ambient: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     content: {

@@ -96,7 +96,7 @@ function resolveFeedVideoPosterUri(
     item: PostMediaItem | undefined,
     post: Post,
 ): string | undefined {
-    const extra = item as { thumbnailUrl?: string; thumbnail_url?: string } | undefined;
+    const extra = item as { posterUrl?: string; thumbnailUrl?: string; thumbnail_url?: string } | undefined;
     const postExtra = post as { thumbnailUrl?: string; thumbnail_url?: string };
     return firstMediaUri(
         extra?.posterUrl,
@@ -170,7 +170,7 @@ const FeedPostMedia = React.memo(
         stickers,
         onMediaLoad,
         mode = 'feed',
-        isActive = false,
+        isActive: _isActive = false,
         suspendNativeVideo = false,
         muted = true,
         style,
@@ -877,19 +877,17 @@ const FeedPostMedia = React.memo(
                 ) : null}
 
                 {slidePosterUri && showBufferCover ? (
-                    <Animated.Image
-                        source={{ uri: slidePosterUri, cache: 'force-cache' }}
-                        style={[
-                            styles.posterCover,
-                            { opacity: slideMountVideo ? posterOpacity : 1 },
-                        ]}
-                        resizeMode="cover"
-                        resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                        pointerEvents="none"
-                        fadeDuration={0}
-                        onLoad={() => markUrlLoaded(slideRawUrl)}
-                        onError={() => markUrlLoaded(slideRawUrl)}
-                    />
+                    <View style={styles.posterCover} pointerEvents="none">
+                        <Animated.Image
+                            source={{ uri: slidePosterUri, cache: 'force-cache' }}
+                            style={[StyleSheet.absoluteFill, { opacity: slideMountVideo ? posterOpacity : 1 }]}
+                            resizeMode="cover"
+                            resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                            fadeDuration={0}
+                            onLoad={() => markUrlLoaded(slideRawUrl)}
+                            onError={() => markUrlLoaded(slideRawUrl)}
+                        />
+                    </View>
                 ) : !slideMountVideo ? (
                     <View style={styles.posterPlaceholder} pointerEvents="none" />
                 ) : null}
@@ -1041,26 +1039,26 @@ const styles = StyleSheet.create({
         borderRadius: 20,
     },
     videoClip: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         overflow: 'hidden',
         borderRadius: 20,
         backgroundColor: '#000000',
     },
     stillImage: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
         opacity: 1,
     },
     /** Explicit fill — Android TextureView collapses to 0×0 without width/height. */
     videoFill: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
     },
     /** Sits above Video until first frame, then faded/unmounted. */
     posterCover: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
         zIndex: 2,
@@ -1068,18 +1066,18 @@ const styles = StyleSheet.create({
         backgroundColor: '#000000',
     },
     posterPlaceholder: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: '#000000',
     },
     loadingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'transparent',
         zIndex: 6,
     },
     playBadge: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1105,7 +1103,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#121212',
     },
     mediaFill: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     textOnlyCard: {
         borderRadius: 16,

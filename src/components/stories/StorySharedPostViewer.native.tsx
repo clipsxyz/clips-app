@@ -59,26 +59,28 @@ function SharedBackdrop({
     // pointerEvents none — TextureView would steal taps meant for the card / modal.
     if (isVideo && posterSource) {
         return (
-            <Image
-                source={posterSource}
-                style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-                resizeMode="cover"
-                blurRadius={18}
-                pointerEvents="none"
-            />
+            <View style={[StyleSheet.absoluteFill, styles.backdropMedia]} pointerEvents="none">
+                <Image
+                    source={posterSource}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                    blurRadius={18}
+                />
+            </View>
         );
     }
     if (isVideo) {
         return <View style={[StyleSheet.absoluteFill, styles.backdropMedia]} pointerEvents="none" />;
     }
     return (
-        <Image
-            source={{ uri: mediaUrl }}
-            style={[StyleSheet.absoluteFill, styles.backdropMedia]}
-            resizeMode="cover"
-            blurRadius={12}
-            pointerEvents="none"
-        />
+        <View style={[StyleSheet.absoluteFill, styles.backdropMedia]} pointerEvents="none">
+            <Image
+                source={{ uri: mediaUrl }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+                blurRadius={12}
+            />
+        </View>
     );
 }
 
@@ -112,22 +114,24 @@ function SharedCardMedia({
         }
         if (posterSource) {
             return (
-                <Image
-                    source={posterSource}
-                    style={styles.cardMediaFill}
-                    resizeMode="cover"
-                    pointerEvents="none"
-                />
+                <View style={styles.cardMediaFill} pointerEvents="none">
+                    <Image
+                        source={posterSource}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                    />
+                </View>
             );
         }
     }
     return (
-        <Image
-            source={{ uri: mediaUrl }}
-            style={styles.cardMediaFill}
-            resizeMode="cover"
-            pointerEvents="none"
-        />
+        <View style={styles.cardMediaFill} pointerEvents="none">
+            <Image
+                source={{ uri: mediaUrl }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+            />
+        </View>
     );
 }
 
@@ -411,7 +415,7 @@ const styles = StyleSheet.create({
     fallbackText: { color: '#fff', fontSize: 14 },
     backdropMedia: { opacity: 0.58 },
     backdropDim: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     cardColumn: {
@@ -507,7 +511,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     textSharedVeil: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(6, 13, 22, 0.45)',
     },
     textSharedColumn: {

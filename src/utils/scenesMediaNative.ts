@@ -41,6 +41,6 @@ export function resolveScenesVideoUrl(raw: string): string {
 }
 
 /** Video source for Scenes — bundled require for mock demo paths. */
-export function scenesVideoSource(raw: string): number | { uri: string } {
+export function scenesVideoSource(raw: string): { uri: string } {
     return mockFeedVideoSource(raw);
 }

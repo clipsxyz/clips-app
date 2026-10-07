@@ -62,11 +62,37 @@ export type PostMediaItem = {
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
 };
 
+/**
+ * Link attachment rendered under a text-only post or story.
+ *
+ * Resolved server-side by `GET /api/link-preview` (legacy RN path: `GET /api/v1/parse-link`)
+ * or locally by `mapApiLinkPreview` from an already-fetched payload. The backend persists the
+ * same payload verbatim in `posts.link_preview` / `stories.link_preview`.
+ */
+export type LinkPreview = {
+  /** Canonical page URL the preview was resolved from. */
+  url: string;
+  title?: string;
+  description?: string;
+  /** Primary still image (`image_url` / `thumbnail_url` on the API payload). */
+  imageUrl?: string;
+  /** Publisher name from Open Graph, e.g. `YouTube`. */
+  siteName?: string;
+  /** Human-readable label shown on the card, e.g. `YouTube`, `TikTok`, `Instagram`. */
+  source: string;
+  /** True when `videoUrl` points at a playable file rather than a watch page. */
+  isDirectVideo?: boolean;
+  /** Direct media URL when the preview can be played inline. */
+  videoUrl?: string;
+};
+
 export type Post = {
   id: string;
   publicShareToken?: string;
   user_id?: string; // Backend field
   userHandle: string;
+  /** Author profile picture from API (`avatar_url` / nested `user.avatar_url`). */
+  avatarUrl?: string;
   locationLabel: string;
   /** Venue / place name (e.g. café, stadium); shown in metadata carousel on feed */
   venue?: string;
@@ -113,6 +139,8 @@ export type Post = {
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
   caption?: string; // Caption/description for image/video posts
+  /** Link card resolved from the first URL in the text (server-persisted or composer-supplied). */
+  linkPreview?: LinkPreview;
   createdAt: number; // Epoch timestamp in milliseconds (like Date.now())
   created_at?: string; // Backend field (ISO string)
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };

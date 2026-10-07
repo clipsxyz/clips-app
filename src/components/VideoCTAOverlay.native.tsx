@@ -39,8 +39,7 @@ export default function VideoCTAOverlay({
     return (
         <View style={styles.wrap} pointerEvents="box-none">
             <Pressable
-                onPress={(e) => {
-                    e?.stopPropagation?.();
+                onPress={() => {
                     onPress();
                 }}
                 hitSlop={8}

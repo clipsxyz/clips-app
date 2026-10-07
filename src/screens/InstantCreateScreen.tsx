@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
+import { launchNativeCamera } from '../utils/launchNativeCamera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
+import CommunityGroupOnboardingSheet from '../components/CommunityGroupOnboardingSheet.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
@@ -22,9 +24,10 @@ import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarous
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 import {
-    ensureCameraPermission,
-    ensureGalleryMediaPermission,
+    ensureCameraCapturePermission,
 } from '../utils/galleryMediaPermissionsNative';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { MAX_FEED_VIDEO_DURATION_SEC } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 type PickerMode = 'feed' | 'story24';
@@ -168,11 +171,12 @@ function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress }: OrbitMod
     );
 }
 
-export default function InstantCreateScreen({ navigation }: any) {
+export default function InstantCreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
     const [centeredMode, setCenteredMode] = useState<CreateModeId>('gallery');
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [communityOnboardingOpen, setCommunityOnboardingOpen] = useState(false);
     const [hubAlert, setHubAlert] = useState<HubAlertConfig | null>(null);
     const [mediaSourceMenu, setMediaSourceMenu] = useState<{
         title: string;
@@ -182,6 +186,9 @@ export default function InstantCreateScreen({ navigation }: any) {
     const orbitIndexRef = useRef(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0);
     const orbitAnim = useRef(new Animated.Value(GALLERY_INDEX >= 0 ? GALLERY_INDEX : 0)).current;
     const didInit = useRef(false);
+    const clipStudioFormatRef = useRef<'youtube_shorts' | 'tiktok' | 'instagram_reels' | undefined>(
+        undefined,
+    );
 
     const setOrbitIndex = useCallback(
         (idx: number) => {
@@ -230,10 +237,38 @@ export default function InstantCreateScreen({ navigation }: any) {
         });
     }, [stepOrbitMode]);
 
-    const navigateFromAssets = (assets: ImagePicker.Asset[], mode: PickerMode, carousel: boolean) => {
+    const navigateFromAssets = async (
+        assets: ImagePicker.Asset[],
+        mode: PickerMode,
+        carousel: boolean,
+    ) => {
+        const socialFormat = mode === 'feed' ? clipStudioFormatRef.current : undefined;
+        clipStudioFormatRef.current = undefined;
         if (!assets.length) return;
-        if (carousel && assets.length >= 2) {
-            const items = assets
+
+        const accepted = assets.filter((asset) => !!asset.uri);
+        if (accepted.length === 0) return;
+
+        // Stories skip the feed GalleryPreview (caption/settings) and open the story composer.
+        if (mode === 'story24') {
+            const asset = accepted[0];
+            if (!asset?.uri) return;
+            const isVideo = assetIsVideo(asset);
+            const duration = Number(asset.duration || 0);
+            navigation.navigate('Story24Composer', {
+                mediaUrl: asset.uri,
+                mediaType: isVideo ? 'video' : 'image',
+                videoCoverTime: isVideo ? 0 : undefined,
+                videoDurationSec:
+                    isVideo && Number.isFinite(duration) && duration > 0
+                        ? Math.max(0.1, Math.floor(duration * 10) / 10)
+                        : undefined,
+            });
+            return;
+        }
+
+        if (carousel && accepted.length >= 2) {
+            const items = accepted
                 .filter((a) => a.uri)
                 .slice(0, 10)
                 .map((a) => {
@@ -256,104 +291,105 @@ export default function InstantCreateScreen({ navigation }: any) {
                     }
                     return slide;
                 });
-            navigation.navigate('GalleryPreview', { carouselItems: items, story24: mode === 'story24' });
+            navigation.navigate('GalleryPreview', { carouselItems: items, socialFormat });
             return;
         }
-        const asset = assets[0];
+        const asset = accepted[0];
         if (!asset?.uri) return;
+        const isVideo = assetIsVideo(asset);
+        const duration = Number(asset.duration || 0);
         navigation.navigate('GalleryPreview', {
             mediaUrl: asset.uri,
-            mediaType: assetIsVideo(asset) ? 'video' : 'image',
-            story24: mode === 'story24',
+            mediaType: isVideo ? 'video' : 'image',
+            videoDuration:
+                isVideo && Number.isFinite(duration) && duration > 0
+                    ? Math.max(0.1, Math.floor(duration * 10) / 10)
+                    : undefined,
+            socialFormat,
         });
     };
 
     const pickGalleryMedia = useCallback(
         async (mode: PickerMode = 'feed') => {
-            const allowed = await ensureGalleryMediaPermission();
-            if (!allowed) {
+            try {
+                const maxItems = mode === 'story24' ? 1 : MAX_GALLERY_ITEMS;
+                const picked = await pickFromFullGallery(maxItems);
+                if (picked === 'denied') {
+                    setHubAlert({
+                        title: 'Gallery access needed',
+                        message:
+                            'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                    return;
+                }
+                if (picked === 'cancel') return;
+                const supported = picked.filter(assetIsSupportedGalleryItem);
+                if (supported.length === 0) {
+                    setHubAlert({
+                        title: 'No Supported Files',
+                        message: 'Please select images or videos from your gallery.',
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                    });
+                    return;
+                }
+
+                const proceed = () => {
+                    const items = supported.slice(0, maxItems);
+                    void navigateFromAssets(items, mode, mode === 'feed' && items.length >= 2);
+                };
+
+                if (mode === 'feed' && supported.length > MAX_GALLERY_ITEMS) {
+                    setHubAlert({
+                        title: 'Too Many Items',
+                        message: `You can select up to ${MAX_GALLERY_ITEMS} items for a carousel.`,
+                        icon: 'alert',
+                        confirmButtonText: 'OK',
+                        onConfirm: () => {
+                            setHubAlert(null);
+                            proceed();
+                        },
+                    });
+                    return;
+                }
+
+                proceed();
+            } catch (err: any) {
                 setHubAlert({
-                    title: 'Gallery access needed',
-                    message: 'Allow photo and video access in Settings to upload from your gallery.',
+                    title: 'Media error',
+                    message: err?.message || 'Could not open your gallery.',
                     icon: 'alert',
                     confirmButtonText: 'OK',
                 });
-                return;
             }
-            ImagePicker.launchImageLibrary(
-                {
-                    mediaType: 'mixed',
-                    quality: 0.9,
-                    selectionLimit: MAX_GALLERY_ITEMS,
-                    videoQuality: 'high',
-                },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        setHubAlert({
-                            title: 'Media error',
-                            message: response.errorMessage || 'Could not open your gallery.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-                    const rawAssets = response.assets || [];
-                    const supported = rawAssets.filter(assetIsSupportedGalleryItem);
-                    if (supported.length === 0) {
-                        setHubAlert({
-                            title: 'No Supported Files',
-                            message: 'Please select images or videos from your gallery.',
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                        });
-                        return;
-                    }
-
-                    const proceed = () => {
-                        const items = supported.slice(0, MAX_GALLERY_ITEMS);
-                        navigateFromAssets(items, mode, items.length >= 2);
-                    };
-
-                    if (supported.length > MAX_GALLERY_ITEMS) {
-                        setHubAlert({
-                            title: 'Too Many Items',
-                            message: `You can select up to ${MAX_GALLERY_ITEMS} items for a carousel.`,
-                            icon: 'alert',
-                            confirmButtonText: 'OK',
-                            onConfirm: () => {
-                                setHubAlert(null);
-                                proceed();
-                            },
-                        });
-                        return;
-                    }
-
-                    proceed();
-                },
-            );
         },
         [navigateFromAssets],
     );
 
     const pickCameraMedia = useCallback(
-        async (mode: PickerMode = 'feed') => {
-            const allowed = await ensureCameraPermission();
+        async (mode: PickerMode = 'feed', capture: 'photo' | 'video' = 'photo') => {
+            const allowed = await ensureCameraCapturePermission(capture);
             if (!allowed) {
                 setHubAlert({
-                    title: 'Camera access needed',
-                    message: 'Allow camera access in Settings to take a photo for your post.',
+                    title: capture === 'video' ? 'Camera and microphone needed' : 'Camera access needed',
+                    message:
+                        capture === 'video'
+                            ? 'Allow camera and microphone in Settings to record a video for your post.'
+                            : 'Allow camera access in Settings to take a photo for your post.',
                     icon: 'alert',
                     confirmButtonText: 'OK',
                 });
                 return;
             }
-            ImagePicker.launchCamera(
+            launchNativeCamera(
                 {
-                    mediaType: 'photo',
-                    quality: 0.9,
+                    mediaType: capture,
+                    quality: capture === 'video' ? 0.8 : 0.9,
                     saveToPhotos: true,
                     cameraType: 'back',
+                    durationLimitSec: capture === 'video' ? MAX_FEED_VIDEO_DURATION_SEC : 0,
                 },
                 (response) => {
                     if (response.didCancel) return;
@@ -370,26 +406,30 @@ export default function InstantCreateScreen({ navigation }: any) {
                     const supported = rawAssets.filter(assetIsSupportedGalleryItem);
                     if (supported.length === 0) {
                         setHubAlert({
-                            title: 'No photo',
-                            message: 'No photo was captured. Try again.',
+                            title: capture === 'video' ? 'No video' : 'No photo',
+                            message:
+                                capture === 'video'
+                                    ? 'No video was recorded. Try again.'
+                                    : 'No photo was captured. Try again.',
                             icon: 'alert',
                             confirmButtonText: 'OK',
                         });
                         return;
                     }
-                    navigateFromAssets(supported.slice(0, 1), mode, false);
+                    void navigateFromAssets(supported.slice(0, 1), mode, false);
                 },
             );
         },
         [navigateFromAssets],
     );
 
-    /** System gallery has no camera tab — offer library vs camera explicitly. */
+    /** System gallery has no camera tab — offer library, camera, and (for stories) a pasted link. */
     const openMediaSourceMenu = useCallback(
         (mode: PickerMode = 'feed') => {
+            const isStory = mode === 'story24';
             setMediaSourceMenu({
-                title: 'Add media',
-                subtitle: 'Choose a source',
+                title: isStory ? 'Add to your story' : 'Add to your post',
+                subtitle: isStory ? 'Photo, video, or a link' : 'Photo or video',
                 options: [
                     {
                         label: 'Photo library',
@@ -397,32 +437,57 @@ export default function InstantCreateScreen({ navigation }: any) {
                         onPress: () => void pickGalleryMedia(mode),
                     },
                     {
-                        label: 'Camera',
+                        label: 'Take photo',
                         icon: 'camera-outline',
-                        onPress: () => void pickCameraMedia(mode),
+                        onPress: () => void pickCameraMedia(mode, 'photo'),
                     },
+                    {
+                        label: 'Record video',
+                        icon: 'videocam-outline',
+                        onPress: () => void pickCameraMedia(mode, 'video'),
+                    },
+                    ...(isStory
+                        ? [
+                              {
+                                  label: 'Paste a link',
+                                  icon: 'link-outline' as const,
+                                  onPress: () => navigation.navigate('StoryLinkCreate'),
+                              },
+                          ]
+                        : []),
                 ],
             });
         },
-        [pickCameraMedia, pickGalleryMedia],
+        [navigation, pickCameraMedia, pickGalleryMedia],
     );
 
-    const openGallerySourceExplainer = useCallback(() => {
-        setHubAlert({
-            title: 'Upload from your gallery',
-            message:
-                'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
-            showIcon: false,
-            confirmButtonText: 'Proceed',
-            cancelButtonText: 'Not now',
-            showCancelButton: true,
-            onConfirm: () => {
-                setHubAlert(null);
-                // Carousel is gallery-only — never offer Camera here.
-                setTimeout(() => void pickGalleryMedia('feed'), 100);
-            },
-        });
-    }, [pickGalleryMedia]);
+    useEffect(() => {
+        if (!route?.params?.openStoryPicker) return;
+        openMediaSourceMenu('story24');
+        navigation.setParams?.({ openStoryPicker: undefined });
+    }, [navigation, openMediaSourceMenu, route?.params?.openStoryPicker]);
+
+    const openGallerySourceExplainer = useCallback(
+        (sourceKey?: 'tiktok' | 'instagram' | 'capcut' | 'edits') => {
+            const socialFormat =
+                sourceKey === 'tiktok' ? ('tiktok' as const) : sourceKey ? ('instagram_reels' as const) : undefined;
+            setHubAlert({
+                title: 'Upload from your gallery',
+                message:
+                    'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
+                showIcon: false,
+                confirmButtonText: 'Proceed',
+                cancelButtonText: 'Not now',
+                showCancelButton: true,
+                onConfirm: () => {
+                    setHubAlert(null);
+                    clipStudioFormatRef.current = socialFormat;
+                    setTimeout(() => void pickGalleryMedia('feed'), 100);
+                },
+            });
+        },
+        [pickGalleryMedia],
+    );
 
     const handleModePress = (
         item: (typeof CREATE_MODE_ITEMS)[number],
@@ -442,22 +507,10 @@ export default function InstantCreateScreen({ navigation }: any) {
             return;
         }
         if (item.id === 'story') {
-            navigation.navigate('Clip', { storyMode: true });
+            openMediaSourceMenu('story24');
             return;
         }
-        setHubAlert({
-            title: 'Create a community',
-            message:
-                'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
-            icon: 'info',
-            confirmButtonText: 'Continue',
-            cancelButtonText: 'Not now',
-            showCancelButton: true,
-            onConfirm: () => {
-                setHubAlert(null);
-                setTimeout(() => setCreateGroupOpen(true), 100);
-            },
-        });
+        setCommunityOnboardingOpen(true);
     };
 
     const handleBack = () => {
@@ -522,6 +575,14 @@ export default function InstantCreateScreen({ navigation }: any) {
                 </View>
             </View>
 
+            <CommunityGroupOnboardingSheet
+                visible={communityOnboardingOpen}
+                onDismiss={() => setCommunityOnboardingOpen(false)}
+                onCreateGroup={() => {
+                    setCommunityOnboardingOpen(false);
+                    setTimeout(() => setCreateGroupOpen(true), 100);
+                }}
+            />
             <CreateGroupModal
                 visible={createGroupOpen}
                 onClose={() => setCreateGroupOpen(false)}

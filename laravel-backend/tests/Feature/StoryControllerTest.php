@@ -209,5 +209,77 @@ class StoryControllerTest extends TestCase
                 'user_id' => $viewer->id,
             ]);
     }
+
+    public function test_feed_includes_followed_users_active_stories_newest_first(): void
+    {
+        $viewer = User::factory()->create();
+        $author = User::factory()->create();
+        $author->followers()->attach($viewer->id, ['status' => 'accepted']);
+
+        $older = Story::factory()->forUser($author)->create(['expires_at' => now()->addDay()]);
+        $newer = Story::factory()->forUser($author)->create(['expires_at' => now()->addDay()]);
+        $older->forceFill(['created_at' => now()->subHours(3)])->saveQuietly();
+        $newer->forceFill(['created_at' => now()->subMinutes(2)])->saveQuietly();
+
+        $own = Story::factory()->forUser($viewer)->create(['expires_at' => now()->addDay()]);
+        $own->forceFill(['created_at' => now()->subHour()])->saveQuietly();
+
+        $response = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories');
+        $response->assertStatus(200);
+
+        $groups = $response->json();
+        $handles = array_column($groups, 'user_handle');
+
+        // The followed author's group must be present and sorted newest-group-first.
+        $this->assertContains($author->handle, $handles, 'Followed author should appear in the feed');
+        $this->assertContains($viewer->handle, $handles, 'Viewer own stories should appear');
+
+        $authorGroup = collect($groups)->firstWhere('user_handle', $author->handle);
+        $authorIds = array_column($authorGroup['stories'], 'id');
+        $this->assertSame($newer->id, $authorIds[0], 'Newest story should be first within the group');
+        $this->assertContains($older->id, $authorIds);
+
+        // Author's latest story (-2 min) is newer than the viewer's own (-1h), so the
+        // followed author's group must sort first.
+        $this->assertSame($author->handle, $groups[0]['user_handle']);
+
+        $this->assertNotNull($own->id);
+    }
+
+    public function test_feed_excludes_unfollowed_and_expired_stories(): void
+    {
+        $viewer = User::factory()->create();
+        $followed = User::factory()->create();
+        $stranger = User::factory()->create();
+        $followed->followers()->attach($viewer->id, ['status' => 'accepted']);
+
+        $visible = Story::factory()->forUser($followed)->create(['expires_at' => now()->addDay()]);
+        $expired = Story::factory()->forUser($followed)->expired()->create();
+        $strangerStory = Story::factory()->forUser($stranger)->create(['expires_at' => now()->addDay()]);
+
+        $response = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories');
+        $response->assertStatus(200)
+            ->assertJsonFragment(['id' => $visible->id])
+            ->assertJsonMissing(['id' => $expired->id])
+            ->assertJsonMissing(['id' => $strangerStory->id]);
+    }
+
+    public function test_paged_feed_scopes_to_followed_users(): void
+    {
+        $viewer = User::factory()->create();
+        $followed = User::factory()->create();
+        $stranger = User::factory()->create();
+        $followed->followers()->attach($viewer->id, ['status' => 'accepted']);
+
+        $followedStory = Story::factory()->forUser($followed)->create(['expires_at' => now()->addDay()]);
+        $strangerStory = Story::factory()->forUser($stranger)->create(['expires_at' => now()->addDay()]);
+
+        $response = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories/paged');
+        $response->assertStatus(200);
+
+        $ids = array_column($response->json('items'), 'id');
+        $this->assertContains($followedStory->id, $ids);
+        $this->assertNotContains($strangerStory->id, $ids);
+    }
 }
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, type ImageProps, type ImageURISource } from 'react-native';
+import { Image, StyleSheet, View, type ImageProps, type ImageURISource } from 'react-native';
 
 /**
  * Shared cached image for feed media and avatars.
@@ -13,9 +13,23 @@ import { Image, type ImageProps, type ImageURISource } from 'react-native';
  *    loaded avatar/thumbnail is served from memory/disk without even a revalidation
  *    round-trip.
  */
-export default function CachedImage(props: ImageProps) {
-    const { source, ...rest } = props;
-    return <Image {...rest} source={cachedSource(source)} fadeDuration={0} />;
+/**
+ * `pointerEvents` is a View prop — RN's `Image` no longer accepts it — so when it is
+ * requested we put the layout + hit-testing on a wrapping View and pin the image to it.
+ */
+export type CachedImageProps = ImageProps & {
+    pointerEvents?: 'box-none' | 'none' | 'box-only' | 'auto';
+};
+
+export default function CachedImage(props: CachedImageProps) {
+    const { source, pointerEvents, ...rest } = props;
+    const image = <Image {...rest} source={cachedSource(source)} fadeDuration={0} />;
+    if (!pointerEvents) return image;
+    return (
+        <View style={rest.style} pointerEvents={pointerEvents}>
+            <Image {...rest} style={StyleSheet.absoluteFill} source={cachedSource(source)} fadeDuration={0} />
+        </View>
+    );
 }
 
 function cachedSource(source: ImageProps['source']): ImageProps['source'] {

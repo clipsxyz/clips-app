@@ -83,12 +83,14 @@ class Post extends Model
         'final_video_url', // Final rendered video URL
         'music_track_id', // Reference to music track from library
         'music_attribution', // Attribution text for music track
+        'link_preview', // JSON: server-resolved OG/oEmbed payload { url, title, description, image_url, source, ... }
     ];
 
     protected $casts = [
         'tags' => 'array',
         'stickers' => 'array',
         'media_items' => 'array',
+        'link_preview' => 'array',
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'edit_timeline' => 'array', // Edit timeline for hybrid editing pipeline
         'likes_count' => 'integer',

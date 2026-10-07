@@ -122,9 +122,12 @@ export function buildStories24StoryNavParams(
 export async function buildStories24RailItems(
     userId: string,
     userHandle?: string | null,
+    viewerAvatarUrl?: string | null,
 ): Promise<Stories24RailItem[]> {
     const followedUserHandles = await getFollowedUsers(userId);
     const groups = await fetchFollowedUsersStoryGroups(userId, followedUserHandles || []);
+    const normalizedViewerHandle = (userHandle || '').trim().toLowerCase();
+    const viewerAvatar = (viewerAvatarUrl || '').trim() || undefined;
 
     const nextItems: Stories24RailItem[] = [];
     for (const group of groups) {
@@ -142,13 +145,22 @@ export async function buildStories24RailItems(
         const sharedPost = latest.sharedFromPost
             ? localPosts.find((p) => String(p.id) === String(latest.sharedFromPost))
             : undefined;
+        const usablePoster = (url?: string | null) => {
+            const raw = (url || '').trim();
+            // Guard against audience values mistakenly stored as video_poster_url.
+            if (!raw || raw === 'public' || raw === 'close_friends' || raw === 'only_me') {
+                return undefined;
+            }
+            if (!/^https?:\/\//i.test(raw) && !raw.startsWith('/')) return undefined;
+            return resolveStoryMediaUrl(raw);
+        };
         const sharedPoster =
-            resolveStoryMediaUrl(latest.videoPosterUrl) ||
-            resolveStoryMediaUrl(sharedPost?.videoPosterUrl) ||
-            resolveStoryMediaUrl(
+            usablePoster(latest.videoPosterUrl) ||
+            usablePoster(sharedPost?.videoPosterUrl) ||
+            usablePoster(
                 sharedPost?.mediaItems?.find((m) => m?.type === 'video' && m.posterUrl)?.posterUrl,
             ) ||
-            resolveStoryMediaUrl(
+            usablePoster(
                 sharedPost?.mediaItems?.find((m) => m?.type === 'image' && m.url)?.url,
             );
         const previewVideoUrl =
@@ -157,15 +169,15 @@ export async function buildStories24RailItems(
                 : sharedPost?.mediaType === 'video'
                   ? resolveStoryVideoPlaybackUrl(sharedPost.mediaUrl)
                   : undefined;
-        const avatarUrl = getAvatarForHandle(group.userHandle);
-        // Real poster avatar for the rings/badges. The API group already carries one;
-        // the seed mock map is only a fallback for handles it happens to know.
-        // Kept separate from `avatarUrl` above so thumbnail selection is unchanged.
-        const posterAvatarUrl =
+        // Prefer API / story payload avatars. Mock handle map is last-resort only for
+        // seed handles — never let it override a real (or intentionally empty) API value
+        // when the group already carried an avatarUrl from Laravel.
+        const apiAvatar =
             group.avatarUrl ||
             (latest as { avatarUrl?: string }).avatarUrl ||
-            avatarUrl ||
             undefined;
+        const avatarUrl = apiAvatar || getAvatarForHandle(group.userHandle);
+        const posterAvatarUrl = avatarUrl || undefined;
         // Prefer real story/post stills. Never use profile avatars as video thumbs — on press
         // the rail pauses previews and would flash the avatar instead of the shared clip.
         let thumb =
@@ -185,13 +197,17 @@ export async function buildStories24RailItems(
         const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
         const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
+        const isViewerGroup =
+            !!normalizedViewerHandle &&
+            group.userHandle.trim().toLowerCase() === normalizedViewerHandle;
         nextItems.push({
             handle: group.userHandle,
             title,
             subtitle,
             thumb,
             previewVideoUrl,
-            avatarUrl: posterAvatarUrl,
+            // Stamp Auth avatar onto the viewer's own rail card so Passport / feed / stories match.
+            avatarUrl: isViewerGroup && viewerAvatar ? viewerAvatar : posterAvatarUrl,
         });
         if (nextItems.length >= 12) break;
     }
@@ -199,7 +215,7 @@ export async function buildStories24RailItems(
     const mergedByHandle = new Map<string, Stories24RailItem>();
     for (const item of nextItems) mergedByHandle.set(item.handle.trim().toLowerCase(), item);
     const baseItems = Array.from(mergedByHandle.values());
-    const normalizedUserHandle = (userHandle || '').trim().toLowerCase();
+    const normalizedUserHandle = normalizedViewerHandle;
     const userItemIndex = baseItems.findIndex(
         (item) => item.handle.trim().toLowerCase() === normalizedUserHandle,
     );

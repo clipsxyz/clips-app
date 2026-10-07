@@ -19,12 +19,13 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import CachedImage from './CachedImage.native';
-import type { VideoRef } from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import Stories24MapPinIcon from './Stories24MapPinIcon.native';
 import FeedPlusIcon from './FeedPlusIcon.native';
+import Avatar from './Avatar.native';
+import { getAvatarForHandle, setAvatarForHandle } from '../api/users';
+import { useAuth } from '../context/Auth';
 import type { Stories24RailItem, Stories24RailReturnPayload } from '../utils/stories24Rail';
-import { getFeedScrollBusy, subscribeFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import {
     STORIES24_ADD_YOURS_HANDLE,
     STORIES24_COLLAPSE_MS,
@@ -33,8 +34,6 @@ import {
     normalizeStories24Handle,
     pickFirstStories24RailStory,
 } from '../utils/stories24Rail';
-import { storyVideoSource } from '../utils/storyMediaNative';
-import StorySafeVideo from './stories/StorySafeVideo.native';
 const CARD_W = 175;
 const CARD_H = 102;
 const CARD_RADIUS = 10;
@@ -84,28 +83,18 @@ type Props = {
 };
 
 function StoryPreviewVideo({
-    uri,
     posterUri,
-    paused,
 }: {
     uri: string;
     posterUri?: string;
     paused: boolean;
 }) {
-    const videoRef = useRef<VideoRef>(null);
-    // Local scroll-busy only — do not setState on the FlatList header (jumps scroll).
-    const [feedScrolling, setFeedScrolling] = useState(getFeedScrollBusy());
-    useEffect(() => subscribeFeedScrollBusy(setFeedScrolling), []);
-    const effectivelyPaused = paused || feedScrolling;
-
-    const source = storyVideoSource(uri) || { uri };
-    // Prefer the story/post still — never the bundled BBB rainbow test card.
+    // Still-only rail thumbs. Android TextureView ignores overflow clipping and bleeds into
+    // the feed; motion plays in the fullscreen story viewer instead.
     const posterSource =
         posterUri && !posterUri.startsWith('#') ? { uri: posterUri } : undefined;
 
-    // Android TextureView steals touches — keep preview non-interactive so the card press works.
-    // When paused without a real still, keep a paused video frame (not profile avatar / empty).
-    if (effectivelyPaused && posterSource) {
+    if (posterSource) {
         return (
             <CachedImage
                 source={posterSource}
@@ -117,22 +106,10 @@ function StoryPreviewVideo({
     }
 
     return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <StorySafeVideo
-                videoRef={videoRef}
-                source={source}
-                posterSource={posterSource}
-                style={StyleSheet.absoluteFill}
-                muted
-                repeat
-                paused={effectivelyPaused}
-                onProgress={({ currentTime }) => {
-                    if (currentTime > 3) {
-                        videoRef.current?.seek(0);
-                    }
-                }}
-            />
-        </View>
+        <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: PREVIEW_POSTER_FALLBACK }]}
+        />
     );
 }
 
@@ -153,9 +130,22 @@ function StoryCard({
     morphHidden?: boolean;
 }) {
     const cardRef = useRef<View>(null);
+    const { user } = useAuth();
     const handleKey = normalizeStories24Handle(item.handle);
     const isAddYours = item.handle === STORIES24_ADD_YOURS_HANDLE;
     const displayHandle = item.handle.startsWith('@') ? item.handle : `@${item.handle.replace(/^@/, '')}`;
+    const isOwnStory =
+        !!user?.handle && normalizeStories24Handle(user.handle) === handleKey;
+    useEffect(() => {
+        if (isOwnStory && user?.handle && user.avatarUrl) {
+            setAvatarForHandle(user.handle, user.avatarUrl);
+        }
+    }, [isOwnStory, user?.handle, user?.avatarUrl]);
+    // Own stories must match Passport / feed header: Auth avatar wins over stale API
+    // `avatar_url` (and over mock getAvatarForHandle Unsplash seeds).
+    const avatarSrc = isOwnStory
+        ? user?.avatarUrl || item.avatarUrl || getAvatarForHandle(item.handle)
+        : item.avatarUrl || getAvatarForHandle(item.handle);
 
     const measureAndPress = () => {
         const fallback: CardRect = { x: 0, y: 0, width: CARD_W, height: CARD_H };
@@ -236,12 +226,21 @@ function StoryCard({
                     />
                 )}
                 <LinearGradient
-                    colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.85)']}
-                    locations={[0, 0.45, 1]}
+                    colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.88)']}
+                    locations={[0, 0.4, 1]}
                     style={styles.cardFooterGrad}
                 />
+                <View style={styles.cardAvatarCenter} pointerEvents="none">
+                    <View style={styles.cardAvatarRing}>
+                        <Avatar
+                            src={avatarSrc}
+                            name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                            size={48}
+                        />
+                    </View>
+                </View>
                 <View style={styles.cardFooter}>
-                    <Text style={styles.cardTitle} numberOfLines={2}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
                         {item.title}
                     </Text>
                     <Text style={styles.cardSubtitle} numberOfLines={1}>
@@ -803,7 +802,7 @@ export default Stories24FeedRail;
 
 const styles = StyleSheet.create({
     root: {
-        marginVertical: 12,
+        paddingVertical: 4,
     },
     headerRow: {
         flexDirection: 'row',
@@ -865,7 +864,26 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        height: 40,
+        height: 44,
+    },
+    cardAvatarCenter: {
+        ...StyleSheet.absoluteFill,
+        alignItems: 'center',
+        justifyContent: 'center',
+        // Sit slightly above true center so the footer text doesn't crowd it.
+        paddingBottom: 10,
+    },
+    cardAvatarRing: {
+        padding: 2,
+        borderRadius: 28,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.92)',
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.45,
+        shadowRadius: 4,
+        elevation: 4,
     },
     cardFooter: {
         position: 'absolute',
@@ -874,17 +892,22 @@ const styles = StyleSheet.create({
         bottom: 0,
         paddingHorizontal: 8,
         paddingVertical: 6,
+        gap: 2,
+        alignItems: 'center',
     },
     cardTitle: {
         color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '600',
         lineHeight: 13,
+        textAlign: 'center',
     },
     cardSubtitle: {
-        color: '#7A8AF0',
+        color: '#A5B4FC',
         fontSize: 10,
-        marginTop: 1,
+        fontWeight: '600',
+        textAlign: 'center',
+        includeFontPadding: false,
     },
     expandModalRoot: {
         flex: 1,
@@ -895,11 +918,11 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     expandBackdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: '#000000',
     },
     collapseVeil: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.12)',
     },
     expandCard: {
@@ -913,7 +936,7 @@ const styles = StyleSheet.create({
         elevation: 16,
     },
     expandDim: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
     cardMorphHidden: {

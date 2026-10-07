@@ -6,6 +6,8 @@ export type AvatarSize = 'sm' | 'md' | 'lg' | 'xl' | number;
 export type AvatarProps = {
     src?: string;
     name: string;
+    /** Optional handle so native Image can fall back to a cached hosted URL. */
+    handle?: string;
     size?: AvatarSize;
     /** Web / NativeWind only; ignored on native. */
     className?: string;

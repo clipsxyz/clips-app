@@ -494,7 +494,7 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     backdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.55)',
     },
     sheet: {
@@ -514,7 +514,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     ambientBack: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     sheetContent: {
@@ -661,7 +661,7 @@ const styles = StyleSheet.create({
         borderColor: '#FFF',
     },
     savingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.35)',
         alignItems: 'center',
         justifyContent: 'center',

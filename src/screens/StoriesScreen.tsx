@@ -1211,7 +1211,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                 </View>
 
                 <View style={styles.storyList}>
-                    {storyGroups.map((group, index) => (
+                    {storyGroups.map((group) => (
                         <TouchableOpacity
                             key={group.userId}
                             onPress={() => startViewingStories(group)}
@@ -1261,7 +1261,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     >
                         {currentStory.sharedFromPost ? (
                             suspendStoryMedia ? (
-                                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} />
+                                <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
                             ) : (
                             <StorySharedPostViewer
                                 story={currentStory}
@@ -1282,7 +1282,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             />
                             )
                         ) : suspendStoryMedia ? (
-                            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} />
+                            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
                         ) : (
                             <StoryViewerMedia
                                 story={currentStory}
@@ -1489,7 +1489,7 @@ export default function StoriesScreen({ route, navigation }: any) {
             >
                 <View style={styles.sharedPostBackdrop}>
                     <Pressable
-                        style={StyleSheet.absoluteFillObject}
+                        style={StyleSheet.absoluteFill}
                         onPress={closeSharedPostModal}
                         accessibilityRole="button"
                         accessibilityLabel="Dismiss"
@@ -1716,7 +1716,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     storyDismissBackdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: '#000000',
     },
     storyViewer: {
@@ -1724,7 +1724,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#000000',
     },
     mediaLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     profileCardHost: {
         position: 'absolute',

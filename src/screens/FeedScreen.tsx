@@ -67,6 +67,7 @@ import {
     clearLocalFeedPostsStorage,
 } from '../api/posts';
 import { isMockMode } from '../api/apiMode';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getUnreadTotal } from '../api/messages';
 import { blockUser } from '../api/messages';
 import { isUserBlocked } from '../api/messages';
@@ -1016,8 +1017,15 @@ function PillTabs({
                             <View style={FEED_HEADER_PASSPORT_AVATAR}>
                                 {user?.avatarUrl ? (
                                     <Image
-                                        source={{ uri: user.avatarUrl }}
+                                        source={{
+                                            uri:
+                                                resolvePublicMediaUrl(user.avatarUrl) ||
+                                                user.avatarUrl,
+                                        }}
                                         style={styles.feedHeaderPassportAvatarImage}
+                                        onError={() => {
+                                            /* fall through to initials on next paint via missing uri */
+                                        }}
                                     />
                                 ) : (
                                     <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
@@ -1066,6 +1074,7 @@ const FeedCard = React.memo(function FeedCard({
     onOpenLikesSheet,
     onOpenTaggedSheet,
     onShareToStories,
+    onShareToStoriesSuccess,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -1098,6 +1107,7 @@ const FeedCard = React.memo(function FeedCard({
     onLikeBurst?: (windowX: number, windowY: number) => void;
     /** Parent-owned share modal — per-card Modal show/hide jumps FlatList on Android. */
     onShareToStories?: () => void;
+    onShareToStoriesSuccess?: (postId: string) => void;
 }) {
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<ProfileQuickMenuAnchor | null>(null);
@@ -1608,6 +1618,7 @@ type FeedListRow =
     | { kind: 'local_business'; posts: Post[]; pinnedPaidPostId?: string; useMockPreview?: boolean }
     | { kind: 'suggested_places'; bundleKey: string; suggestions: PlaceMatchedPost[] }
     | { kind: 'stories24'; id: string }
+    | { kind: 'stories24_divider'; id: string }
     | { kind: 'stories_promo'; id: string }
     | { kind: 'interests'; id: string }
     | { kind: 'suggested_follower'; suggestion: SuggestedFollowerSuggestion };
@@ -2015,7 +2026,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         let cancelled = false;
         const load = () => {
-            void buildStories24RailItems(user.id, user.handle).then((items) => {
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl).then((items) => {
                 if (!cancelled) setStories24Items(items);
             });
         };
@@ -2028,13 +2039,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
-    }, [user?.id, user?.handle]);
+    }, [user?.id, user?.handle, user?.avatarUrl]);
 
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id) return;
-            void buildStories24RailItems(user.id, user.handle).then(setStories24Items);
-        }, [user?.id, user?.handle]),
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl).then(setStories24Items);
+        }, [user?.id, user?.handle, user?.avatarUrl]),
     );
 
     React.useEffect(() => {
@@ -3536,7 +3547,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
         if (!target && user?.id) {
             try {
-                items = await buildStories24RailItems(user.id, user.handle);
+                items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl);
                 setStories24Items(items);
                 target = resolveStories24OpenTarget(items);
             } catch (err) {
@@ -3600,6 +3611,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Rail is pinned to index 0 (above post #1), so it is never injected mid-loop.
         if (showStories24Rail) {
             out.push({ kind: 'stories24', id: 'stories24-feed-rail' });
+            out.push({ kind: 'stories24_divider', id: 'stories24-feed-divider' });
         }
         for (const item of flatWithSuggested) {
             if (item.type === 'post') {
@@ -3898,11 +3910,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
-        ({ item }: { item: FeedListRow }) => {
-            const wrapRow = (row: React.ReactElement) => (
+        ({ item, index }: { item: FeedListRow; index: number }) => {
+            const prevKind = flatForRenderRef.current[index - 1]?.kind;
+            const afterStoriesDivider = prevKind === 'stories24_divider';
+            const wrapRow = (row: React.ReactElement, extraStyle?: object) => (
                 <View
                     collapsable={false}
-                    style={styles.feedListRow}
+                    style={[
+                        styles.feedListRow,
+                        item.kind === 'stories24' ? styles.feedListRowStories : null,
+                        item.kind === 'stories24_divider' ? styles.feedListRowStoriesDivider : null,
+                        afterStoriesDivider ? styles.feedListRowAfterStories : null,
+                        extraStyle,
+                    ]}
                 >
                     {row}
                 </View>
@@ -3983,6 +4003,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         onScrollCardIntoView={scrollStories24RailIntoView}
                         collapsePayload={stories24CollapsePayload}
                         onCollapseHandled={() => setStories24CollapsePayload(null)}
+                    />,
+                );
+            }
+            if (item.kind === 'stories24_divider') {
+                return wrapRow(
+                    <View
+                        collapsable={false}
+                        pointerEvents="none"
+                        style={styles.storiesRailSeparator}
                     />,
                 );
             }
@@ -4469,6 +4498,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     if (
                         item.kind === 'interests' ||
                         item.kind === 'stories24' ||
+                        item.kind === 'stories24_divider' ||
                         item.kind === 'stories_promo'
                     ) {
                         return `${item.kind}:${item.id}`;
@@ -5355,7 +5385,7 @@ const styles = StyleSheet.create({
         marginRight: 8,
     },
     mediaBurstPortal: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         position: 'absolute',
         left: 0,
         right: 0,
@@ -5407,6 +5437,27 @@ const styles = StyleSheet.create({
         // This wrapper spans the FULL row width, so leaving it opaque painted over the
         // 16px margins and hid the canvas completely.
         backgroundColor: 'transparent',
+    },
+    /** Stories rail — keep wrap spacing tight; divider row owns the rule + gap. */
+    feedListRowStories: {
+        marginBottom: 0,
+        paddingTop: 8,
+        paddingBottom: 8,
+    },
+    feedListRowStoriesDivider: {
+        marginBottom: 16,
+        overflow: 'visible',
+    },
+    storiesRailSeparator: {
+        alignSelf: 'stretch',
+        height: 1,
+        marginHorizontal: 16,
+        // Stronger than raw #1E232A so the rule reads on ambient black.
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    },
+    /** Extra air between Stories divider and the first feed card. */
+    feedListRowAfterStories: {
+        marginTop: 8,
     },
     feedListContent: {
         // Same reason as feedListRow: the content container covers the whole scroll area
@@ -5500,7 +5551,7 @@ feedSwitchPillBorder: {
         justifyContent: 'flex-end',
     },
     feedSwitchSheetBackdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.72)',
     },
     feedSwitchSheet: {
@@ -5520,7 +5571,7 @@ feedSwitchPillBorder: {
         overflow: 'hidden',
     },
     feedSwitchSheetAmbient: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 0,
     },
     feedSwitchSheetContent: {

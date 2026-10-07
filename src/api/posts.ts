@@ -15,6 +15,7 @@ import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, getAllActiveBoostLabels, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import { postHasVideoMedia } from '../utils/postMedia';
+import { mapApiLinkPreview } from '../utils/linkPreview';
 import { MOCK_FEED_VIDEO_URLS } from '../constants/mockFeedVideos';
 import {
   createFollowRequest,
@@ -22,6 +23,7 @@ import {
   isProfilePrivate,
   removeFollowRequest,
 } from './privacy';
+import { setAvatarForHandle } from './users';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -1350,10 +1352,29 @@ export function transformLaravelPost(response: any): Post {
     userNational: response.user?.national || response.userNational,
   });
 
+  const rawAvatar =
+    response.avatar_url ||
+    response.avatarUrl ||
+    response.user?.avatar_url ||
+    response.user?.avatarUrl ||
+    existing?.avatarUrl ||
+    undefined;
+  const resolvedAvatarUrl =
+    typeof rawAvatar === 'string' && rawAvatar.trim()
+      ? rewriteMediaUrlForNetwork(String(rawAvatar).trim())
+      : undefined;
+  if (resolvedAvatarUrl) {
+    const handle = response.user_handle || response.userHandle;
+    if (handle) {
+      setAvatarForHandle(String(handle), resolvedAvatarUrl);
+    }
+  }
+
   return {
     id: response.id,
     publicShareToken: response.public_share_token || response.publicShareToken,
     userHandle: response.user_handle || response.userHandle,
+    avatarUrl: resolvedAvatarUrl,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
@@ -1397,6 +1418,11 @@ width: response.width ?? existing?.width,
     text: response.text_content || response.text || response.caption || existing?.text,
     imageText: response.image_text || response.imageText,
     caption: response.caption || response.text_content || response.text || existing?.caption,
+      // Link card resolved server-side (stored in `posts.link_preview`) or supplied by the
+      // composer. Both key spellings accepted; keep any value we already had locally when the
+      // endpoint omits it (e.g. paginated feed responses that strip heavy fields).
+      linkPreview:
+        mapApiLinkPreview(response.link_preview ?? response.linkPreview) || existing?.linkPreview,
     createdAt: (() => {
       const raw = response.created_at || response.createdAt;
       const ts = raw ? new Date(raw).getTime() : Date.now();

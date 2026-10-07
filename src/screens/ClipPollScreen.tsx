@@ -15,6 +15,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import * as ImagePicker from 'react-native-image-picker';
+import type { PhotoQuality } from 'react-native-image-picker';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
@@ -37,7 +38,11 @@ export default function ClipPollScreen({ navigation }: any) {
 
     const pickBackground = () => {
         ImagePicker.launchImageLibrary(
-            { mediaType: 'photo', quality: 0.85 },
+            {
+                mediaType: 'photo',
+                // PhotoQuality only lists tenths in its TS union; native accepts any 0..1 double.
+                quality: 0.85 as PhotoQuality,
+            },
             (response) => {
                 if (response.didCancel) return;
                 const uri = response.assets?.[0]?.uri;

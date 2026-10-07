@@ -13,12 +13,23 @@ export interface TextStoryTemplate {
 export const TEXT_STORY_TEMPLATE_FONT =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
+/** Feed / text-only canvas — same as Gazetteer `#151D28`. */
+export const TEXT_ONLY_CANVAS_BG = '#151D28';
+
 export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
   // Blues, golds & jewel tones — listed first in create template picker
   {
     id: 'broadcast-blue',
     name: 'Broadcast',
     background: 'linear-gradient(165deg, #2563eb 0%, #1d4ed8 38%, #1e3a8a 72%, #172554 100%)',
+    textColor: '#ffffff',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'text-black',
+    name: 'Canvas',
+    background: TEXT_ONLY_CANVAS_BG,
     textColor: '#ffffff',
     textSize: 'medium',
     fontFamily: TEXT_STORY_TEMPLATE_FONT,
@@ -512,4 +523,11 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
 ];
+
+/** Feed text-only posts: blue or canvas only. Stories keep the full template list. */
+export const TEXT_ONLY_FEED_TEMPLATE_IDS = ['broadcast-blue', 'text-black'] as const;
+
+export const TEXT_ONLY_FEED_TEMPLATES: TextStoryTemplate[] = TEXT_ONLY_FEED_TEMPLATE_IDS.map(
+  (id) => TEXT_STORY_TEMPLATES.find((t) => t.id === id)!,
+);
 
