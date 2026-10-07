@@ -62,6 +62,8 @@ export default function PlaceAutocompleteField({
     const wrapRef = React.useRef<HTMLDivElement>(null);
     const inputRef = React.useRef<HTMLInputElement>(null);
     const menuRef = React.useRef<HTMLUListElement>(null);
+    /** After a tap on a suggestion, ignore the follow-up search for that filled-in value. */
+    const pickedRef = React.useRef(false);
 
     const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : 'location';
 
@@ -92,6 +94,13 @@ export default function PlaceAutocompleteField({
         if (disabled) {
             setSuggestions([]);
             setLoading(false);
+            setOpen(false);
+            return;
+        }
+        if (pickedRef.current) {
+            setSuggestions([]);
+            setLoading(false);
+            setOpen(false);
             return;
         }
         const q = value.trim();
@@ -99,6 +108,7 @@ export default function PlaceAutocompleteField({
         if (q.length < minLen) {
             setSuggestions([]);
             setLoading(false);
+            setOpen(false);
             return;
         }
         if (signupLevel === 'region' && !parentCountry.trim()) {
@@ -118,12 +128,12 @@ export default function PlaceAutocompleteField({
                     country: parentCountry,
                     region: parentRegion,
                 });
-                if (!ctrl.signal.aborted) {
+                if (!ctrl.signal.aborted && !pickedRef.current) {
                     setSuggestions(res);
                     setOpen(true);
                 }
             } catch (e) {
-                if (!ctrl.signal.aborted && (e as Error)?.name !== 'AbortError') {
+                if (!ctrl.signal.aborted && !pickedRef.current && (e as Error)?.name !== 'AbortError') {
                     setSuggestions([]);
                 }
             } finally {
@@ -166,10 +176,13 @@ export default function PlaceAutocompleteField({
         const label = showFeedLevels
             ? parsed.fullName || s.name
             : labelForPostField(s, mode);
-        onChange(label);
-        onSelectSuggestion?.(s);
+        pickedRef.current = true;
         setOpen(false);
         setSuggestions([]);
+        setLoading(false);
+        onChange(label);
+        onSelectSuggestion?.(s);
+        inputRef.current?.blur();
     };
 
     const menu = showList ? (
@@ -222,10 +235,12 @@ export default function PlaceAutocompleteField({
                 value={value}
                 disabled={disabled}
                 onChange={(e) => {
+                    pickedRef.current = false;
                     onChange(e.target.value);
                     setOpen(true);
                 }}
                 onFocus={() => {
+                    if (pickedRef.current) return;
                     const minLen = signupLevel === 'country' ? 2 : 1;
                     if (value.trim().length >= minLen) setOpen(true);
                     requestAnimationFrame(updateMenuPosition);

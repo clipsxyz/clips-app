@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\InteractionPushService;
+use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -20,6 +22,59 @@ use Illuminate\Validation\Rules\Password;
 class AuthController extends Controller
 {
     /**
+     * Public signup pre-check so email / username conflicts surface on the right step.
+     * GET /api/auth/check-availability?email=&username=
+     */
+    public function checkAvailability(Request $request): JsonResponse
+    {
+        $email = strtolower(trim((string) $request->query('email', '')));
+        $username = trim((string) $request->query('username', ''));
+
+        if ($email === '' && $username === '') {
+            return response()->json([
+                'errors' => ['query' => ['Provide email and/or username to check.']],
+            ], 400);
+        }
+
+        $emailTaken = false;
+        $usernameTaken = false;
+
+        if ($email !== '') {
+            if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return response()->json([
+                    'available' => false,
+                    'email_taken' => false,
+                    'username_taken' => false,
+                    'errors' => ['email' => ['Enter a valid email address.']],
+                ], 400);
+            }
+            $emailTaken = User::query()
+                ->whereRaw('LOWER(email) = ?', [$email])
+                ->exists();
+        }
+
+        if ($username !== '') {
+            if (! preg_match('/^[a-zA-Z0-9_]{3,50}$/', $username)) {
+                return response()->json([
+                    'available' => false,
+                    'email_taken' => $emailTaken,
+                    'username_taken' => false,
+                    'errors' => ['username' => ['Username must be 3–50 characters (letters, numbers, underscore).']],
+                ], 400);
+            }
+            $usernameTaken = User::query()
+                ->whereRaw('LOWER(username) = ?', [strtolower($username)])
+                ->exists();
+        }
+
+        return response()->json([
+            'available' => ! $emailTaken && ! $usernameTaken,
+            'email_taken' => $emailTaken,
+            'username_taken' => $usernameTaken,
+        ]);
+    }
+
+    /**
      * Register new user
      */
     public function register(Request $request): JsonResponse
@@ -32,7 +87,19 @@ class AuthController extends Controller
             'handle' => 'required|string|min:3|max:100|unique:users,handle|regex:/^[a-zA-Z0-9@]+$/',
             'locationLocal' => 'nullable|string|max:100',
             'locationRegional' => 'nullable|string|max:100',
-            'locationNational' => 'nullable|string|max:100'
+            'locationNational' => 'nullable|string|max:100',
+            'accountType' => 'nullable|in:personal,business',
+            'account_type' => 'nullable|in:personal,business',
+            'isBusiness' => 'nullable|boolean',
+            'is_business' => 'nullable|boolean',
+            'businessAddress' => 'nullable|string|max:500',
+            'business_address' => 'nullable|string|max:500',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
+            'avatar_url' => 'nullable|string|max:500',
+            'avatarUrl' => 'nullable|string|max:500',
+            'invite' => 'nullable|string|max:100',
+            'inviteHandle' => 'nullable|string|max:100',
         ]);
 
         if ($validator->fails()) {
@@ -42,18 +109,39 @@ class AuthController extends Controller
         $locationLocal = $this->nullableTrimmedString($request->input('locationLocal'));
         $locationRegional = $this->nullableTrimmedString($request->input('locationRegional'));
         $locationNational = $this->nullableTrimmedString($request->input('locationNational'));
+        $avatarUrl = $this->nullablePublicAvatarUrl(
+            $request->input('avatar_url') ?? $request->input('avatarUrl')
+        );
 
-        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational) {
-            $user = User::create([
+        $inviter = $this->resolveInviter(
+            (string) ($request->input('invite') ?: $request->input('inviteHandle') ?: '')
+        );
+
+        $businessFields = $this->businessAddressAttributes($request, $this->requestIsBusinessAccount($request));
+
+        $user = DB::transaction(function () use ($request, $locationLocal, $locationRegional, $locationNational, $avatarUrl, $inviter, $businessFields) {
+            $attributes = [
                 'username' => $request->username,
-                'email' => $request->email,
-                'password' => Hash::make($request->password),
+                'email' => strtolower(trim((string) $request->email)),
+                // Hashed cast on User hashes once — do not Hash::make here.
+                'password' => $request->password,
                 'display_name' => $request->displayName,
                 'handle' => $request->handle,
                 'location_local' => $locationLocal,
                 'location_regional' => $locationRegional,
                 'location_national' => $locationNational,
-            ]);
+                'avatar_url' => $avatarUrl,
+                ...$businessFields,
+            ];
+            if ($inviter && Schema::hasColumn('users', 'invited_by_user_id')) {
+                $attributes['invited_by_user_id'] = $inviter->id;
+            }
+
+            $user = User::create($attributes);
+
+            if ($inviter) {
+                $this->followInviterOnSignup($user, $inviter);
+            }
 
             return $user;
         });
@@ -73,7 +161,7 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'email' => 'required|email',
+            'email' => 'required|string',
             'password' => 'required|string'
         ]);
 
@@ -81,7 +169,7 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $user = User::where('email', $request->email)->first();
+        $user = $this->findUserByLoginIdentifier((string) $request->email);
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json(['error' => 'Invalid credentials'], 401);
@@ -99,12 +187,163 @@ class AuthController extends Controller
     }
 
     /**
+     * Local-only: set a new password for an existing account and return a login token.
+     * Used by the native Forgot password sheet while developing against this Mac.
+     */
+    public function resetPasswordLocal(Request $request): JsonResponse
+    {
+        if (! app()->environment(['local', 'testing'])) {
+            return response()->json(['error' => 'Not available'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|string',
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = $this->findUserByLoginIdentifier((string) $request->email);
+        if (! $user) {
+            return response()->json(['error' => 'No account found for that email or handle'], 404);
+        }
+
+        $user->password = $request->password;
+        $user->save();
+
+        $user->forceFill(['last_active_at' => now()])->saveQuietly();
+        $token = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'user' => $user->fresh()?->makeHidden(['password']) ?? $user->makeHidden(['password']),
+            'token' => $token,
+        ]);
+    }
+
+    /**
+     * Start password reset: store a 6-digit code.
+     * Without Mailgun/SMTP (`mail.default` log/array) the code is returned as `debug_code`.
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|string',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = $this->findUserByLoginIdentifier((string) $request->email);
+        if (! $user) {
+            return response()->json(['error' => 'No account found for that email or handle'], 404);
+        }
+
+        $otpCode = (string) random_int(100000, 999999);
+        $expiresAt = now()->addMinutes(10);
+        Cache::put('password_otp:user:'.$user->id, [
+            'code_hash' => hash('sha256', $otpCode),
+            'attempts' => 0,
+        ], $expiresAt);
+
+        $mailer = strtolower((string) config('mail.default', 'log'));
+        $delivery = in_array($mailer, ['log', 'array', ''], true) ? 'mock' : 'email';
+
+        Log::info('Password reset code issued', [
+            'user_id' => $user->id,
+            'delivery' => $delivery,
+        ]);
+
+        $response = [
+            'ok' => true,
+            'delivery' => $delivery,
+            'expires_in_seconds' => 600,
+        ];
+        if ($delivery === 'mock') {
+            $response['debug_code'] = $otpCode;
+        }
+
+        return response()->json($response);
+    }
+
+    /**
+     * Confirm the reset code and set a new password. Returns a login token.
+     */
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|string',
+            'code' => ['required', 'digits:6'],
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = $this->findUserByLoginIdentifier((string) $request->email);
+        if (! $user) {
+            return response()->json(['error' => 'No account found for that email or handle'], 404);
+        }
+
+        $cacheKey = 'password_otp:user:'.$user->id;
+        $payload = Cache::get($cacheKey);
+        if (! is_array($payload) || empty($payload['code_hash'])) {
+            return response()->json(['error' => 'Code expired. Request a new one.'], 400);
+        }
+
+        $attempts = (int) ($payload['attempts'] ?? 0);
+        if ($attempts >= 5) {
+            Cache::forget($cacheKey);
+            return response()->json(['error' => 'Too many attempts. Request a new code.'], 429);
+        }
+
+        $incomingHash = hash('sha256', (string) $request->code);
+        if (! hash_equals((string) $payload['code_hash'], $incomingHash)) {
+            $payload['attempts'] = $attempts + 1;
+            Cache::put($cacheKey, $payload, now()->addMinutes(10));
+            return response()->json(['error' => 'Incorrect code.'], 400);
+        }
+
+        Cache::forget($cacheKey);
+        $user->password = $request->password;
+        $user->save();
+        $user->forceFill(['last_active_at' => now()])->saveQuietly();
+        $token = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'user' => $user->fresh()?->makeHidden(['password']) ?? $user->makeHidden(['password']),
+            'token' => $token,
+        ]);
+    }
+
+    private function findUserByLoginIdentifier(string $raw): ?User
+    {
+        $identifier = strtolower(trim($raw));
+        $identifier = ltrim($identifier, '@');
+        if ($identifier === '') {
+            return null;
+        }
+
+        return User::query()
+            ->where(function ($query) use ($identifier) {
+                $query->whereRaw('lower(email) = ?', [$identifier])
+                    ->orWhereRaw('lower(handle) = ?', [$identifier])
+                    ->orWhereRaw('lower(username) = ?', [$identifier]);
+            })
+            ->first();
+    }
+
+    /**
      * Get current user profile
      */
     public function me(Request $request): JsonResponse
     {
         $user = Auth::user();
-        
+        if ($user instanceof User) {
+            $user->syncLiveAudienceCounts(true);
+        }
+
         return response()->json($user->makeHidden(['password']));
     }
 
@@ -134,9 +373,19 @@ class AuthController extends Controller
             'location_local' => 'sometimes|nullable|string|max:100',
             'location_regional' => 'sometimes|nullable|string|max:100',
             'location_national' => 'sometimes|nullable|string|max:100',
+            'accountType' => 'sometimes|nullable|in:personal,business',
+            'account_type' => 'sometimes|nullable|in:personal,business',
+            'isBusiness' => 'sometimes|boolean',
+            'is_business' => 'sometimes|boolean',
+            'businessAddress' => 'sometimes|nullable|string|max:500',
+            'business_address' => 'sometimes|nullable|string|max:500',
+            'latitude' => 'sometimes|nullable|numeric|between:-90,90',
+            'longitude' => 'sometimes|nullable|numeric|between:-180,180',
             'social_links' => 'sometimes|nullable|array',
             'profile_background_url' => 'sometimes|nullable|string|max:65535',
+            'avatar_url' => 'sometimes|nullable|string|max:500',
             'email_digest_enabled' => 'sometimes|boolean',
+            'is_private' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -148,15 +397,19 @@ class AuthController extends Controller
         $newHandle = array_key_exists('handle', $data) ? (string) $data['handle'] : $oldHandle;
         $handleChanging = $newHandle !== '' && strcasecmp($oldHandle, $newHandle) !== 0;
 
-        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled'];
+        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled', 'is_private'];
         foreach ($fillable as $field) {
             if (array_key_exists($field, $data)) {
                 $user->{$field} = $data[$field];
             }
         }
+        $this->applyBusinessAddressUpdate($user, $request);
         if (array_key_exists('profile_background_url', $data)) {
             $raw = $data['profile_background_url'];
             $user->profile_background_url = ($raw === null || $raw === '') ? null : $raw;
+        }
+        if (array_key_exists('avatar_url', $data)) {
+            $user->avatar_url = $this->nullablePublicAvatarUrl($data['avatar_url']);
         }
         if ($handleChanging) {
             $user->handle = $newHandle;
@@ -365,6 +618,57 @@ class AuthController extends Controller
     }
 
     /**
+     * Clear the verified phone so the user can add a different number.
+     */
+    public function removePhone(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $user->phone_number = null;
+        $user->phone_verified_at = null;
+        $user->save();
+
+        return response()->json([
+            'ok' => true,
+            'phone_number' => null,
+            'phone_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Authenticated password change (current password required).
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'new_password' => ['required', 'string', Password::min(6), 'different:current_password'],
+            'confirm_password' => 'required|string|same:new_password',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $current = (string) $request->input('current_password');
+        if (! Hash::check($current, $user->password)) {
+            return response()->json(['error' => 'Current password is incorrect'], 422);
+        }
+
+        $user->password = (string) $request->input('new_password');
+        $user->save();
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
      * Link the authenticated account to a Facebook profile ID.
      */
     public function linkFacebook(Request $request): JsonResponse
@@ -517,19 +821,26 @@ class AuthController extends Controller
 
         $validator = Validator::make($request->all(), [
             'phones' => ['required', 'array', 'min:1', 'max:500'],
-            'phones.*' => ['required', 'string', 'max:32'],
+            'phones.*' => ['required', 'string', 'max:40'],
         ]);
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $normalized = collect((array) $request->input('phones', []))
-            ->map(fn ($p) => $this->normalizePhone((string) $p))
-            ->filter(fn ($p) => $p !== null)
+        $candidates = collect((array) $request->input('phones', []))
+            ->flatMap(fn ($p) => $this->phoneMatchCandidates((string) $p))
             ->unique()
             ->values();
 
-        if ($normalized->isEmpty()) {
+        $suffixes = collect((array) $request->input('phones', []))
+            ->map(fn ($p) => $this->phoneDigits((string) $p))
+            ->filter()
+            ->map(fn ($digits) => substr((string) $digits, -8))
+            ->filter(fn ($suffix) => is_string($suffix) && strlen($suffix) === 8)
+            ->unique()
+            ->values();
+
+        if ($candidates->isEmpty() && $suffixes->isEmpty()) {
             return response()->json([
                 'ok' => true,
                 'matched' => [],
@@ -539,12 +850,21 @@ class AuthController extends Controller
         }
 
         $matchedUsers = User::query()
-            ->whereIn('phone_number', $normalized->all())
-            ->whereNotNull('phone_verified_at')
+            ->whereNotNull('phone_number')
+            ->where('phone_number', '!=', '')
             ->where('id', '!=', $user->id)
+            ->where(function ($query) use ($candidates, $suffixes) {
+                if ($candidates->isNotEmpty()) {
+                    $query->whereIn('phone_number', $candidates->all());
+                }
+                foreach ($suffixes as $suffix) {
+                    $query->orWhere('phone_number', 'like', '%' . $suffix);
+                }
+            })
             ->select(['id', 'handle', 'display_name', 'avatar_url', 'phone_number'])
             ->limit(200)
             ->get()
+            ->unique('id')
             ->map(fn (User $matched) => [
                 'id' => (string) $matched->id,
                 'handle' => $matched->handle,
@@ -557,7 +877,7 @@ class AuthController extends Controller
         return response()->json([
             'ok' => true,
             'matched' => $matchedUsers,
-            'submitted_count' => $normalized->count(),
+            'submitted_count' => $candidates->count(),
             'matched_count' => $matchedUsers->count(),
         ]);
     }
@@ -576,17 +896,177 @@ class AuthController extends Controller
         return is_array($payload) ? $payload : [];
     }
 
-    private function normalizePhone(string $raw): ?string
+    private function resolveInviter(string $raw): ?User
     {
-        $trimmed = trim($raw);
-        if ($trimmed === '') return null;
-
-        $digits = preg_replace('/\D+/', '', $trimmed);
-        if (!is_string($digits) || strlen($digits) < 8 || strlen($digits) > 15) {
+        $handle = ltrim(trim($raw), '@');
+        if ($handle === '') {
             return null;
         }
 
-        return '+' . $digits;
+        return User::query()
+            ->where('handle', $handle)
+            ->orWhere('handle', '@' . $handle)
+            ->orWhereRaw('LOWER(handle) = ?', [strtolower($handle)])
+            ->orWhereRaw('LOWER(handle) = ?', ['@' . strtolower($handle)])
+            ->first();
+    }
+
+    private function followInviterOnSignup(User $user, User $inviter): void
+    {
+        if ($user->id === $inviter->id) {
+            return;
+        }
+
+        $exists = DB::table('user_follows')
+            ->where('follower_id', $user->id)
+            ->where('following_id', $inviter->id)
+            ->exists();
+        if ($exists) {
+            return;
+        }
+
+        $status = $inviter->is_private ? 'pending' : 'accepted';
+        DB::table('user_follows')->insert([
+            'follower_id' => $user->id,
+            'following_id' => $inviter->id,
+            'status' => $status,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        if ($status === 'accepted') {
+            $user->increment('following_count');
+            $inviter->increment('followers_count');
+        }
+
+        try {
+            $push = new InteractionPushService();
+            if ($status === 'accepted') {
+                $push->notifyFollow($user, $inviter);
+            } else {
+                $push->notifyFollowRequest($user, $inviter);
+            }
+        } catch (\Throwable $e) {
+            Log::debug('invite follow notify skipped: ' . $e->getMessage());
+        }
+    }
+
+    private function phoneDigits(string $raw): ?string
+    {
+        $digits = preg_replace('/\D+/', '', trim($raw));
+        if (! is_string($digits) || strlen($digits) < 8 || strlen($digits) > 15) {
+            return null;
+        }
+
+        return $digits;
+    }
+
+    /** @return list<string> */
+    private function phoneMatchCandidates(string $raw): array
+    {
+        $digits = $this->phoneDigits($raw);
+        if ($digits === null) {
+            return [];
+        }
+
+        $out = ['+' . $digits, $digits];
+        if (str_starts_with($digits, '0') && strlen($digits) >= 9) {
+            $national = substr($digits, 1);
+            $out[] = '+353' . $national;
+            $out[] = '353' . $national;
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    private function requestIsBusinessAccount(Request $request): bool
+    {
+        $type = strtolower(trim((string) ($request->input('accountType') ?? $request->input('account_type') ?? '')));
+        if ($type === 'business') {
+            return true;
+        }
+        if ($type === 'personal') {
+            return false;
+        }
+
+        return $request->boolean('isBusiness') || $request->boolean('is_business');
+    }
+
+    private function nullableCoord(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function businessAddressAttributes(Request $request, bool $isBusiness): array
+    {
+        if (! Schema::hasColumn('users', 'business_address')) {
+            return [];
+        }
+
+        if (! $isBusiness) {
+            return [
+                'business_address' => null,
+                'latitude' => null,
+                'longitude' => null,
+            ];
+        }
+
+        return [
+            'business_address' => $this->nullableTrimmedString(
+                $request->input('business_address') ?? $request->input('businessAddress')
+            ),
+            'latitude' => $this->nullableCoord($request->input('latitude')),
+            'longitude' => $this->nullableCoord($request->input('longitude')),
+        ];
+    }
+
+    private function applyBusinessAddressUpdate(User $user, Request $request): void
+    {
+        if (! Schema::hasColumn('users', 'business_address')) {
+            return;
+        }
+
+        $accountTypeSent = $request->exists('accountType')
+            || $request->exists('account_type')
+            || $request->exists('isBusiness')
+            || $request->exists('is_business');
+        $addressSent = $request->exists('business_address')
+            || $request->exists('businessAddress')
+            || $request->exists('latitude')
+            || $request->exists('longitude');
+
+        if ($accountTypeSent && ! $this->requestIsBusinessAccount($request)) {
+            $user->business_address = null;
+            $user->latitude = null;
+            $user->longitude = null;
+
+            return;
+        }
+
+        if (! $addressSent) {
+            return;
+        }
+
+        $payload = $this->businessAddressAttributes($request, true);
+        if ($request->exists('business_address') || $request->exists('businessAddress')) {
+            $user->business_address = $payload['business_address'];
+        }
+        if ($request->exists('latitude')) {
+            $user->latitude = $payload['latitude'];
+        }
+        if ($request->exists('longitude')) {
+            $user->longitude = $payload['longitude'];
+        }
     }
 
     private function nullableTrimmedString(mixed $value): ?string
@@ -599,12 +1079,30 @@ class AuthController extends Controller
         return $trimmed === '' ? null : $trimmed;
     }
 
+    /** Hosted avatar only — never persist data:/file: URIs (column is 500 chars). */
+    private function nullablePublicAvatarUrl(mixed $value): ?string
+    {
+        $trimmed = $this->nullableTrimmedString($value);
+        if ($trimmed === null) {
+            return null;
+        }
+        $lower = strtolower($trimmed);
+        if (str_starts_with($lower, 'data:') || str_starts_with($lower, 'file:') || str_starts_with($lower, 'content:')) {
+            return null;
+        }
+
+        return $trimmed;
+    }
+
     /**
-     * Logout user
+     * Logout user and revoke the current Sanctum access token.
      */
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $token = $request->user()?->currentAccessToken();
+        if ($token instanceof PersonalAccessToken) {
+            $token->delete();
+        }
 
         return response()->json(['message' => 'Successfully logged out']);
     }

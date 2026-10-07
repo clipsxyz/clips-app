@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
-import { loginUser, registerUser, mapLaravelUserToAppFields } from '../api/client';
+import { loginUser, registerUser, checkSignupAvailability, mapLaravelUserToAppFields, requestPasswordResetCode, resetPasswordWithCode, uploadFile, updateAuthProfile } from '../api/client';
 import { isMockMode } from '../api/apiMode';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
@@ -11,8 +11,10 @@ import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
 import { persistAuthToken } from '../utils/authTokenBridge';
+import { setAvatarForHandle } from '../api/users';
+import { clearLaravelUnreachable } from '../config/runtimeEnv';
 import { db } from '../utils/db';
-import { buildGazetteerHandle } from '../utils/gazetteerHandle';
+import { buildGazetteerHandle, sanitizeSignupUsernameInput, validateSignupUsername } from '../utils/gazetteerHandle';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
 const avatarStorageKey = (id: string) => `clips_app_avatar_${id}`;
@@ -97,6 +99,14 @@ export default function LoginPage() {
     if (modeParam === 'login' || modeParam === 'signup') {
       setMode(modeParam);
     }
+    const inviteParam = (searchParams.get('invite') || '').replace(/^@/, '').trim();
+    if (inviteParam) {
+      try {
+        sessionStorage.setItem('clips:inviteHandle', inviteParam);
+      } catch {
+        // ignore storage failures
+      }
+    }
   }, [searchParams]);
 
   const getPostAuthRedirect = React.useCallback(() => {
@@ -109,17 +119,23 @@ export default function LoginPage() {
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
-  const step = (stepFromUrl >= 1 && stepFromUrl <= 3) ? stepFromUrl : 1;
+  const step = (stepFromUrl >= 1 && stepFromUrl <= 4) ? stepFromUrl : 1;
 
   const signupStepTitle =
-    step === 1 ? 'Create your account' : step === 2 ? 'About you' : 'Add a photo';
+    step === 1
+      ? 'Create your account'
+      : step === 2
+        ? 'About you'
+        : step === 3
+          ? 'Choose your news feeds'
+          : 'Add a photo';
 
   const signupInputClass =
     'w-full rounded-lg border border-white/15 bg-white/5 px-3 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#7A8AF0]/60 focus:ring-1 focus:ring-[#7A8AF0]/30';
 
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
-    if (newStep >= 1 && newStep <= 3) {
+    if (newStep >= 1 && newStep <= 4) {
       setSignupError('');
       setSearchParams({ mode: 'signup', step: newStep.toString() });
     }
@@ -127,6 +143,7 @@ export default function LoginPage() {
 
   // Step 2: Profile & location
   const [name, setName] = React.useState('');
+  const [username, setUsername] = React.useState('');
   const [local, setLocal] = React.useState('');
   const [regional, setRegional] = React.useState('');
   const [national, setNational] = React.useState('');
@@ -149,10 +166,16 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
 
-  // Forgot password
+  // Forgot password (same Laravel local reset as the native app)
   const [showForgotPassword, setShowForgotPassword] = React.useState(false);
+  const [forgotStep, setForgotStep] = React.useState<1 | 2>(1);
   const [forgotEmail, setForgotEmail] = React.useState('');
-  const [forgotSent, setForgotSent] = React.useState(false);
+  const [forgotCode, setForgotCode] = React.useState('');
+  const [forgotDebugCode, setForgotDebugCode] = React.useState('');
+  const [forgotPassword, setForgotPassword] = React.useState('');
+  const [forgotConfirm, setForgotConfirm] = React.useState('');
+  const [forgotError, setForgotError] = React.useState('');
+  const [forgotLoading, setForgotLoading] = React.useState(false);
 
   // Password strength: 0=weak, 1=fair, 2=good, 3=strong
   function getPasswordStrength(pw: string): number {
@@ -187,15 +210,18 @@ export default function LoginPage() {
     return age;
   }
 
-  const handleFirstName = name.trim().split(/\s+/)[0] || 'yourname';
-  const handlePreview = regional ? `${handleFirstName}@${regional}` : `${handleFirstName}@yourregion`;
+  const usernameForHandle = sanitizeSignupUsernameInput(username) || 'yourname';
+  const handlePreview = regional
+    ? buildGazetteerHandle(usernameForHandle, regional)
+    : buildGazetteerHandle(usernameForHandle, 'yourregion');
   const previewCountryFlag = normalizeCountryFlagInput('', national);
   const homeLocationComplete = Boolean(local && regional && national);
   const birthdateComplete = React.useMemo(() => {
     const age = getAgeFromBirthday();
     return age !== null && age >= MIN_AGE;
   }, [birthMonth, birthDay, birthYear]);
-  const step2CanContinue = Boolean(name.trim() && homeLocationComplete && birthdateComplete);
+  const step2CanContinue = Boolean(name.trim() && !validateSignupUsername(username) && birthdateComplete);
+  const step3CanContinue = homeLocationComplete;
   const step1CanContinue =
     Boolean(accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines);
 
@@ -214,7 +240,7 @@ export default function LoginPage() {
     setHomeLocationQuery('');
   }
 
-  function handleAccountSubmit(e: React.FormEvent) {
+  async function handleAccountSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
     if (!email || !password || !confirmPassword) {
@@ -242,19 +268,43 @@ export default function LoginPage() {
       setSignupError('Please fix the highlighted fields.');
       return;
     }
-    setSignupFieldErrors({});
+
+    setSignupSubmitting(true);
     setSignupError('');
-    updateStep(2);
+    try {
+      const availability = await checkSignupAvailability({ email: email.trim() });
+      if (availability.email_taken) {
+        setSignupFieldErrors({ email: 'This email is already taken. Try logging in instead.' });
+        setSignupError('This email is already registered.');
+        return;
+      }
+      if (availability.errors?.email?.[0]) {
+        setSignupFieldErrors({ email: availability.errors.email[0] });
+        setSignupError('Please fix the highlighted fields.');
+        return;
+      }
+      setSignupFieldErrors({});
+      updateStep(2);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isConnection =
+        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+      setSignupError(
+        isConnection
+          ? 'Cannot reach the server. Check Laravel is running and try again.'
+          : msg || 'Could not verify email. Try again.',
+      );
+    } finally {
+      setSignupSubmitting(false);
+    }
   }
 
-  function handleLocationSubmit(e: React.FormEvent) {
+  async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
     if (!name) nextErrors.name = 'Full name is required.';
-    if (!local || !regional || !national) {
-      nextErrors.homeLocation =
-        'Search and pick a place from the list ? we need your local, regional, and national feeds.';
-    }
+    const usernameError = validateSignupUsername(username);
+    if (usernameError) nextErrors.username = usernameError;
     if (!birthMonth || !birthDay || !birthYear) {
       nextErrors.birthdate = 'Please enter your date of birth.';
     }
@@ -269,9 +319,50 @@ export default function LoginPage() {
       setSignupError('Please complete all required profile fields.');
       return;
     }
+
+    setSignupSubmitting(true);
+    setSignupError('');
+    try {
+      const cleanUsername = sanitizeSignupUsernameInput(username);
+      const availability = await checkSignupAvailability({ username: cleanUsername });
+      if (availability.username_taken) {
+        setSignupFieldErrors({ username: 'This username is already taken. Try another.' });
+        setSignupError('Please choose a different username.');
+        return;
+      }
+      if (availability.errors?.username?.[0]) {
+        setSignupFieldErrors({ username: availability.errors.username[0] });
+        setSignupError('Please fix the highlighted fields.');
+        return;
+      }
+      setSignupFieldErrors({});
+      updateStep(3);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isConnection =
+        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+      setSignupError(
+        isConnection
+          ? 'Cannot reach the server. Check Laravel is running and try again.'
+          : msg || 'Could not verify username. Try again.',
+      );
+    } finally {
+      setSignupSubmitting(false);
+    }
+  }
+
+  function handleLocationSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!homeLocationComplete) {
+      setSignupFieldErrors({
+        homeLocation: 'Search and pick a place from the list — we need your local, regional, and national feeds.',
+      });
+      setSignupError('Please choose the location that will power your news feeds.');
+      return;
+    }
     setSignupFieldErrors({});
     setSignupError('');
-    updateStep(3);
+    updateStep(4);
   }
 
   async function handleProfilePictureSubmit(e: React.FormEvent) {
@@ -282,7 +373,8 @@ export default function LoginPage() {
     setSignupSubmitting(true);
     const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
-    const handle = buildGazetteerHandle(name.trim() || 'user', regional);
+    const cleanUsername = sanitizeSignupUsernameInput(username);
+    const handle = buildGazetteerHandle(cleanUsername || 'user', regional);
     const userId = email.trim().toLowerCase();
     const userData = {
       id: userId,
@@ -311,8 +403,11 @@ export default function LoginPage() {
     }
 
     try {
+      const inviteHandle =
+        (searchParams.get('invite') || '').replace(/^@/, '').trim() ||
+        (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('clips:inviteHandle') || '').replace(/^@/, '').trim() : '');
       const apiResponse = await registerUser({
-        username: email.trim().split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
+        username: cleanUsername,
         email: email.trim(),
         password,
         displayName: name.trim(),
@@ -322,10 +417,39 @@ export default function LoginPage() {
         locationNational: national.trim(),
         accountType: (accountType ?? 'personal') as 'personal' | 'business',
         isBusiness: accountType === 'business',
+        inviteHandle: inviteHandle || undefined,
       });
       const token = apiResponse?.token;
       if (token) await persistAuthToken(token);
+      try {
+        sessionStorage.removeItem('clips:inviteHandle');
+      } catch {
+        // ignore
+      }
       const mapped = mapLaravelUserToAppFields(apiResponse?.user || {});
+      let hostedAvatar = (mapped.avatarUrl as string | undefined) || undefined;
+      if (profilePicture && /^data:/i.test(profilePicture)) {
+        try {
+          const blob = await (await fetch(profilePicture)).blob();
+          const file = new File([blob], 'profile-avatar.jpg', { type: blob.type || 'image/jpeg' });
+          const uploaded = await uploadFile(file);
+          const remote = String((uploaded as { fileUrl?: string; url?: string })?.fileUrl || (uploaded as { url?: string })?.url || '').trim();
+          if (remote) {
+            let persistUrl = remote;
+            try {
+              const parsed = new URL(remote);
+              if (parsed.pathname.startsWith('/storage/')) persistUrl = parsed.pathname;
+            } catch {
+              /* already relative */
+            }
+            await updateAuthProfile({ avatar_url: persistUrl });
+            hostedAvatar = persistUrl;
+            setAvatarForHandle(handle, persistUrl);
+          }
+        } catch (avatarErr) {
+          console.warn('[signup] profile photo did not upload to Laravel', avatarErr);
+        }
+      }
       const mergedUser = {
         ...userData,
         id: mapped.id ?? userData.id,
@@ -334,7 +458,7 @@ export default function LoginPage() {
         local: String(mapped.local || userData.local),
         regional: String(mapped.regional || userData.regional),
         national: String(mapped.national || userData.national),
-        avatarUrl: (mapped.avatarUrl as string | undefined) || userData.avatarUrl,
+        avatarUrl: hostedAvatar || userData.avatarUrl,
         accountType: (mapped.accountType as 'personal' | 'business') || userData.accountType,
         is_private: mapped.is_private,
       };
@@ -348,11 +472,40 @@ export default function LoginPage() {
         const isConnection =
           message.includes('CONNECTION_REFUSED') ||
           (err instanceof Error && err.name === 'ConnectionRefused');
-        setSignupError(
-          isConnection
-            ? 'Cannot reach the server. Check Laravel is running and try again.'
-            : message,
-        );
+        const responseErrors = (err as any)?.response?.errors || {};
+        const emailErr = Array.isArray(responseErrors.email)
+          ? String(responseErrors.email[0] || '')
+          : '';
+        const usernameErr = Array.isArray(responseErrors.username)
+          ? String(responseErrors.username[0] || '')
+          : '';
+        const handleErr = Array.isArray(responseErrors.handle)
+          ? String(responseErrors.handle[0] || '')
+          : '';
+        if (/email/i.test(emailErr) || /email.*(taken|unique|already)/i.test(message)) {
+          updateStep(1);
+          setSignupFieldErrors({
+            email: emailErr || 'This email is already taken. Try logging in instead.',
+          });
+          setSignupError('This email is already registered.');
+        } else if (
+          /username/i.test(usernameErr) ||
+          /username.*(taken|unique|already)/i.test(message) ||
+          /handle.*(taken|unique|already)/i.test(handleErr) ||
+          /handle.*(taken|unique|already)/i.test(message)
+        ) {
+          updateStep(2);
+          setSignupFieldErrors({
+            username: usernameErr || handleErr || 'This username is already taken. Try another.',
+          });
+          setSignupError('Please choose a different username.');
+        } else {
+          setSignupError(
+            isConnection
+              ? 'Cannot reach the server. Check Laravel is running and try again.'
+              : message,
+          );
+        }
         setSignupSubmitting(false);
         return;
       }
@@ -402,37 +555,58 @@ export default function LoginPage() {
       return;
     }
     setLoginLoading(true);
+    clearLaravelUnreachable();
     try {
-      const res = await loginUser(loginEmail.trim(), loginPassword);
+      const res = await loginUser(loginEmail.trim().replace(/^@+/, ''), loginPassword);
       const token = (res as { token?: string }).token;
       const apiUser = (res as { user?: any }).user;
       if (token) await persistAuthToken(token);
       if (apiUser) {
+        const mapped = mapLaravelUserToAppFields(apiUser);
         const userData = {
-          name: apiUser.display_name || apiUser.name || apiUser.username || '',
-          email: apiUser.email || '',
-          handle: apiUser.handle || '',
-          local: apiUser.location_local || '',
-          regional: apiUser.location_regional || '',
-          national: apiUser.location_national || '',
-          avatarUrl: apiUser.avatar_url,
-          is_private: apiUser.is_private || false,
+          id: mapped.id,
+          name: mapped.name || apiUser.display_name || apiUser.name || apiUser.username || '',
+          email: mapped.email || apiUser.email || '',
+          handle: mapped.handle || apiUser.handle || '',
+          local: mapped.local || apiUser.location_local || '',
+          regional: mapped.regional || apiUser.location_regional || '',
+          national: mapped.national || apiUser.location_national || '',
+          avatarUrl: mapped.avatarUrl || apiUser.avatar_url,
+          is_private: mapped.is_private || apiUser.is_private || false,
           accountType:
-            apiUser.account_type === 'business' || apiUser.accountType === 'business' || apiUser.is_business === true
+            mapped.accountType === 'business' ||
+            apiUser.account_type === 'business' ||
+            apiUser.accountType === 'business' ||
+            apiUser.is_business === true
               ? 'business'
               : 'personal',
         };
         login(userData);
         nav(getPostAuthRedirect(), { replace: true });
+        return;
       }
+      setLoginError('Login succeeded but the server did not return a user session.');
     } catch (err: any) {
+      // Live Laravel: seeded users are not in localStorage. Do not treat a miss as "backend down".
+      if (!isMockMode()) {
+        const msg = String(err?.message || 'Login failed');
+        const isConnection =
+          err?.name === 'ConnectionRefused' ||
+          msg === 'CONNECTION_REFUSED' ||
+          msg.includes('Failed to fetch') ||
+          msg.includes('ERR_CONNECTION_REFUSED');
+        if (isConnection) {
+          setLoginError('Cannot reach the server. Check Laravel is running and try again.');
+        } else {
+          setLoginError('Invalid email or password.');
+        }
+        return;
+      }
+
       const isConnectionError =
         err?.message === 'CONNECTION_REFUSED' ||
         err?.name === 'ConnectionRefused' ||
         err?.message?.includes('Failed to fetch');
-      const is401 = err?.status === 401;
-
-      // Fallback: if backend is down or invalid credentials, try local (mock) registrations from sign-up
       const key = loginEmail.trim().toLowerCase();
       const localReg = getLocalRegistrations();
       const stored = localReg[key];
@@ -441,7 +615,6 @@ export default function LoginPage() {
         nav(getPostAuthRedirect(), { replace: true });
         return;
       }
-      // Also try current user in localStorage (e.g. signed up before we stored localRegistrations)
       try {
         const savedUser = localStorage.getItem('user');
         if (savedUser) {
@@ -464,11 +637,92 @@ export default function LoginPage() {
     }
   }
 
+  async function handleForgotSendCode(e: React.FormEvent) {
+    e.preventDefault();
+    setForgotError('');
+    const identifier = forgotEmail.trim();
+    if (!identifier) {
+      setForgotError('Enter your email or handle.');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const res = await requestPasswordResetCode(identifier);
+      setForgotDebugCode(String(res.debug_code || ''));
+      if (res.debug_code) setForgotCode(String(res.debug_code));
+      setForgotStep(2);
+    } catch (err: any) {
+      const msg = String(err?.message || 'Could not send code');
+      const isConnection =
+        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+      setForgotError(
+        isConnection
+          ? 'Cannot reach the server. Check Laravel is running.'
+          : msg,
+      );
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setForgotError('');
+    const identifier = forgotEmail.trim();
+    const code = forgotCode.replace(/\D/g, '');
+    if (!identifier) {
+      setForgotError('Enter your email or handle.');
+      return;
+    }
+    if (code.length !== 6) {
+      setForgotError('Enter the 6-digit code.');
+      return;
+    }
+    if (forgotPassword.length < 8) {
+      setForgotError('New password must be at least 8 characters.');
+      return;
+    }
+    if (forgotPassword !== forgotConfirm) {
+      setForgotError('Passwords do not match.');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const res = await resetPasswordWithCode(identifier, code, forgotPassword);
+      if (res.token) await persistAuthToken(res.token);
+      const mapped = mapLaravelUserToAppFields(res.user || {});
+      login({
+        id: mapped.id,
+        name: mapped.name || identifier.split('@')[0] || 'User',
+        email: mapped.email || identifier,
+        handle: mapped.handle,
+        local: mapped.local,
+        regional: mapped.regional,
+        national: mapped.national,
+        avatarUrl: mapped.avatarUrl,
+        is_private: mapped.is_private,
+        accountType: mapped.accountType,
+      });
+      nav(getPostAuthRedirect(), { replace: true });
+    } catch (err: any) {
+      const msg = String(err?.message || 'Could not reset password');
+      const isConnection =
+        err?.name === 'ConnectionRefused' || msg.includes('CONNECTION_REFUSED');
+      setForgotError(
+        isConnection
+          ? 'Cannot reach the server. Check Laravel is running.'
+          : msg,
+      );
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
   return (
     <div 
       className="h-full min-h-0 flex-1 flex flex-col overflow-hidden items-center px-4 sm:px-6 py-4 sm:py-6 relative"
       style={{ 
-        backgroundColor: '#000000',
+        backgroundColor: '#151D28',
         paddingTop: 'max(1rem, env(safe-area-inset-top))',
         paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
       }}
@@ -477,66 +731,108 @@ export default function LoginPage() {
         {mode === 'login' ? (
           <div
             className="max-w-md mx-auto rounded-2xl p-0.5 shadow-lg"
-            style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
+            style={{ background: '#FFFFFF' }}
           >
             {showForgotPassword ? (
-              <div className="rounded-2xl bg-black px-8 py-8 flex flex-col">
+              <form
+                onSubmit={forgotStep === 1 ? handleForgotSendCode : handleForgotSubmit}
+                className="rounded-2xl px-8 py-8 flex flex-col"
+                style={{ backgroundColor: '#151D28' }}
+              >
                 <div className="text-center mb-6">
                   <p className="text-xs text-gray-500 mb-2">Recovery</p>
-                  <h1 className="text-2xl font-light mb-2 tracking-tight text-white">Reset password</h1>
-                  <p className="text-sm text-gray-400">Recover your Gazetteer account</p>
+                  <h1 className="text-2xl font-light mb-2 tracking-tight text-white">
+                    {forgotStep === 1 ? 'Forgot password' : 'Enter code'}
+                  </h1>
+                  <p className="text-sm text-gray-400">
+                    {forgotStep === 1
+                      ? 'We’ll send a 6-digit code. Without Mailgun it shows here.'
+                      : forgotDebugCode
+                        ? `No email yet — your code is ${forgotDebugCode}`
+                        : 'Enter the 6-digit code, then choose a new password.'}
+                  </p>
                 </div>
-                {forgotSent ? (
-                  <div className="space-y-4">
-                    <p className="text-sm text-gray-300">
-                      If an account exists for that email, we&apos;ve sent a reset link. Check your inbox.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
-                      className="w-full py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 text-sm font-medium"
-                    >
-                      Back to login
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-sm text-gray-400">Enter your email and we&apos;ll send you a reset link.</p>
+                <div className="space-y-3">
+                  {forgotStep === 1 ? (
                     <input
-                      type="email"
+                      type="text"
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
-                      placeholder="Email"
+                      placeholder="Email or handle"
                       className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
                       autoFocus
+                      autoCapitalize="none"
+                      autoCorrect="off"
                     />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => { setShowForgotPassword(false); setForgotEmail(''); }}
-                        className="flex-1 py-2 bg-gray-700 text-white rounded-sm hover:bg-gray-600 text-sm font-medium"
-                      >
-                        Back
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (forgotEmail.trim()) {
-                            setForgotSent(true);
-                          }
-                        }}
-                        className="flex-1 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 text-sm font-medium"
-                      >
-                        Send link
-                      </button>
-                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={forgotCode}
+                        onChange={e => setForgotCode(e.target.value)}
+                        placeholder="6-digit code"
+                        className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                        autoFocus
+                      />
+                      <input
+                        type="password"
+                        value={forgotPassword}
+                        onChange={e => setForgotPassword(e.target.value)}
+                        placeholder="New password (8+ characters)"
+                        className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                      />
+                      <input
+                        type="password"
+                        value={forgotConfirm}
+                        onChange={e => setForgotConfirm(e.target.value)}
+                        placeholder="Confirm new password"
+                        className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                      />
+                    </>
+                  )}
+                  {forgotError ? <p className="text-xs text-red-500">{forgotError}</p> : null}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (forgotStep === 2) {
+                          setForgotStep(1);
+                          setForgotError('');
+                          return;
+                        }
+                        setShowForgotPassword(false);
+                        setForgotEmail('');
+                        setForgotCode('');
+                        setForgotDebugCode('');
+                        setForgotPassword('');
+                        setForgotConfirm('');
+                        setForgotError('');
+                      }}
+                      className="flex-1 py-2 bg-gray-700 text-white rounded-sm hover:bg-gray-600 text-sm font-medium"
+                    >
+                      {forgotStep === 2 ? 'Back' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 text-sm font-medium disabled:opacity-50"
+                    >
+                      {forgotLoading
+                        ? 'Please wait…'
+                        : forgotStep === 1
+                          ? 'Send code'
+                          : 'Save and log in'}
+                    </button>
                   </div>
-                )}
-              </div>
+                </div>
+              </form>
             ) : (
               <form
                 onSubmit={handleLoginSubmit}
-                className="rounded-2xl bg-black px-8 py-8 flex flex-col"
+                className="rounded-2xl px-8 py-8 flex flex-col"
+                style={{ backgroundColor: '#151D28' }}
               >
               <div className="text-center mb-6">
                 <p className="text-xs text-gray-500 mb-2">No algorithms just places</p>
@@ -545,12 +841,15 @@ export default function LoginPage() {
               </div>
               <div className="space-y-3">
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   value={loginEmail}
                   onChange={e => setLoginEmail(e.target.value)}
-                  placeholder="Email"
+                  placeholder="Email or handle"
                   className={signupInputClass}
-                  autoComplete="email"
+                  autoComplete="username"
                 />
                 <div className="relative">
                   <input
@@ -573,7 +872,17 @@ export default function LoginPage() {
                 <div className="text-right">
                   <button
                     type="button"
-                    onClick={() => { setShowForgotPassword(true); setLoginError(''); }}
+                    onClick={() => {
+                      setShowForgotPassword(true);
+                      setForgotStep(1);
+                      setForgotEmail(loginEmail.trim());
+                      setForgotCode('');
+                      setForgotDebugCode('');
+                      setForgotPassword('');
+                      setForgotConfirm('');
+                      setForgotError('');
+                      setLoginError('');
+                    }}
                     className="text-xs text-[#7A8AF0] hover:underline"
                   >
                     Forgot password?
@@ -612,10 +921,13 @@ export default function LoginPage() {
             step === 1
               ? handleAccountSubmit
               : step === 2
-                ? handleLocationSubmit
-                : handleProfilePictureSubmit
+                ? handleProfileSubmit
+                : step === 3
+                  ? handleLocationSubmit
+                  : handleProfilePictureSubmit
           }
-          className="flex flex-1 flex-col min-h-0 w-full h-full overflow-hidden bg-black"
+          className="flex flex-1 flex-col min-h-0 w-full h-full overflow-hidden"
+          style={{ backgroundColor: '#151D28' }}
         >
           {/* Header */}
           <div className="flex-shrink-0 px-6 sm:px-10 pt-6 sm:pt-10 pb-2">
@@ -647,7 +959,7 @@ export default function LoginPage() {
               <div className="mx-auto mt-5 mb-1 h-0.5 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
                 <div
                   className="h-full rounded-full bg-[#7A8AF0] transition-all duration-300 ease-out"
-                  style={{ width: `${(step / 3) * 100}%` }}
+                  style={{ width: `${(step / 4) * 100}%` }}
                 />
               </div>
             </div>
@@ -799,7 +1111,7 @@ export default function LoginPage() {
                 {showConfirmPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
               </button>
               {confirmPassword && (
-                <p className={`text-xs mt-1.5 px-1 ${password === confirmPassword ? 'text-green-500' : 'text-red-500'}`}>
+                <p className={`text-xs mt-1.5 px-1 font-semibold ${password === confirmPassword ? 'text-green-400' : 'text-amber-300'}`}>
                   {password === confirmPassword ? 'Passwords match' : 'Passwords don\'t match'}
                 </p>
               )}
@@ -823,6 +1135,30 @@ export default function LoginPage() {
                 autoComplete="name"
               />
               {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-2">
+                Username — one word for your Gazetteer handle (letters, numbers, underscore).
+              </p>
+              <input
+                value={username}
+                onChange={e => setUsername(sanitizeSignupUsernameInput(e.target.value))}
+                className={signupInputClass}
+                placeholder="e.g. John or JohnS"
+                required
+                autoComplete="username"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+              {signupFieldErrors.username && (
+                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.username}</p>
+              )}
+              {sanitizeSignupUsernameInput(username).length >= 3 && (
+                <p className="mt-1.5 text-xs text-gray-400 px-1">
+                  Your handle will be <span className="text-white font-medium">{handlePreview}</span>
+                </p>
+              )}
             </div>
 
             {/* Date of Birth - required, 13+ */}
@@ -871,9 +1207,14 @@ export default function LoginPage() {
               {signupFieldErrors.birthdate && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.birthdate}</p>}
             </div>
 
+          </>
+        )}
+
+        {step === 3 && (
+          <>
             <div>
               <p className="text-xs text-gray-500 mb-2">
-                Home location ? local, regional, and national feeds.
+                Choose your home location to set your local, regional, and national news feeds.
               </p>
               <PlaceAutocompleteField
                 value={homeLocationQuery}
@@ -925,7 +1266,7 @@ export default function LoginPage() {
           </>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <>
             <p className="text-center text-sm text-gray-400">
               <span className="font-medium text-white">@{handlePreview}</span>
@@ -969,7 +1310,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="flex-shrink-0 border-t border-white/10 bg-black px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.65)]">
+          <div className="flex-shrink-0 border-t border-white/10 px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.65)]" style={{ backgroundColor: '#151D28' }}>
             <div className="mx-auto w-full max-w-[400px] space-y-3">
               {step === 1 && (
                 <div className="space-y-2.5 rounded-lg border border-white/15 bg-white/5 px-3 py-3">
@@ -1029,13 +1370,14 @@ export default function LoginPage() {
                 disabled={
                   signupSubmitting ||
                   (step === 1 && !step1CanContinue) ||
-                  (step === 2 && !step2CanContinue)
+                  (step === 2 && !step2CanContinue) ||
+                  (step === 3 && !step3CanContinue)
                 }
                 className="w-full rounded-lg bg-white px-4 py-3 text-sm font-semibold text-[#111827] transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:bg-white/25 disabled:text-white/50"
               >
                 {signupSubmitting
                   ? 'Creating account?'
-                  : step < 3
+                  : step < 4
                     ? 'Continue'
                     : 'Create account'}
               </button>

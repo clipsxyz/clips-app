@@ -16,7 +16,7 @@ import {
   parsedPlaceFeedFromSuggestion,
 } from '../utils/placeFeedLevels';
 
-export type PlaceFieldMode = 'location' | 'venue' | 'landmark';
+export type PlaceFieldMode = 'location' | 'venue' | 'landmark' | 'all';
 
 type Props = {
   value: string;
@@ -32,6 +32,9 @@ type Props = {
 };
 
 function labelForPostField(s: LocationSuggestion, mode: PlaceFieldMode): string {
+  if (mode === 'all' || mode === 'venue') {
+    return String(s.formatted_address || s.name || s.display_name || '').trim();
+  }
   const parsed = parsedPlaceFeedFromSuggestion(s);
   if (mode === 'location') {
     return parsed.local || parsed.regional || parsed.national || feedHeaderLabelFromSuggestion(s, parsed);
@@ -52,24 +55,37 @@ export default function PlaceAutocompleteField({
 }: Props) {
   const [suggestions, setSuggestions] = React.useState<LocationSuggestion[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const inputRef = React.useRef<TextInput>(null);
+  /** After a tap on a suggestion, ignore the follow-up search for that filled-in value. */
+  const pickedRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (pickedRef.current) {
+      setSuggestions([]);
+      setLoading(false);
+      setOpen(false);
+      return;
+    }
     const q = value.trim();
     if (q.length < 2) {
       setSuggestions([]);
       setLoading(false);
+      setOpen(false);
       return;
     }
     const ctrl = new AbortController();
-    const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : 'location';
+    const apiMode = mode === 'venue' ? 'venue' : mode === 'landmark' ? 'landmark' : mode === 'all' ? 'all' : 'location';
+    setOpen(true);
+    setLoading(true);
     setSuggestions(searchLocalGazetteer(q, 12, apiMode));
     const id = setTimeout(async () => {
       try {
         setLoading(true);
         const res = await searchLocations(q, 12, apiMode, ctrl.signal);
-        if (!ctrl.signal.aborted) setSuggestions(res);
+        if (!ctrl.signal.aborted && !pickedRef.current) setSuggestions(res);
       } catch {
-        if (!ctrl.signal.aborted) setSuggestions(searchLocalGazetteer(q, 12, apiMode));
+        if (!ctrl.signal.aborted && !pickedRef.current) setSuggestions(searchLocalGazetteer(q, 12, apiMode));
       } finally {
         if (!ctrl.signal.aborted) setLoading(false);
       }
@@ -80,16 +96,20 @@ export default function PlaceAutocompleteField({
     };
   }, [mode, value]);
 
-  const showList = value.trim().length >= 2;
+  const showList = open && value.trim().length >= 2;
 
   const pick = (s: LocationSuggestion) => {
     const parsed = parsedPlaceFeedFromSuggestion(s);
     const label = showFeedLevels
       ? parsed.fullName || s.name
       : labelForPostField(s, mode);
+    pickedRef.current = true;
+    setOpen(false);
+    setSuggestions([]);
+    setLoading(false);
     onChange(label);
     onSelectSuggestion?.(s);
-    setSuggestions([]);
+    inputRef.current?.blur();
   };
 
   return (
@@ -98,8 +118,17 @@ export default function PlaceAutocompleteField({
         <Icon name="location-outline" size={18} color="#9CA3AF" style={styles.icon} />
       ) : null}
       <TextInput
+        ref={inputRef}
         value={value}
-        onChangeText={onChange}
+        onChangeText={(text) => {
+          pickedRef.current = false;
+          setOpen(true);
+          onChange(text);
+        }}
+        onFocus={() => {
+          if (pickedRef.current) return;
+          if (value.trim().length >= 2) setOpen(true);
+        }}
         placeholder={placeholder}
         placeholderTextColor="#6B7280"
         style={[bare ? styles.inputBare : styles.input, showIcon && !bare && styles.inputWithIcon, inputStyle]}

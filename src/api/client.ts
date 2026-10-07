@@ -134,6 +134,62 @@ export async function apiRequest(endpoint: string, options: RequestInit & { time
 }
 
 // Auth API
+export async function checkSignupAvailability(opts: {
+    email?: string;
+    username?: string;
+}): Promise<{
+    available: boolean;
+    email_taken: boolean;
+    username_taken: boolean;
+    errors?: Record<string, string[]>;
+}> {
+    if (isMockMode()) {
+        return { available: true, email_taken: false, username_taken: false };
+    }
+
+    const params = new URLSearchParams();
+    const email = String(opts.email || '').trim().toLowerCase();
+    const username = String(opts.username || '').trim();
+    if (email) params.set('email', email);
+    if (username) params.set('username', username);
+    if (![...params.keys()].length) {
+        return { available: true, email_taken: false, username_taken: false };
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/check-availability?${params.toString()}`;
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            return {
+                available: false,
+                email_taken: Boolean((data as any)?.email_taken),
+                username_taken: Boolean((data as any)?.username_taken),
+                errors: (data as any)?.errors,
+            };
+        }
+        return {
+            available: (data as any)?.available !== false,
+            email_taken: Boolean((data as any)?.email_taken),
+            username_taken: Boolean((data as any)?.username_taken),
+            errors: (data as any)?.errors,
+        };
+    } catch (err: any) {
+        const msg = String(err?.message || '');
+        if (msg.includes('Failed to fetch') || msg.includes('Network request failed')) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw err;
+    }
+}
+
 export async function registerUser(userData: {
     username: string;
     email: string;
@@ -145,6 +201,10 @@ export async function registerUser(userData: {
     locationNational?: string;
     accountType?: 'personal' | 'business';
     isBusiness?: boolean;
+    businessAddress?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    inviteHandle?: string;
 }): Promise<{ user: Record<string, unknown>; token: string }> {
     if (isMockMode()) {
         throwMockConnectionRefused();
@@ -178,6 +238,10 @@ export async function registerUser(userData: {
         locationNational: String(userData.locationNational || '').trim() || undefined,
         accountType: userData.accountType,
         isBusiness: userData.isBusiness,
+        businessAddress: String(userData.businessAddress || '').trim() || undefined,
+        latitude: typeof userData.latitude === 'number' ? userData.latitude : undefined,
+        longitude: typeof userData.longitude === 'number' ? userData.longitude : undefined,
+        invite: String(userData.inviteHandle || '').replace(/^@/, '').trim() || undefined,
     };
 
     const controller = new AbortController();
@@ -417,6 +481,149 @@ export async function verifyPhoneVerificationCode(phone: string, code: string): 
         method: 'POST',
         body: JSON.stringify({ phone, code }),
     });
+}
+
+export async function requestPasswordResetCode(email: string): Promise<{
+    ok: boolean;
+    delivery: 'mock' | 'email';
+    expires_in_seconds: number;
+    debug_code?: string;
+}> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/password/forgot`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({ email }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Could not send code' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            throw error;
+        }
+
+        return (await response.json()) as {
+            ok: boolean;
+            delivery: 'mock' | 'email';
+            expires_in_seconds: number;
+            debug_code?: string;
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
+}
+
+export async function resetPasswordWithCode(
+    email: string,
+    code: string,
+    password: string,
+): Promise<{
+    user: Record<string, unknown>;
+    token: string;
+}> {
+    if (isMockMode()) {
+        throwMockConnectionRefused();
+    }
+
+    const API_BASE_URL = getApiBaseUrl().replace(/\/$/, '');
+    const url = `${API_BASE_URL}/auth/password/reset`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({
+                email,
+                code,
+                password,
+                password_confirmation: password,
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Reset failed' }));
+            const errorMessage =
+                errorData.error ||
+                errorData.message ||
+                (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            throw error;
+        }
+
+        const data = (await response.json()) as { user?: Record<string, unknown>; token?: string };
+        const token = typeof data?.token === 'string' ? data.token.trim() : '';
+        if (!token) {
+            throw new Error('Password was reset but no API token was returned');
+        }
+        await persistAuthToken(token);
+        return {
+            user: data.user && typeof data.user === 'object' ? data.user : {},
+            token,
+        };
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED') {
+            throw error;
+        }
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
+            error?.message?.includes('Network request failed') ||
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+        if (isConnectionError) {
+            markLaravelUnreachable();
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
+    }
 }
 
 /** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
