@@ -83,7 +83,7 @@ export function isMockMode(): boolean {
 }
 
 /** Mac LAN IP when the phone cannot reach localhost (adb reverse drops). */
-export const DEV_LAN_API_HOST = '192.168.1.5';
+export const DEV_LAN_API_HOST = '192.168.1.9';
 export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
 export const DEV_LOOPBACK_API_BASE_URL = 'http://127.0.0.1:8000/api';
 export const DEV_ANDROID_EMULATOR_API_HOST = '10.0.2.2';

@@ -1096,11 +1096,13 @@ export async function createStory(
             } : undefined),
         };
 
-        // Also add to local stories array for immediate UI update
-        stories.push(newStory);
+          // Also add to local stories array for immediate UI update
+          stories.push(newStory);
 
-        return newStory;
-    } catch (error: any) {
+          // A brand-new story must show up in feed headers immediately.
+          clearActiveStoryProbes();
+          return newStory;
+      } catch (error: any) {
         const isConnectionFallback =
             error?.name === 'ConnectionRefused' || error?.message === 'CONNECTION_REFUSED';
         if (!isConnectionFallback) {
@@ -1177,6 +1179,9 @@ export async function markStoryViewed(storyId: string, _userId: string, viewerHa
         }
         story.hasViewed = true;
     }
+
+    // The cached active-story probe answers the avatar ring, so it must not outlive this view.
+    clearActiveStoryProbes();
 }
 
 // Increment story view count
@@ -1434,8 +1439,58 @@ export async function userHasStories(userId: string): Promise<boolean> {
     return activeStories.length > 0;
 }
 
+/**
+ * Active-story probe backing the feed avatar ring and the "View stories" quick action.
+ *
+ * Every visible feed card runs these checks on mount, so the live branch answers both
+ * questions from ONE cached `GET /stories/user/{handle}` response instead of two
+ * uncached round-trips per card while scrolling. The endpoint only returns `active()`
+ * stories, which is exactly the 24-hour window the menu is supposed to honour.
+ */
+type ActiveStoryProbe = { any: boolean; unviewed: boolean };
+
+/** Long enough to absorb scroll churn, short enough that a viewed ring still clears. */
+const STORY_PROBE_TTL_MS = 30_000;
+const storyProbes = new Map<string, { at: number; value: ActiveStoryProbe }>();
+
+/** Invalidate after viewing/creating so the ring and menu react immediately. */
+export function clearActiveStoryProbes(): void {
+    storyProbes.clear();
+}
+
+async function probeActiveStories(userHandle: string, userId?: string): Promise<ActiveStoryProbe> {
+    const handle = (userHandle || '').trim();
+    if (!handle) return { any: false, unviewed: false };
+
+    const key = `${handle.toLowerCase()}|${userId || ''}`;
+    const cached = storyProbes.get(key);
+    if (cached && Date.now() - cached.at < STORY_PROBE_TTL_MS) return cached.value;
+
+    try {
+        const { apiRequest } = await import('./client');
+        const query = userId ? `?userId=${encodeURIComponent(String(userId))}` : '';
+        const response = await apiRequest(`/stories/user/${encodeURIComponent(handle)}${query}`);
+        const list: any[] = Array.isArray(response) ? response : [];
+        const value: ActiveStoryProbe = {
+            any: list.length > 0,
+            // has_viewed is only reported when the viewer id is passed.
+            unviewed: userId ? list.some((s: any) => !s?.has_viewed) : list.length > 0,
+        };
+        storyProbes.set(key, { at: Date.now(), value });
+        return value;
+    } catch (error) {
+        // Never cache a failure: a flaky request must not hide stories for the full TTL.
+        console.warn('Active story probe failed:', handle, error);
+        return { any: false, unviewed: false };
+    }
+}
+
 // Check if a user has stories by userHandle
-export async function userHasStoriesByHandle(userHandle: string): Promise<boolean> {
+export async function userHasStoriesByHandle(userHandle: string, userId?: string): Promise<boolean> {
+    if (isLaravelApiEnabled()) {
+        return (await probeActiveStories(userHandle, userId)).any;
+    }
+
     await delay();
 
     const now = Date.now();
@@ -1445,7 +1500,11 @@ export async function userHasStoriesByHandle(userHandle: string): Promise<boolea
 }
 
 // Check if a user has unviewed stories by userHandle
-export async function userHasUnviewedStoriesByHandle(userHandle: string): Promise<boolean> {
+export async function userHasUnviewedStoriesByHandle(userHandle: string, userId?: string): Promise<boolean> {
+    if (isLaravelApiEnabled()) {
+        return (await probeActiveStories(userHandle, userId)).unviewed;
+    }
+
     await delay();
 
     const now = Date.now();

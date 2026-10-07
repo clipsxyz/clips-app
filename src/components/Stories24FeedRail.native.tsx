@@ -33,6 +33,7 @@ import {
     isStories24AddYoursHandle,
     normalizeStories24Handle,
     pickFirstStories24RailStory,
+    rankStories24RailItems,
 } from '../utils/stories24Rail';
 const CARD_W = 175;
 const CARD_H = 102;
@@ -115,6 +116,7 @@ function StoryPreviewVideo({
 
 function StoryCard({
     item,
+    index,
     onPress,
     registerCardRef,
     playPreviewVideo,
@@ -123,6 +125,8 @@ function StoryCard({
     morphHidden = false,
 }: {
     item: Stories24RailItem;
+    /** 0-based story index; the card paints `index + 1`. Null/omit for Add yours. */
+    index?: number | null;
     onPress: (rect: CardRect) => void;
     registerCardRef: (handle: string, node: View | null) => void;
     playPreviewVideo: boolean;
@@ -230,6 +234,11 @@ function StoryCard({
                     locations={[0, 0.4, 1]}
                     style={styles.cardFooterGrad}
                 />
+                {typeof index === 'number' ? (
+                    <Text pointerEvents="none" numberOfLines={1} style={styles.cardRank}>
+                        {index + 1}
+                    </Text>
+                ) : null}
                 <View style={styles.cardAvatarCenter} pointerEvents="none">
                     <View style={styles.cardAvatarRing}>
                         <Avatar
@@ -642,6 +651,10 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
         [items],
     );
 
+    // Rail render only: top 9 story cards (+ Add yours). `railHandles` above stays uncapped
+    // so the full-screen viewer keeps swiping past rank 9.
+    const displayCards = useMemo(() => rankStories24RailItems(items), [items]);
+
     const firstStoryPreviewHandle = useMemo(
         () => items.find((i) => i.handle !== STORIES24_ADD_YOURS_HANDLE)?.handle ?? null,
         [items],
@@ -737,7 +750,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                 onScrollEndDrag={() => setRailScrolling(false)}
                 onMomentumScrollEnd={() => setRailScrolling(false)}
             >
-                {items.map((item) => {
+                {displayCards.map(({ item, index }) => {
                     const handleKey = normalizeStories24Handle(item.handle);
                     // Keep the source card visible until the morph clone has a paintable frame.
                     const morphHidden =
@@ -755,6 +768,7 @@ const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function St
                                     : item.handle
                             }
                             item={item}
+                            index={index}
                             registerCardRef={registerCardRef}
                             morphHidden={morphHidden}
                             playPreviewVideo={
@@ -894,6 +908,22 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         gap: 2,
         alignItems: 'center',
+        // Paint the byline over the rank watermark so long titles stay readable.
+        zIndex: 2,
+    },
+    /** NOW TV / Netflix-style rank number, bottom-left of every story card. */
+    cardRank: {
+        position: 'absolute',
+        left: 8,
+        bottom: 4,
+        color: 'rgba(255, 255, 255, 0.85)',
+        fontSize: 44,
+        lineHeight: 46,
+        fontWeight: '900',
+        textShadowColor: 'rgba(0, 0, 0, 0.75)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
+        zIndex: 1,
     },
     cardTitle: {
         color: '#FFFFFF',

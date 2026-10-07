@@ -87,6 +87,35 @@ export function pickFirstStories24RailStory(items: Stories24RailItem[]): Stories
     );
 }
 
+/** Ranked cards shown in the horizontal rail (NOW TV / Netflix-style 1–9). */
+export const STORIES24_RAIL_MAX_CARDS = 9;
+
+export type Stories24RailDisplayItem = {
+    item: Stories24RailItem;
+    /** 0-based story index; the card paints `index + 1`. `null` for the Add yours CTA. */
+    index: number | null;
+};
+
+/**
+ * Cap the rail *render* at {@link STORIES24_RAIL_MAX_CARDS} story cards while always
+ * keeping the Add yours CTA. Pure display helper: the uncapped `items` array must keep
+ * driving `railHandles`, so the full-screen viewer still swipes past rank 9.
+ */
+export function rankStories24RailItems(items: Stories24RailItem[]): Stories24RailDisplayItem[] {
+    const ranked: Stories24RailDisplayItem[] = [];
+    let next = 0;
+    for (const item of items) {
+        if (isStories24AddYoursHandle(item.handle)) {
+            ranked.push({ item, index: null });
+            continue;
+        }
+        if (next >= STORIES24_RAIL_MAX_CARDS) break;
+        ranked.push({ item, index: next });
+        next += 1;
+    }
+    return ranked;
+}
+
 export type Stories24OpenTarget = {
     item: Stories24RailItem;
     railHandles: string[];
