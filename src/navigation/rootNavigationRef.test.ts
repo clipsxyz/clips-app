@@ -1,11 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { resetRootToScreen, rootNavigationRef } from './rootNavigationRef';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@react-navigation/native', () => ({
+    createNavigationContainerRef: () => ({
+        isReady: () => false,
+        reset: vi.fn(),
+    }),
+}));
 
 describe('rootNavigationRef', () => {
-    it('exports resetRootToScreen as a function (login post-auth navigation)', () => {
-        expect(typeof resetRootToScreen).toBe('function');
-        expect(rootNavigationRef).toBeTruthy();
+    it('exports resetRootToScreen as a function (login post-auth navigation)', async () => {
+        const mod = await import('./rootNavigationRef');
+        expect(typeof mod.resetRootToScreen).toBe('function');
+        expect(mod.rootNavigationRef).toBeTruthy();
         // Safe no-op when the container is not ready (unit/test env).
-        expect(() => resetRootToScreen('MainTabs')).not.toThrow();
+        expect(() => mod.resetRootToScreen('MainTabs')).not.toThrow();
     });
 });
