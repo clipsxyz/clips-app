@@ -183,7 +183,9 @@ export default function LoginScreen({ navigation, route }: any) {
     }, []);
 
     const goToFeed = () => {
-        if (rootNavigationRef.isReady()) {
+        // Prefer a root reset so Login is not left under MainTabs (back → blank auth).
+        // Fall back if the helper is missing/unready so login never throws "undefined is not a function".
+        if (typeof resetRootToScreen === 'function' && rootNavigationRef.isReady()) {
             resetRootToScreen('MainTabs');
             return;
         }
