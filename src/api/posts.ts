@@ -215,6 +215,49 @@ function resolveAuthorLocations(input: {
 const POSTS_STORAGE_KEY = 'clips_app_posts';
 const PENDING_CREATED_POST_KEY = 'clips_pending_created_post';
 
+/**
+ * Post ids deleted this session. Laravel has already dropped the row, but the local
+ * mirrors (the in-memory `posts` array, the localStorage/AsyncStorage copy under
+ * POSTS_STORAGE_KEY, and any in-flight optimistic create) still hold it. Without a
+ * tombstone the next pull-to-refresh re-injects it and the post "comes back".
+ */
+const deletedPostIds = new Set<string>();
+
+export function isDeletedPostId(id: string | number | null | undefined): boolean {
+  return id != null && deletedPostIds.has(String(id));
+}
+
+/** Drop a deleted post from every local mirror so a refresh cannot resurrect it. */
+function purgeLocalPost(postId: string): void {
+  const id = String(postId);
+  deletedPostIds.add(id);
+
+  posts = posts.filter((p) => String(p.id) !== id);
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(PENDING_CREATED_POST_KEY);
+      if (raw && String(JSON.parse(raw)?.id) === id) {
+        localStorage.removeItem(PENDING_CREATED_POST_KEY);
+      }
+    }
+  } catch {
+    // Ignore storage failures — the tombstone already covers the session.
+  }
+
+  void import('./postsStorage.native')
+    .then(async (m) => {
+      const pending = await m.consumePendingCreatedPostNative();
+      // Only the matching pending create is dropped; put any other one back.
+      if (pending && String(pending.id) !== id) await m.markPendingCreatedPostNative(pending);
+    })
+    .catch(() => {});
+
+  // Rewrite storage from the surviving mirror (not from `posts`) so unrelated
+  // persisted posts are not clobbered by a delete that happens before hydration.
+  savePostsToStorage(getPostsFromStorage().filter((p) => String(p.id) !== id));
+}
+
 /** True when comments/likes should use in-memory mock APIs (not Laravel UUID routes). */
 export function isFrontendOnlyPostId(id: string): boolean {
   return isMockPostId(id) || id.startsWith('mock-scenes-');
@@ -428,6 +471,7 @@ export function markPostAsBoosted(
   };
   savePostsToStorage(posts);
 }
+
 
 function markPendingCreatedPost(post: Post): void {
   try {
@@ -1897,6 +1941,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       const uuidRe =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const recentLocal = getPostsFromStorage().filter((p) => {
+        if (isDeletedPostId(p.id)) return false;
         if (isMockPostId(p.id) || isDevMockFeedVideoPost(p)) return false;
         if (!uuidRe.test(String(p.id))) return false;
         const h = String(p.userHandle || '').toLowerCase();
@@ -1969,7 +2014,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       if (storedNative.length > 0) {
         const seenNative = new Set(posts.map((p) => String(p.id)));
         for (const p of storedNative) {
-          if (!seenNative.has(String(p.id))) {
+          if (!seenNative.has(String(p.id)) && !isDeletedPostId(p.id)) {
             posts.push(p);
             seenNative.add(String(p.id));
           }
@@ -2369,7 +2414,9 @@ export async function toggleLike(userId: string, id: string, currentPost?: Post)
 
 /**
  * Delete a post. Only the post owner can delete (enforced by UI and backend).
- * Mock: removes from in-memory posts and localStorage.
+ * Live mode: a confirmed (or already-gone) delete purges every local mirror; a real
+ * server failure is re-thrown instead of being swallowed, because silently falling
+ * through to the mock path would drop the card locally while Laravel still has it.
  */
 export async function deletePost(_userId: string, postId: string, userHandle?: string): Promise<void> {
   const useLaravelAPI = isLaravelApiEnabled();
@@ -2377,24 +2424,33 @@ export async function deletePost(_userId: string, postId: string, userHandle?: s
   if (useLaravelAPI) {
     try {
       await apiClient.deletePost(postId);
+      purgeLocalPost(postId);
       return;
     } catch (error: any) {
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API delete failed, falling back to mock:', error);
+      const status = Number(error?.status || 0);
+      // Already gone server-side: treat as success so the card stays away.
+      if (status === 404) {
+        purgeLocalPost(postId);
+        return;
       }
-      // Fall through to mock
+      const offline =
+        error?.name === 'ConnectionRefused' ||
+        String(error?.message || '').includes('CONNECTION_REFUSED');
+      if (!offline) {
+        console.warn('Laravel API delete failed:', status, error?.message || error);
+        throw error;
+      }
+      // Offline: fall through to the local-only removal below.
     }
   }
 
   await delay(200);
   const p = posts.find(x => x.id === postId);
-  if (!p) return;
-  // Mock: only allow deleting own posts (userHandle must match)
-  if (userHandle != null && p.userHandle !== userHandle) {
+  // Mock/owner check only applies when the post is in the local store.
+  if (p && userHandle != null && p.userHandle !== userHandle) {
     throw new Error('You can only delete your own posts');
   }
-  posts = posts.filter(x => x.id !== postId);
-  savePostsToStorage(posts);
+  purgeLocalPost(postId);
 }
 
 export async function toggleBookmark(userId: string, id: string): Promise<Post> {
@@ -2887,6 +2943,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Optional userId: when provided and we fetch from Laravel, we get user_liked etc. and decorate.
 export async function getPostById(postId: string, userId?: string): Promise<Post | null> {
   await delay(0);
+  if (isDeletedPostId(postId)) return null;
   const local = posts.find(p => p.id === postId);
   if (local) return userId ? decorateForUser(userId, local) : local;
 
@@ -3145,7 +3202,9 @@ export async function fetchPostsByUser(
         postsLimit: limit,
         tab: tab || 'all',
       });
-      const transformed = mapLaravelProfilePosts(payload?.posts);
+      const transformed = mapLaravelProfilePosts(payload?.posts).filter(
+        (p) => !isDeletedPostId(p.id),
+      );
       console.log('[fetchPostsByUser] live ok', {
         handle: payload?.handle || identifier,
         posts_count: payload?.posts_count ?? payload?.postsCount,
@@ -3154,6 +3213,7 @@ export async function fetchPostsByUser(
 
       try {
         for (const p of transformed) {
+          if (isDeletedPostId(p.id)) continue;
           const idx = posts.findIndex((existing) => String(existing.id) === String(p.id));
           if (idx >= 0) {
             const prev = posts[idx];
@@ -3196,7 +3256,7 @@ export async function fetchPostsByUser(
   // Keep in-memory list synchronized with persisted user-created posts so profile/my feed
   // can always see newly created posts even after route transitions on mobile browsers.
   try {
-    const persisted = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+    const persisted = getPostsFromStorage().filter(p => !isMockPostId(p.id) && !isDeletedPostId(p.id));
     if (persisted.length > 0) {
       const byId = new Map<string, Post>();
       for (const p of posts) byId.set(String(p.id), p);
@@ -3211,7 +3271,7 @@ export async function fetchPostsByUser(
     // Ignore storage sync errors and proceed with in-memory posts.
   }
   const handle = userHandle.trim().toLowerCase();
-  const filtered = posts.filter(p => p.userHandle.toLowerCase() === handle);
+  const filtered = posts.filter(p => !isDeletedPostId(p.id) && p.userHandle.toLowerCase() === handle);
   // newest first (ids include timestamp; also fallback to original order)
   const sorted = filtered.slice().reverse();
   return sorted.slice(0, limit);

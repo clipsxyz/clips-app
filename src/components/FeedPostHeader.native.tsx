@@ -90,14 +90,16 @@ export default function FeedPostHeader({
     const textMuted = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
     const reclipColor = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
 
+    const viewerId = user?.id != null ? String(user.id) : undefined;
+
     useEffect(() => {
         let cancelled = false;
         async function checkStory() {
             try {
-                const anyStory = await userHasStoriesByHandle(safeProfileHandle);
+                const anyStory = await userHasStoriesByHandle(safeProfileHandle, viewerId);
                 let ring = anyStory;
                 if (!isCurrentUser) {
-                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle);
+                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle, viewerId);
                 }
                 if (!cancelled) {
                     setHasStory(ring);
@@ -111,7 +113,7 @@ export default function FeedPostHeader({
         return () => {
             cancelled = true;
         };
-    }, [safeProfileHandle, isCurrentUser, onHasStoryChange]);
+    }, [safeProfileHandle, isCurrentUser, onHasStoryChange, viewerId]);
 
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | undefined;

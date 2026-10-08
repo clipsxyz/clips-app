@@ -311,5 +311,51 @@ class PostControllerTest extends TestCase
             'Response should contain error or errors'
         );
     }
+
+    public function test_owner_delete_removes_post_permanently(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson('/api/posts/' . $post->id);
+
+        $response->assertStatus(200)
+            ->assertJsonFragment(['success' => true]);
+
+        // The feed, profile grid and single-post endpoint re-read this table on every
+        // pull, so a soft-deleted row (deleted_at set, still present) is a corpse the
+        // client can resurrect from its own mirror. The row must be gone.
+        $this->assertDatabaseMissing('posts', ['id' => $post->id]);
+        $this->assertSame(0, Post::withTrashed()->whereKey($post->id)->count());
+    }
+
+    public function test_delete_is_rejected_for_non_owner(): void
+    {
+        $owner = User::factory()->create();
+        $other = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $owner->id,
+            'user_handle' => $owner->handle,
+        ]);
+
+        $this->actingAs($other, 'sanctum')
+            ->deleteJson('/api/posts/' . $post->id)
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('posts', ['id' => $post->id]);
+    }
+
+    public function test_delete_of_unknown_post_returns_404(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->deleteJson('/api/posts/' . (string) \Illuminate\Support\Str::uuid())
+            ->assertStatus(404);
+    }
 }
 

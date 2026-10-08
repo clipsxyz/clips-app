@@ -918,6 +918,11 @@ class PostController extends Controller
     public function destroy(string $id): JsonResponse
     {
         $user = Auth::user();
+
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated.'], 401);
+        }
+
         $post = Post::find($id);
 
         if (! $post) {
@@ -928,9 +933,13 @@ class PostController extends Controller
             return response()->json(['error' => 'You can only delete your own posts'], 403);
         }
 
-        $post->delete();
+        // Permanent delete. The feed, profile grid and single-post endpoint all re-read
+        // this table on every pull, so a soft-deleted row would be an invisible corpse the
+        // client can still resurrect from its own mirror. `boosts` is the only foreign key
+        // to posts and it cascades on delete; nothing hooks Post::deleting.
+        $post->forceDelete();
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'message' => 'Post deleted successfully']);
     }
 
     /**
