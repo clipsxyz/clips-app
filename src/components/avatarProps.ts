@@ -12,6 +12,12 @@ export type AvatarProps = {
     /** Web / NativeWind only; ignored on native. */
     className?: string;
     hasStory?: boolean;
+    /**
+     * Opt-in squircle radius. When set, the avatar (inner image + story ring)
+     * renders as a rounded square instead of a full circle. Defaults to a circle
+     * (`dim / 2`) so existing circular avatars are unaffected.
+     */
+    cornerRadius?: number;
     /** Web: button click event. Native: `onClick()` is called with no argument. */
     onClick?: (e?: ReactMouseEvent<HTMLButtonElement>) => void;
 };

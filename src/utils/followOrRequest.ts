@@ -7,6 +7,7 @@ import {
     isProfilePrivate,
     removeFollowRequest,
 } from '../api/privacy';
+import { emitFollowStatusChanged } from '../hooks/useFollowState';
 
 export type FollowOrRequestResult = {
     following: boolean;
@@ -22,7 +23,26 @@ export async function followOrRequest(opts: {
     userId: string;
     targetHandle: string;
     viewerHandle?: string | null;
+    /** Author user id (optional) — used to key global follow-state broadcasts. */
+    targetUserId?: string;
     /** Desired following state after the action (true = follow / request, false = unfollow). */
+    nextFollowing: boolean;
+}): Promise<FollowOrRequestResult> {
+    const result = await runFollowOrRequest(opts);
+    // Broadcast so feed headers / quick menus / DM gates update globally.
+    emitFollowStatusChanged({
+        userId: opts.targetUserId,
+        handle: opts.targetHandle,
+        isFollowing: result.following,
+        hasPendingRequest: result.requested,
+    });
+    return result;
+}
+
+async function runFollowOrRequest(opts: {
+    userId: string;
+    targetHandle: string;
+    viewerHandle?: string | null;
     nextFollowing: boolean;
 }): Promise<FollowOrRequestResult> {
     const { userId, targetHandle, viewerHandle, nextFollowing } = opts;

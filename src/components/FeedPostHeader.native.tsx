@@ -6,8 +6,9 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
-import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { useMutualFollow } from '../hooks/useMutualFollow';
+import { useFollowState } from '../hooks/useFollowState';
+import { useHasActiveStories } from '../hooks/useHasActiveStories';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
 import FeedPostMetaCarousel from './FeedPostMetaCarousel.native';
@@ -21,6 +22,17 @@ import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
+/**
+ * Feed header avatar size. Matches the prominent circular avatars used in the
+ * Stories rail (48) and Reels overlay (36) so the feed reads as the same family.
+ */
+const FEED_HEADER_AVATAR_SIZE = 34;
+/** Squircle corners scale with the avatar to match the 36dp top-bar buttons. */
+const FEED_HEADER_AVATAR_RADIUS = 9;
+/** Compact overlay badge (follow +, DM, follow check, request pill). */
+const FEED_HEADER_BADGE_SIZE = 12;
+const FEED_HEADER_BADGE_ICON = 7;
+
 export type FeedPostHeaderProps = {
     post: Post;
     viewerHandle?: string | null;
@@ -31,6 +43,11 @@ export type FeedPostHeaderProps = {
     onFollow?: () => Promise<void>;
     onOpenDM?: (handle: string, postId: string) => void;
     onProfileMenuPress?: () => void;
+    /**
+     * Avatar tap. Receives the live "has unviewed active stories" value so the
+     * caller can open the story player, or fall back to the profile screen.
+     */
+    onAvatarPress?: (hasStory: boolean) => void;
     onOverflowPress?: () => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onHasStoryChange?: (hasStory: boolean) => void;
@@ -46,13 +63,13 @@ export default function FeedPostHeader({
     onFollow,
     onOpenDM,
     onProfileMenuPress,
+    onAvatarPress,
     onOverflowPress,
     onRegisterDmAnchor,
     onHasStoryChange,
     menuAnchorRef,
 }: FeedPostHeaderProps) {
     const { user } = useAuth();
-    const [hasStory, setHasStory] = useState(false);
     const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
 
     const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
@@ -68,15 +85,23 @@ export default function FeedPostHeader({
     }, [post]);
     const socialSourceLabel = getPostSocialSourceLabel(post);
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
-    const isFollowing = post.isFollowing === true;
     const viewer = viewerHandle ?? user?.handle;
-    const hasPendingRequest = Boolean(
+    const isFollowingFromProps = post.isFollowing === true;
+    const hasPendingRequestFromProps = Boolean(
         !isCurrentUser &&
-            !isFollowing &&
+            !isFollowingFromProps &&
             viewer &&
             isProfilePrivate(safeProfileHandle) &&
             hasPendingFollowRequest(viewer, safeProfileHandle),
     );
+    // Live follow state keyed on the author handle: a follow/unfollow on View Profile
+    // (or a quick menu) updates this header immediately, without a feed refetch.
+    const { isFollowing, hasPendingRequest } = useFollowState({
+        userId: post.user_id,
+        handle: safeProfileHandle,
+        isFollowing: isFollowingFromProps,
+        hasPendingRequest: hasPendingRequestFromProps,
+    });
 
     const avatarSrc = isCurrentUser
         ? user?.avatarUrl || post.avatarUrl || getAvatarForHandle(safeProfileHandle)
@@ -91,33 +116,15 @@ export default function FeedPostHeader({
     const reclipColor = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
 
     const viewerId = user?.id != null ? String(user.id) : undefined;
-
-    useEffect(() => {
-        let cancelled = false;
-        async function checkStory() {
-            try {
-                const anyStory = await userHasStoriesByHandle(safeProfileHandle, viewerId);
-                let ring = anyStory;
-                if (!isCurrentUser) {
-                    ring = await userHasUnviewedStoriesByHandle(safeProfileHandle, viewerId);
-                }
-                if (!cancelled) {
-                    setHasStory(ring);
-                    onHasStoryChange?.(anyStory);
-                }
-            } catch {
-                /* ignore */
-            }
-        }
-        checkStory();
-        return () => {
-            cancelled = true;
-        };
-    }, [safeProfileHandle, isCurrentUser, onHasStoryChange, viewerId]);
+    const hasStory = useHasActiveStories(safeProfileHandle, {
+        viewerId,
+        isCurrentUser,
+        onHasStoryChange,
+    });
 
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | undefined;
-        if (!isCurrentUser && onFollow && post.isFollowing) {
+        if (!isCurrentUser && onFollow && isFollowing) {
             setShowFollowCheck(true);
             timer = setTimeout(() => setShowFollowCheck(false), 2500);
         } else {
@@ -126,13 +133,13 @@ export default function FeedPostHeader({
         return () => {
             if (timer) clearTimeout(timer);
         };
-    }, [post.isFollowing, isCurrentUser, onFollow]);
+    }, [isFollowing, isCurrentUser, onFollow]);
 
     const showAvatar = variant === 'default' || variant === 'textOnlyChrome';
 
     const avatarBlock = showAvatar ? (
         <View
-            style={[styles.avatarWrap, { width: FEED_UI.icon.avatar, height: FEED_UI.icon.avatar }]}
+            style={[styles.avatarWrap, { width: FEED_HEADER_AVATAR_SIZE, height: FEED_HEADER_AVATAR_SIZE }]}
             ref={(r) => {
                 onRegisterDmAnchor?.(`post:${post.id}`, r);
                 onRegisterDmAnchor?.(`handle:${post.userHandle || safeHandle}`, r);
@@ -140,20 +147,29 @@ export default function FeedPostHeader({
             collapsable={false}
         >
             <TouchableOpacity
-                onPress={onProfileMenuPress}
+                onPress={() => {
+                    if (onAvatarPress) {
+                        onAvatarPress(hasStory);
+                        return;
+                    }
+                    onProfileMenuPress?.();
+                }}
                 activeOpacity={0.85}
                 style={styles.avatarHit}
+                accessibilityRole="button"
+                accessibilityLabel={hasStory ? `View ${safeHandle} stories` : `View ${safeHandle} profile`}
             >
                 <Avatar
                     src={avatarSrc}
                     name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                    size={FEED_UI.icon.avatar}
+                    size={FEED_HEADER_AVATAR_SIZE}
+                    cornerRadius={FEED_HEADER_AVATAR_RADIUS}
                     hasStory={hasStory}
                 />
             </TouchableOpacity>
             {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
-                    <Icon name="add" size={10} color="#FFFFFF" />
+                    <Icon name="add" size={FEED_HEADER_BADGE_ICON} color="#FFFFFF" />
                 </TouchableOpacity>
             ) : null}
             {!isCurrentUser && hasPendingRequest ? (
@@ -166,12 +182,12 @@ export default function FeedPostHeader({
                     style={styles.dmButton}
                     onPress={() => onOpenDM(post.userHandle || safeHandle, post.id)}
                 >
-                    <Icon name="paper-plane" size={10} color="#EF4444" />
+                    <Icon name="paper-plane" size={FEED_HEADER_BADGE_ICON} color="#EF4444" />
                 </TouchableOpacity>
             ) : null}
             {!isCurrentUser && isFollowing && !isMutualFollow && showFollowCheck ? (
                 <View style={styles.followCheck}>
-                    <Icon name="checkmark" size={10} color="#FFFFFF" />
+                    <Icon name="checkmark" size={FEED_HEADER_BADGE_ICON} color="#FFFFFF" />
                 </View>
             ) : null}
         </View>
@@ -322,7 +338,7 @@ const styles = StyleSheet.create({
         gap: 10,
         minWidth: 0,
         maxWidth: '100%',
-        height: FEED_UI.icon.avatar,
+        height: FEED_HEADER_AVATAR_SIZE,
     },
     right: {
         alignItems: 'flex-end',
@@ -346,32 +362,32 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: -2,
         bottom: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: FEED_HEADER_BADGE_SIZE,
+        height: FEED_HEADER_BADGE_SIZE,
+        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
         backgroundColor: '#3B82F6',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#000000',
     },
     requestedPill: {
         position: 'absolute',
-        right: -10,
+        right: -4,
         bottom: -2,
-        minWidth: 28,
-        height: 18,
-        paddingHorizontal: 4,
-        borderRadius: 9,
+        minWidth: 22,
+        height: FEED_HEADER_BADGE_SIZE,
+        paddingHorizontal: 3,
+        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
         backgroundColor: 'rgba(61, 155, 143, 0.95)',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#000000',
     },
     requestedPillText: {
         color: '#FFFFFF',
-        fontSize: 8,
+        fontSize: 7,
         fontWeight: '700',
         letterSpacing: 0.2,
     },
@@ -379,27 +395,27 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: -2,
         bottom: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: FEED_HEADER_BADGE_SIZE,
+        height: FEED_HEADER_BADGE_SIZE,
+        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
         backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderWidth: 1.5,
+        borderColor: '#000000',
     },
     followCheck: {
         position: 'absolute',
         right: -2,
         bottom: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: FEED_HEADER_BADGE_SIZE,
+        height: FEED_HEADER_BADGE_SIZE,
+        borderRadius: FEED_HEADER_BADGE_SIZE / 2,
         backgroundColor: '#22C55E',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: '#030712',
+        borderColor: '#000000',
     },
     reclipRow: {
         flexDirection: 'row',
@@ -418,7 +434,7 @@ const styles = StyleSheet.create({
         gap: 4,
         flexShrink: 1,
         minWidth: 0,
-        height: FEED_UI.icon.avatar,
+        height: FEED_HEADER_AVATAR_SIZE,
     },
     // Web feed: `text-xs font-semibold`
     handleText: {

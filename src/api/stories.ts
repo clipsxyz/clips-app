@@ -1451,11 +1451,20 @@ type ActiveStoryProbe = { any: boolean; unviewed: boolean };
 
 /** Long enough to absorb scroll churn, short enough that a viewed ring still clears. */
 const STORY_PROBE_TTL_MS = 30_000;
+/** While the endpoint is unreachable, don't hammer it — short enough not to mask a recovery. */
+const STORY_PROBE_FAILURE_TTL_MS = 5_000;
+/** Throttle repeated offline logs so a down backend can't flood the console every render. */
+const STORY_PROBE_WARN_EVERY_MS = 30_000;
 const storyProbes = new Map<string, { at: number; value: ActiveStoryProbe }>();
+const storyProbeFailures = new Map<string, number>();
+const storyProbeInflight = new Map<string, Promise<ActiveStoryProbe>>();
+let lastStoryProbeWarnAt = 0;
 
 /** Invalidate after viewing/creating so the ring and menu react immediately. */
 export function clearActiveStoryProbes(): void {
     storyProbes.clear();
+    storyProbeFailures.clear();
+    storyProbeInflight.clear();
 }
 
 async function probeActiveStories(userHandle: string, userId?: string): Promise<ActiveStoryProbe> {
@@ -1466,23 +1475,48 @@ async function probeActiveStories(userHandle: string, userId?: string): Promise<
     const cached = storyProbes.get(key);
     if (cached && Date.now() - cached.at < STORY_PROBE_TTL_MS) return cached.value;
 
-    try {
-        const { apiRequest } = await import('./client');
-        const query = userId ? `?userId=${encodeURIComponent(String(userId))}` : '';
-        const response = await apiRequest(`/stories/user/${encodeURIComponent(handle)}${query}`);
-        const list: any[] = Array.isArray(response) ? response : [];
-        const value: ActiveStoryProbe = {
-            any: list.length > 0,
-            // has_viewed is only reported when the viewer id is passed.
-            unviewed: userId ? list.some((s: any) => !s?.has_viewed) : list.length > 0,
-        };
-        storyProbes.set(key, { at: Date.now(), value });
-        return value;
-    } catch (error) {
-        // Never cache a failure: a flaky request must not hide stories for the full TTL.
-        console.warn('Active story probe failed:', handle, error);
+    // Negative cache: the last attempt just failed (e.g. backend down). Answer from the
+    // cached failure for a few seconds instead of starting another request per card mount.
+    const failedAt = storyProbeFailures.get(key);
+    if (failedAt != null && Date.now() - failedAt < STORY_PROBE_FAILURE_TTL_MS) {
         return { any: false, unviewed: false };
     }
+
+    // Single-flight: a whole feed of mounted cards asks the same question at once. Share
+    // one in-flight request per key instead of firing N identical GETs per mount.
+    const inflight = storyProbeInflight.get(key);
+    if (inflight) return inflight;
+
+    const request = (async (): Promise<ActiveStoryProbe> => {
+        try {
+            const { apiRequest } = await import('./client');
+            const query = userId ? `?userId=${encodeURIComponent(String(userId))}` : '';
+            const response = await apiRequest(`/stories/user/${encodeURIComponent(handle)}${query}`);
+            const list: any[] = Array.isArray(response) ? response : [];
+            const value: ActiveStoryProbe = {
+                any: list.length > 0,
+                // has_viewed is only reported when the viewer id is passed.
+                unviewed: userId ? list.some((s: any) => !s?.has_viewed) : list.length > 0,
+            };
+            storyProbes.set(key, { at: Date.now(), value });
+            storyProbeFailures.delete(key);
+            return value;
+        } catch (error) {
+            // Never cache a failure as a 30s "no stories" answer, but back off briefly so
+            // a down endpoint can't amplify into a request storm from every card mount.
+            storyProbeFailures.set(key, Date.now());
+            const now = Date.now();
+            if (now - lastStoryProbeWarnAt >= STORY_PROBE_WARN_EVERY_MS) {
+                lastStoryProbeWarnAt = now;
+                console.warn('Active story probe failed:', handle, error);
+            }
+            return { any: false, unviewed: false };
+        } finally {
+            storyProbeInflight.delete(key);
+        }
+    })();
+    storyProbeInflight.set(key, request);
+    return request;
 }
 
 // Check if a user has stories by userHandle

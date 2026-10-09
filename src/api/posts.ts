@@ -24,6 +24,7 @@ import {
   removeFollowRequest,
 } from './privacy';
 import { setAvatarForHandle } from './users';
+import { emitFollowStatusChanged } from '../hooks/useFollowState';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -2462,12 +2463,34 @@ export async function toggleBookmark(userId: string, id: string): Promise<Post> 
 }
 
 export async function toggleFollowForPost(
-  userId: string,
-  id: string,
-  userHandle?: string,
-  viewerHandle?: string,
-): Promise<Post> {
-  await delay(150);
+    userId: string,
+    id: string,
+    userHandle?: string,
+    viewerHandle?: string,
+  ): Promise<Post> {
+    const updated = await runToggleFollowForPost(userId, id, userHandle, viewerHandle);
+const handle = updated.userHandle;
+    const viewer = typeof viewerHandle === 'string' ? viewerHandle.trim() : '';
+    const authorUserId = (updated as { user_id?: string }).user_id;
+    // Broadcast so headers / quick menus / DM gates update globally.
+    emitFollowStatusChanged({
+        userId: authorUserId,
+        handle,
+        isFollowing: updated.isFollowing === true,
+        hasPendingRequest: Boolean(
+            viewer && isProfilePrivate(handle) && hasPendingFollowRequest(viewer, handle),
+        ),
+    });
+    return updated;
+  }
+
+  async function runToggleFollowForPost(
+    userId: string,
+    id: string,
+    userHandle?: string,
+    viewerHandle?: string,
+  ): Promise<Post> {
+    await delay(150);
   let p = posts.find(x => x.id === id);
   // Feed/Scenes demo videos (mock-scenes-*) often aren't in the in-memory store —
   // upsert so callers that merge the returned post keep mediaUrl / slides.
@@ -2592,33 +2615,60 @@ export async function toggleFollowForPost(
   }
 
   const nextFollowing = !wasFollowing;
+
+  // Follow is per-author: keep every in-memory post for this handle aligned
+  // and return the post/minimal shape reflecting the resolved follow state.
+  const applyFollowState = (following: boolean): Post => {
+    const handleLower = handle.toLowerCase();
+    for (const post of posts) {
+      if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
+        post.isFollowing = following;
+      }
+    }
+
+    if (p) return { ...decorateForUser(userId, p), isFollowing: following };
+    // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
+    return {
+      id,
+      userHandle: handle,
+      locationLabel: '',
+      tags: [],
+      createdAt: Date.now(),
+      stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+      isBookmarked: false,
+      isFollowing: following,
+      userLiked: false
+    } as Post;
+  };
+
+  // Persist the public follow/unfollow to the server so profile views, DM gates
+  // and other devices agree with the feed. Mirrors followOrRequest() semantics.
+  if (isLaravelApiEnabled()) {
+    try {
+      const result = await apiClient.toggleFollow(handle);
+      if (result?.status === 'pending') {
+        createFollowRequest(viewer, handle);
+        setFollowStateKey(s.follows, handle, false);
+        saveFollowsToStorage(userId, s.follows);
+        return applyFollowState(false);
+      }
+      if (typeof result?.following === 'boolean') {
+        setFollowStateKey(s.follows, handle, result.following);
+        saveFollowsToStorage(userId, s.follows);
+        if (viewer) removeFollowRequest(viewer, handle);
+        return applyFollowState(result.following);
+      }
+    } catch {
+      // Server unreachable — fall back to the optimistic local toggle below.
+    }
+  }
+
   setFollowStateKey(s.follows, handle, nextFollowing);
   saveFollowsToStorage(userId, s.follows);
   if (!nextFollowing && viewer) {
     removeFollowRequest(viewer, handle);
   }
-
-  // Follow is per-author: keep every in-memory post for this handle aligned.
-  const handleLower = handle.toLowerCase();
-  for (const post of posts) {
-    if (typeof post.userHandle === 'string' && post.userHandle.toLowerCase() === handleLower) {
-      post.isFollowing = nextFollowing;
-    }
-  }
-
-  if (p) return { ...decorateForUser(userId, p), isFollowing: nextFollowing };
-  // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
-  return {
-    id,
-    userHandle: handle,
-    locationLabel: '',
-    tags: [],
-    createdAt: Date.now(),
-    stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
-    isBookmarked: false,
-    isFollowing: nextFollowing,
-    userLiked: false
-  } as Post;
+  return applyFollowState(nextFollowing);
 }
 
 export async function incrementViews(userId: string, id: string): Promise<Post> {

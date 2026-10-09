@@ -1,5 +1,86 @@
-import { describe, it, expect } from 'vitest';
-import { mapLaravelStoryToStory } from './stories';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+  import { mapLaravelStoryToStory, userHasStoriesByHandle, userHasUnviewedStoriesByHandle, clearActiveStoryProbes } from './stories';
+
+  const { apiRequestMock } = vi.hoisted(() => ({ apiRequestMock: vi.fn() }));
+
+  vi.mock('./client', () => ({
+      apiRequest: apiRequestMock,
+      fetchStoriesPageApi: vi.fn(),
+  }));
+  vi.mock('../config/runtimeEnv', async (importOriginal) => {
+      const runtimeEnv = await importOriginal<typeof import('../config/runtimeEnv')>();
+      return { ...runtimeEnv, isLaravelApiEnabled: () => true };
+  });
+
+/**
+ * Regression guards for the per-card active-story probe.
+ *
+ * Every visible feed card asks "does this handle have active stories?" on mount. Two
+ * things made that path unsafe: N mounted cards fired N identical GETs per mount (no
+ * single-flight), and a refused/rejected request was never cached, so the next render
+ * immediately retried — with the endpoint unreachable this turned into a request storm
+ * plus a state write per render (the "Maximum update depth exceeded" driver).
+ *
+ * The probe now shares one in-flight request per key and negative-caches short failures.
+ */
+describe('active story probe (network safety)', () => {
+    beforeEach(() => {
+        clearActiveStoryProbes();
+        apiRequestMock.mockReset();
+        vi.useRealTimers();
+    });
+
+    it('single-flights concurrent probes for the same user', async () => {
+        apiRequestMock.mockResolvedValue([]);
+
+        const [a, b] = await Promise.all([
+            userHasStoriesByHandle('Alice@Dublin', 'viewer-1'),
+            userHasStoriesByHandle('alice@dublin', 'viewer-1'),
+        ]);
+
+        expect(a).toBe(false);
+        expect(b).toBe(false);
+        expect(apiRequestMock).toHaveBeenCalledTimes(1);
+        expect(apiRequestMock).toHaveBeenCalledWith('/stories/user/Alice%40Dublin?userId=viewer-1');
+    });
+
+    it('reuses a successful probe for the TTL window', async () => {
+        apiRequestMock.mockResolvedValue([{ id: 's1', has_viewed: false }]);
+
+        const first = await userHasStoriesByHandle('Barry@Galway', 'viewer-1');
+        const second = await userHasStoriesByHandle('Barry@Galway', 'viewer-1');
+
+        expect(first).toBe(true);
+        expect(second).toBe(true);
+        expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('backs off short failures without hiding stories for the full TTL', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(1_000_000);
+        apiRequestMock.mockRejectedValue(new TypeError('Network request failed'));
+
+        expect(await userHasStoriesByHandle('Carol@Limerick', 'viewer-1')).toBe(false);
+        expect(apiRequestMock).toHaveBeenCalledTimes(1);
+
+        // Still inside the failure backoff window → graceful false, no new request.
+        expect(await userHasStoriesByHandle('Carol@Limerick', 'viewer-1')).toBe(false);
+        expect(apiRequestMock).toHaveBeenCalledTimes(1);
+
+        // After the backoff window the probe retries (and fails again).
+        vi.setSystemTime(1_000_000 + 6_000);
+        expect(await userHasStoriesByHandle('Carol@Limerick', 'viewer-1')).toBe(false);
+        expect(apiRequestMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports unviewed per has_viewed when a viewer id is passed', async () => {
+        apiRequestMock.mockResolvedValueOnce([{ id: 's1', has_viewed: true }]);
+        expect(await userHasUnviewedStoriesByHandle('Dave@Dublin', 'viewer-1')).toBe(false);
+
+        apiRequestMock.mockResolvedValueOnce([{ id: 's2', has_viewed: false }]);
+        expect(await userHasUnviewedStoriesByHandle('Eve@Dublin', 'viewer-1')).toBe(true);
+    });
+});
 
 /**
  * Regression guards for shared-post stories.

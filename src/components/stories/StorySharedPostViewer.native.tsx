@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
     View,
     Text,
@@ -97,13 +97,16 @@ function SharedCardMedia({
     isMuted: boolean;
     paused: boolean;
 }) {
+    // Stable source identity so the embedded player doesn't reload/reset on the
+    // frequent (progress-tick) re-renders of the story viewer.
+    const videoSource = useMemo(() => storyVideoSource(mediaUrl), [mediaUrl]);
+
     if (isVideo) {
-        const source = storyVideoSource(mediaUrl);
-        if (source) {
+        if (videoSource) {
             return (
                 <View style={styles.cardMediaFill} pointerEvents="none">
                     <StorySafeVideo
-                        source={source}
+                        source={videoSource}
                         posterSource={posterSource}
                         style={StyleSheet.absoluteFill}
                         muted={isMuted}
@@ -251,10 +254,14 @@ export default function StorySharedPostViewer({
 
     if (story.sharedFromPost && !post && sharedPostFetchFailed && fallbackUrl) {
         return (
-            <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
+            <LinearGradient
+                colors={SHARED_BACKDROP}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="box-none"
+            >
                 <SharedBackdrop isVideo={isVideo} mediaUrl={fallbackUrl} posterSource={posterSource} />
-                <View style={styles.backdropDim} />
-                <View style={styles.cardColumn}>
+                <View style={styles.backdropDim} pointerEvents="none" />
+                <View style={styles.cardColumn} pointerEvents="box-none">
                     <SharedPostMediaCard
                         handle={handle || story.sharedFromUser || 'post'}
                         avatarHandle={handle || story.sharedFromUser || ''}
@@ -285,10 +292,14 @@ export default function StorySharedPostViewer({
         const imageText = String(post.imageText || '').trim();
         const isCarousel = (post.mediaItems?.length || 0) > 1;
         return (
-            <LinearGradient colors={SHARED_BACKDROP} style={StyleSheet.absoluteFill}>
+            <LinearGradient
+                colors={SHARED_BACKDROP}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="box-none"
+            >
                 <SharedBackdrop isVideo={isVideo} mediaUrl={mediaUrl} posterSource={posterSource} />
-                <View style={styles.backdropDim} />
-                <View style={styles.cardColumn}>
+                <View style={styles.backdropDim} pointerEvents="none" />
+                <View style={styles.cardColumn} pointerEvents="box-none">
                     <SharedPostMediaCard
                         handle={post.userHandle || handle}
                         avatarHandle={post.userHandle}
@@ -317,9 +328,13 @@ export default function StorySharedPostViewer({
                 : TEXT_SHARE_FALLBACK_BACKDROP;
 
         return (
-            <LinearGradient colors={backdropColors} style={styles.textSharedRoot}>
+            <LinearGradient
+                colors={backdropColors}
+                style={styles.textSharedRoot}
+                pointerEvents="box-none"
+            >
                 <View style={styles.textSharedVeil} pointerEvents="none" />
-                <View style={styles.textSharedColumn}>
+                <View style={styles.textSharedColumn} pointerEvents="box-none">
                     <View style={styles.sharedFromPill}>
                         <Icon name="return-up-forward-outline" size={ox(12)} color="#9fd4cb" />
                         <Text style={styles.sharedFromPillText}>

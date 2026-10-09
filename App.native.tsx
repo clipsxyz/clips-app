@@ -139,22 +139,37 @@ function MainTabs() {
       return;
     }
     let mounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveFailures = 0;
     const handle = user.handle;
     const refresh = async () => {
+      let failed: number;
       try {
-        const [notificationUnread, messageUnread] = await Promise.all([
-          getUnreadNotificationCount(handle).catch(() => 0),
-          getUnreadTotal(handle).catch(() => 0),
+        const results = await Promise.allSettled([
+          getUnreadNotificationCount(handle),
+          getUnreadTotal(handle),
         ]);
-        if (mounted) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
+        failed = results.filter((r) => r.status === 'rejected').length;
+        if (mounted) {
+          const total = results.reduce<number>(
+            (sum, r) => sum + (r.status === 'fulfilled' ? r.value : 0),
+            0,
+          );
+          setInboxBadgeCount(Math.max(0, total));
+        }
       } catch {
+        failed = 2;
         if (mounted) setInboxBadgeCount(0);
+      }
+      consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
+      if (mounted && consecutiveFailures === 1) {
+        console.warn('[inbox] badge endpoint unreachable; backing off to 30s polls');
+      }
+      if (mounted) {
+        timer = setTimeout(() => void refresh(), consecutiveFailures > 0 ? 30000 : 8000);
       }
     };
     void refresh();
-    const interval = setInterval(() => {
-      void refresh();
-    }, 8000);
 
     const onInboxUnread = (payload?: { handle?: string; unread?: number }) => {
       if (payload?.handle && payload.handle !== handle) return;
@@ -180,7 +195,7 @@ function MainTabs() {
 
     return () => {
       mounted = false;
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
       subs.forEach((s) => s.remove());
       appStateSub.remove();
     };

@@ -22,6 +22,7 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import StoriesPopIcon from '../components/StoriesPopIcon.native';
@@ -108,10 +109,13 @@ export default function StoriesScreen({ route, navigation }: any) {
         previewVideoUrl: routePreviewVideoUrl,
         skipStories24RailReturn,
         forceRefreshAt,
+        targetHandle,
+        soloMode,
     } = route.params || {};
     const railHandles = Array.isArray(railHandlesParam) ? railHandlesParam : [];
     const railHandlesKey = railHandles.join('|');
     const shouldReturnToStories24Rail = skipStories24RailReturn !== true;
+    const insets = useSafeAreaInsets();
     const normalizedOpenUserHandle = React.useMemo(() => {
         if (!openUserHandle || typeof openUserHandle !== 'string') return '';
         try {
@@ -120,6 +124,17 @@ export default function StoriesScreen({ route, navigation }: any) {
             return openUserHandle;
         }
     }, [openUserHandle]);
+    /**
+     * Solo mode: only play this author's playlist, then close straight back.
+     * Requested by the feed "View stories" action (`soloMode` / `targetHandle`).
+     */
+    const soloModeRequested =
+        soloMode === true ||
+        (typeof targetHandle === 'string' && targetHandle.trim().length > 0);
+    const soloHandleKey = String(targetHandle || normalizedOpenUserHandle || '')
+        .replace(/^@/, '')
+        .trim()
+        .toLowerCase();
     const { user } = useAuth();
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
@@ -128,6 +143,8 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [viewingStories, setViewingStories] = useState(false);
     const [stories24OpenFromFeedRail, setStories24OpenFromFeedRail] = useState(fromStories24Rail === true);
     const [stories24HoldMinReady, setStories24HoldMinReady] = useState(false);
+    /** True once a solo request has been resolved (played or fallen through) so the overlay can't hang. */
+    const [soloResolved, setSoloResolved] = useState(false);
     const [progress, setProgress] = useState(0);
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
@@ -182,6 +199,9 @@ export default function StoriesScreen({ route, navigation }: any) {
         opacity: interpolate(dismissProgress.value, [0, 1], [1, 0]),
     }));
     const progressRef = useRef(0);
+    /** Set while a hold-to-pause is active so the release doesn't also count as a tap. */
+    const holdActiveRef = useRef(false);
+    const holdClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const currentStoryIndexRef = useRef(0);
     const currentGroupIndexRef = useRef(0);
@@ -356,6 +376,11 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         let cancelled = false;
+        if (soloModeRequested) {
+            // Feed "View stories" opens a plain push — never the rail-return flow.
+            setStories24OpenFromFeedRail(false);
+            return;
+        }
         if (fromStories24Rail === true) {
             setStories24OpenFromFeedRail(true);
             return;
@@ -374,7 +399,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         return () => {
             cancelled = true;
         };
-    }, [forceRefreshAt, fromStories24Rail, normalizedOpenUserHandle]);
+    }, [forceRefreshAt, fromStories24Rail, normalizedOpenUserHandle, soloModeRequested]);
 
     useEffect(() => {
         if (!stories24OpenFromFeedRail || !normalizedOpenUserHandle) {
@@ -397,13 +422,45 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [user?.id, normalizedOpenUserHandle, railHandlesKey]);
 
     useEffect(() => {
+        if (loading || viewingStories) return;
+        if (soloModeRequested) {
+            // Solo "View stories" must resolve to exactly the tapped author. If that
+            // author has no playable stories (expired/removed) or the load failed, stop
+            // waiting instead of stranding the user on the "Opening story…" overlay, and
+            // never fall back to someone else's / the world group.
+            const soloTarget = storyGroups.find(
+                (g) =>
+                    (g.userHandle || '').replace(/^@/, '').trim().toLowerCase() === soloHandleKey,
+            );
+            if (soloTarget && soloTarget.stories && soloTarget.stories.length > 0) {
+                startViewingStories(soloTarget, openStoryId);
+            } else if (user?.id) {
+                setSoloResolved(true);
+                finalizeCloseNavigation();
+            }
+            return;
+        }
         if (normalizedOpenUserHandle && storyGroups.length > 0) {
-            const targetGroup = storyGroups.find(g => g.userHandle === normalizedOpenUserHandle);
+            const lookup = normalizedOpenUserHandle.replace(/^@/, '').trim().toLowerCase();
+            const targetGroup = storyGroups.find(
+                (g) => (g.userHandle || '').replace(/^@/, '').trim().toLowerCase() === lookup,
+            );
             if (targetGroup) {
                 startViewingStories(targetGroup, openStoryId);
             }
         }
-    }, [normalizedOpenUserHandle, openStoryId, storyGroups.length]);
+        // finalizeCloseNavigation is declared below; it's a stable useCallback.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        normalizedOpenUserHandle,
+        openStoryId,
+        storyGroups,
+        soloModeRequested,
+        soloHandleKey,
+        loading,
+        viewingStories,
+        user?.id,
+    ]);
 
     const loadStories = async () => {
         if (!user?.id) {
@@ -476,6 +533,20 @@ export default function StoriesScreen({ route, navigation }: any) {
                 }),
             );
 
+            // Solo mode (feed "View stories"): keep ONLY the tapped author's playlist
+            // so finishing it can't roll into other people's / the world group.
+            if (soloModeRequested && soloHandleKey) {
+                const soloGroups = groupsWithAvatars.filter(
+                    (group) =>
+                        (group.userHandle || '').replace(/^@/, '').trim().toLowerCase() ===
+                        soloHandleKey,
+                );
+                if (soloGroups.length > 0) {
+                    setStoryGroups(soloGroups);
+                    return;
+                }
+            }
+
             setStoryGroups(withGazetteerWorldGroup(groupsWithAvatars));
         } catch (error) {
             console.error('Error loading stories:', error);
@@ -504,7 +575,13 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
 
         const followedUserHandles = await getFollowedUsers(user.id);
-        const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
+        const fetchedStories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
+        // The followed-users feed (`/stories/paged`) can omit an author we just opened directly
+        // (e.g. a profile/"View stories" tap for someone not yet reflected server-side). In that
+        // case fall back to the group's own playlist, which came from the server-scoped
+        // `/stories/user/{handle}` lookup, so we don't stall on the loading overlay.
+        const stories =
+            fetchedStories && fetchedStories.length > 0 ? fetchedStories : group.stories || [];
         if (!stories || stories.length === 0) return;
 
         const groupIndex = storyGroups.findIndex(g => g.userId === group.userId);
@@ -624,6 +701,13 @@ export default function StoriesScreen({ route, navigation }: any) {
             clearInterval(timerRef.current);
         }
 
+        // Solo playlist: closed on X or after the author's last story — go straight
+        // back to the calling feed, never the global "Clips 24" list / rail return.
+        if (soloModeRequested) {
+            finalizeCloseNavigation();
+            return;
+        }
+
         const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
         const mediaUrl = currentStory?.mediaUrl;
         const isVideo =
@@ -690,11 +774,34 @@ export default function StoriesScreen({ route, navigation }: any) {
     };
 
     const pauseForHold = () => {
+        // A long hold also swallows the finger-up so it doesn't advance the story.
+        if (holdClearTimerRef.current) {
+            clearTimeout(holdClearTimerRef.current);
+            holdClearTimerRef.current = null;
+        }
+        holdActiveRef.current = true;
         setIsHoldingToPause(true);
     };
 
     const releaseHold = () => {
         setIsHoldingToPause(false);
+        if (holdClearTimerRef.current) clearTimeout(holdClearTimerRef.current);
+        // Keep the tap guard for a beat after release so the finger-up that ends the
+        // hold is ignored, then allow normal taps again.
+        holdClearTimerRef.current = setTimeout(() => {
+            holdClearTimerRef.current = null;
+            holdActiveRef.current = false;
+        }, 320);
+    };
+
+    const handleTapPrevious = () => {
+        if (holdActiveRef.current) return;
+        previousStory();
+    };
+
+    const handleTapNext = () => {
+        if (holdActiveRef.current) return;
+        nextStory();
     };
 
     const toggleGlobalMute = useCallback(() => {
@@ -1136,9 +1243,10 @@ export default function StoriesScreen({ route, navigation }: any) {
     );
 
     useEffect(() => {
-        if (viewingStories && !paused) {
+        const effectivelyPaused = paused || isHoldingToPause;
+        if (viewingStories && !effectivelyPaused) {
             startProgress();
-        } else if (paused && timerRef.current) {
+        } else if (effectivelyPaused && timerRef.current) {
             clearInterval(timerRef.current);
         }
 
@@ -1147,7 +1255,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                 clearInterval(timerRef.current);
             }
         };
-    }, [viewingStories, paused, currentGroupIndex, currentStoryIndex]);
+    }, [viewingStories, paused, isHoldingToPause, currentGroupIndex, currentStoryIndex]);
 
     if (showStories24HoldScreen) {
         return (
@@ -1159,9 +1267,9 @@ export default function StoriesScreen({ route, navigation }: any) {
         );
     }
 
-    if (loading) {
+    if (loading || (soloModeRequested && !viewingStories && !soloResolved)) {
         const fromProfile =
-            Boolean(normalizedOpenUserHandle) && !stories24OpenFromFeedRail;
+            (Boolean(normalizedOpenUserHandle) || soloModeRequested) && !stories24OpenFromFeedRail;
         return (
             <GazetteerScreenShell
                 contentStyle={styles.loadingShell}
@@ -1239,8 +1347,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                 style={[styles.storyDismissBackdrop, dismissBackdropStyle]}
             />
             <Animated.View style={[styles.storyViewer, dismissShellStyle]}>
-            {/* Progress bars */}
-            <View style={styles.progressContainer}>
+            {/* Progress bars — absolute so the full-bleed media layer can't paint over
+                them, and offset below the status-bar/notch inset. */}
+            <View style={[styles.progressContainer, { paddingTop: insets.top + 4 }]}>
                 {currentGroup?.stories.map((_, index) => (
                     <View key={index} style={styles.progressBarContainer}>
                         <View style={[styles.progressBar, { width: `${index < currentStoryIndex ? 100 : index === currentStoryIndex ? progress : 0}%` }]} />
@@ -1259,39 +1368,63 @@ export default function StoriesScreen({ route, navigation }: any) {
                         onHoldStart={pauseForHold}
                         onHoldEnd={releaseHold}
                     >
-                        {currentStory.sharedFromPost ? (
-                            suspendStoryMedia ? (
+                        {/* Tap zones live beneath the media (which is pointerEvents="none"),
+                            so the Android TextureView can't swallow them. Left 30% = previous,
+                            right 30% = next; the center is left free for cards/polls. */}
+                        <Pressable
+                            style={styles.tapZoneLeft}
+                            onPress={handleTapPrevious}
+                            accessibilityRole="button"
+                            accessibilityLabel="Previous story"
+                        />
+                        <Pressable
+                            style={styles.tapZoneRight}
+                            onPress={handleTapNext}
+                            accessibilityRole="button"
+                            accessibilityLabel="Next story"
+                        />
+                        <View
+                            style={StyleSheet.absoluteFill}
+                            pointerEvents={currentStory.sharedFromPost ? 'box-none' : 'none'}
+                        >
+                            {currentStory.sharedFromPost ? (
+                                suspendStoryMedia ? (
+                                    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+                                ) : (
+                                <StorySharedPostViewer
+                                    story={currentStory}
+                                    originalPost={originalPost}
+                                    sharedPostFetchFailed={sharedPostFetchFailed}
+                                    isMuted={isMuted}
+                                    paused={paused || isHoldingToPause || !!deliveryFx}
+                                    onOpenModal={() => {
+                                        setPaused(true);
+                                        setShowSharedPostModal(true);
+                                    }}
+                                    onOpenProfile={(handle) => {
+                                        closeStories();
+                                        setTimeout(() => {
+                                            navigation.navigate('ViewProfile', { handle });
+                                        }, 100);
+                                    }}
+                                />
+                                )
+                            ) : suspendStoryMedia ? (
                                 <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
                             ) : (
-                            <StorySharedPostViewer
-                                story={currentStory}
-                                originalPost={originalPost}
-                                sharedPostFetchFailed={sharedPostFetchFailed}
-                                isMuted={isMuted}
-                                paused={paused || !!deliveryFx}
-                                onOpenModal={() => {
-                                    setPaused(true);
-                                    setShowSharedPostModal(true);
-                                }}
-                                onOpenProfile={(handle) => {
-                                    closeStories();
-                                    setTimeout(() => {
-                                        navigation.navigate('ViewProfile', { handle });
-                                    }, 100);
-                                }}
-                            />
-                            )
-                        ) : suspendStoryMedia ? (
-                            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-                        ) : (
-                            <StoryViewerMedia
-                                story={currentStory}
-                                isMuted={isMuted}
-                                paused={paused || !!deliveryFx}
-                            />
-                        )}
+                                <StoryViewerMedia
+                                    story={currentStory}
+                                    isMuted={isMuted}
+                                    paused={paused || isHoldingToPause || !!deliveryFx}
+                                />
+                            )}
+                        </View>
                     </StorySwipeLayer>
 
+                    <View
+                        style={[styles.headerFadeWrap, isHoldingToPause && styles.headerFadeHidden]}
+                        pointerEvents={isHoldingToPause ? 'none' : 'box-none'}
+                    >
                     <StoryViewerHeader
                         avatarRef={avatarRef}
                         avatarUrl={currentGroup.avatarUrl}
@@ -1320,6 +1453,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         onToggleMute={toggleGlobalMute}
                         onClose={closeStories}
                     />
+                    </View>
                     {showStoryProfileCard && currentGroup.userHandle !== user?.handle ? (
                         <View style={styles.profileCardHost} pointerEvents="box-none">
                             <StoryProfileCard
@@ -1752,10 +1886,27 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     progressContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 120,
+        elevation: 120,
         flexDirection: 'row',
         paddingHorizontal: ox(8),
-        paddingTop: ox(8),
         gap: ox(4),
+    },
+    headerFadeWrap: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 130,
+        elevation: 130,
+    },
+    headerFadeHidden: {
+        opacity: 0,
     },
     progressBarContainer: {
         flex: 1,
@@ -1963,21 +2114,19 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    leftTapArea: {
+    tapZoneLeft: {
         position: 'absolute',
         left: 0,
         top: 0,
         bottom: 0,
-        width: width / 2,
-        zIndex: 1,
+        width: width * 0.3,
     },
-    rightTapArea: {
+    tapZoneRight: {
         position: 'absolute',
         right: 0,
         top: 0,
         bottom: 0,
-        width: width / 2,
-        zIndex: 1,
+        width: width * 0.3,
     },
     storyLinkSticker: {
         position: 'absolute',

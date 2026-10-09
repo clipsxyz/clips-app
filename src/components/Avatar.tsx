@@ -8,6 +8,7 @@ export default function Avatar({
     size = 'md',
     className = '',
     hasStory = false,
+    cornerRadius,
     onClick,
 }: AvatarProps) {
     const initials = getAvatarInitials(name);
@@ -56,45 +57,34 @@ export default function Avatar({
         ? (e: React.MouseEvent<HTMLButtonElement>) => onClick(e)
         : undefined;
 
-    // Gold + silver metallic palette for "has story" ring.
-    const storyRingStyle = {
-        background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)',
-    };
+    // White outline when there's an unviewed active story, subtle translucent otherwise.
+    const borderColor = hasStory ? '#FFFFFF' : 'rgba(255, 255, 255, 0.15)';
+    // Opt-in squircle: overrides the `rounded-full` classes so the inner image and
+    // the story ring share a matching rounded-square radius.
+    const outerRadius = cornerRadius != null ? cornerRadius : undefined;
+    const innerRadius = cornerRadius != null ? Math.max(0, cornerRadius - 2) : undefined;
 
-    const inner = hasStory ? (
-        <>
-            <div className="absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
-                <div className="w-full h-full rounded-full bg-black" />
-            </div>
-            <div
-                className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-black"
-                style={isNumericSize ? { width: dim, height: dim } : undefined}
-            >
-                {avatarContent}
-            </div>
-        </>
-    ) : (
+    const inner = (
         <div
-            className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950"
-            style={isNumericSize ? { width: dim, height: dim } : undefined}
+            className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-black"
+            style={innerRadius != null ? { borderRadius: innerRadius } : undefined}
         >
             {avatarContent}
         </div>
     );
 
-    const outerStyle = isNumericSize
-        ? {
-              width: hasStory ? dim + 4 : dim,
-              height: hasStory ? dim + 4 : dim,
-          }
-        : undefined;
+    const outerStyle = {
+        border: `2px solid ${borderColor}`,
+        ...(isNumericSize ? { width: dim, height: dim } : {}),
+        ...(outerRadius != null ? { borderRadius: outerRadius } : {}),
+    };
 
     if (onClick) {
         return (
             <button
                 type="button"
                 onClick={handleClick}
-                className={`${baseClassName} relative rounded-full ${hasStory ? 'overflow-visible' : 'overflow-hidden'}`}
+                className={`${baseClassName} relative rounded-full overflow-hidden`}
                 style={outerStyle}
             >
                 {inner}
@@ -104,7 +94,7 @@ export default function Avatar({
 
     return (
         <div
-            className={`${baseClassName} relative rounded-full ${hasStory ? 'overflow-visible' : 'overflow-hidden'}`}
+            className={`${baseClassName} relative rounded-full overflow-hidden`}
             style={outerStyle}
         >
             {inner}

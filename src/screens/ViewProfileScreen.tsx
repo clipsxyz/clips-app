@@ -28,6 +28,7 @@ import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, getFollowedUsers, setReclipState, toggleLike, reclipPost, posts as allPosts, mapLaravelProfilePosts } from '../api/posts';
 import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client';
 import { followOrRequest } from '../utils/followOrRequest';
+import { emitFollowStatusChanged } from '../hooks/useFollowState';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { userHasStoriesByHandle } from '../api/stories';
 import {
@@ -72,13 +73,19 @@ import {
 } from '../utils/profilePostNotifyPrefsMobile';
 
 export default function ViewProfileScreen({ route, navigation }: any) {
-    const { handle, sourcePostId } = route.params ?? {};
+    const { handle, sourcePostId, isFollowing: routeIsFollowing } = route.params ?? {};
     const { user } = useAuth();
+    // The feed knows the author's follow state from the very post whose quick menu
+    // was tapped. Seed with it so the action pill never flashes "Follow" on open
+    // while the authoritative profile fetch is in flight.
+    const hasRouteFollowState = typeof routeIsFollowing === 'boolean';
 
     const [profileUser, setProfileUser] = useState<any>(null);
     const [posts, setPosts] = useState<Post[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isFollowing, setIsFollowing] = useState(false);
+    const [isFollowing, setIsFollowing] = useState<boolean>(
+        hasRouteFollowState ? routeIsFollowing === true : false,
+    );
     const [hasStory, setHasStory] = useState(false);
     const [canView, setCanView] = useState(true);
     const [hasPendingRequest, setHasPendingRequest] = useState(false);
@@ -197,11 +204,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 const isFollowingUser = followedUsers.some(
                     (h) => h.toLowerCase() === decodedHandle.toLowerCase(),
                 );
-                const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
+const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
 
-                setCanView(canViewProfileState);
-                setIsFollowing(isFollowingUser);
-                setHasPendingRequest(hasPending);
+                  setCanView(canViewProfileState);
+                  if (hasRouteFollowState) {
+                      // Route hint wins until the authoritative fetch resolves; the local
+                      // followedUsers cache can lag the server and caused a state flip.
+                      setIsFollowing(routeIsFollowing === true);
+                      setHasPendingRequest(routeIsFollowing ? false : hasPending);
+                  } else {
+                      setIsFollowing(isFollowingUser);
+                      setHasPendingRequest(hasPending);
+                  }
 
                 if (!canViewProfileState && profilePrivate && decodedHandle !== user.handle) {
                     setLoading(false);
@@ -212,18 +226,28 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             let userPosts: Post[] = [];
             let profileData: any;
 
-            if (isLaravelApiEnabled()) {
-                try {
-                    profileData = await fetchUserProfile(
-                        decodedHandle,
-                        user?.id,
-                        null,
-                        20,
-                        typeof sourcePostId === 'string' ? sourcePostId : undefined,
-                        'all',
-                    );
-                    if (cancelled()) return;
-                    userPosts = mapLaravelProfilePosts(profileData?.posts);
+if (isLaravelApiEnabled()) {
+                  try {
+                      profileData = await fetchUserProfile(
+                          decodedHandle,
+                          user?.id,
+                          null,
+                          20,
+                          typeof sourcePostId === 'string' ? sourcePostId : undefined,
+                          'all',
+                      );
+                      if (cancelled()) return;
+                      // The profile payload is the authoritative follow state (derived from
+                      // the viewer's follows table). The followedUsers list above is only a
+                      // fallback for the mock path and can lag/omit the target, which used to
+                      // leave the CTA stuck on "Follow" for users we already follow.
+                      if (typeof profileData?.is_following === 'boolean') {
+                          setIsFollowing(profileData.is_following);
+                      }
+                      if (typeof profileData?.has_pending_request === 'boolean') {
+                          setHasPendingRequest(profileData.has_pending_request);
+                      }
+                      userPosts = mapLaravelProfilePosts(profileData?.posts);
                 } catch (error: any) {
                     console.error('[ViewProfile] profile fetch error', {
                         name: error?.name,
@@ -390,15 +414,24 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 ? false
                 : !wasFollowingBeforeClick;
             const wasRequested = hasPendingRequest;
-            const result = await followOrRequest({
-                userId: followUserId,
-                targetHandle: handleToUse,
-                viewerHandle: user.handle,
-                nextFollowing,
-            });
-            setIsFollowing(result.following);
-            setHasPendingRequest(result.requested);
-            if (result.requested && !wasRequested) {
+const result = await followOrRequest({
+                  userId: followUserId,
+                  targetHandle: handleToUse,
+                  viewerHandle: user.handle,
+                  targetUserId: profileUser?.id != null ? String(profileUser.id) : undefined,
+                  nextFollowing,
+              });
+              setIsFollowing(result.following);
+              setHasPendingRequest(result.requested);
+              // Broadcast so feed headers / quick menus reflect the new follow state
+              // without refetching the feed.
+              emitFollowStatusChanged({
+                  userId: profileUser?.id != null ? String(profileUser.id) : undefined,
+                  handle: handleToUse,
+                  isFollowing: result.following,
+                  hasPendingRequest: result.requested,
+              });
+              if (result.requested && !wasRequested) {
                 setShowFollowRequestAlert(true);
             }
             if (!result.following && !result.requested && wasFollowingBeforeClick) {
@@ -1086,9 +1119,24 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
                 {/* Following | Message | Notify */}
                 {!isOwnProfile ? (
-                    <View style={styles.actionButtons}>
-                        <TouchableOpacity onPress={handleFollow} style={styles.followButton}>
-                            <Text style={styles.followButtonText}>
+                      <View style={styles.actionButtons}>
+                        <TouchableOpacity
+                            onPress={handleFollow}
+                            style={[
+                                styles.followButton,
+                                hasPendingRequest || isFollowing
+                                    ? styles.followButtonGlass
+                                    : styles.followButtonAccent,
+                            ]}
+                        >
+                            <Text
+                            style={[
+                                styles.followButtonText,
+                                hasPendingRequest || isFollowing
+                                    ? styles.followButtonTextGlass
+                                    : styles.followButtonTextAccent,
+                            ]}
+                            >
                                 {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
                             </Text>
                         </TouchableOpacity>
@@ -1623,23 +1671,25 @@ const styles = StyleSheet.create({
         paddingBottom: ox(8),
         gap: ox(24),
     },
-    statsContainer: {
-        flex: 1,
-        flexDirection: 'row',
-        gap: ox(8),
-        borderRadius: ox(16),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-        padding: ox(8),
-    },
-    statItem: {
-        flex: 1,
-        alignItems: 'center',
-        borderRadius: ox(12),
-        backgroundColor: 'rgba(0,0,0,0.4)',
-        paddingVertical: ox(8),
-    },
+statsContainer: {
+          flex: 1,
+          flexDirection: 'row',
+          gap: ox(8),
+          borderRadius: ox(20),
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.15)',
+          backgroundColor: 'rgba(18,24,38,0.65)',
+          padding: ox(10),
+      },
+      statItem: {
+          flex: 1,
+          alignItems: 'center',
+          borderRadius: ox(14),
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: 'rgba(255,255,255,0.1)',
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          paddingVertical: ox(10),
+      },
     statNumber: {
         fontSize: ox(16),
         fontWeight: '600',
@@ -1724,18 +1774,18 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         marginBottom: ox(4),
     },
-    bioBox: {
-        borderRadius: ox(16),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(10),
-        marginBottom: ox(4),
-    },
-    bioBoxEmpty: {
-        backgroundColor: 'rgba(255,255,255,0.02)',
-    },
+bioBox: {
+          borderRadius: ox(16),
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.15)',
+          backgroundColor: 'rgba(18,24,38,0.65)',
+          paddingHorizontal: ox(12),
+          paddingVertical: ox(10),
+          marginBottom: ox(4),
+      },
+      bioBoxEmpty: {
+          backgroundColor: 'rgba(18,24,38,0.5)',
+      },
     bio: {
         fontSize: ox(14),
         color: '#E5E7EB',
@@ -1767,17 +1817,17 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         lineHeight: ox(22),
     },
-    postNotifyButton: {
-        width: ox(44),
-        height: ox(42),
-        borderRadius: ox(12),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.3)',
-        backgroundColor: '#000000',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-    },
+postNotifyButton: {
+          width: ox(44),
+          height: ox(42),
+          borderRadius: ox(14),
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.15)',
+          backgroundColor: 'rgba(18,24,38,0.65)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+      },
     postNotifyButtonActive: {
         borderColor: 'rgba(61,155,143,0.55)',
         backgroundColor: 'rgba(61,155,143,0.16)',
@@ -1795,18 +1845,18 @@ const styles = StyleSheet.create({
         gap: ox(8),
         marginBottom: ox(16),
     },
-    secondaryActionBtn: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: ox(8),
-        paddingVertical: ox(11),
-        borderRadius: ox(12),
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.3)',
-        backgroundColor: '#000000',
-    },
+secondaryActionBtn: {
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: ox(8),
+          paddingVertical: ox(11),
+          borderRadius: ox(14),
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.15)',
+          backgroundColor: 'rgba(18,24,38,0.65)',
+      },
     secondaryActionBtnDisabled: {
         opacity: 0.45,
     },
@@ -1815,42 +1865,61 @@ const styles = StyleSheet.create({
         fontSize: ox(14),
         fontWeight: '600',
     },
-    followButton: {
-        flex: 1,
-        paddingVertical: ox(10),
-        minHeight: ox(42),
-        borderRadius: ox(12),
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    privateFollowButton: {
-        flex: 0,
-        paddingHorizontal: ox(24),
-        minWidth: 140,
-        backgroundColor: PASSPORT_PALETTE.wavePrimary,
-    },
-    privateFollowButtonText: {
-        color: '#FFFFFF',
-        fontSize: ox(14),
-        fontWeight: '600',
-    },
-    followButtonText: {
-        color: '#000000',
-        fontSize: ox(14),
-        fontWeight: '600',
-    },
-    messageButton: {
-        flex: 1,
-        paddingVertical: ox(10),
-        minHeight: ox(42),
-        borderRadius: ox(12),
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#000000',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.3)',
-    },
+followButton: {
+          flex: 1,
+          paddingVertical: ox(10),
+          minHeight: ox(42),
+          borderRadius: ox(14),
+          alignItems: 'center',
+          justifyContent: 'center',
+      },
+      followButtonGlass: {
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.12)',
+      },
+      followButtonAccent: {
+          backgroundColor: PASSPORT_PALETTE.wavePrimary,
+          borderWidth: 0,
+          shadowColor: 'rgba(45,212,191,0.55)',
+          shadowOpacity: 0.6,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 10,
+      },
+      privateFollowButton: {
+          flex: 0,
+          paddingHorizontal: ox(24),
+          minWidth: 140,
+          backgroundColor: PASSPORT_PALETTE.wavePrimary,
+      },
+      privateFollowButtonText: {
+          color: '#FFFFFF',
+          fontSize: ox(14),
+          fontWeight: '600',
+      },
+      followButtonText: {
+          color: '#FFFFFF',
+          fontSize: ox(14),
+          fontWeight: '600',
+      },
+      followButtonTextGlass: {
+          color: 'rgba(255,255,255,0.92)',
+      },
+      followButtonTextAccent: {
+          color: '#FFFFFF',
+      },
+      messageButton: {
+          flex: 1,
+          paddingVertical: ox(10),
+          minHeight: ox(42),
+          borderRadius: ox(14),
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.15)',
+      },
     messageButtonText: {
         color: '#FFFFFF',
         fontSize: ox(14),

@@ -278,6 +278,7 @@ import {
     saveLocationNotifyPrefs,
 } from '../utils/locationNotifyPrefNative';
 import { useMutualFollow } from '../hooks/useMutualFollow';
+import { onFollowStatusChanged } from '../hooks/useFollowState';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard.native';
 import SuggestedPlacesFeedSection from '../components/SuggestedPlacesFeedSection.native';
@@ -1304,6 +1305,14 @@ const FeedCard = React.memo(function FeedCard({
                     onFollow={onFollow}
                     onOpenDM={onOpenDM}
                     onProfileMenuPress={openProfileMenu}
+                    onAvatarPress={(hasStory) => {
+                        if (hasStory && onViewStories) {
+                            onViewStories();
+                            return;
+                        }
+                        if (onVisitHandle) onVisitHandle(profileHandle);
+                        else onVisitProfile?.();
+                    }}
                     onOverflowPress={onOverflowPress}
                     onDoubleLike={() => {
                         void onLike();
@@ -1424,6 +1433,14 @@ const FeedCard = React.memo(function FeedCard({
                                     onFollow={onFollow}
                                     onOpenDM={onOpenDM}
                                     onProfileMenuPress={openProfileMenu}
+                                    onAvatarPress={(hasStory) => {
+                                        if (hasStory && onViewStories) {
+                                            onViewStories();
+                                            return;
+                                        }
+                                        if (onVisitHandle) onVisitHandle(profileHandle);
+                                        else onVisitProfile?.();
+                                    }}
                                     onHasStoryChange={setHeaderHasStory}
                                     onOverflowPress={onOverflowPress}
                                     onRegisterDmAnchor={onRegisterDmAnchor}
@@ -2520,27 +2537,40 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     );
     recordFeedViewRef.current = recordFeedView;
 
-    /** Follow is per-author — keep every visible post for that handle in sync. */
-    const patchFollowForHandle = React.useCallback(
-        (handle: string | undefined, isFollowing: boolean, extras?: Partial<Post>) => {
-            const lower = String(handle || '')
-                .trim()
-                .toLowerCase();
-            if (!lower) return;
-            setPages((prev) =>
-                prev.map((page) =>
-                    page.map((p) =>
-                        String(p.userHandle || '')
-                            .trim()
-                            .toLowerCase() === lower
-                            ? ({ ...p, ...extras, isFollowing } as Post)
-                            : p,
-                    ),
-                ),
-            );
-        },
-        [],
-    );
+/** Follow is per-author — keep every visible post for that handle in sync. */
+      const patchFollowForHandle = React.useCallback(
+          (handle: string | undefined, isFollowing: boolean, extras?: Partial<Post>) => {
+              const lower = String(handle || '')
+                  .trim()
+                  .toLowerCase();
+              if (!lower) return;
+              setPages((prev) =>
+                  prev.map((page) =>
+                      page.map((p) =>
+                          String(p.userHandle || '')
+                              .trim()
+                              .toLowerCase() === lower
+                              ? ({ ...p, ...extras, isFollowing } as Post)
+                              : p,
+                      ),
+                  ),
+              );
+          },
+          [],
+      );
+
+      // Global follow-state bus: a follow/unfollow on View Profile (or anywhere else)
+      // patches every visible post for that author so headers, quick menus and DM
+      // gates stay in sync without a feed refetch.
+      useEffect(() => {
+          return onFollowStatusChanged((payload) => {
+              patchFollowForHandle(payload.handle, payload.isFollowing === true, {
+                  ...(payload.hasPendingRequest != null
+                      ? { isFollowRequested: payload.hasPendingRequest }
+                      : {}),
+              } as Partial<Post>);
+          });
+      }, [patchFollowForHandle]);
 
     useEffect(() => {
         let cancelled = false;
@@ -3684,6 +3714,50 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     flatForRenderRef.current = flatForRender;
 
+    // Recover an empty/errored feed once the connection comes back. NetInfo stays
+    // "connected" when only a local port-forward (adb reverse) drops, so we also retry
+    // whenever the screen refocuses or the app returns to the foreground with no posts.
+    // Guarded on an empty feed so we never clobber a populated one — resetting the feed
+    // on focus previously raced loadMore and left the feed blank. We check the post rows
+    // (not the rendered list) because chrome rows like the Stories rail are always present.
+    const feedPostCountRef = React.useRef(0);
+    feedPostCountRef.current = pages.flat().length;
+
+    const prevOnlineRef = React.useRef(online);
+    React.useEffect(() => {
+        const reconnected = prevOnlineRef.current === false && online;
+        prevOnlineRef.current = online;
+        if (reconnected && feedPostCountRef.current === 0) {
+            setReloadTick((t) => t + 1);
+        }
+    }, [online]);
+
+    const feedFocusPrimedRef = React.useRef(false);
+    useFocusEffect(
+        React.useCallback(() => {
+            if (!feedFocusPrimedRef.current) {
+                // The mount fetch effect already loads the first page.
+                feedFocusPrimedRef.current = true;
+                return;
+            }
+            if (feedPostCountRef.current === 0) {
+                setReloadTick((t) => t + 1);
+            }
+        }, []),
+    );
+
+    const feedAppStateRef = React.useRef(AppState.currentState);
+    React.useEffect(() => {
+        const sub = AppState.addEventListener('change', (next) => {
+            const resumed = feedAppStateRef.current !== 'active' && next === 'active';
+            feedAppStateRef.current = next;
+            if (resumed && feedPostCountRef.current === 0) {
+                setReloadTick((t) => t + 1);
+            }
+        });
+        return () => sub.remove();
+    }, []);
+
     /**
      * Row index -> header palette colour, keyed by each post's ordinal position among
      * posts (not the raw row index) so interleaved non-post rows cannot shift a given
@@ -4350,20 +4424,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         }
                         navigation.navigate('PostDetail', { postId: mergedPost.id });
                     }}
-                    onVisitProfile={() =>
-                        navigation.navigate('ViewProfile', {
-                            handle: mergedPost.userHandle,
-                            sourcePostId: mergedPost.id,
-                        })
-                    }
-                    onVisitHandle={(handle) =>
-                        navigation.navigate('ViewProfile', {
-                            handle,
-                            sourcePostId: mergedPost.id,
-                        })
-                    }
+onVisitProfile={() =>
+                          navigation.navigate('ViewProfile', {
+                              handle: mergedPost.userHandle,
+                              sourcePostId: mergedPost.id,
+                              isFollowing: mergedPost.isFollowing === true,
+                          })
+                      }
+                      onVisitHandle={(handle) =>
+                          navigation.navigate('ViewProfile', {
+                              handle,
+                              sourcePostId: mergedPost.id,
+                              isFollowing: mergedPost.isFollowing === true,
+                          })
+                      }
                     onViewStories={() =>
-                        navigation.navigate('Stories', { openUserHandle: mergedPost.userHandle })
+                        navigation.navigate('Stories', {
+                            openUserHandle: mergedPost.userHandle,
+                            targetHandle: mergedPost.userHandle,
+                            soloMode: true,
+                        })
                     }
                     onBlockUser={async () => {
                         if (!user?.handle) return;
@@ -4853,21 +4933,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                           }
                         : undefined
                 }
-                onVisitProfile={
-                    imageFullscreenPost
-                        ? () => {
-                              const handle = imageFullscreenPost.userHandle;
-                              const sourcePostId = imageFullscreenPost.id;
-                              setImageFullscreenPost(null);
-                              setImageFullscreenStartIndex(0);
-                              setImageFullscreenOrigin(null);
-                              navigation.navigate('ViewProfile', {
-                                  handle,
-                                  sourcePostId,
-                              });
-                          }
-                        : undefined
-                }
+onVisitProfile={
+                      imageFullscreenPost
+                          ? () => {
+                                const handle = imageFullscreenPost.userHandle;
+                                const sourcePostId = imageFullscreenPost.id;
+                                const isFollowing = imageFullscreenPost.isFollowing === true;
+                                setImageFullscreenPost(null);
+                                setImageFullscreenStartIndex(0);
+                                setImageFullscreenOrigin(null);
+                                navigation.navigate('ViewProfile', {
+                                    handle,
+                                    sourcePostId,
+                                    isFollowing,
+                                });
+                            }
+                          : undefined
+                  }
                 onMenu={
                     imageFullscreenPost
                         ? () => {

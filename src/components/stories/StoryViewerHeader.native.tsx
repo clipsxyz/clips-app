@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../Avatar';
 import VerifiedBadge from '../VerifiedBadge.native';
 import type { StoryMetadataItem } from '../../utils/storyViewerMeta';
@@ -51,6 +52,8 @@ export default function StoryViewerHeader({
     onClose,
 }: Props) {
     const [metaIndex, setMetaIndex] = useState(0);
+    // Push the close "X", mute control, avatar and handle below the status-bar notch.
+    const insets = useSafeAreaInsets();
 
     useEffect(() => {
         setMetaIndex(0);
@@ -67,7 +70,10 @@ export default function StoryViewerHeader({
     const currentMeta = metadataItems[metaIndex];
 
     return (
-        <View style={styles.header} pointerEvents="box-none">
+        <View
+            style={[styles.header, { paddingTop: insets.top + 8 }]}
+            pointerEvents="box-none"
+        >
             <View style={styles.left} pointerEvents="box-none">
                 <View ref={avatarRef} collapsable={false}>
                     <View style={styles.avatarWrap}>
@@ -139,7 +145,7 @@ export default function StoryViewerHeader({
 const styles = StyleSheet.create({
     header: {
         position: 'absolute',
-        top: 12,
+        top: 0,
         left: 16,
         right: 16,
         zIndex: 130,

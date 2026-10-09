@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { useFollowState } from '../hooks/useFollowState';
 
 /** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
 const PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
@@ -47,6 +48,7 @@ export type FeedPostProfileQuickMenuProps = {
 export default function FeedPostProfileQuickMenu({
     visible,
     anchor,
+    profileHandle,
     isCurrentUser,
     isMutualFollow,
     hasStory,
@@ -62,6 +64,15 @@ export default function FeedPostProfileQuickMenu({
 }: FeedPostProfileQuickMenuProps) {
     const insets = useSafeAreaInsets();
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
+    // Derive live follow state for the author so the menu label (and DM gate) stay
+    // correct even if the parent's post prop is momentarily stale.
+    const { isFollowing: liveIsFollowing, hasPendingRequest: liveHasPendingRequest } =
+        useFollowState({
+            handle: profileHandle,
+            isFollowing,
+            hasPendingRequest: isRequested,
+        });
 
     if (!visible) return null;
 
@@ -103,9 +114,9 @@ export default function FeedPostProfileQuickMenu({
                 >
                     <Icon
                         name={
-                            isFollowing
+                            liveIsFollowing
                                 ? 'person-remove-outline'
-                                : isRequested
+                                : liveHasPendingRequest
                                   ? 'time-outline'
                                   : 'person-add-outline'
                         }
@@ -113,7 +124,11 @@ export default function FeedPostProfileQuickMenu({
                         color="#FFFFFF"
                     />
                     <Text style={styles.itemText}>
-                        {isFollowing ? 'Unfollow' : isRequested ? 'Requested' : 'Follow'}
+                        {liveIsFollowing
+                            ? 'Unfollow'
+                            : liveHasPendingRequest
+                              ? 'Requested'
+                              : 'Follow'}
                     </Text>
                 </TouchableOpacity>
             ) : null}
@@ -131,7 +146,7 @@ export default function FeedPostProfileQuickMenu({
                 </TouchableOpacity>
             ) : null}
 
-            {!isCurrentUser && isMutualFollow && onMessage ? (
+            {!isCurrentUser && isMutualFollow && liveIsFollowing && onMessage ? (
                 <TouchableOpacity
                     style={styles.item}
                     onPress={() => {

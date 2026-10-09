@@ -46,11 +46,16 @@ export default function StorySafeVideo({
     const [ready, setReady] = useState(false);
     const notifiedReadyRef = React.useRef(false);
 
+    // Key the reset on the URI string, not the source object: callers rebuild
+    // `{ uri }` on every render, so keying on the object reset `ready` each frame
+    // (e.g. the 50ms progress tick) and left the poster cover covering the video.
+    const sourceUri = source?.uri;
+
     useEffect(() => {
         setFailed(false);
         setReady(false);
         notifiedReadyRef.current = false;
-    }, [source]);
+    }, [sourceUri]);
 
     if (failed && posterSource) {
         return <Image source={posterSource} style={style as object} resizeMode="cover" />;

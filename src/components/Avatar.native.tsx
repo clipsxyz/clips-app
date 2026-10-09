@@ -7,17 +7,25 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import CachedImage from './CachedImage.native';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import type { AvatarProps } from './avatarProps';
 import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
+
+/** White outline when there's an unviewed active story, subtle translucent otherwise. */
+export const AVATAR_STORY_BORDER_WIDTH = 2;
+export const AVATAR_STORY_BORDER_COLOR = '#FFFFFF';
+export const AVATAR_IDLE_BORDER_COLOR = 'rgba(255, 255, 255, 0.15)';
+export function avatarBorderColor(hasStory: boolean): string {
+    return hasStory ? AVATAR_STORY_BORDER_COLOR : AVATAR_IDLE_BORDER_COLOR;
+}
 
 export default function Avatar({
     src,
     name,
     size = 'md',
     hasStory = false,
+    cornerRadius,
     onClick,
 }: AvatarProps) {
     const { dim, fontSize } = resolveAvatarDimensions(size);
@@ -29,8 +37,22 @@ export default function Avatar({
     }, [resolvedSrc]);
     const showImage = !!resolvedSrc && !imageFailed;
 
+    // Full circle by default; an explicit `cornerRadius` opts into the squircle
+    // shape used by the feed header / top-bar buttons.
+    const outerRadius = cornerRadius != null ? cornerRadius : dim / 2;
+    // Outer circle/square is always `dim` so every avatar shares identical
+    // dimensions; the 2px outline + 2px inner padding are uniform in both
+    // story states and the inner radius stays concentric with the outer ring.
+    const innerDim = Math.max(0, dim - AVATAR_STORY_BORDER_WIDTH * 2);
+    const innerRadius = Math.max(0, outerRadius - AVATAR_STORY_BORDER_WIDTH);
+
     const inner = (
-        <View style={[styles.innerClip, { width: dim, height: dim, borderRadius: dim / 2 }]}>
+        <View
+            style={[
+                styles.innerClip,
+                { width: innerDim, height: innerDim, borderRadius: innerRadius },
+            ]}
+        >
             {showImage ? (
                 <CachedImage
                     source={{ uri: resolvedSrc }}
@@ -51,32 +73,24 @@ export default function Avatar({
         </View>
     );
 
-    const body = hasStory ? (
-        <LinearGradient
-            colors={['#f6e27a', '#d4af37', '#f4f4f4', '#bfc5cc', '#ffe8a3', '#d4af37']}
-            start={{ x: 0, y: 1 }}
-            end={{ x: 1, y: 0 }}
+    const body = (
+        <View
             style={[
-                styles.storyRing,
+                styles.ring,
                 {
-                    width: dim + 4,
-                    height: dim + 4,
-                    borderRadius: (dim + 4) / 2,
-                    justifyContent: 'center',
-                    alignItems: 'center',
+                    width: dim,
+                    height: dim,
+                    borderRadius: outerRadius,
+                    borderWidth: AVATAR_STORY_BORDER_WIDTH,
+                    borderColor: avatarBorderColor(hasStory),
                 },
             ]}
         >
             {inner}
-        </LinearGradient>
-    ) : (
-        inner
+        </View>
     );
 
-    const rootStyle: StyleProp<ViewStyle> = [
-        styles.root,
-        { width: hasStory ? dim + 4 : dim, height: hasStory ? dim + 4 : dim },
-    ];
+    const rootStyle: StyleProp<ViewStyle> = [styles.root, { width: dim, height: dim }];
 
     if (onClick) {
         return (
@@ -100,8 +114,7 @@ const styles = StyleSheet.create({
     pressed: {
         opacity: 0.85,
     },
-    storyRing: {
-        padding: 2,
+    ring: {
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -121,6 +134,7 @@ const styles = StyleSheet.create({
     },
     initialsText: {
         color: '#FFFFFF',
+        fontSize: 14,
         fontWeight: '700',
     },
 });

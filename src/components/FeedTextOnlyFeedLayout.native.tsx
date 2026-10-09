@@ -13,6 +13,7 @@ type Props = {
     onFollow?: () => Promise<void>;
     onOpenDM?: (handle: string, postId: string) => void;
     onProfileMenuPress?: () => void;
+    onAvatarPress?: (hasStory: boolean) => void;
     onOverflowPress?: () => void;
     onDoubleLike: () => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
@@ -28,6 +29,7 @@ export default function FeedTextOnlyFeedLayout({
     onFollow,
     onOpenDM,
     onProfileMenuPress,
+    onAvatarPress,
     onOverflowPress,
     onDoubleLike,
     onRegisterDmAnchor,
@@ -45,6 +47,7 @@ export default function FeedTextOnlyFeedLayout({
                 onFollow={onFollow}
                 onOpenDM={onOpenDM}
                 onProfileMenuPress={onProfileMenuPress}
+                onAvatarPress={onAvatarPress}
                 onOverflowPress={onOverflowPress}
                 onRegisterDmAnchor={onRegisterDmAnchor}
                 menuAnchorRef={menuAnchorRef}

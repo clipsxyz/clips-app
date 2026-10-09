@@ -52,11 +52,11 @@ export default function ProfileCoverHero({
                     if (customCover) setCoverFailed(true);
                 }}
             />
-            <LinearGradient
-                colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.28)', 'rgba(11,7,17,0.75)']}
-                style={styles.gradient}
-                pointerEvents="none"
-            />
+<LinearGradient
+                  colors={['rgba(45,212,191,0.05)', 'rgba(0,0,0,0.24)', 'rgba(11,7,17,0.78)']}
+                  style={styles.gradient}
+                  pointerEvents="none"
+              />
             {showChangeCover && onPressChangeCover ? (
                 <TouchableOpacity style={styles.changeCoverBtn} onPress={onPressChangeCover}>
                     <Icon name="image-outline" size={14} color="#FFFFFF" />

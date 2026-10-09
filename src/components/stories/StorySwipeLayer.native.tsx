@@ -2,7 +2,8 @@ import React, { useRef } from 'react';
 import { View, PanResponder, StyleSheet, type ViewProps } from 'react-native';
 
 const SWIPE_THRESHOLD = 40;
-const HOLD_DELAY_MS = 140;
+/** Long enough that a normal tap doesn't trigger hold-to-pause. */
+const HOLD_DELAY_MS = 220;
 
 type Props = ViewProps & {
     enabled: boolean;
