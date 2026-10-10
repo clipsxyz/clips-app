@@ -29,7 +29,6 @@ const QUICK_PICK_CITIES = [
     'Dublin', 'Cork', 'Galway', 'Belfast',
     'New York', 'Los Angeles', 'Chicago',
 ];
-const QUICK_PICK_PIN_COLORS = ['#38BDF8', '#F472B6', '#34D399', '#FBBF24', '#A78BFA', '#F87171'];
 
 const POPULAR_VENUES = [
     'Madison Square Garden', 'Wembley Stadium', 'Camp Nou', 'Allianz Arena',
@@ -484,7 +483,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                 </View>
 
                 <View style={styles.searchBar}>
-                    <Icon name="search" size={ox(18)} color="#9CA3AF" />
+                    <Icon name="search" size={ox(18)} color="rgba(255, 255, 255, 0.6)" />
                     <TextInput
                         style={styles.searchInput}
                         placeholder={modePlaceholder[searchMode]}
@@ -547,7 +546,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                 onPress={() => onModeChipPress(chip.id)}
                                 style={[styles.chip, active && styles.chipActive]}
                             >
-                                <Icon name={chip.icon as any} size={ox(14)} color={active ? '#111' : '#E5E7EB'} />
+                                <Icon name={chip.icon as any} size={ox(14)} color={active ? '#FFFFFF' : '#E5E7EB'} />
                                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip.label}</Text>
                             </TouchableOpacity>
                         );
@@ -733,7 +732,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                 <Text style={styles.quickPicksHint}>Tap to jump feed.</Text>
                             </View>
                             <View style={styles.quickGrid}>
-                                {QUICK_PICK_CITIES.map((name, idx) => (
+                                {QUICK_PICK_CITIES.map((name) => (
                                     <TouchableOpacity
                                         key={name}
                                         onPress={() => goToLocation(name, 'location')}
@@ -744,7 +743,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                                 <Icon
                                                     name="location"
                                                     size={ox(12)}
-                                                    color={QUICK_PICK_PIN_COLORS[idx % QUICK_PICK_PIN_COLORS.length]}
+                                                    color="#10B981"
                                                 />
                                             </View>
                                             <Text style={styles.quickCardTitle} numberOfLines={1}>{name}</Text>
@@ -890,9 +889,9 @@ const styles = StyleSheet.create({
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#101010',
+        backgroundColor: 'rgba(255, 255, 255, 0.07)',
         borderWidth: 1,
-        borderColor: '#272727',
+        borderColor: 'rgba(255, 255, 255, 0.15)',
         borderRadius: ox(20),
         paddingHorizontal: ox(14),
         paddingVertical: ox(11),
@@ -914,15 +913,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(6),
-        borderRadius: ox(999),
-        backgroundColor: '#0d0d0f',
+        borderRadius: ox(16),
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         borderWidth: 1,
-        borderColor: '#2a2a2a',
+        borderColor: 'rgba(255, 255, 255, 0.15)',
         paddingHorizontal: ox(14),
         paddingVertical: ox(9),
     },
     chipActive: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'rgba(255, 255, 255, 0.22)',
         borderColor: '#FFFFFF',
     },
     chipText: {
@@ -931,7 +930,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     chipTextActive: {
-        color: '#111827',
+        color: '#FFFFFF',
     },
     refinementRow: {
         flexDirection: 'row',
@@ -1131,10 +1130,10 @@ const styles = StyleSheet.create({
     },
     quickCard: {
         width: '31.5%',
-        borderRadius: ox(16),
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        borderRadius: ox(12),
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255, 255, 255, 0.10)',
         paddingHorizontal: ox(10),
         paddingVertical: ox(10),
         gap: ox(6),
