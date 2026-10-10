@@ -13,9 +13,10 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import PlaceAutocompleteField from '../PlaceAutocompleteField.native';
+import CarouselSlideThumb from '../CarouselSlideThumb.native';
 import { INSTANT_FILTER_NAMES, getFilterOverlayStyle, type InstantFilterName } from '../../utils/instantFiltersNative';
 import type { LocalCarouselItem } from '../../utils/prepareCarouselMediaForPostNative';
-import { TEXT_POST_BODY_MAX_LENGTH } from '../../constants';
+import { TEXT_POST_BODY_MAX_LENGTH, CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../../constants';
 
 export type GalleryPickerTab = 'caption' | 'location' | 'carousel' | 'filters';
 
@@ -25,8 +26,6 @@ const PICKER_TABS: Array<{ id: GalleryPickerTab; icon: string; title: string }> 
     { id: 'carousel', icon: 'albums', title: 'Add photos or videos' },
     { id: 'filters', icon: 'color-filter-outline', title: 'Filters' },
 ];
-
-const CAROUSEL_MAX = 10;
 
 function GradientField({
     colors,
@@ -358,11 +357,14 @@ export default function GalleryPreviewComposerPanel({
                                             ]}
                                         >
                                             {item.type === 'video' ? (
-                                                <View style={styles.carouselThumbVideo}>
-                                                    <Icon name="videocam" size={18} color="#E5E7EB" />
-                                                </View>
+                                                <CarouselSlideThumb
+                                                    size={72}
+                                                    uri={item.uri}
+                                                    type="video"
+                                                    allowPausedVideo
+                                                />
                                             ) : (
-                                                <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
+                                                <CarouselSlideThumb size={72} uri={item.uri} type="image" />
                                             )}
                                             <View style={styles.carouselIndexBadge}>
                                                 <Text style={styles.carouselIndexText}>{index + 1}</Text>
@@ -638,13 +640,6 @@ const styles = StyleSheet.create({
         paddingVertical: 2,
     },
     carouselIndexText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
-    carouselThumb: { width: '100%', height: '100%' },
-    carouselThumbVideo: {
-        flex: 1,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
     removeThumb: {
         position: 'absolute',
         top: -4,

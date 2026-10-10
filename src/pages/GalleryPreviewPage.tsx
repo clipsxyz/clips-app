@@ -21,9 +21,9 @@ import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galle
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import { prepareMediaForPost, prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import { CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../constants';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
-const CAROUSEL_MAX = 10;
 
 /** Same gold + silver palette as `Avatar` story ring. */
 const PROFILE_STORY_RING_GRADIENT = 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)';
@@ -456,6 +456,11 @@ export default function GalleryPreviewPage() {
 
     const addCarouselItems = useCallback((files: FileList | null) => {
         if (!files || files.length === 0) return;
+        const remaining = CAROUSEL_MAX - carouselItems.length;
+        if (remaining <= 0) {
+            showToast(`You can add up to ${CAROUSEL_MAX} items to a carousel.`);
+            return;
+        }
         const processFile = (file: File): Promise<CarouselItem | null> => {
             if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) return Promise.resolve(null);
             const url = URL.createObjectURL(file);
@@ -477,8 +482,14 @@ export default function GalleryPreviewPage() {
             });
         };
         (async () => {
+            const validFiles = Array.from(files).filter(
+                (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
+            );
+            if (validFiles.length > remaining) {
+                showToast(`Only ${remaining} more item${remaining === 1 ? '' : 's'} can be added (max ${CAROUSEL_MAX}).`);
+            }
             const toAdd: CarouselItem[] = [];
-            for (const file of Array.from(files)) {
+            for (const file of validFiles) {
                 if (carouselItems.length + toAdd.length >= CAROUSEL_MAX) break;
                 const item = await processFile(file);
                 if (item) toAdd.push(item);

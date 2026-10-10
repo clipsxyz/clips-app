@@ -4,7 +4,7 @@ import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOf
 import { FaPeopleRobbery } from 'react-icons/fa6';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
-import { TEMPLATE_IDS } from '../constants';
+import { TEMPLATE_IDS, CAROUSEL_MAX_ITEMS } from '../constants';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
@@ -2579,7 +2579,7 @@ export default function InstantCreatePage() {
                         return;
                     }
 
-                    const MAX_ITEMS = 10;
+                    const MAX_ITEMS = CAROUSEL_MAX_ITEMS;
                     const selectedFiles = Array.from(files).filter((file) =>
                         file.type.startsWith('image/') || file.type.startsWith('video/')
                     );

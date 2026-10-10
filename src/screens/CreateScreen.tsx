@@ -30,7 +30,7 @@ import {
     savedToDraftsSheet,
     type DraftSaveSheetState,
 } from '../utils/draftSaveSheetNative';
-import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
+import { TEXT_POST_BODY_MAX_LENGTH, CAROUSEL_MAX_ITEMS } from '../constants';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import StickerPickerNative from '../components/StickerPicker.native';
@@ -405,7 +405,7 @@ export default function CreateScreen({ navigation, route }: any) {
 
     const handleSelectMedia = useCallback(async () => {
         try {
-            const picked = await pickFromFullGallery(isStory24Flow ? 1 : 10);
+            const picked = await pickFromFullGallery(isStory24Flow ? 1 : CAROUSEL_MAX_ITEMS);
             if (picked === 'denied') {
                 Alert.alert(
                     'Gallery access needed',
