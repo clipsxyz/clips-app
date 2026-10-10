@@ -15,8 +15,15 @@ class VideoThumbnailService
      */
     public function ensureForPost(Post $post): ?string
     {
+        // Repair per-slide posters first: a carousel tile renders its OWN item.posterUrl,
+        // not the post-level poster, so a black frame on slide 2 must be fixed even when
+        // slide 1's poster is perfectly fine.
+        $this->ensureItemPosters($post);
+
         $existing = $post->resolvedThumbnailUrl();
-        if (is_string($existing) && $existing !== '') {
+        $existingIsBlack = $this->isLikelyBlackImage($existing);
+
+        if (is_string($existing) && $existing !== '' && ! $existingIsBlack) {
             if ($post->thumbnail_url !== $existing) {
                 $post->thumbnail_url = $existing;
                 $this->mergePosterIntoMediaItems($post, $existing);
@@ -34,16 +41,18 @@ class VideoThumbnailService
             // sampled straight off their own media, which is where most feed colour comes from.
             $this->ensureDominantColorFor($post);
 
-            return null;
+            return $existing;
         }
 
         $source = $this->videoSourceUrl($post);
         if ($source === null) {
-            return null;
+            return $existing;
         }
 
+        // Only trust the sibling JPEG when it is a real picture — an uploaded "poster" is
+        // often frame 0 of the clip, which is pure black on clips that open on a leader.
         $sibling = $this->siblingJpegUrl($source);
-        if ($sibling !== null) {
+        if ($sibling !== null && ! $this->isLikelyBlackImage($sibling)) {
             $post->thumbnail_url = $sibling;
             $this->mergePosterIntoMediaItems($post, $sibling);
             $post->save();
@@ -54,7 +63,8 @@ class VideoThumbnailService
 
         $url = $this->extractJpeg($source, (string) $post->id);
         if ($url === null) {
-            return null;
+            // Nothing better available — keep the old poster rather than dropping it.
+            return $existing;
         }
 
         $post->thumbnail_url = $url;
@@ -63,6 +73,192 @@ class VideoThumbnailService
         $this->ensureDominantColorFor($post);
 
         return $url;
+    }
+
+    /**
+     * True when a video post has a slide (or post-level) poster that is missing or a black
+     * frame, i.e. the backfill has work to do. Read-only — never writes.
+     */
+    public function posterNeedsRepair(Post $post): bool
+    {
+        if (! $this->isVideoPost($post)) {
+            return false;
+        }
+
+        $items = is_array($post->media_items) ? $post->media_items : [];
+        foreach ($items as $item) {
+            if (! is_array($item) || ($item['type'] ?? null) !== 'video') {
+                continue;
+            }
+            $url = $item['url'] ?? null;
+            if (! is_string($url) || $url === '') {
+                continue;
+            }
+            $poster = $item['posterUrl']
+                ?? $item['poster_url']
+                ?? $item['thumbnail_url']
+                ?? $item['thumbnailUrl']
+                ?? null;
+            if (! is_string($poster) || $poster === '' || $this->isLikelyBlackImage($poster)) {
+                return true;
+            }
+        }
+
+        if ($items === []) {
+            $existing = $post->resolvedThumbnailUrl();
+            if (! is_string($existing) || $existing === '' || $this->isLikelyBlackImage($existing)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Repair the poster on each video slide of a carousel.
+     *
+     * A slide with a missing or black poster is re-extracted from that slide's own MP4 so
+     * its tile shows a real frame instead of a black square. Idempotent: slides that already
+     * have a visible poster are left untouched, so this is safe to call on every render pass.
+     */
+    private function ensureItemPosters(Post $post): void
+    {
+        $items = is_array($post->media_items) ? $post->media_items : [];
+        if ($items === [] || ! $this->isVideoPost($post)) {
+            return;
+        }
+
+        $changed = false;
+        foreach ($items as $index => $item) {
+            if (! is_array($item) || ($item['type'] ?? null) !== 'video') {
+                continue;
+            }
+            $url = $item['url'] ?? null;
+            if (! is_string($url) || $url === '') {
+                continue;
+            }
+
+            $poster = $item['posterUrl']
+                ?? $item['poster_url']
+                ?? $item['thumbnail_url']
+                ?? $item['thumbnailUrl']
+                ?? null;
+            if (is_string($poster) && $poster !== '' && ! $this->isLikelyBlackImage($poster)) {
+                continue;
+            }
+
+            $extracted = $this->extractJpeg($url, (string) $post->id, (int) $index);
+            if ($extracted === null) {
+                continue;
+            }
+
+            $items[$index]['posterUrl'] = $extracted;
+            $items[$index]['poster_url'] = $extracted;
+            $items[$index]['thumbnail_url'] = $extracted;
+            $items[$index]['thumbnailUrl'] = $extracted;
+            $changed = true;
+        }
+
+        if ($changed) {
+            $post->media_items = $items;
+            $post->save();
+        }
+    }
+
+    /**
+     * True when an encoded image is (near) uniformly black — the signature of a poster
+     * captured from a clip's black leader frame.
+     *
+     * Requires a very low mean AND max luminance, so a mostly-dark-but-visible frame (night
+     * scenes, a black title card with white text) is never mistaken for a blank one.
+     */
+    private function isLikelyBlackImage(?string $url): bool
+    {
+        if (! is_string($url) || $url === '') {
+            return false;
+        }
+
+        $local = $this->resolveLocalPath($url);
+        if ($local !== null) {
+            return $this->isLikelyBlackFile($local);
+        }
+
+        if (! preg_match('#^https?://#i', $url)) {
+            return false;
+        }
+
+        $context = stream_context_create([
+            'http' => ['timeout' => 4, 'follow_location' => 1, 'max_redirects' => 2],
+        ]);
+        $binary = @file_get_contents($url, false, $context);
+        if ($binary === false || $binary === '') {
+            return false;
+        }
+
+        return $this->isLikelyBlackBinary($binary);
+    }
+
+    private function isLikelyBlackFile(string $path): bool
+    {
+        if (! is_file($path)) {
+            return false;
+        }
+
+        $binary = @file_get_contents($path);
+        if ($binary === false || $binary === '') {
+            return false;
+        }
+
+        return $this->isLikelyBlackBinary($binary);
+    }
+
+    private function isLikelyBlackBinary(string $binary): bool
+    {
+        if (! function_exists('imagecreatefromstring')) {
+            // No GD: we cannot inspect pixels, so never claim a poster is black.
+            return false;
+        }
+
+        $image = @imagecreatefromstring($binary);
+        if ($image === false) {
+            return false;
+        }
+
+        $width = imagesx($image);
+        $height = imagesy($image);
+        if ($width < 1 || $height < 1) {
+            imagedestroy($image);
+
+            return false;
+        }
+
+        $samples = 0;
+        $sum = 0;
+        $max = 0;
+        $steps = 8;
+        for ($i = 0; $i < $steps; $i++) {
+            for ($j = 0; $j < $steps; $j++) {
+                $x = (int) round($i * ($width - 1) / ($steps - 1));
+                $y = (int) round($j * ($height - 1) / ($steps - 1));
+                $rgb = imagecolorat($image, $x, $y);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
+                $luma = (int) round(0.299 * $r + 0.587 * $g + 0.114 * $b);
+                $sum += $luma;
+                $max = max($max, $luma);
+                $samples++;
+            }
+        }
+        imagedestroy($image);
+
+        if ($samples === 0) {
+            return false;
+        }
+
+        $mean = $sum / $samples;
+
+        return $mean < 12.0 && $max < 30;
     }
 
     /**
@@ -168,7 +364,7 @@ class VideoThumbnailService
         return null;
     }
 
-    public function extractJpeg(string $videoUrl, string $postId): ?string
+    public function extractJpeg(string $videoUrl, string $postId, ?int $itemIndex = null): ?string
     {
         $input = $this->resolveLocalPath($videoUrl);
         if ($input === null) {
@@ -180,30 +376,47 @@ class VideoThumbnailService
             return null;
         }
 
-        $relative = 'thumbnails/' . $postId . '.jpg';
+        $suffix = $itemIndex !== null ? '-' . $itemIndex : '';
+        $relative = 'thumbnails/' . $postId . $suffix . '.jpg';
         Storage::disk('public')->makeDirectory('thumbnails');
         $output = Storage::disk('public')->path($relative);
 
-        $cmd = sprintf(
-            '%s -y -ss 0.1 -i %s -frames:v 1 -q:v 2 %s 2>&1',
-            escapeshellarg($ffmpeg),
-            escapeshellarg($input),
-            escapeshellarg($output)
-        );
-        $outputLines = [];
-        $code = 0;
-        exec($cmd, $outputLines, $code);
+        // Sample a few timestamps: a clip may open on a black leader, so frame 0 can be
+        // uniformly black even though the video has plenty of visible content later.
+        foreach ([0.1, 0.5, 1.0, 2.0, 3.0] as $offset) {
+            $cmd = sprintf(
+                '%s -y -ss %s -i %s -frames:v 1 -q:v 2 %s 2>&1',
+                escapeshellarg($ffmpeg),
+                escapeshellarg((string) $offset),
+                escapeshellarg($input),
+                escapeshellarg($output)
+            );
+            $outputLines = [];
+            $code = 0;
+            exec($cmd, $outputLines, $code);
 
-        if ($code !== 0 || !is_file($output) || filesize($output) < 32) {
-            Log::warning('Video thumbnail extraction failed', [
-                'post_id' => $postId,
-                'return_code' => $code,
-                'output' => implode("\n", array_slice($outputLines, 0, 20)),
-            ]);
-            return null;
+            if ($code !== 0 || !is_file($output) || filesize($output) < 32) {
+                Log::warning('Video thumbnail extraction failed', [
+                    'post_id' => $postId,
+                    'offset' => $offset,
+                    'return_code' => $code,
+                    'output' => implode("\n", array_slice($outputLines, 0, 20)),
+                ]);
+                continue;
+            }
+
+            if (! $this->isLikelyBlackFile($output)) {
+                return Storage::disk('public')->url($relative);
+            }
         }
 
-        return Storage::disk('public')->url($relative);
+        // Every sampled frame was black. Returning null lets the client paint its gradient
+        // video-icon fallback instead of a blank black tile.
+        Log::warning('Video thumbnail extraction produced only black frames', [
+            'post_id' => $postId,
+        ]);
+
+        return null;
     }
 
     private function isVideoPost(Post $post): bool

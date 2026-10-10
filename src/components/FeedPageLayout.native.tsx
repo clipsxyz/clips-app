@@ -391,15 +391,17 @@ export const FEED_CARD_CAROUSEL_RAIL = {
 export const FEED_CARD_CAROUSEL_THUMB = {
     width: 56,
     height: 56,
-    borderRadius: 8,
+    // Match the Passport glass header button: tight 12px squircle with a single hairline
+    // ring rather than a heavy 2px active box.
+    borderRadius: 12,
     overflow: 'hidden' as const,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderColor: 'rgba(255,255,255,0.2)',
 };
 
 export const FEED_CARD_CAROUSEL_THUMB_ACTIVE = {
     borderColor: '#FFFFFF',
-    borderWidth: 2,
+    borderWidth: 1,
 };
 
 /** Web banner ticker under engagement (news-ticker-container). */
