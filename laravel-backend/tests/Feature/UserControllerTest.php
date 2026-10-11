@@ -344,4 +344,106 @@ class UserControllerTest extends TestCase
 
         $this->assertFalse($user->fresh()->is_private);
     }
+
+    public function test_profile_returns_live_audience_counts_not_stale_columns(): void
+    {
+        $owner = User::factory()->create(['is_private' => false]);
+        $viewer = User::factory()->create(['is_private' => false]);
+
+        // Create the follow directly in the graph and deliberately leave the denormalized
+        // counter column stale, as drift does in production.
+        DB::table('user_follows')->insert([
+            'follower_id' => $viewer->id,
+            'following_id' => $owner->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $owner->forceFill(['followers_count' => 0])->saveQuietly();
+
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . $owner->handle . '?userId=' . $viewer->id);
+
+        $response->assertStatus(200);
+        $this->assertSame(1, $response->json('followers_count'));
+        $this->assertSame(1, $response->json('stats.followers'));
+
+        $postsResponse = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . $owner->handle . '/posts?userId=' . $viewer->id);
+
+        $postsResponse->assertStatus(200);
+        $this->assertSame(1, $postsResponse->json('stats.followers'));
+    }
+
+    public function test_following_endpoint_reports_is_following_by_me(): void
+    {
+        $owner = User::factory()->create(['is_private' => false]);
+        $viewer = User::factory()->create(['is_private' => false]);
+        $target = User::factory()->create(['is_private' => false]);
+
+        DB::table('user_follows')->insert([
+            'follower_id' => $owner->id,
+            'following_id' => $target->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // Viewer does not follow the target yet → server-truth false.
+        $response = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . $owner->handle . '/following?userId=' . $viewer->id);
+
+        $response->assertStatus(200);
+        $this->assertTrue(
+            collect($response->json('items'))->contains(
+                fn ($item) => $item['id'] === $target->id && $item['is_following_by_me'] === false
+            )
+        );
+
+        // Viewer follows the target → server-truth true.
+        DB::table('user_follows')->insert([
+            'follower_id' => $viewer->id,
+            'following_id' => $target->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response2 = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/' . $owner->handle . '/following?userId=' . $viewer->id);
+
+        $response2->assertStatus(200);
+        $this->assertTrue(
+            collect($response2->json('items'))->contains(
+                fn ($item) => $item['id'] === $target->id && $item['is_following_by_me'] === true
+            )
+        );
+    }
+
+    public function test_followers_and_following_accept_case_insensitive_handle(): void
+    {
+        $owner = User::factory()->create([
+            'is_private' => false,
+            'handle' => 'StevieG@NewtonAbbot',
+        ]);
+        $viewer = User::factory()->create(['is_private' => false]);
+
+        DB::table('user_follows')->insert([
+            'follower_id' => $viewer->id,
+            'following_id' => $owner->id,
+            'status' => 'accepted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // Lowercased handle must resolve (case-insensitive like the profile endpoint) instead of 400.
+        $followers = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/stevieg@newtonabbot/followers?userId=' . $viewer->id);
+        $followers->assertStatus(200);
+        $this->assertCount(1, $followers->json('items'));
+
+        $following = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/users/barry@anytown/following?userId=' . $viewer->id);
+        $following->assertStatus(404);
+    }
 }

@@ -75,6 +75,11 @@ class UserController extends Controller
         }
 
         $userData = $user->toArray();
+        // Counts are also denormalized on the row; recompute from the follow graph so every
+        // surface (header, Audience card, connections modal) agrees and stale columns self-heal.
+        $liveCounts = $user->syncLiveAudienceCounts();
+        $userData['followers_count'] = $liveCounts['followers'];
+        $userData['following_count'] = $liveCounts['following'];
         $viewerId = $viewer instanceof User ? $viewer->id : null;
         $userData['is_following'] = $viewerId
             ? DB::table('user_follows')
@@ -227,14 +232,19 @@ class UserController extends Controller
     public function followers(Request $request, string $handle): JsonResponse
     {
         $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
+            'handle' => 'required|string'
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $user = User::where('handle', $handle)->firstOrFail();
+        // Resolve case-insensitively (like show()/posts()) so a handle with different casing
+        // never 400s the client into a stale local-state fallback.
+        $user = $this->resolveProfileUser($handle);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
         $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
         $limit = (int) $request->get('limit', 20);
 
@@ -254,6 +264,8 @@ class UserController extends Controller
         }
 
         $followers = $query->limit($limit)->get();
+        $viewer = Auth::user();
+        $this->attachIsFollowingByMe($followers, $viewer instanceof User ? $viewer : null);
 
         $last = $followers->last();
         $nextCursor = null;
@@ -391,14 +403,19 @@ class UserController extends Controller
     public function following(Request $request, string $handle): JsonResponse
     {
         $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
+            'handle' => 'required|string'
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $user = User::where('handle', $handle)->firstOrFail();
+        // Resolve case-insensitively (like show()/posts()) so a handle with different casing
+        // never 400s the client into a stale local-state fallback.
+        $user = $this->resolveProfileUser($handle);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
         $cursorState = $this->decodeConnectionsCursor((string) $request->get('cursor', ''));
         $limit = (int) $request->get('limit', 20);
 
@@ -418,6 +435,8 @@ class UserController extends Controller
         }
 
         $following = $query->limit($limit)->get();
+        $viewer = Auth::user();
+        $this->attachIsFollowingByMe($following, $viewer instanceof User ? $viewer : null);
 
         $last = $following->last();
         $nextCursor = null;
@@ -474,6 +493,35 @@ class UserController extends Controller
             return User::find($userId);
         }
         return null;
+    }
+
+    /**
+     * Annotate a page of users with whether the viewer follows each of them.
+     *
+     * Connection lists must reflect the server follow graph (not client-local state) so the
+     * Follow/Following button matches reality after refresh / on another device.
+     */
+    private function attachIsFollowingByMe($users, ?User $viewer): void
+    {
+        if (!$viewer || $users->isEmpty()) {
+            foreach ($users as $u) {
+                $u->setAttribute('is_following_by_me', false);
+            }
+            return;
+        }
+
+        $ids = $users->pluck('id')->filter()->all();
+        $followed = DB::table('user_follows')
+            ->where('follower_id', $viewer->id)
+            ->whereIn('following_id', $ids)
+            ->where('status', 'accepted')
+            ->pluck('following_id')
+            ->all();
+        $followedSet = array_flip($followed);
+
+        foreach ($users as $u) {
+            $u->setAttribute('is_following_by_me', isset($followedSet[$u->id]));
+        }
     }
 
     /**
@@ -640,6 +688,7 @@ class UserController extends Controller
 
         $likesTotal = (int) $user->posts()->sum('likes_count');
         $viewsTotal = (int) $user->posts()->sum('views_count');
+        $liveCounts = $user->syncLiveAudienceCounts();
 
         return [
             'posts' => $transformedPosts,
@@ -656,8 +705,8 @@ class UserController extends Controller
                 'likes_count' => $likesTotal,
                 'views' => $viewsTotal,
                 'views_count' => $viewsTotal,
-                'followers' => (int) $user->followers_count,
-                'following' => (int) $user->following_count,
+                'followers' => $liveCounts['followers'],
+                'following' => $liveCounts['following'],
             ],
         ];
     }

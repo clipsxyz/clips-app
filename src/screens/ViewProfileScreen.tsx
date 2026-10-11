@@ -478,6 +478,12 @@ const result = await followOrRequest({
                     avatarUrl: typeof item?.avatar_url === 'string' ? item.avatar_url : item?.avatarUrl,
                     isRequested: !!(item?.is_requested || item?.has_pending_request || item?.isRequested),
                     isPrivate: !!(item?.isPrivate || item?.is_private) || isProfilePrivate(handleRaw),
+                    isFollowing:
+                        typeof item?.is_following_by_me === 'boolean'
+                            ? item.is_following_by_me
+                            : typeof item?.is_following === 'boolean'
+                              ? item.is_following
+                              : undefined,
                 };
             })
             .filter(Boolean) as ConnectionRow[];
@@ -508,6 +514,7 @@ const result = await followOrRequest({
                 avatarUrl: avatarUrl || getAvatarForHandle(handleNoAt) || undefined,
                 isPrivate: isProfilePrivate(handleNoAt),
                 isRequested: !!(user?.handle && hasPendingFollowRequest(user.handle, handleNoAt)),
+                isFollowing: viewerFollowsSet.has(normalizeHandleKey(handleNoAt)),
             });
         };
 
@@ -569,7 +576,10 @@ const result = await followOrRequest({
                 const followPatch: Record<string, boolean> = {};
                 const requestPatch: Record<string, boolean> = {};
                 normalized.forEach((entry) => {
-                    followPatch[entry.handleNoAt] = followedSet.has(normalizeHandleKey(entry.handleNoAt));
+                    followPatch[entry.handleNoAt] =
+                        typeof entry.isFollowing === 'boolean'
+                            ? entry.isFollowing
+                            : followedSet.has(normalizeHandleKey(entry.handleNoAt));
                     requestPatch[entry.handleNoAt] = !!entry.isRequested;
                 });
                 setConnectionFollowMap((prev) => ({ ...prev, ...followPatch }));
@@ -596,7 +606,10 @@ const result = await followOrRequest({
             const followPatch: Record<string, boolean> = {};
             const requestPatch: Record<string, boolean> = {};
             normalized.forEach((entry) => {
-                followPatch[entry.handleNoAt] = followedSet.has(normalizeHandleKey(entry.handleNoAt));
+                followPatch[entry.handleNoAt] =
+                    typeof entry.isFollowing === 'boolean'
+                        ? entry.isFollowing
+                        : followedSet.has(normalizeHandleKey(entry.handleNoAt));
                 requestPatch[entry.handleNoAt] = !!entry.isRequested;
             });
             setConnectionFollowMap((prev) => ({ ...prev, ...followPatch }));
@@ -641,6 +654,17 @@ const result = await followOrRequest({
                         (Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))),
                     );
                     const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
+                    const followPatch: Record<string, boolean> = {};
+                    const requestPatch: Record<string, boolean> = {};
+                    normalized.forEach((entry) => {
+                        followPatch[entry.handleNoAt] =
+                            typeof entry.isFollowing === 'boolean'
+                                ? entry.isFollowing
+                                : followedSet.has(normalizeHandleKey(entry.handleNoAt));
+                        requestPatch[entry.handleNoAt] = !!entry.isRequested;
+                    });
+                    setConnectionFollowMap((prev) => ({ ...prev, ...followPatch }));
+                    setConnectionRequestMap((prev) => ({ ...prev, ...requestPatch }));
                     if (tab === 'followers') {
                         setFollowersList(normalized);
                         setFollowersHasMore(false);

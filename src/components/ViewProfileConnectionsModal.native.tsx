@@ -27,6 +27,7 @@ export type ConnectionRow = {
     avatarUrl?: string;
     isRequested?: boolean;
     isPrivate?: boolean;
+    isFollowing?: boolean;
     suggestionReason?: string;
     mutualCount?: number;
 };
@@ -182,7 +183,9 @@ export default function ViewProfileConnectionsModal({
                             const isOwnRow =
                                 !!viewerKey &&
                                 key.replace(/^@/, '').trim().toLowerCase() === viewerKey;
-                            const following = followMap[key] === true;
+                            const following =
+                                followMap[key] === true ||
+                                (followMap[key] == null && row.isFollowing === true);
                             const requested = requestMap[key] === true || !!row.isRequested;
                             const actionLoading = !!actionLoadingMap[key];
                             return (

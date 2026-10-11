@@ -54,7 +54,7 @@ import { buildFilterInfo, type InstantFilterName } from '../utils/instantFilters
 import { getUnreadTotal } from '../api/messages';
 import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, fetchFollowers, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
@@ -367,22 +367,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             setCollections(userCollections);
             setDrafts(userDrafts);
 
-            let followers = user?.followers_count ?? 0;
+            let followers = typeof user?.followers_count === 'number' ? user.followers_count : 0;
+            let following = typeof user?.following_count === 'number' ? user.following_count : 0;
             if (isLaravelApiEnabled() && user?.handle) {
                 try {
-                    const res: any = await fetchFollowers(user.handle, 0, 20);
-                    const list = Array.isArray(res?.data) ? res.data : res?.followers ?? res?.items ?? [];
-                    if (typeof res?.total === 'number') followers = res.total;
-                    else if (typeof user?.followers_count === 'number') followers = user.followers_count;
-                    else followers = list.length;
+                    // Single authoritative source: live counts from /auth/me (backend recomputes
+                    // from the follow graph). This keeps the header and the Audience card in sync.
+                    const me = await getCurrentUser();
+                    const counts = mapLaravelUserToAppFields(me as Record<string, unknown>);
+                    if (typeof counts.followers_count === 'number') followers = counts.followers_count;
+                    if (typeof counts.following_count === 'number') following = counts.following_count;
                 } catch (err) {
-                    console.error('Error loading followers count:', err);
-                    followers = user?.followers_count ?? 0;
+                    console.error('Error loading audience counts:', err);
+                    if (followingHandles.length > 0) following = followingHandles.length;
                 }
+            } else if (followingHandles.length > 0) {
+                following = followingHandles.length;
             }
             setAudienceCounts({
                 followers,
-                following: followingHandles.length,
+                following,
             });
         } catch (error) {
             console.error('Error loading profile extras:', error);
@@ -1105,6 +1109,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     onPressCover={() => navigation.navigate('ProfileCover')}
                     openCardRequest={openPassportCardRequest}
                     onOpenCardRequestHandled={() => setOpenPassportCardRequest(null)}
+                    followersCount={audienceCounts.followers}
+                    followingCount={audienceCounts.following}
                 />
             </View>
 

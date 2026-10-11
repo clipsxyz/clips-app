@@ -19,6 +19,8 @@ import { buildShareablePostUrl } from '../utils/shareUrls';
 import { useAuth } from '../context/Auth';
 import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
 import { appendMessage } from '../api/messages';
+import * as apiClient from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { ox } from '../constants/nativeOpticalScale';
 import Avatar from './Avatar.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
@@ -58,11 +60,35 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
         }
 
         setLoadingFollowed(true);
-        getFollowedUsers(String(user.id))
-            .then((handles) => setFollowedHandles(handles))
-            .catch(() => setFollowedHandles([]))
-            .finally(() => setLoadingFollowed(false));
-    }, [isOpen, user?.id]);
+        const setFromLocal = () => {
+            getFollowedUsers(String(user.id))
+                .then(setFollowedHandles)
+                .catch(() => setFollowedHandles([]))
+                .finally(() => setLoadingFollowed(false));
+        };
+
+        if (isLaravelApiEnabled() && user?.handle) {
+            apiClient
+                .fetchFollowing(user.handle, 0, 100)
+                .then((res) => {
+                    const apiHandles = (res?.items ?? [])
+                        .map((u: any) => u?.handle ?? u?.user_handle ?? String(u))
+                        .filter(Boolean) as string[];
+                    return getFollowedUsers(String(user.id)).then((localHandles) => {
+                        const merged = [...new Set([...apiHandles, ...localHandles])];
+                        setFollowedHandles(merged.length ? merged : apiHandles);
+                    });
+                })
+                .catch((err) => {
+                    console.warn('FeedShareModal: fetchFollowing failed, using local list', err);
+                    setFromLocal();
+                    return;
+                })
+                .finally(() => setLoadingFollowed(false));
+        } else {
+            setFromLocal();
+        }
+    }, [isOpen, user?.id, user?.handle]);
 
     const filteredHandles = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
@@ -210,7 +236,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                         ) : filteredHandles.length === 0 ? (
                             <Text style={styles.emptyText}>No people you follow yet</Text>
                         ) : (
-                            filteredHandles.slice(0, 12).map((handle) => (
+                            filteredHandles.map((handle) => (
                                 <TouchableOpacity
                                     key={handle}
                                     style={[styles.followRow, sendingTo === handle && styles.followRowSending]}

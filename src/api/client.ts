@@ -652,6 +652,10 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         is_private: apiUser.is_private as boolean | undefined,
         emailDigestEnabled: (apiUser.email_digest_enabled ?? apiUser.emailDigestEnabled) as boolean | undefined,
         is_verified: apiUser.is_verified as boolean | undefined,
+        followers_count:
+            typeof apiUser.followers_count === 'number' ? (apiUser.followers_count as number) : undefined,
+        following_count:
+            typeof apiUser.following_count === 'number' ? (apiUser.following_count as number) : undefined,
         facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
     };

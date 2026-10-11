@@ -17,7 +17,7 @@ import { useAuth } from '../context/Auth';
 import Avatar from './Avatar.native';
 import Flag from './Flag.native';
 import PlaceAutocompleteField from './PlaceAutocompleteField.native';
-import { fetchFollowers, mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
+import { fetchFollowers, fetchFollowing, mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
 import { getFollowedUsers } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
@@ -66,6 +66,12 @@ type Props = {
     /** Open a card from the parent (e.g. tapping the passport header name). */
     openCardRequest?: ProfileCardId | null;
     onOpenCardRequestHandled?: () => void;
+    /**
+     * Canonical audience counts from the profile header (live server values). When supplied they
+     * win over the locally-fetched list lengths so every surface agrees.
+     */
+    followersCount?: number;
+    followingCount?: number;
 };
 
 const FLAG_ISO_OPTIONS = ['IE', 'GB', 'FR', 'ES', 'IT', 'DE', 'PT', 'NL', 'US', 'CA', 'BR', 'MX', 'AU', 'NZ', 'JP', 'CN', 'IN', 'PK', 'ZA', 'KE', 'EG', 'TR', 'RU', 'UA'];
@@ -235,6 +241,8 @@ export default function ProfilePassportCards({
     onPressCover,
     openCardRequest,
     onOpenCardRequestHandled,
+    followersCount: followersCountProp,
+    followingCount: followingCountProp,
 }: Props) {
     const { user, login } = useAuth();
     const { width: screenWidth } = useWindowDimensions();
@@ -362,11 +370,34 @@ export default function ProfilePassportCards({
     );
 
     const refreshFollowing = useCallback(async () => {
-        if (!user?.id) return;
-        const handles = await getFollowedUsers(String(user.id));
+        if (!user?.id) {
+            setFollowingCount(0);
+            setFollowingList([]);
+            return;
+        }
+        const localHandles = await getFollowedUsers(String(user.id)).catch(() => [] as string[]);
+        let handles: string[] = localHandles;
+        if (user?.handle && isLaravelApiEnabled()) {
+            try {
+                // Live source of truth from /api/users/{handle}/following (mirrors the DB, not
+                // AsyncStorage), merged with the local cache so offline rows still appear.
+                const res: any = await fetchFollowing(user.handle, 0, 200);
+                const list = Array.isArray(res?.items)
+                    ? res.items
+                    : res?.data ?? res?.following ?? [];
+                const apiHandles = list
+                    .map((u: any) => u?.handle ?? u?.user_handle ?? String(u))
+                    .filter(Boolean);
+                if (apiHandles.length > 0) {
+                    handles = [...new Set([...apiHandles, ...localHandles])];
+                }
+            } catch (err) {
+                console.warn('refreshFollowing: live fetch failed, using local list', err);
+            }
+        }
         setFollowingList(handles);
         setFollowingCount(handles.length);
-    }, [user?.id]);
+    }, [user?.id, user?.handle]);
 
     const refreshFollowers = useCallback(async () => {
         if (!user?.handle || !isLaravelApiEnabled()) {
@@ -376,7 +407,9 @@ export default function ProfilePassportCards({
         }
         try {
             const res: any = await fetchFollowers(user.handle, 0, 200);
-            const list = Array.isArray(res?.data) ? res.data : res?.followers ?? [];
+            const list = Array.isArray(res?.items)
+                ? res.items
+                : res?.data ?? res?.followers ?? [];
             const handles = list
                 .map((u: any) => u?.handle ?? u?.user_handle ?? String(u))
                 .filter(Boolean);
@@ -1009,7 +1042,7 @@ export default function ProfilePassportCards({
                         cardId="followers"
                         icon="people-outline"
                         title="Followers"
-                        count={followersCount}
+                        count={followersCountProp ?? followersCount}
                         cardWidth={cardWidth}
                         onPress={() => setSelectedCard('followers')}
                     />
@@ -1017,7 +1050,7 @@ export default function ProfilePassportCards({
                         cardId="following"
                         icon="person-add-outline"
                         title="Following"
-                        count={followingCount}
+                        count={followingCountProp ?? followingCount}
                         cardWidth={cardWidth}
                         onPress={() => setSelectedCard('following')}
                     />
