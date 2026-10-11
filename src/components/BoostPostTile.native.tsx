@@ -108,6 +108,8 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         overflow: 'hidden',
         backgroundColor: '#111827',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     fill: {
         width: '100%',

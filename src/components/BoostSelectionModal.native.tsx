@@ -291,7 +291,7 @@ export default function BoostSelectionModal({
                                         onSlidingComplete={(value) => {
                                             commitSliderRadius(Number(value));
                                         }}
-                                        minimumTrackTintColor="#0EA5E9"
+                                        minimumTrackTintColor="#d91b5c"
                                         maximumTrackTintColor="rgba(148,163,184,0.45)"
                                         thumbTintColor="#FFFFFF"
                                     />
@@ -380,7 +380,7 @@ export default function BoostSelectionModal({
                         </Text>
                         {estimateLoading && (
                             <View style={styles.loadingRow}>
-                                <ActivityIndicator size="small" color="#38BDF8" />
+                                <ActivityIndicator size="small" color="#f472b6" />
                                 <Text style={styles.footerMuted}>Calculating audience...</Text>
                             </View>
                         )}
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     },
     sheet: {
         maxHeight: '92%',
-        backgroundColor: '#0B0B0F',
+        backgroundColor: 'rgba(13,12,18,0.98)',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         overflow: 'hidden',
@@ -442,23 +442,23 @@ const styles = StyleSheet.create({
     stepText: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     chip: {
-        color: '#BAE6FD',
+        color: '#FBCFE8',
         fontSize: 11,
         paddingHorizontal: 10,
         paddingVertical: 5,
-        borderRadius: 999,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: 'rgba(56,189,248,0.35)',
-        backgroundColor: 'rgba(14,165,233,0.12)',
+        borderColor: 'rgba(217,27,92,0.55)',
+        backgroundColor: 'rgba(217,27,92,0.2)',
     },
     body: { flexGrow: 0 },
     bodyContent: { padding: 14, gap: 10 },
     card: {
-        borderRadius: 14,
+        borderRadius: 12,
         padding: 12,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: 'rgba(255,255,255,0.03)',
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         gap: 8,
     },
     sectionTitle: { color: '#F3F4F6', fontSize: 16, fontWeight: '700' },
@@ -471,18 +471,18 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         paddingVertical: 10,
-        borderRadius: 10,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: 'rgba(255,255,255,0.04)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
     },
     smallBtnText: { color: '#E5E7EB', fontWeight: '700' },
     input: {
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
-        backgroundColor: '#0F1117',
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         color: '#F3F4F6',
-        borderRadius: 10,
+        borderRadius: 12,
         paddingHorizontal: 12,
         paddingVertical: 10,
         fontSize: 14,
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-start',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.16)',
-        borderRadius: 8,
+        borderRadius: 12,
         paddingHorizontal: 10,
         paddingVertical: 6,
     },
@@ -499,14 +499,14 @@ const styles = StyleSheet.create({
     durationBtn: {
         paddingHorizontal: 12,
         paddingVertical: 8,
-        borderRadius: 10,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
-        backgroundColor: 'rgba(255,255,255,0.03)',
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
     },
-    durationBtnActive: { borderColor: '#38BDF8', backgroundColor: 'rgba(56,189,248,0.16)' },
+    durationBtnActive: { borderColor: 'rgba(217,27,92,0.55)', backgroundColor: 'rgba(217,27,92,0.2)' },
     durationBtnText: { color: '#D1D5DB', fontWeight: '600' },
-    durationBtnTextActive: { color: '#E0F2FE' },
+    durationBtnTextActive: { color: '#FBCFE8' },
     footer: {
         paddingHorizontal: 16,
         paddingTop: 10,
@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
         width: 84,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 10,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
         paddingVertical: 12,
@@ -536,8 +536,8 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 10,
-        backgroundColor: '#0EA5E9',
+        borderRadius: 12,
+        backgroundColor: '#d91b5c',
         paddingVertical: 12,
     },
     primaryBtnDisabled: { opacity: 0.45 },

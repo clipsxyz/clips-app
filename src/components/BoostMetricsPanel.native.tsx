@@ -103,7 +103,7 @@ export default function BoostMetricsPanel({ post, isOpen }: Props) {
 
     return (
         <LinearGradient
-            colors={['#3b82f6', '#a855f7']}
+            colors={['#d91b5c', '#f472b6']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.gradientBorder}
@@ -111,7 +111,7 @@ export default function BoostMetricsPanel({ post, isOpen }: Props) {
             <View style={styles.inner}>
                 <View style={styles.headerRow}>
                     <View style={styles.titleRow}>
-                        <Icon name="trending-up" size={20} color="#7A8AF0" />
+                        <Icon name="trending-up" size={20} color="#f472b6" />
                         <Text style={styles.title}>Boost Metrics</Text>
                     </View>
                     <View style={styles.metaRow}>
@@ -144,11 +144,11 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         padding: 2,
     },
-    inner: {
-        backgroundColor: '#111827',
-        borderRadius: 10,
-        padding: 14,
-    },
+    inner: {
+        backgroundColor: 'rgba(17,24,39,0.9)',
+        borderRadius: 10,
+        padding: 14,
+    },
     headerRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
@@ -170,15 +170,15 @@ const styles = StyleSheet.create({
         alignItems: 'flex-end',
         gap: 4,
     },
-    feedTypePill: {
-        color: '#A5B4FC',
-        fontSize: 11,
-        fontWeight: '600',
-        backgroundColor: 'rgba(99, 102, 241, 0.25)',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 999,
-    },
+    feedTypePill: {
+        color: '#FBCFE8',
+        fontSize: 11,
+        fontWeight: '600',
+        backgroundColor: 'rgba(217, 27, 92, 0.2)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 16,
+    },
     timeLeft: {
         color: '#9CA3AF',
         fontSize: 11,

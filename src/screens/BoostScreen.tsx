@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { chipActiveMagenta, chipActiveMagentaText, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
@@ -358,8 +358,10 @@ const styles = StyleSheet.create({
     filterChip: {
         paddingHorizontal: ox(10),
         paddingVertical: ox(6),
-        borderRadius: ox(999),
-        ...glassSurface,
+        borderRadius: ox(16),
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     filterChipActive: {
         ...chipActiveMagenta,
@@ -375,8 +377,10 @@ const styles = StyleSheet.create({
     smallChip: {
         paddingHorizontal: ox(9),
         paddingVertical: ox(5),
-        borderRadius: ox(999),
-        ...glassSurface,
+        borderRadius: ox(16),
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     smallChipActive: {
         ...chipActiveMagenta,
@@ -409,7 +413,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(24),
         paddingVertical: ox(12),
         backgroundColor: '#d91b5c',
-        borderRadius: ox(8),
+        borderRadius: ox(12),
     },
     createButtonText: {
         color: '#FFFFFF',
@@ -447,7 +451,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         paddingHorizontal: ox(8),
         paddingVertical: ox(4),
-        borderRadius: ox(999),
+        borderRadius: ox(8),
         overflow: 'hidden',
         color: '#FFFFFF',
         backgroundColor: 'rgba(0,0,0,0.72)',
@@ -457,7 +461,7 @@ const styles = StyleSheet.create({
     insightsBtn: {
         marginTop: ox(6),
         minHeight: ox(28),
-        borderRadius: ox(8),
+        borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(56, 189, 248, 0.35)',
         backgroundColor: 'rgba(14, 165, 233, 0.12)',
