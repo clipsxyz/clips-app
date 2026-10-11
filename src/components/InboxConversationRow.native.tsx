@@ -179,6 +179,7 @@ export default function InboxConversationRow({
                             src={avatarSrc}
                             name={title}
                             size={ox(44)}
+                            cornerRadius={ox(12)}
                             hasStory={!isGroup && !!conv.hasUnviewedStories}
                         />
                     </TouchableOpacity>
@@ -236,20 +237,22 @@ const styles = StyleSheet.create({
     wrap: {
         overflow: 'hidden',
         marginHorizontal: ox(8),
-        marginBottom: ox(2),
-        borderRadius: ox(8),
+        marginBottom: ox(6),
+        borderRadius: ox(12),
     },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: ox(6),
+        paddingHorizontal: ox(10),
         paddingVertical: ox(10),
-        backgroundColor: '#070a12',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
         gap: ox(10),
-        borderRadius: ox(8),
+        borderRadius: ox(12),
     },
     rowUnread: {
-        backgroundColor: 'rgba(255,255,255,0.04)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
     },
     avatarWrap: {
         flexShrink: 0,
@@ -272,7 +275,7 @@ const styles = StyleSheet.create({
     },
     subtitle: {
         fontSize: ox(11),
-        color: '#6B7280',
+        color: '#9CA3AF',
         marginTop: 1,
     },
     requestBadge: {
@@ -292,8 +295,10 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
     },
     unreadBadge: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: ox(10),
+        backgroundColor: 'rgba(16, 185, 129, 0.20)',
+        borderWidth: 1,
+        borderColor: 'rgba(16, 185, 129, 0.45)',
+        borderRadius: ox(12),
         minWidth: ox(18),
         height: ox(18),
         justifyContent: 'center',
@@ -301,7 +306,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(6),
     },
     unreadBadgeText: {
-        color: '#111827',
+        color: '#34D399',
         fontSize: ox(10),
         fontWeight: '700',
     },

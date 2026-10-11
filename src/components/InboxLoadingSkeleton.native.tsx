@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { ox } from '../constants/nativeOpticalScale';
 
-const TAB_WIDTHS = [72, 58, 52, 62] as const;
+const TAB_WIDTHS = [92, 76, 72, 82] as const;
 const ROW_TITLE_WIDTHS = ['48%', '36%', '58%', '42%', '51%', '33%', '45%'] as const;
 const ROW_SUB_WIDTHS = ['68%', '54%', '72%', '40%', '61%', '55%', '47%'] as const;
 
@@ -135,15 +135,13 @@ const styles = StyleSheet.create({
     tabs: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: ox(10),
+        gap: ox(6),
         paddingHorizontal: ox(12),
         paddingBottom: ox(10),
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
     tabBone: {
-        height: ox(12),
-        borderRadius: ox(6),
+        height: ox(33),
+        borderRadius: ox(16),
     },
     tabBoneActive: {
         backgroundColor: 'rgba(255,255,255,0.18)',
@@ -155,14 +153,19 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         marginHorizontal: ox(8),
-        paddingHorizontal: ox(6),
-        paddingVertical: ox(12),
+        marginBottom: ox(6),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(10),
         gap: ox(10),
+        borderRadius: ox(12),
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     avatar: {
         width: ox(44),
         height: ox(44),
-        borderRadius: ox(22),
+        borderRadius: ox(12),
     },
     content: {
         flex: 1,

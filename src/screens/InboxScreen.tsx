@@ -1015,6 +1015,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                         src={dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
                                         name={item.fromHandle}
                                         size={ox(40)}
+                                        cornerRadius={ox(12)}
                                     />
                                     <View style={styles.notificationTypeBadge}>
                                         <Icon
@@ -1511,26 +1512,30 @@ const styles = StyleSheet.create({
     },
     tabs: {
         flexDirection: 'row',
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
-        marginBottom: ox(8),
+        gap: ox(6),
+        paddingHorizontal: ox(12),
+        marginBottom: ox(10),
         backgroundColor: 'transparent',
     },
     tab: {
-        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: ox(6),
+        paddingVertical: ox(8),
+        paddingHorizontal: ox(12),
         gap: ox(4),
+        borderRadius: ox(16),
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     tabActive: {
-        borderBottomWidth: 2,
-        borderBottomColor: '#FFFFFF',
+        backgroundColor: 'rgba(255, 255, 255, 0.22)',
+        borderColor: '#FFFFFF',
     },
     tabText: {
         fontSize: ox(12),
-        color: '#6B7280',
+        color: '#D1D5DB',
         fontWeight: '500',
     },
     tabTextActive: {
@@ -1538,8 +1543,10 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     badge: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: ox(10),
+        backgroundColor: 'rgba(16, 185, 129, 0.20)',
+        borderWidth: 1,
+        borderColor: 'rgba(16, 185, 129, 0.45)',
+        borderRadius: ox(12),
         minWidth: ox(16),
         height: ox(16),
         justifyContent: 'center',
@@ -1547,35 +1554,39 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(4),
     },
     badgeText: {
-        color: '#111827',
+        color: '#34D399',
         fontSize: ox(9),
         fontWeight: '700',
     },
     item: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: ox(8),
+        paddingHorizontal: ox(10),
         paddingVertical: ox(12),
-        marginHorizontal: ox(4),
-        borderRadius: ox(8),
+        marginHorizontal: ox(6),
+        marginBottom: ox(6),
+        borderRadius: ox(12),
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
         gap: ox(10),
         position: 'relative',
     },
     itemUnread: {
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
         borderLeftWidth: 4,
-        borderLeftColor: '#FFFFFF',
+        borderLeftColor: '#10B981',
     },
     insightThumb: {
         width: ox(48),
         height: ox(48),
-        borderRadius: ox(10),
+        borderRadius: ox(12),
         backgroundColor: '#1F2937',
     },
     insightThumbText: {
         width: ox(48),
         height: ox(48),
-        borderRadius: ox(10),
+        borderRadius: ox(12),
         backgroundColor: '#1e3a5f',
         padding: ox(5),
         justifyContent: 'center',
@@ -1589,7 +1600,7 @@ const styles = StyleSheet.create({
     insightThumbFallback: {
         width: ox(48),
         height: ox(48),
-        borderRadius: ox(10),
+        borderRadius: ox(12),
         backgroundColor: '#1F2937',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1661,7 +1672,7 @@ const styles = StyleSheet.create({
     },
     itemMessage: {
         fontSize: ox(11),
-        color: '#6B7280',
+        color: '#9CA3AF',
         marginTop: 1,
     },
     itemMessageLink: {
@@ -1750,7 +1761,7 @@ const styles = StyleSheet.create({
     storyThumbWrap: {
         width: ox(44),
         height: ox(56),
-        borderRadius: ox(6),
+        borderRadius: ox(12),
         overflow: 'hidden',
         backgroundColor: '#111827',
     },
@@ -1779,17 +1790,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     messageFilterChip: {
-        borderRadius: ox(999),
+        borderRadius: ox(16),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
-        backgroundColor: 'rgba(0,0,0,0.4)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         paddingHorizontal: ox(10),
         paddingVertical: ox(6),
         minHeight: ox(32),
         justifyContent: 'center',
     },
     messageFilterChipActive: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'rgba(255, 255, 255, 0.22)',
         borderColor: '#FFFFFF',
     },
     messageFilterChipText: {
@@ -1798,16 +1809,16 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     messageFilterChipTextActive: {
-        color: '#111827',
+        color: '#FFFFFF',
     },
     unreadDot: {
         position: 'absolute',
-        right: ox(10),
-        top: ox(18),
+        right: ox(12),
+        top: ox(20),
         width: 8,
         height: 8,
         borderRadius: ox(4),
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#10B981',
     },
     unreadBadge: {
         backgroundColor: '#FFFFFF',
