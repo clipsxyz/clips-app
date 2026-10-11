@@ -8,6 +8,7 @@ import {
     StyleSheet,
     Text,
     TextInput,
+    ToastAndroid,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -17,9 +18,10 @@ import type { Post } from '../types';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import { useAuth } from '../context/Auth';
 import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
+import { appendMessage } from '../api/messages';
+import { ox } from '../constants/nativeOpticalScale';
 import Avatar from './Avatar.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
 
 type Props = {
     post: Post | null;
@@ -35,6 +37,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
     const [followedHandles, setFollowedHandles] = useState<string[]>([]);
     const [loadingFollowed, setLoadingFollowed] = useState(false);
     const [regeneratingToken, setRegeneratingToken] = useState(false);
+    const [sendingTo, setSendingTo] = useState<string | null>(null);
 
     const shareUrl = useMemo(() => (post ? buildShareablePostUrl(post) : ''), [post]);
     const shareMessage = useMemo(() => {
@@ -96,6 +99,30 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
             console.error('Error sharing:', err);
         } finally {
             onClose();
+        }
+    };
+
+    const sendPostToUser = async (recipientHandle: string) => {
+        if (!post?.id || !user?.handle || sendingTo) return;
+        setSendingTo(recipientHandle);
+        try {
+            await appendMessage(user.handle, recipientHandle, {
+                text: shareUrl,
+                sourcePostId: String(post.id),
+            });
+            await recordShare();
+            const confirmation = `Sent to ${recipientHandle.split('@')[0] || recipientHandle}`;
+            if (Platform.OS === 'android') {
+                ToastAndroid.show(confirmation, ToastAndroid.SHORT);
+            } else {
+                Alert.alert(confirmation);
+            }
+            onClose();
+        } catch (err) {
+            console.error('Send post to DM failed:', err);
+            Alert.alert('Could not send', 'Please try again.');
+        } finally {
+            setSendingTo(null);
         }
     };
 
@@ -186,14 +213,16 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                             filteredHandles.slice(0, 12).map((handle) => (
                                 <TouchableOpacity
                                     key={handle}
-                                    style={styles.followRow}
+                                    style={[styles.followRow, sendingTo === handle && styles.followRowSending]}
                                     activeOpacity={0.85}
-                                    onPress={handleShareSystem}
+                                    disabled={sendingTo !== null}
+                                    onPress={() => void sendPostToUser(handle)}
                                 >
                                     <Avatar
                                         src={undefined}
                                         name={handle.split('@')[0] || 'User'}
                                         size="sm"
+                                        cornerRadius={ox(12)}
                                     />
                                     <Text style={styles.followHandle} numberOfLines={1}>
                                         {handle}
@@ -304,12 +333,12 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     shareModalShell: {
-        backgroundColor: PASSPORT_ABYSS,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderTopLeftRadius: 12,
+        borderTopRightRadius: 12,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
         overflow: 'hidden',
         maxHeight: '85%',
     },
@@ -323,7 +352,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingBottom: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
     },
     modalTitle: {
         fontSize: 18,
@@ -338,10 +367,10 @@ const styles = StyleSheet.create({
         gap: 10,
         paddingHorizontal: 14,
         paddingVertical: 10,
-        borderRadius: 14,
-        backgroundColor: 'rgba(31,41,55,0.7)',
+        borderRadius: 12,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
         borderWidth: 1,
-        borderColor: 'rgba(55,65,81,0.85)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     searchInput: {
         flex: 1,
@@ -351,12 +380,11 @@ const styles = StyleSheet.create({
     },
     followListWrap: {
         minHeight: 92,
-        borderRadius: 14,
-        backgroundColor: 'rgba(17,24,39,0.55)',
-        borderWidth: 1,
-        borderColor: 'rgba(55,65,81,0.75)',
-        paddingVertical: 10,
-        paddingHorizontal: 10,
+        borderRadius: 12,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        paddingVertical: 0,
+        paddingHorizontal: 0,
     },
     emptyText: {
         paddingVertical: 18,
@@ -370,8 +398,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 10,
         paddingVertical: 10,
-        paddingHorizontal: 8,
-        borderRadius: 10,
+        paddingHorizontal: 12,
+        marginBottom: 8,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
+    },
+    followRowSending: {
+        opacity: 0.6,
     },
     followHandle: {
         flex: 1,
@@ -448,7 +483,7 @@ const styles = StyleSheet.create({
         padding: 16,
         gap: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
     },
     shareOptionText: {
         fontSize: 16,
