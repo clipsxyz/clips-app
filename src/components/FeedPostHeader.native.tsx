@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import LinearGradient from 'react-native-linear-gradient';
@@ -11,12 +11,7 @@ import { useFollowState } from '../hooks/useFollowState';
 import { useHasActiveStories } from '../hooks/useHasActiveStories';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
-import FeedPostMetaCarousel from './FeedPostMetaCarousel.native';
-import {
-    buildPostMetadataItems,
-    getPostSocialSourceLabel,
-    getReclipDisplay,
-} from '../utils/feedPostMeta';
+import { getPostSocialSourceLabel, getReclipDisplay } from '../utils/feedPostMeta';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
@@ -75,14 +70,6 @@ export default function FeedPostHeader({
     const { isReclip, displayHandle, profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
     const safeHandle = String(displayHandle || post.userHandle || 'User').trim() || 'User';
     const safeProfileHandle = String(profileHandle || post.userHandle || safeHandle).trim() || safeHandle;
-    const metadataItems = useMemo(() => {
-        const items = buildPostMetadataItems(post);
-        const hasLocation = items.some((item) => item.type === 'location');
-        if (hasLocation) return items;
-        const raw = String(post.locationLabel || '').trim();
-        const label = raw && raw !== 'Unknown Location' ? raw : 'Gazetteer';
-        return [{ label, type: 'location' as const }, ...items];
-    }, [post]);
     const socialSourceLabel = getPostSocialSourceLabel(post);
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const viewer = viewerHandle ?? user?.handle;
@@ -236,9 +223,6 @@ export default function FeedPostHeader({
                 ) : null}
             </View>
             <View style={styles.right}>
-                {metadataItems.length > 0 ? (
-                    <FeedPostMetaCarousel items={metadataItems} overlaid={isOverlaid} align="right" />
-                ) : null}
                 {onOverflowPress ? (
                     <GesturePressable
                         onPress={onOverflowPress}

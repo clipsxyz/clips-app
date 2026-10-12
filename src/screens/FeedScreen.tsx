@@ -176,6 +176,7 @@ import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedPostTagRow from '../components/FeedPostTagRow.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
+import FeedPostNewsTicker from '../components/FeedPostNewsTicker.native';
 import { fullscreenSlideIndexForCarousel } from '../utils/feedImageFullscreen';
 import { setImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
@@ -1321,6 +1322,7 @@ const FeedCard = React.memo(function FeedCard({
                     onShowTaggedUsers={() => onOpenTaggedSheet?.()}
                     menuAnchorRef={profileMenuAnchorRef}
                 />
+                <FeedPostNewsTicker post={post} carouselIndex={carouselIndex} />
                 <View style={styles.textOnlyEngagementRow}>
                     <View style={styles.textOnlyEngagementLeft}>
                         <FeedEngagementRow
@@ -1475,6 +1477,10 @@ const FeedCard = React.memo(function FeedCard({
                                 </Pressable>
                             ) : null}
                         </View>
+                    ) : null}
+
+                    {hasFeedMedia ? (
+                        <FeedPostNewsTicker post={post} carouselIndex={carouselIndex} />
                     ) : null}
 
                     {hasFeedMedia ? (
