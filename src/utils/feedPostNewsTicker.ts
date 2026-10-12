@@ -3,13 +3,28 @@ import { timeAgo } from './timeAgo';
 
 export type NewsTickerBadgeTone = 'emerald' | 'yellow';
 
+export type NewsTickerSegmentKind =
+    | 'location'
+    | 'venue'
+    | 'landmark'
+    | 'tagged'
+    | 'author'
+    | 'timestamp'
+    | 'views';
+
+export type NewsTickerSegment = {
+    kind: NewsTickerSegmentKind;
+    text: string;
+};
+
 export type FeedPostNewsTickerData = {
     badgeLabel?: string;
     badgeTone?: NewsTickerBadgeTone;
     content: string;
+    segments: NewsTickerSegment[];
 };
 
-const GAP = '  •  ';
+export const TICKER_SEGMENT_GAP = '  •  ';
 
 function resolvedLocation(post: Post): string {
     const raw = String(post.locationLabel || (post as any).location || '').trim();
@@ -21,15 +36,15 @@ function ownerHandle(post: Post): string {
     return String(post.originalUserHandle || post.userHandle || 'User').trim() || 'User';
 }
 
-function timestampSegment(post: Post): string {
+function timestampSegment(post: Post): NewsTickerSegment | null {
     const ts =
         post.createdAt != null
             ? typeof post.createdAt === 'string'
                 ? parseInt(post.createdAt, 10)
                 : post.createdAt
             : null;
-    if (typeof ts !== 'number' || Number.isNaN(ts)) return '';
-    return `🕒 ${timeAgo(ts)}`;
+    if (typeof ts !== 'number' || Number.isNaN(ts)) return null;
+    return { kind: 'timestamp', text: timeAgo(ts) };
 }
 
 export function tickerSlideCount(post: Post): number {
@@ -69,29 +84,20 @@ export function formatViewCount(count: number): string {
 }
 
 export function formatViews(count: number): string {
-    if (!Number.isFinite(count) || count <= 0) return '0';
-    if (count >= 1_000_000) {
-        const value = count / 1_000_000;
-        return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}M`;
-    }
-    if (count >= 1_000) {
-        const value = count / 1_000;
-        return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}K`;
-    }
-    return String(Math.round(count));
+    return formatViewCount(count);
 }
 
-function venueSegment(post: Post): string {
+function venueSegment(post: Post): NewsTickerSegment | null {
     const venue = String(post.venue || (post as any).venueName || '').trim();
-    return venue.length > 0 ? `🏢 ${venue}` : '';
+    return venue.length > 0 ? { kind: 'venue', text: venue } : null;
 }
 
-function landmarkSegment(post: Post): string {
+function landmarkSegment(post: Post): NewsTickerSegment | null {
     const landmark = String(post.landmark || '').trim();
-    return landmark.length > 0 ? `🏛️ ${landmark}` : '';
+    return landmark.length > 0 ? { kind: 'landmark', text: landmark } : null;
 }
 
-function taggedSegment(post: Post): string {
+function taggedSegment(post: Post): NewsTickerSegment | null {
     const tagged = Array.isArray((post as any).tagged_users)
         ? (post as any).tagged_users
         : Array.isArray(post.taggedUsers)
@@ -102,24 +108,18 @@ function taggedSegment(post: Post): string {
     const handles = tagged
         .map((h: any) => String(h || '').trim())
         .filter((h: string) => h.length > 0);
-    if (handles.length === 0) return '';
+    if (handles.length === 0) return null;
     const display = handles.slice(0, 3).map((h: string) => (h.startsWith('@') ? h : `@${h}`)).join(', ');
-    return handles.length > 3 ? `👤 ${display}, +${handles.length - 3}` : `👤 ${display}`;
+    const text = handles.length > 3 ? `${display}, +${handles.length - 3}` : display;
+    return { kind: 'tagged', text };
 }
 
-function statsSegment(post: Post): string {
-    const parts: string[] = [];
-    if (post.stats?.likes > 0) parts.push(`${post.stats.likes} likes`);
-    if (post.stats?.comments > 0) parts.push(`${post.stats.comments} comments`);
-    return parts.join(' • ');
-}
-
-function viewsSegment(post: Post): string {
+function viewsSegment(post: Post): NewsTickerSegment {
     const views = Number(
         post.stats?.views ?? (post as any).views_count ?? (post as any).views ?? (post as any).view_count,
     );
-    if (!Number.isFinite(views) || views < 0) return `👁️ 0 Views`;
-    return `👁️ ${formatViews(views)} Views`;
+    if (!Number.isFinite(views) || views < 0) return { kind: 'views', text: '0 Views' };
+    return { kind: 'views', text: `${formatViews(views)} Views` };
 }
 
 export function buildFeedPostNewsTicker(
@@ -127,23 +127,23 @@ export function buildFeedPostNewsTicker(
     carouselIndex = 0,
     slideCount?: number,
 ): FeedPostNewsTickerData {
-    const total = slideCount ?? tickerSlideCount(post);
-    const clippedIndex = Math.min(Math.max(0, carouselIndex), Math.max(total - 1, 0));
+    void carouselIndex;
+    void slideCount;
 
-
-    const segments = [
-`📍 ${resolvedLocation(post)}`,
+    const segments: NewsTickerSegment[] = [
+        { kind: 'location', text: resolvedLocation(post) },
         venueSegment(post),
         landmarkSegment(post),
         taggedSegment(post),
-        `Posted by @${ownerHandle(post)}`,
+        { kind: 'author', text: `Posted by @${ownerHandle(post)}` },
         timestampSegment(post),
         viewsSegment(post),
-    ].filter(Boolean);
+    ].filter((segment): segment is NewsTickerSegment => segment != null);
 
     return {
         badgeLabel: '',
         badgeTone: 'emerald',
-        content: segments.join(GAP),
+        content: segments.map((segment) => segment.text).join(TICKER_SEGMENT_GAP),
+        segments,
     };
 }

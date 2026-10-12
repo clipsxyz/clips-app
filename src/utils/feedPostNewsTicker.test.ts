@@ -53,7 +53,8 @@ describe('feedPostNewsTicker', () => {
         });
         const data = buildFeedPostNewsTicker(post, 0, 1);
 
-        expect(data.content).toContain('📍 Dublin');
+        expect(data.content).toContain('Dublin');
+        expect(data.content).not.toContain('📍');
     });
 
     it('text posts without location get a POST badge', () => {
@@ -92,7 +93,7 @@ describe('feedPostNewsTicker', () => {
         });
         const data = buildFeedPostNewsTicker(post);
         const content = data.content;
-        const loc = content.indexOf('📍 Dublin');
+        const loc = content.indexOf('Dublin');
         const posted = content.indexOf('Posted by @Gazetteer@Dublin');
         const ts = content.indexOf('1 hour ago');
         const views = content.indexOf('2.8K Views');
@@ -100,6 +101,29 @@ describe('feedPostNewsTicker', () => {
         expect(loc).toBeLessThan(posted);
         expect(posted).toBeLessThan(ts);
         expect(ts).toBeLessThan(views);
+    });
+
+    it('emits structured segments with no emoji characters', () => {
+        const post = makePost({
+            mediaType: 'image',
+            locationLabel: 'Dublin',
+            venue: 'Vicar Street',
+            landmark: 'SNL',
+            taggedUsers: ['@alice'],
+            createdAt: Date.now(),
+            stats: { likes: 0, views: 120, comments: 0, shares: 0, reclips: 0 },
+        });
+        const data = buildFeedPostNewsTicker(post);
+        expect(data.segments.map((s) => s.kind)).toEqual([
+            'location',
+            'venue',
+            'landmark',
+            'tagged',
+            'author',
+            'timestamp',
+            'views',
+        ]);
+        expect(data.content).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
     });
 
     it('formats view counts compactly', () => {
@@ -115,7 +139,7 @@ describe('feedPostNewsTicker', () => {
     it('falls back to Gazetteer for missing location', () => {
         const post = makePost({ mediaType: 'image' });
         const data = buildFeedPostNewsTicker(post);
-        expect(data.content).toContain('📍 Gazetteer');
+        expect(data.content).toContain('Gazetteer');
     });
 
     it('resolves slide type from mediaItems when mediaType is absent', () => {
