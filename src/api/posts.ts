@@ -3645,7 +3645,7 @@ export async function createPost(
   userNational?: string,
   stickers?: StickerOverlay[],
   templateId?: string,
-  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; posterUrl?: string; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Multiple media items for carousel, including text-only clips
+  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; posterUrl?: string; width?: number; height?: number; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Multiple media items for carousel, including text-only clips
   bannerText?: string, // News ticker banner text
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only posts
   taggedUsers?: string[], // Array of user handles tagged in the post
@@ -3663,6 +3663,10 @@ export async function createPost(
   placeId?: string,
   latitude?: number,
   longitude?: number,
+  /** Intrinsic pixel size of the primary media, from the picker/composer. Forwarded so the
+   *  server persists width/height/aspect_ratio and the feed lays the card out on first paint. */
+  mediaWidth?: number,
+  mediaHeight?: number,
 ): Promise<Post> {
   const currentUserAccountType = (() => {
     try {
@@ -3699,6 +3703,8 @@ export async function createPost(
         socialFormat: socialFormat || undefined,
         mediaUrl: imageUrl || undefined,
         mediaType: mediaType || undefined,
+        width: mediaWidth ?? mediaItems?.[0]?.width,
+        height: mediaHeight ?? mediaItems?.[0]?.height,
         videoFrameMode: videoFrameMode || undefined,
         videoPosterUrl: videoPosterUrl || undefined,
         caption: caption || undefined,
@@ -3759,6 +3765,10 @@ export async function createPost(
         videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
         videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
         mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
+        // Keep the known intrinsic size on the locally-cached post so the just-created card
+        // also lays out at its final height without waiting for `onLoad`.
+        width: transformed.width ?? mediaWidth ?? mediaItems?.[0]?.width,
+        height: transformed.height ?? mediaHeight ?? mediaItems?.[0]?.height,
       };
       (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
 

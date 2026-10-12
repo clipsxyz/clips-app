@@ -43,21 +43,24 @@ export const RATIO_FEED_MAX_PORTRAIT = 4 / 5; // 0.8
 /**
  * Ratio used before any dimension is known.
  *
- * 16:9, NOT 1:1.
+ * Portrait-biased 4:5, NOT 16:9 and NOT 1:1.
  *
- * A square default is the worst possible guess for feed video. It over-allocates height for
- * a landscape clip (a 390pt-wide card becomes a 390pt-tall box for content that only needs
- * ~219pt) and under-allocates for a portrait clip. Either way the box disagrees with the
- * video, and any surplus shows up as a black gap above the engagement row until `onLoad`
- * corrects it.
+ * This app is portrait-first: the overwhelming majority of feed clips are vertical phone
+ * recordings. Portrait content is clamped UP to {@link RATIO_FEED_MAX_PORTRAIT} (4:5) by
+ * {@link feedAspectRatio}, so seeding the fallback at exactly 4:5 means a true 9:16 clip
+ * already renders at its final height on the first paint -- there is nothing left for
+ * `onLoad` to correct, and the card cannot jump.
  *
- * 16:9 is the standard feed fallback: it is the orientation most camera and screen-capture
- * video defaults to, and it keeps the worst-case gap small. Because `FeedPostSkeleton`
- * imports this same constant, the placeholder and the settled card stay identical, so
- * correcting to the true ratio on load is a reflow of one component rather than a jump
- * between two differently-sized boxes.
+ * The old 16:9 fallback was the worst case for this: a vertical clip first painted in a
+ * short ~219pt box, then expanded to ~487pt the moment the video mounted and reported
+ * `naturalSize`. That is the layout snap this constant removes. A landscape clip is now the
+ * only shape that re-measures, and it is the rare case here.
+ *
+ * Because `FeedPostSkeleton` imports this same constant, the placeholder and the settled
+ * card stay identical, so any residual correction is a reflow of one component rather than
+ * a jump between two differently-sized boxes.
  */
-export const RATIO_FALLBACK = RATIO_LANDSCAPE_16_9;
+export const RATIO_FALLBACK = RATIO_FEED_MAX_PORTRAIT;
 
 /** Guard rails so malformed metadata cannot produce a 0px or infinite box. */
 const MIN_SANE_RATIO = 0.1; // ~1:10, absurdly tall

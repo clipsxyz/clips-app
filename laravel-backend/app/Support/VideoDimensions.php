@@ -7,16 +7,18 @@ use Illuminate\Http\UploadedFile;
 /**
  * Reads intrinsic pixel dimensions out of media container metadata.
  *
- * WHY NOT FFMPEG OR GETID3
- * ------------------------
- * Neither is available in this deployment:
+ * WHY A HAND-ROLLED PARSER, WITH AN FFPROBE FALLBACK
+ * --------------------------------------------------
+ * Neither `ext-ffmpeg` nor `getid3` is available:
  *   - `ext-ffmpeg` is not installed (only `exif` and `gd` are).
- *   - There is no `ffprobe`/`ffmpeg` binary on the host PATH.
  *   - `getid3/getid3` is not in composer.json or vendor/.
+ *   - Adding a composer package would only work on hosts that can reach packagist.
  *
- * Adding a composer package would also mean the extractor only works on hosts that can
- * reach packagist, and this app's dev environment has not been able to install new
- * packages. So this is a hand-rolled ISO-BMFF box walker.
+ * So the primary path is a dependency-free ISO-BMFF box walker below. It reads a bounded
+ * header window, so it cannot see an MP4 whose `moov` atom is at the end of the file -- which
+ * is common for phone and guest uploads. When it fails, {@see fromFfprobe()} shells out to
+ * `ffprobe` if the host ships one (this dev/prod host does), recovering those files with the
+ * correct rotation-aware display size instead of leaving width/height NULL in the database.
  *
  * SCOPE, HONESTLY STATED
  * ----------------------
@@ -113,13 +115,93 @@ final class VideoDimensions
             $bytes = fread($handle, $window);
 
             if ($bytes === false || strlen($bytes) < 8) {
-                return null;
+                return self::fromFfprobe($path);
             }
 
-            return self::fromBytes($bytes);
+            return self::fromBytes($bytes) ?? self::fromFfprobe($path);
         } finally {
             fclose($handle);
         }
+    }
+
+    /**
+     * Fallback extractor using the `ffprobe` binary when available.
+     *
+     * The hand-rolled box walker only reads {@see HEADER_WINDOW} bytes from the front of the
+     * file, so it misses any MP4 whose `moov` atom sits at the END of the file -- which is
+     * exactly what untruncated phone / guest uploads and fragmented MP4s do. Those returned
+     * null, leaving width/height NULL in the database and forcing the feed to reflow on load.
+     *
+     * ffprobe reads the container properly regardless of moov position and also reports the
+     * rotation-corrected display size, so it is the authoritative fallback. It is only used
+     * when the dependency-free walker fails, keeping the fast, zero-dependency path primary
+     * on hosts that do not ship ffprobe (the walker's `?? null` keeps those working).
+     *
+     * @return array{width: int, height: int}|null
+     */
+    public static function fromFfprobe(string $path): ?array
+    {
+        if ($path === '' || ! is_file($path) || ! is_readable($path)) {
+            return null;
+        }
+
+        $binary = self::ffprobeBinary();
+
+        if ($binary === null) {
+            return null;
+        }
+
+        $cmd = sprintf(
+            '%s -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 %s 2>/dev/null',
+            escapeshellarg($binary),
+            escapeshellarg($path),
+        );
+
+        $output = shell_exec($cmd);
+
+        if (! is_string($output) || trim($output) === '') {
+            return null;
+        }
+
+        // ffprobe emits "width,height" on the first line.
+        $parts = explode(',', trim(explode("\n", trim($output))[0]));
+
+        if (count($parts) < 2) {
+            return null;
+        }
+
+        $width = (int) $parts[0];
+        $height = (int) $parts[1];
+
+        if (! self::isSane($width) || ! self::isSane($height)) {
+            return null;
+        }
+
+        return ['width' => $width, 'height' => $height];
+    }
+
+    /**
+     * Locate an `ffprobe` binary, or null when the host does not ship one.
+     */
+    private static function ffprobeBinary(): ?string
+    {
+        foreach (['ffprobe', '/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe'] as $bin) {
+            if ($bin === 'ffprobe') {
+                $found = trim((string) shell_exec('command -v ffprobe 2>/dev/null'));
+
+                if ($found !== '') {
+                    return $found;
+                }
+
+                continue;
+            }
+
+            if (is_file($bin) && is_executable($bin)) {
+                return $bin;
+            }
+        }
+
+        return null;
     }
 
     /**

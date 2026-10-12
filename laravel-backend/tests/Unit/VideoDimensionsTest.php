@@ -109,6 +109,43 @@ class VideoDimensionsTest extends TestCase
         unlink($tmp);
     }
 
+    public function test_from_ffprobe_returns_null_for_missing_files(): void
+    {
+        $this->assertNull(VideoDimensions::fromFfprobe('/no/such/file.mp4'));
+        $this->assertNull(VideoDimensions::fromFfprobe(''));
+    }
+
+    /**
+     * The box walker only reads a bounded header window, so an MP4 whose `moov` atom sits
+     * past that window (phone / guest uploads) is invisible to it. `fromFfprobe` is the
+     * fallback that recovers those. This generates a real clip with ffmpeg so the assertion
+     * covers the actual container, not a synthetic one; it is skipped where ffmpeg is absent.
+     */
+    public function test_from_ffprobe_reads_a_real_container(): void
+    {
+        $ffmpeg = trim((string) shell_exec('command -v ffmpeg 2>/dev/null'));
+        if ($ffmpeg === '') {
+            $this->markTestSkipped('ffmpeg not available on this host');
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'vd').'.mp4';
+        $cmd = sprintf(
+            '%s -v error -f lavfi -i testsrc=size=90x160:rate=1 -frames:v 1 -pix_fmt yuv420p %s -y 2>/dev/null',
+            escapeshellarg($ffmpeg),
+            escapeshellarg($tmp),
+        );
+        shell_exec($cmd);
+
+        if (! is_file($tmp) || filesize($tmp) < 8) {
+            unlink($tmp);
+            $this->markTestSkipped('could not synthesise an MP4 fixture');
+        }
+
+        $this->assertSame(['width' => 90, 'height' => 160], VideoDimensions::fromFfprobe($tmp));
+
+        unlink($tmp);
+    }
+
     /**
      * Build a minimal but structurally valid MP4: ftyp + moov(mvhd, trak(tkhd, mdia(hdlr, …))).
      *

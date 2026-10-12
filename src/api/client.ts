@@ -865,6 +865,10 @@ export async function createPost(postData: {
     socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
+    /** Intrinsic pixel dimensions of the primary media. Sent so the server stores them and
+     *  the feed can lay the card out at its final size on first paint (no reflow on load). */
+    width?: number;
+    height?: number;
     videoFrameMode?: 'crop' | 'fit' | 'original';
     videoPosterUrl?: string;
     caption?: string;
@@ -872,7 +876,7 @@ export async function createPost(postData: {
     bannerText?: string;
     stickers?: any[];
     templateId?: string;
-    mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: any }>;
+    mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; width?: number; height?: number; posterUrl?: string; text?: string; textStyle?: any }>;
     textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
     taggedUsers?: string[];
     videoCaptionsEnabled?: boolean;

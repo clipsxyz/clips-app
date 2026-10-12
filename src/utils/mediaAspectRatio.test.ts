@@ -102,7 +102,7 @@ describe('feedAspectRatio', () => {
         expect(feedAspectRatio(4, 3)).toBeCloseTo(4 / 3, 6);
     });
 
-    it('falls back to square for unknown dimensions, never to 0 or NaN', () => {
+    it('falls back to the portrait default for unknown dimensions, never to 0 or NaN', () => {
         expect(feedAspectRatio(undefined, undefined)).toBe(RATIO_FALLBACK);
         expect(feedAspectRatio(0, 0)).toBe(RATIO_FALLBACK);
         expect(feedAspectRatio(NaN, 1080)).toBe(RATIO_FALLBACK);
@@ -257,7 +257,7 @@ describe('no black bars: wrapper and inner frame must agree', () => {
         const wrapper = wrapperHeight(undefined, undefined);
         const inner = innerFrameHeight(undefined, undefined, wrapper);
 
-        expect(wrapper).toBe(Math.round(CARD_WIDTH / RATIO_FALLBACK)); // 16:9 default
+        expect(wrapper).toBe(Math.round(CARD_WIDTH / RATIO_FALLBACK)); // 4:5 portrait default
         expect(inner).toBe(wrapper);
         expect(wrapper).toBeGreaterThan(0);
     });
@@ -408,21 +408,28 @@ describe('resolveIntrinsicSize: wrapper and frame must never disagree', () => {
     });
 });
 
-describe('RATIO_FALLBACK is 16:9, not 1:1', () => {
-    it('defaults an unknown-dimension video to 16:9', () => {
-        expect(RATIO_FALLBACK).toBeCloseTo(16 / 9, 6);
-        expect(feedAspectRatio(undefined, undefined)).toBeCloseTo(16 / 9, 6);
-        expect(feedMediaHeight(W, undefined, undefined)).toBeCloseTo(390 / (16 / 9), 5);
+describe('RATIO_FALLBACK is portrait 4:5, not 16:9 or 1:1', () => {
+    it('defaults an unknown-dimension video to the portrait feed ceiling', () => {
+        expect(RATIO_FALLBACK).toBeCloseTo(4 / 5, 6);
+        expect(feedAspectRatio(undefined, undefined)).toBeCloseTo(4 / 5, 6);
+        expect(feedMediaHeight(W, undefined, undefined)).toBeCloseTo(390 / (4 / 5), 5);
     });
 
-    it('a square default would have over-allocated height for landscape content', () => {
-        // Documents WHY the fallback changed: at 390pt wide, 1:1 reserves 390pt for content
-        // that needs ~219pt, which is the surplus that rendered as black.
-        const squareHeight = W;
-        const landscapeHeight = Math.round(W / (16 / 9));
+    it('seeds portrait clips at their final clamped height so onLoad cannot shift them', () => {
+        // A true 9:16 source clamps to 4:5. With the fallback also at 4:5, the pre-load box
+        // already equals the settled box -- the exact no-shift guarantee this constant buys.
+        const settled = feedMediaHeight(W, 1080, 1920);
+        const fallback = feedMediaHeight(W, undefined, undefined);
+        expect(fallback).toBeCloseTo(settled, 6);
+    });
 
-        expect(squareHeight - landscapeHeight).toBe(171);
-        expect(feedMediaHeight(W, undefined, undefined)).toBeLessThan(squareHeight);
+    it('never under-allocates for portrait the way the old 16:9 default did', () => {
+        const fallbackHeight = Math.round(W / (4 / 5));
+        const oldLandscapeHeight = Math.round(W / (16 / 9));
+
+        // The portrait default is taller than the old landscape one, matching the dominant
+        // portrait content instead of reserving a short landscape strip for it.
+        expect(fallbackHeight).toBeGreaterThan(oldLandscapeHeight);
     });
 
     it('still lets portrait sit between 4/5 and 9/16 as required', () => {
