@@ -83,7 +83,7 @@ describe('feedPostNewsTicker', () => {
         });
         const data = buildFeedPostNewsTicker(post);
         expect(data.content).toContain('1.3K Views');
-        expect(data.content).toContain('42 likes');
+        expect(data.content).not.toContain('42 likes');
         expect(data.content).not.toContain('0 comments');
     });
 
@@ -101,12 +101,10 @@ describe('feedPostNewsTicker', () => {
         const posted = content.indexOf('Posted by @Gazetteer@Dublin');
         const ts = content.indexOf('1 hour ago');
         const views = content.indexOf('2.8K Views');
-        const likes = content.indexOf('42 likes');
         expect(loc).toBeGreaterThanOrEqual(0);
         expect(loc).toBeLessThan(posted);
         expect(posted).toBeLessThan(ts);
         expect(ts).toBeLessThan(views);
-        expect(views).toBeLessThan(likes);
     });
 
     it('formats view counts compactly', () => {

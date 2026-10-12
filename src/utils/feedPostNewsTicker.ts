@@ -12,12 +12,13 @@ export type FeedPostNewsTickerData = {
 const GAP = '   •   ';
 
 function resolvedLocation(post: Post): string {
-    const raw = String(post.locationLabel || '').trim();
-    return raw && raw !== 'Unknown Location' ? raw : 'Gazetteer';
+    const raw = String(post.locationLabel || (post as any).location || '').trim();
+    if (raw && raw !== 'Unknown Location') return raw;
+    return 'Gazetteer';
 }
 
 function hasRealLocation(post: Post): boolean {
-    const raw = String(post.locationLabel || '').trim();
+    const raw = String(post.locationLabel || (post as any).location || '').trim();
     return raw.length > 0 && raw !== 'Unknown Location';
 }
 
@@ -72,15 +73,58 @@ export function formatViewCount(count: number): string {
     return String(Math.round(count));
 }
 
-function viewsSegment(post: Post): string {
-    return post.stats.views > 0 ? `${formatViewCount(post.stats.views)} Views` : '';
+export function formatViews(count: number): string {
+    if (!Number.isFinite(count) || count <= 0) return '0';
+    if (count >= 1_000_000) {
+        const value = count / 1_000_000;
+        return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}M`;
+    }
+    if (count >= 1_000) {
+        const value = count / 1_000;
+        return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}K`;
+    }
+    return String(Math.round(count));
+}
+
+function venueSegment(post: Post): string {
+    const venue = String(post.venue || (post as any).venueName || '').trim();
+    return venue.length > 0 ? `at ${venue}` : '';
+}
+
+function landmarkSegment(post: Post): string {
+    const landmark = String(post.landmark || '').trim();
+    return landmark.length > 0 ? `near ${landmark}` : '';
+}
+
+function taggedSegment(post: Post): string {
+    const tagged = Array.isArray((post as any).tagged_users)
+        ? (post as any).tagged_users
+        : Array.isArray(post.taggedUsers)
+          ? post.taggedUsers
+          : Array.isArray((post as any).mentions)
+            ? (post as any).mentions
+            : [];
+    const handles = tagged
+        .map((h: any) => String(h || '').trim())
+        .filter((h: string) => h.length > 0);
+    if (handles.length === 0) return '';
+    const display = handles.slice(0, 3).map((h: string) => (h.startsWith('@') ? h : `@${h}`)).join(', ');
+    return handles.length > 3 ? `w/ ${display}, +${handles.length - 3}` : `w/ ${display}`;
 }
 
 function statsSegment(post: Post): string {
     const parts: string[] = [];
-    if (post.stats.likes > 0) parts.push(`${post.stats.likes} likes`);
-    if (post.stats.comments > 0) parts.push(`${post.stats.comments} comments`);
+    if (post.stats?.likes > 0) parts.push(`${post.stats.likes} likes`);
+    if (post.stats?.comments > 0) parts.push(`${post.stats.comments} comments`);
     return parts.join(' • ');
+}
+
+function viewsSegment(post: Post): string {
+    const views = Number(
+        post.stats?.views ?? (post as any).views_count ?? (post as any).views ?? (post as any).view_count,
+    );
+    if (!Number.isFinite(views) || views <= 0) return '';
+    return `${formatViews(views)} Views`;
 }
 
 export function buildFeedPostNewsTicker(
@@ -107,10 +151,12 @@ export function buildFeedPostNewsTicker(
 
     const segments = [
         `📍 ${resolvedLocation(post)}`,
+        venueSegment(post),
+        landmarkSegment(post),
+        taggedSegment(post),
         `Posted by @${ownerHandle(post)}`,
         timestampSegment(post),
         viewsSegment(post),
-        statsSegment(post),
     ].filter(Boolean);
 
     return {

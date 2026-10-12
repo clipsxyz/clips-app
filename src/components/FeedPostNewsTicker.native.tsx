@@ -1,14 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import type { Post } from '../types';
 import { buildFeedPostNewsTicker, tickerSlideCount, type NewsTickerBadgeTone } from '../utils/feedPostNewsTicker';
 
 const TICKER_HEIGHT = 34;
-const COPIES = 8;
-/** Base duration for a full (one-copy) scroll, scaled by the measured copy width. */
-const MS_PER_POINT = 34;
-const MIN_LOOP_MS = 11000;
+const GAP = '   •   ';
 
 type Props = {
     post: Post;
@@ -29,17 +26,17 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
     const data = buildFeedPostNewsTicker(post, carouselIndex, slideCount >= 2 ? slideCount : undefined);
     const { background } = badgeColors(data.badgeTone);
 
-    const anim = React.useRef(new Animated.Value(0)).current;
+    const anim = useRef(new Animated.Value(0)).current;
     const [textWidth, setTextWidth] = useState(0);
 
     useEffect(() => {
-        if (textWidth <= 0 || COPIES <= 0) return;
-        const period = textWidth / COPIES;
-        if (period <= 0) return;
+        if (textWidth <= 0) return;
+        const duration = Math.max(10000, textWidth * 36);
+        anim.setValue(0);
         const loop = Animated.loop(
             Animated.timing(anim, {
                 toValue: 1,
-                duration: Math.max(MIN_LOOP_MS, period * MS_PER_POINT),
+                duration,
                 easing: Easing.linear,
                 useNativeDriver: true,
             }),
@@ -48,11 +45,12 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
         return () => loop.stop();
     }, [anim, textWidth, data.content]);
 
-    const tiled = data.content + GAP;
     const translateX = anim.interpolate({
         inputRange: [0, 1],
-        outputRange: [0, -(textWidth / COPIES)],
+        outputRange: [0, -textWidth],
     });
+
+    const marquee = `${data.content}${GAP}${data.content}`;
 
     return (
         <LinearGradient
@@ -72,14 +70,12 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
                     onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}
                     style={[styles.text, { transform: [{ translateX }] }]}
                 >
-                    {tiled.repeat(COPIES)}
+                    {marquee}
                 </Animated.Text>
             </View>
         </LinearGradient>
     );
 }
-
-const GAP = '   •   ';
 
 const styles = StyleSheet.create({
     bar: {
