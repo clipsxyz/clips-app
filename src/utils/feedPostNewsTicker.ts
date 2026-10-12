@@ -90,12 +90,10 @@ export function buildFeedPostNewsTicker(
             label: `CAROUSEL ${clippedIndex + 1}/${total}`,
             tone: 'yellow',
         });
-    } else if (type === 'video') {
-        badges.push({ label: 'LIVE', tone: 'emerald' });
     } else if (hasRealLocation(post)) {
         badges.push({ label: 'LOCATION', tone: 'emerald' });
     } else {
-        badges.push({ label: 'UPDATE', tone: 'yellow' });
+        badges.push({ label: 'POST', tone: 'emerald' });
     }
 
     const badge = badges[0];

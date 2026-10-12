@@ -41,10 +41,10 @@ describe('feedPostNewsTicker', () => {
         expect(data.badgeLabel).not.toBe('LIVE');
     });
 
-    it('single video posts get a LIVE badge and MP4 media type', () => {
+    it('single video posts get a POST badge and MP4 media type', () => {
         const post = makePost({ mediaType: 'video' });
         const data = buildFeedPostNewsTicker(post, 0, 1);
-        expect(data.badgeLabel).toBe('LIVE');
+        expect(data.badgeLabel).toBe('POST');
         expect(data.badgeTone).toBe('emerald');
         expect(data.content).toContain('MP4 video');
     });
@@ -61,11 +61,11 @@ describe('feedPostNewsTicker', () => {
         expect(data.content).toContain('📍 Dublin');
     });
 
-    it('text posts without location get an UPDATE badge and Text post type', () => {
+    it('text posts without location get a POST badge and Text post type', () => {
         const post = makePost({});
         const data = buildFeedPostNewsTicker(post, 0, 0);
-        expect(data.badgeLabel).toBe('UPDATE');
-        expect(data.badgeTone).toBe('yellow');
+        expect(data.badgeLabel).toBe('POST');
+        expect(data.badgeTone).toBe('emerald');
         expect(data.content).toContain('Text post');
         expect(data.content).toContain('Posted by @Gazetteer@Dublin');
     });
@@ -92,7 +92,7 @@ describe('feedPostNewsTicker', () => {
     it('falls back to Gazetteer for missing location', () => {
         const post = makePost({ mediaType: 'image' });
         const data = buildFeedPostNewsTicker(post);
-        expect(data.badgeLabel).toBe('UPDATE');
+        expect(data.badgeLabel).toBe('POST');
         expect(data.content).toContain('📍 Gazetteer');
     });
 
