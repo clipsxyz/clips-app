@@ -66,7 +66,6 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
             </View>
             <View style={styles.track}>
                 <Animated.Text
-                    numberOfLines={1}
                     onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}
                     style={[styles.text, { transform: [{ translateX }] }]}
                 >
@@ -115,5 +114,8 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         letterSpacing: 0.3,
         paddingLeft: 4,
+        flexShrink: 0,
+        flexDirection: 'row',
+        flexWrap: 'nowrap',
     },
 });

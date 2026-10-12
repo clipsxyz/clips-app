@@ -88,12 +88,12 @@ export function formatViews(count: number): string {
 
 function venueSegment(post: Post): string {
     const venue = String(post.venue || (post as any).venueName || '').trim();
-    return venue.length > 0 ? `at ${venue}` : '';
+    return venue.length > 0 ? `🏢 VENUE: ${venue}` : '';
 }
 
 function landmarkSegment(post: Post): string {
     const landmark = String(post.landmark || '').trim();
-    return landmark.length > 0 ? `near ${landmark}` : '';
+    return landmark.length > 0 ? `🏛️ LANDMARK: ${landmark}` : '';
 }
 
 function taggedSegment(post: Post): string {
@@ -109,7 +109,7 @@ function taggedSegment(post: Post): string {
         .filter((h: string) => h.length > 0);
     if (handles.length === 0) return '';
     const display = handles.slice(0, 3).map((h: string) => (h.startsWith('@') ? h : `@${h}`)).join(', ');
-    return handles.length > 3 ? `w/ ${display}, +${handles.length - 3}` : `w/ ${display}`;
+    return handles.length > 3 ? `👤 ${display}, +${handles.length - 3}` : `👤 ${display}`;
 }
 
 function statsSegment(post: Post): string {
@@ -123,8 +123,8 @@ function viewsSegment(post: Post): string {
     const views = Number(
         post.stats?.views ?? (post as any).views_count ?? (post as any).views ?? (post as any).view_count,
     );
-    if (!Number.isFinite(views) || views <= 0) return '';
-    return `${formatViews(views)} Views`;
+    if (!Number.isFinite(views) || views < 0) return '👁️ 0 Views';
+    return `👁️ ${formatViews(views)} Views`;
 }
 
 export function buildFeedPostNewsTicker(
