@@ -5,7 +5,6 @@ import type { Post } from '../types';
 import { buildFeedPostNewsTicker, tickerSlideCount, type NewsTickerBadgeTone } from '../utils/feedPostNewsTicker';
 
 const TICKER_HEIGHT = 34;
-const GAP = '   •   ';
 
 type Props = {
     post: Post;
@@ -31,8 +30,8 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
 
     useEffect(() => {
         if (textWidth <= 0) return;
-        const duration = Math.max(10000, textWidth * 36);
         anim.setValue(0);
+        const duration = Math.max(10000, textWidth * 36);
         const loop = Animated.loop(
             Animated.timing(anim, {
                 toValue: 1,
@@ -50,38 +49,42 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
         outputRange: [0, -textWidth],
     });
 
-    const marquee = `${data.content}${GAP}${data.content}`;
+    const tickerText = `${data.content}   •   ${data.content}`;
 
     return (
-        <LinearGradient
-            colors={['rgba(15, 15, 18, 0.92)', 'rgba(15, 15, 18, 0.72)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.bar}
-        >
+        <View style={styles.scrim}>
+            <LinearGradient
+                colors={['rgba(15, 15, 18, 0.92)', 'rgba(15, 15, 18, 0.72)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={StyleSheet.absoluteFill}
+            />
             <View style={[styles.badge, { backgroundColor: background }]}>
                 <Text style={styles.badgeText} numberOfLines={1}>
                     {data.badgeLabel}
                 </Text>
             </View>
-            <View style={styles.track}>
-                <Animated.View
-                    style={[styles.animatedRow, { transform: [{ translateX }] }]}
+            <Animated.View
+                style={[
+                    styles.animatedTrack,
+                    {
+                        transform: [{ translateX }],
+                    },
+                ]}
+            >
+                <Text
+                    style={styles.tickerText}
+                    onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}
                 >
-                    <Text
-                        onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}
-                        style={styles.text}
-                    >
-                        {marquee}
-                    </Text>
-                </Animated.View>
-            </View>
-        </LinearGradient>
+                    {tickerText}
+                </Text>
+            </Animated.View>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    bar: {
+    scrim: {
         height: TICKER_HEIGHT,
         minHeight: TICKER_HEIGHT,
         flexDirection: 'row',
@@ -89,6 +92,8 @@ const styles = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: 'rgba(255, 255, 255, 0.12)',
         overflow: 'hidden',
+        position: 'relative',
+        zIndex: 0,
     },
     badge: {
         height: 18,
@@ -99,6 +104,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
+        position: 'absolute',
+        left: 0,
+        zIndex: 10,
     },
     badgeText: {
         color: '#FFFFFF',
@@ -106,24 +114,20 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         letterSpacing: 0.8,
     },
-    track: {
-        flex: 1,
-        overflow: 'hidden',
-        alignSelf: 'stretch',
-        justifyContent: 'center',
-    },
-    animatedRow: {
+    animatedTrack: {
+        position: 'absolute',
+        left: 80,
         flexDirection: 'row',
         flexWrap: 'nowrap',
         alignItems: 'center',
+        width: 9999,
         flexShrink: 0,
     },
-    text: {
+    tickerText: {
         color: '#FFFFFF',
         fontSize: 12,
         fontWeight: '600',
         letterSpacing: 0.3,
-        paddingLeft: 4,
         flexShrink: 0,
     },
 });
