@@ -123,7 +123,7 @@ function viewsSegment(post: Post): string {
     const views = Number(
         post.stats?.views ?? (post as any).views_count ?? (post as any).views ?? (post as any).view_count,
     );
-    if (!Number.isFinite(views) || views < 0) return '👁️ 0 Views';
+    if (!Number.isFinite(views) || views < 0) return `👁️ 0 Views`;
     return `👁️ ${formatViews(views)} Views`;
 }
 
@@ -150,7 +150,7 @@ export function buildFeedPostNewsTicker(
     const badge = badges[0];
 
     const segments = [
-        `📍 ${resolvedLocation(post)}`,
+`📍 ${resolvedLocation(post)}`,
         venueSegment(post),
         landmarkSegment(post),
         taggedSegment(post),
