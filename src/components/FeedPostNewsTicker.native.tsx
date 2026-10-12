@@ -65,14 +65,16 @@ export default function FeedPostNewsTicker({ post, carouselIndex = 0 }: Props) {
                 </Text>
             </View>
             <View style={styles.track}>
-                <Animated.Text
-                    onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit={false}
-                    style={[styles.text, { transform: [{ translateX }] }]}
+                <Animated.View
+                    style={[styles.animatedRow, { transform: [{ translateX }] }]}
                 >
-                    {marquee}
-                </Animated.Text>
+                    <Text
+                        onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}
+                        style={styles.text}
+                    >
+                        {marquee}
+                    </Text>
+                </Animated.View>
             </View>
         </LinearGradient>
     );
@@ -110,6 +112,12 @@ const styles = StyleSheet.create({
         alignSelf: 'stretch',
         justifyContent: 'center',
     },
+    animatedRow: {
+        flexDirection: 'row',
+        flexWrap: 'nowrap',
+        alignItems: 'center',
+        flexShrink: 0,
+    },
     text: {
         color: '#FFFFFF',
         fontSize: 12,
@@ -117,9 +125,5 @@ const styles = StyleSheet.create({
         letterSpacing: 0.3,
         paddingLeft: 4,
         flexShrink: 0,
-        flexDirection: 'row',
-        flexWrap: 'nowrap',
-        alignItems: 'center',
-        width: 'auto',
     },
 });
