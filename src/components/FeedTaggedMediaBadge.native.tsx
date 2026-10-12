@@ -21,7 +21,7 @@ export default function FeedTaggedMediaBadge({ count, onPress, aboveMuteControl 
             accessibilityLabel={`View ${count} tagged ${count === 1 ? 'person' : 'people'}`}
         >
             <View style={styles.circle}>
-                <Icon name="person" size={14} color="#FFFFFF" />
+                <Icon name="person" size={16} color="#FFFFFF" />
             </View>
             {count > 1 ? (
                 <View style={styles.countBadge}>
@@ -35,7 +35,7 @@ export default function FeedTaggedMediaBadge({ count, onPress, aboveMuteControl 
 const styles = StyleSheet.create({
     wrap: {
         position: 'absolute',
-        right: 12,
+        left: 12,
         bottom: 12,
         zIndex: 22,
     },

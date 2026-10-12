@@ -1471,7 +1471,7 @@ const FeedCard = React.memo(function FeedCard({
                                 >
                                     <Icon
                                         name={feedVideoMuted ? 'volume-mute' : 'volume-high'}
-                                        size={18}
+                                        size={16}
                                         color="#FFFFFF"
                                     />
                                 </Pressable>
@@ -5416,11 +5416,11 @@ const styles = StyleSheet.create({
     /** Outside TextureView — sibling of FeedPostMedia so mute stays visible on Android. */
     feedMuteButton: {
         position: 'absolute',
-        right: 10,
+        right: 12,
         bottom: 12,
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.72)',
