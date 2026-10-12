@@ -49,7 +49,7 @@ export function tickerSlideType(post: Post): 'video' | 'image' | 'text' {
     return 'text';
 }
 
-function currentSlideType(post: Post, total: number, carouselIndex: number): 'video' | 'image' | 'text' {
+export function currentSlideType(post: Post, total: number, carouselIndex: number): 'video' | 'image' | 'text' {
     if (total <= 1) return tickerSlideType(post);
     const items = (Array.isArray(post.mediaItems) ? post.mediaItems : [])
         .filter((item) => item?.type === 'image' || item?.type === 'video');
@@ -58,9 +58,26 @@ function currentSlideType(post: Post, total: number, carouselIndex: number): 'vi
     return slide?.type === 'video' ? 'video' : slide?.type === 'image' ? 'image' : 'text';
 }
 
+/** Compact view count: 150 → "150", 2800 → "2.8K", 1200000 → "1.2M". */
+export function formatViewCount(count: number): string {
+    if (!Number.isFinite(count) || count <= 0) return '0';
+    if (count >= 1_000_000) {
+        const value = count / 1_000_000;
+        return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}M`;
+    }
+    if (count >= 1_000) {
+        const value = count / 1_000;
+        return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}K`;
+    }
+    return String(Math.round(count));
+}
+
+function viewsSegment(post: Post): string {
+    return post.stats.views > 0 ? `${formatViewCount(post.stats.views)} Views` : '';
+}
+
 function statsSegment(post: Post): string {
     const parts: string[] = [];
-    if (post.stats.views > 0) parts.push(`${post.stats.views} views`);
     if (post.stats.likes > 0) parts.push(`${post.stats.likes} likes`);
     if (post.stats.comments > 0) parts.push(`${post.stats.comments} comments`);
     return parts.join(' • ');
@@ -72,17 +89,7 @@ export function buildFeedPostNewsTicker(
     slideCount?: number,
 ): FeedPostNewsTickerData {
     const total = slideCount ?? tickerSlideCount(post);
-    const type = currentSlideType(post, total, carouselIndex);
     const clippedIndex = Math.min(Math.max(0, carouselIndex), Math.max(total - 1, 0));
-
-    const mediaSegment =
-        total > 1
-            ? `Slide ${clippedIndex + 1}/${total} ${type}`
-            : type === 'video'
-              ? 'MP4 video'
-              : type === 'image'
-                ? 'Photo'
-                : 'Text post';
 
     const badges: Array<{ label: string; tone: NewsTickerBadgeTone }> = [];
     if (total > 1) {
@@ -102,7 +109,7 @@ export function buildFeedPostNewsTicker(
         `📍 ${resolvedLocation(post)}`,
         `Posted by @${ownerHandle(post)}`,
         timestampSegment(post),
-        mediaSegment,
+        viewsSegment(post),
         statsSegment(post),
     ].filter(Boolean);
 

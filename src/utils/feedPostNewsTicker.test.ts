@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Post } from '../types';
 import {
     buildFeedPostNewsTicker,
+    formatViewCount,
     tickerSlideCount,
     tickerSlideType,
 } from './feedPostNewsTicker';
@@ -37,16 +38,14 @@ describe('feedPostNewsTicker', () => {
         const data = buildFeedPostNewsTicker(post, 2, 4);
         expect(data.badgeLabel).toBe('CAROUSEL 3/4');
         expect(data.badgeTone).toBe('yellow');
-        expect(data.content).toContain('Slide 3/4 image');
         expect(data.badgeLabel).not.toBe('LIVE');
     });
 
-    it('single video posts get a POST badge and MP4 media type', () => {
+    it('single video posts get a POST badge (emerald)', () => {
         const post = makePost({ mediaType: 'video' });
         const data = buildFeedPostNewsTicker(post, 0, 1);
         expect(data.badgeLabel).toBe('POST');
         expect(data.badgeTone).toBe('emerald');
-        expect(data.content).toContain('MP4 video');
     });
 
     it('single photo posts get a LOCATION badge when a location is present', () => {
@@ -61,12 +60,11 @@ describe('feedPostNewsTicker', () => {
         expect(data.content).toContain('📍 Dublin');
     });
 
-    it('text posts without location get a POST badge and Text post type', () => {
+    it('text posts without location get a POST badge', () => {
         const post = makePost({});
         const data = buildFeedPostNewsTicker(post, 0, 0);
         expect(data.badgeLabel).toBe('POST');
         expect(data.badgeTone).toBe('emerald');
-        expect(data.content).toContain('Text post');
         expect(data.content).toContain('Posted by @Gazetteer@Dublin');
     });
 
@@ -84,9 +82,41 @@ describe('feedPostNewsTicker', () => {
             stats: { likes: 42, views: 1300, comments: 0, shares: 3, reclips: 0 },
         });
         const data = buildFeedPostNewsTicker(post);
-        expect(data.content).toContain('1300 views');
+        expect(data.content).toContain('1.3K Views');
         expect(data.content).toContain('42 likes');
         expect(data.content).not.toContain('0 comments');
+    });
+
+    it('renders Views right after the timestamp in the marquee string', () => {
+        const now = Date.now();
+        const post = makePost({
+            mediaType: 'video',
+            locationLabel: 'Dublin',
+            createdAt: now - 60 * 60 * 1000,
+            stats: { likes: 42, views: 2800, comments: 7, shares: 3, reclips: 0 },
+        });
+        const data = buildFeedPostNewsTicker(post);
+        const content = data.content;
+        const loc = content.indexOf('📍 Dublin');
+        const posted = content.indexOf('Posted by @Gazetteer@Dublin');
+        const ts = content.indexOf('1 hour ago');
+        const views = content.indexOf('2.8K Views');
+        const likes = content.indexOf('42 likes');
+        expect(loc).toBeGreaterThanOrEqual(0);
+        expect(loc).toBeLessThan(posted);
+        expect(posted).toBeLessThan(ts);
+        expect(ts).toBeLessThan(views);
+        expect(views).toBeLessThan(likes);
+    });
+
+    it('formats view counts compactly', () => {
+        expect(formatViewCount(150)).toBe('150');
+        expect(formatViewCount(999)).toBe('999');
+        expect(formatViewCount(1000)).toBe('1K');
+        expect(formatViewCount(2800)).toBe('2.8K');
+        expect(formatViewCount(15000)).toBe('15K');
+        expect(formatViewCount(1200000)).toBe('1.2M');
+        expect(formatViewCount(0)).toBe('0');
     });
 
     it('falls back to Gazetteer for missing location', () => {
