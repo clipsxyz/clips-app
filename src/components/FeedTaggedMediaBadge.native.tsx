@@ -19,7 +19,7 @@ export default function FeedTaggedMediaBadge({ count, onPress }: Props) {
             accessibilityLabel={`View ${count} tagged ${count === 1 ? 'person' : 'people'}`}
         >
             <View style={styles.circle}>
-                <Icon name="person" size={16} color="#FFFFFF" />
+                <Icon name="person" size={13} color="#FFFFFF" />
             </View>
             {count > 1 ? (
                 <View style={styles.countBadge}>
@@ -38,9 +38,9 @@ const styles = StyleSheet.create({
         zIndex: 22,
     },
     circle: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         backgroundColor: 'rgba(0,0,0,0.7)',
         alignItems: 'center',
         justifyContent: 'center',
@@ -51,9 +51,9 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: -4,
         right: -4,
-        minWidth: 16,
-        height: 16,
-        borderRadius: 8,
+        minWidth: 14,
+        height: 14,
+        borderRadius: 7,
         backgroundColor: '#7A8AF0',
         alignItems: 'center',
         justifyContent: 'center',
@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     },
     countText: {
         color: '#FFFFFF',
-        fontSize: 9,
+        fontSize: 8,
         fontWeight: '700',
     },
 });

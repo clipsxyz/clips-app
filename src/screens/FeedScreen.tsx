@@ -1470,7 +1470,7 @@ const FeedCard = React.memo(function FeedCard({
                                 >
                                     <Icon
                                         name={feedVideoMuted ? 'volume-mute' : 'volume-high'}
-                                        size={16}
+                                        size={13}
                                         color="#FFFFFF"
                                     />
                                 </Pressable>
@@ -5417,9 +5417,9 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 12,
         bottom: 12,
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.72)',
