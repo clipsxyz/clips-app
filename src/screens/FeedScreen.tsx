@@ -1453,7 +1453,6 @@ const FeedCard = React.memo(function FeedCard({
                             {hasTaggedUsers ? (
                                 <FeedTaggedMediaBadge
                                     count={post.taggedUsers!.length}
-                                    aboveMuteControl={showVideoMuteOnMedia}
                                     onPress={() => onOpenTaggedSheet?.()}
                                 />
                             ) : null}

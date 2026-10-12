@@ -5,17 +5,15 @@ import Icon from 'react-native-vector-icons/Ionicons';
 type Props = {
     count: number;
     onPress: () => void;
-    /** Lift above feed video mute control when both are shown. */
-    aboveMuteControl?: boolean;
 };
 
-/** Compact tagged-people control on feed media (bottom-right, away from Scenes CTA). */
-export default function FeedTaggedMediaBadge({ count, onPress, aboveMuteControl }: Props) {
+/** Compact tagged-people control on feed media (bottom-left, inline with mute button). */
+export default function FeedTaggedMediaBadge({ count, onPress }: Props) {
     if (count <= 0) return null;
 
     return (
         <TouchableOpacity
-            style={[styles.wrap, aboveMuteControl && styles.wrapAboveMute]}
+            style={styles.wrap}
             onPress={onPress}
             activeOpacity={0.85}
             accessibilityLabel={`View ${count} tagged ${count === 1 ? 'person' : 'people'}`}
@@ -38,9 +36,6 @@ const styles = StyleSheet.create({
         left: 12,
         bottom: 12,
         zIndex: 22,
-    },
-    wrapAboveMute: {
-        bottom: 56,
     },
     circle: {
         width: 32,

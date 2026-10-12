@@ -4,22 +4,17 @@ import { timeAgo } from './timeAgo';
 export type NewsTickerBadgeTone = 'emerald' | 'yellow';
 
 export type FeedPostNewsTickerData = {
-    badgeLabel: string;
-    badgeTone: NewsTickerBadgeTone;
+    badgeLabel?: string;
+    badgeTone?: NewsTickerBadgeTone;
     content: string;
 };
 
-const GAP = '   •   ';
+const GAP = '  •  ';
 
 function resolvedLocation(post: Post): string {
     const raw = String(post.locationLabel || (post as any).location || '').trim();
     if (raw && raw !== 'Unknown Location') return raw;
     return 'Gazetteer';
-}
-
-function hasRealLocation(post: Post): boolean {
-    const raw = String(post.locationLabel || (post as any).location || '').trim();
-    return raw.length > 0 && raw !== 'Unknown Location';
 }
 
 function ownerHandle(post: Post): string {
@@ -34,7 +29,7 @@ function timestampSegment(post: Post): string {
                 : post.createdAt
             : null;
     if (typeof ts !== 'number' || Number.isNaN(ts)) return '';
-    return timeAgo(ts);
+    return `🕒 ${timeAgo(ts)}`;
 }
 
 export function tickerSlideCount(post: Post): number {
@@ -88,12 +83,12 @@ export function formatViews(count: number): string {
 
 function venueSegment(post: Post): string {
     const venue = String(post.venue || (post as any).venueName || '').trim();
-    return venue.length > 0 ? `🏢 VENUE: ${venue}` : '';
+    return venue.length > 0 ? `🏢 ${venue}` : '';
 }
 
 function landmarkSegment(post: Post): string {
     const landmark = String(post.landmark || '').trim();
-    return landmark.length > 0 ? `🏛️ LANDMARK: ${landmark}` : '';
+    return landmark.length > 0 ? `🏛️ ${landmark}` : '';
 }
 
 function taggedSegment(post: Post): string {
@@ -135,19 +130,6 @@ export function buildFeedPostNewsTicker(
     const total = slideCount ?? tickerSlideCount(post);
     const clippedIndex = Math.min(Math.max(0, carouselIndex), Math.max(total - 1, 0));
 
-    const badges: Array<{ label: string; tone: NewsTickerBadgeTone }> = [];
-    if (total > 1) {
-        badges.push({
-            label: `CAROUSEL ${clippedIndex + 1}/${total}`,
-            tone: 'yellow',
-        });
-    } else if (hasRealLocation(post)) {
-        badges.push({ label: 'LOCATION', tone: 'emerald' });
-    } else {
-        badges.push({ label: 'POST', tone: 'emerald' });
-    }
-
-    const badge = badges[0];
 
     const segments = [
 `📍 ${resolvedLocation(post)}`,
@@ -160,8 +142,8 @@ export function buildFeedPostNewsTicker(
     ].filter(Boolean);
 
     return {
-        badgeLabel: badge.label,
-        badgeTone: badge.tone,
+        badgeLabel: '',
+        badgeTone: 'emerald',
         content: segments.join(GAP),
     };
 }
