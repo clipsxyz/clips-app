@@ -625,7 +625,8 @@ class PostController extends Controller
             'bannerText' => 'nullable|string|max:200',
             'stickers' => 'nullable|array',
             'templateId' => 'nullable|string|max:100',
-            'mediaItems' => 'nullable|array',
+            // Cap carousel media at 5 items (mirrors the client-side CAROUSEL_MAX_ITEMS).
+            'mediaItems' => 'nullable|array|max:5',
             'mediaItems.*.url' => 'required|string|max:2048',
             'mediaItems.*.type' => 'required|in:image,video,text',
             'mediaItems.*.duration' => 'nullable|numeric|min:0',
