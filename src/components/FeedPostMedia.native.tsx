@@ -791,6 +791,9 @@ const FeedPostMedia = React.memo(
 
         // Poster covers the frame until the active player paints its first frame.
         const showBufferCover = !slideMountVideo || posterMounted || !videoSurfaceReady;
+        // OnReadyForDisplay is the ONLY signal that pixels are actually on the surface.
+        // onLoad (stream prepared) can happen well before the first frame is composited;
+        // fading the poster on it exposed a black TextureView until the decoder painted.
         const onFirstFrameReady = () => {
             markUrlLoaded(slideRawUrl);
             fadeOutPosterCover();
@@ -828,7 +831,8 @@ const FeedPostMedia = React.memo(
                             }}
                             onReadyForDisplay={onFirstFrameReady}
                             onLoad={(meta) => {
-                                onFirstFrameReady();
+                                // Metrics + handoff only -- the FADE stays on onReadyForDisplay.
+                                markUrlLoaded(slideRawUrl);
                                 const seekTo =
                                     pendingSeekRef.current ??
                                     (playbackTimeRef.current > 0.05 ? playbackTimeRef.current : null);
