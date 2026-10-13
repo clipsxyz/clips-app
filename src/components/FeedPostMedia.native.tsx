@@ -108,6 +108,95 @@ export function resolveFeedVideoPosterUri(
     );
 }
 
+type FeedNativeVideoProps = {
+    /** Full remount key: identity + slide + epoch. A change here MUST rebuild the player. */
+    videoKey: string;
+    postId: string;
+    source: object;
+    paused: boolean;
+    muted: boolean;
+    soundOn: boolean;
+    repeat: boolean;
+    mode: 'feed' | 'detail';
+    isViewable: boolean;
+    videoRef: React.Ref<VideoRef>;
+    onLoadStart: React.ComponentProps<typeof Video>['onLoadStart'];
+    onReadyForDisplay: React.ComponentProps<typeof Video>['onReadyForDisplay'];
+    onLoad: React.ComponentProps<typeof Video>['onLoad'];
+    onProgress: React.ComponentProps<typeof Video>['onProgress'];
+    onError: React.ComponentProps<typeof Video>['onError'];
+};
+
+/**
+ * The native ExoPlayer/TextureView, fenced behind a memo boundary that ONLY breaks when a
+ * prop the PLAYER actually depends on changes (identity/url/epoch/playback state).
+ *
+ * Every like, burst, sticker, caption, or engagement update re-renders FeedPostMedia and
+ * hands this component a brand-new `post` object plus fresh handler closures. A default
+ * memo would flap on those identities and reconcile the native <Video>, which on Android
+ * tears the TextureView down mid-playback. This comparator deliberately ignores:
+ *   - the `post` object identity (only `postId` matters),
+ *   - like/likeCount and any engagement state (never reaches here at all),
+ *   - overlay/animation identities (opacity, posters, bursts),
+ *   - handler closure identity (all handlers read stable refs / callbacks).
+ * Handlers can therefore stay stale for the lifetime of a compared render — safe because
+ * they only close over refs, setters, and the `slideRawUrl` this instance was built for.
+ */
+const FeedNativeVideo = React.memo(function FeedNativeVideo({
+    videoKey,
+    source,
+    paused,
+    muted,
+    soundOn,
+    repeat,
+    mode,
+    videoRef,
+    onLoadStart,
+    onReadyForDisplay,
+    onLoad,
+    onProgress,
+    onError,
+}: FeedNativeVideoProps) {
+    return (
+        <Video
+            key={videoKey}
+            ref={videoRef}
+            source={source}
+            style={styles.videoFill}
+            resizeMode="cover"
+            controls={false}
+            paused={paused}
+            muted={muted}
+            volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
+            repeat={repeat}
+            playInBackground={false}
+            playWhenInactive={false}
+            ignoreSilentSwitch="ignore"
+            useTextureView
+            hideShutterView
+            {...androidListSafeVideoProps()}
+            pointerEvents="none"
+            onLoadStart={onLoadStart}
+            onReadyForDisplay={onReadyForDisplay}
+            onLoad={onLoad}
+            onProgress={onProgress}
+            onError={onError}
+        />
+    );
+},
+(prev, next) =>
+    // The entire player identity + playback contract. Everything else is noise.
+    prev.postId === next.postId &&
+    prev.videoKey === next.videoKey &&
+    prev.source === next.source &&
+    prev.paused === next.paused &&
+    prev.muted === next.muted &&
+    prev.soundOn === next.soundOn &&
+    prev.repeat === next.repeat &&
+    prev.mode === next.mode &&
+    prev.isViewable === next.isViewable,
+);
+
 export type FeedPostMediaHandle = {
     toggleVideoMute: () => void;
     /** Web feed: single tap re-shows mute icon for ~2s without toggling. */
@@ -816,24 +905,17 @@ const FeedPostMedia = React.memo(
                             pointerEvents="none"
                             collapsable={false}
                         >
-                        <Video
-                            key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
-                            ref={feedVideoRef}
+                        <FeedNativeVideo
+                            videoKey={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
+                            postId={String(post.id)}
                             source={cachedVideoSource as object}
-                            style={styles.videoFill}
-                            resizeMode="cover"
-                            controls={false}
                             paused={mode === 'detail' ? paused : !isViewable}
                             muted={mode === 'feed' ? !soundOn : false}
-                            volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
+                            soundOn={soundOn}
                             repeat={mode === 'feed'}
-                            playInBackground={false}
-                            playWhenInactive={false}
-                            ignoreSilentSwitch="ignore"
-                            useTextureView
-                            hideShutterView
-                            {...androidListSafeVideoProps()}
-                            pointerEvents="none"
+                            mode={mode}
+                            isViewable={isViewable}
+                            videoRef={feedVideoRef}
                             onLoadStart={() => {
                                 beginUrlLoad(slideRawUrl);
                             }}

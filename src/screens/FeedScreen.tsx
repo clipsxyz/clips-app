@@ -1053,6 +1053,7 @@ function PillTabs({
 const FeedCard = React.memo(function FeedCard({
     post,
     onLike,
+    onLikePersisted,
     onFollow,
     onView,
     onComment,
@@ -1083,6 +1084,8 @@ const FeedCard = React.memo(function FeedCard({
 }: {
     post: Post;
     onLike: () => Promise<void>;
+    /** No-op reconciliation target for locally-isolated media-card likes. */
+    onLikePersisted?: (postId: string, updated: Post) => void;
     onFollow?: () => Promise<void>;
     onView: () => Promise<void>;
     onComment: () => void;
@@ -1250,9 +1253,73 @@ const FeedCard = React.memo(function FeedCard({
 
     const mediaGesturesEnabled = !isClientUploading && !isClientUploadFailed;
 
+    /**
+     * Local like isolation for PLAYING media cards. A double-tap like used to flow
+     * straight into the parent's optimistic `setPages`, swapping the FlatList `data`
+     * identity and pushing a fresh `post` through FeedPostMedia — which churned the
+     * memoized video on the exact frame of the tap and restarted ExoPlayer from 0.
+     * Multi-Video-1 isolation: the tap frame must cost ZERO parent/FeedPostMedia
+     * renders, so the like lives here in FeedCard state and the Video never sees it.
+     */
+    type LikeOverride = { liked: boolean; count: number };
+    const [localLike, setLocalLike] = React.useState<LikeOverride | null>(null);
+    const localLikeRef = React.useRef<LikeOverride | null>(null);
+
+    const effectiveLiked = localLike?.liked ?? post.userLiked === true;
+    const effectiveLikes = localLike?.count ?? post.stats?.likes ?? 0;
+
+    const runLocalLike = React.useCallback(async () => {
+        if (isClientUploading || isClientUploadFailed) return;
+        const postId = String(post.id);
+        const prevLiked = localLikeRef.current?.liked ?? post.userLiked === true;
+        const prevCount = localLikeRef.current?.count ?? post.stats?.likes ?? 0;
+        const nextLiked = !prevLiked;
+        const nextCount = Math.max(0, prevCount + (nextLiked ? 1 : -1));
+        const optimistic: LikeOverride = { liked: nextLiked, count: nextCount };
+        localLikeRef.current = optimistic;
+        setLocalLike(optimistic);
+        try {
+            const updated = await toggleLike(viewerUserId ?? 'anon', postId, post);
+            const settled: LikeOverride = {
+                liked: updated.userLiked ?? nextLiked,
+                count: Math.max(
+                    0,
+                    typeof updated.stats?.likes === 'number'
+                        ? updated.stats.likes
+                        : nextCount,
+                ),
+            };
+            localLikeRef.current = settled;
+            setLocalLike(settled);
+            onLikePersisted?.(postId, updated);
+        } catch {
+            const revert: LikeOverride = { liked: prevLiked, count: prevCount };
+            localLikeRef.current = revert;
+            setLocalLike(revert);
+        }
+    }, [isClientUploadFailed, isClientUploading, onLikePersisted, post, viewerUserId]);
+
     const handleMediaDoubleLike = React.useCallback(() => {
+        // Media cards (TextureView active) — local only, no parent setPages on the tap.
+        void runLocalLike();
+    }, [runLocalLike]);
+
+    const handleFeedLike = React.useCallback(() => {
+        // Text-only cards have no native video to resurface, so they keep the parent's
+        // optimistic flow; media cards isolate the like so the player never re-renders.
+        if (postHasVideoMedia(post)) {
+            void runLocalLike();
+            return;
+        }
         void onLike();
-    }, [onLike]);
+    }, [onLike, post, runLocalLike]);
+
+    /** Stable so a local like re-render can't hand FeedPostMedia a new prop and re-render it. */
+    const handleMediaLoadOnce = React.useCallback(() => {
+        if (postViewRecordedRef.current) return;
+        postViewRecordedRef.current = true;
+        void onView();
+    }, [onView]);
 
     const openStillFullscreen = React.useCallback(() => {
         // Slide-aware, not image-only: a mixed carousel must open the slide that was tapped.
@@ -1330,17 +1397,15 @@ const FeedCard = React.memo(function FeedCard({
                     <View style={styles.textOnlyEngagementLeft}>
                         <FeedEngagementRow
                             likeButtonRef={likeButtonRef}
-                            likes={post.stats.likes}
+                            likes={effectiveLikes}
                             comments={post.stats.comments}
                             shares={post.stats.shares}
                             reclips={post.stats.reclips}
                             views={post.stats.views}
-                            userLiked={post.userLiked}
+                            userLiked={effectiveLiked}
                             userReclipped={post.userReclipped}
                             isSaved={post.isBookmarked}
-                            onLike={() => {
-                                void onLike();
-                            }}
+                            onLike={handleFeedLike}
                             onLikesPress={() => {
                                 if (post.stats.likes > 0) onOpenLikesSheet?.();
                             }}
@@ -1393,15 +1458,7 @@ const FeedCard = React.memo(function FeedCard({
                                 height={mediaFrameHeight}
                                 onDoubleLike={mediaGesturesEnabled ? handleMediaDoubleLike : undefined}
                                 onSingleTap={mediaGesturesEnabled ? handleMediaSingleTap : undefined}
-                                onMediaLoad={
-                                    isClientUploading
-                                        ? undefined
-                                        : () => {
-                                              if (postViewRecordedRef.current) return;
-                                              postViewRecordedRef.current = true;
-                                              void onView();
-                                          }
-                                }
+                                onMediaLoad={isClientUploading ? undefined : handleMediaLoadOnce}
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
                                 suspendNativeVideo={suspendNativeVideo}
@@ -1496,17 +1553,15 @@ const FeedCard = React.memo(function FeedCard({
                             <View style={FEED_CARD_ENGAGEMENT_LEFT}>
                                 <FeedEngagementRow
                                     likeButtonRef={likeButtonRef}
-                                    likes={post.stats.likes}
+                                    likes={effectiveLikes}
                                     comments={post.stats.comments}
                                     shares={post.stats.shares}
                                     reclips={post.stats.reclips}
                                     views={post.stats.views}
-                                    userLiked={post.userLiked}
+                                    userLiked={effectiveLiked}
                                     userReclipped={post.userReclipped}
                                     isSaved={post.isBookmarked}
-                                    onLike={() => {
-                                        void onLike();
-                                    }}
+                                    onLike={handleFeedLike}
                                     onLikesPress={() => {
                                         if (post.stats.likes > 0) onOpenLikesSheet?.();
                                     }}
@@ -4345,6 +4400,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 ),
                             );
                         }
+                    }}
+                    onLikePersisted={(likePostId, updated) => {
+                        // Media-card double-taps toggle locally in FeedCard and only touch
+                        // `pages` here, once the backend has answered — never on the tap frame.
+                        const userLiked = updated.userLiked === true;
+                        setPages((prev) =>
+                            prev.map((page) =>
+                                page.map((p) =>
+                                    String(p.id) === likePostId
+                                        ? {
+                                              ...p,
+                                              userLiked,
+                                              stats: { ...p.stats, ...updated.stats },
+                                          }
+                                        : p,
+                                ),
+                            ),
+                        );
+                        recentCreatedPostsRef.current = recentCreatedPostsRef.current.map((p) =>
+                            String(p.id) === likePostId
+                                ? { ...p, userLiked, stats: { ...p.stats, ...updated.stats } }
+                                : p,
+                        );
+                        syncFullscreenPost({
+                            ...mergedPost,
+                            ...updated,
+                            userLiked,
+                            stats: { ...mergedPost.stats, ...updated.stats },
+                        });
                     }}
                     onLikeBurst={showFeedLikeBurst}
                     onFollow={async () => {
