@@ -1161,23 +1161,23 @@ const FeedCard = React.memo(function FeedCard({
         return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
     }, [post.width, post.height]);
 
-    const [measuredMedia, setMeasuredMedia] = React.useState<{ width: number; height: number } | null>(null);
-    const [measuredPostId, setMeasuredPostId] = React.useState<string | null>(null);
+    const [, setMeasuredTick] = React.useState(0);
 
     const handleIntrinsicMedia = React.useCallback(
         (size: { width: number; height: number }) => {
-            setMeasuredPostId(post.id);
-            setMeasuredMedia((prev) =>
-                prev && prev.width === size.width && prev.height === size.height ? prev : size,
-            );
+            const prev = measuredMediaSizeByPostId.get(post.id);
+            if (prev && prev.width === size.width && prev.height === size.height) return;
+            // Hoisted to module scope so the size survives cell recycling (see above).
+            measuredMediaSizeByPostId.set(post.id, size);
+            setMeasuredTick((t) => t + 1);
         },
         [post.id],
     );
 
     const intrinsicMedia = resolveIntrinsicSize({
         api: apiMedia,
-        measured: measuredMedia,
-        measuredForId: measuredPostId,
+        measured: measuredMediaSizeByPostId.get(post.id) ?? null,
+        measuredForId: post.id,
         postId: post.id,
     });
 
@@ -1636,6 +1636,20 @@ onBlock={onBlockUser}
 });
 
 export { FeedCard };
+
+/**
+ * Measured media sizes live at MODULE scope, not in per-cell state.
+ *
+ * A FlatList cell that unmounts (windowing / Android removeClippedSubviews) discards its
+ * local state. When it remounts, the media box previously fell back to RATIO_FALLBACK, the
+ * video re-measured on `onLoad`, and the card resized at the exact moment playback began —
+ * pushing every row below it and snapping the scroll offset by whole posts. Hoisting the
+ * measurement keyed by post.id means a recycled cell remounts at the SAME height it had
+ * when it unloaded, so no row below ever moves. API dimensions still win on first render;
+ * this cache only fills the gap for posts that predate the dimensions columns or for
+ * local/demo uploads.
+ */
+const measuredMediaSizeByPostId = new Map<string, { width: number; height: number }>();
 
 type FeedListRow =
     | { kind: 'post'; post: Post }
@@ -4624,16 +4638,21 @@ onVisitProfile={() =>
                     }
                     return 'feed-row';
                 }}
-                extraData={`${pendingUploadTick}-${refreshing}-${activeVideoPostId}-${isFeedFocused}-${commentsModalOpen}`}
+                extraData={`${pendingUploadTick}-${refreshing}-${isFeedFocused}-${commentsModalOpen}`}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
-                // Keep the render window tight for max FPS while flinging; clip offscreen cells.
+                // Keep the render window tight for max FPS while flinging.
                 initialNumToRender={2}
                 maxToRenderPerBatch={3}
-                windowSize={5}
+                // Widened so recycled cells stay mounted long enough to reuse their measured
+                // height; an unmount/remount cycle during video play was collapsing the
+                // VirtualizedList frame map and snapping the native offset by whole posts.
+                windowSize={7}
                 updateCellsBatchingPeriod={50}
-                // Android-only clipping: frees off-screen cell memory while flinging, and
-                // avoids the iOS blank-cell behaviour of clipping nested/overflow views.
-                removeClippedSubviews={Platform.OS === 'android'}
+                // Android-only clipping freed off-screen cell memory while flinging, but with
+                // content-driven heights (no getItemLayout) clipped cells remount at the wrong
+                // height during a video mount, and the offset snaps 3-4 posts. Disabled so the
+                // list holds its frames; the measured-size cache keeps recycled cells stable.
+                removeClippedSubviews={false}
                 onScrollBeginDrag={() => {
                     feedScrollingRef.current = true;
                     setFeedScrollBusy(true);
