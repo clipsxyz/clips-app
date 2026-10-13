@@ -814,6 +814,14 @@ const FeedPostMedia = React.memo(
                             source={cachedVideoSource as object}
                             style={styles.videoFill}
                             resizeMode="cover"
+                            // Native surface poster: the Android TextureView/ExoPlayer
+                            // surface starts black until the decoder paints, and even with
+                            // the React-side overlay above, momentarily sampling that black
+                            // underneath during init caused a flash. Rendering the same
+                            // thumbnail on the NATIVE layer during load holds pixels on the
+                            // surface itself; React-side cover fades out on onReadyForDisplay.
+                            poster={slidePosterUri}
+                            posterResizeMode="cover"
                             controls={false}
                             paused={mode === 'detail' ? paused : !isViewable}
                             muted={mode === 'feed' ? !soundOn : false}
@@ -1046,7 +1054,9 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         overflow: 'hidden',
         borderRadius: 20,
-        backgroundColor: '#000000',
+        // Transparent, NOT black: with a native poster the surface must not flash black
+        // behind it while ExoPlayer prepares. The frame/chrome below stays on mediaFrame.
+        backgroundColor: 'transparent',
     },
     stillImage: {
         ...StyleSheet.absoluteFill,
@@ -1059,6 +1069,9 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
+        // Transparent so the native poster (and the decoder's first painted frame) are
+        // what the user sees during init, never a hardcoded black backing.
+        backgroundColor: 'transparent',
     },
     /** Sits above Video until first frame, then faded/unmounted. */
     posterCover: {
