@@ -92,7 +92,7 @@ function buildFeedVideoSource(uri: string, rawUrl?: string): object {
     return source;
 }
 
-function resolveFeedVideoPosterUri(
+export function resolveFeedVideoPosterUri(
     item: PostMediaItem | undefined,
     post: Post,
 ): string | undefined {
@@ -808,20 +808,20 @@ const FeedPostMedia = React.memo(
                         pointerEvents={mediaPointerEvents}
                         collapsable={false}
                     >
+                        {/* True crossfade layer: the video stays at opacity 0 under the
+                            poster until onReadyForDisplay, then fades in as the poster fades
+                            out — no orphaned video frame leaks through the thumbnail. */}
+                        <Animated.View
+                            style={[styles.videoClip, { opacity: videoOpacity }]}
+                            pointerEvents="none"
+                            collapsable={false}
+                        >
                         <Video
                             key={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
                             ref={feedVideoRef}
                             source={cachedVideoSource as object}
                             style={styles.videoFill}
                             resizeMode="cover"
-                            // Native surface poster: the Android TextureView/ExoPlayer
-                            // surface starts black until the decoder paints, and even with
-                            // the React-side overlay above, momentarily sampling that black
-                            // underneath during init caused a flash. Rendering the same
-                            // thumbnail on the NATIVE layer during load holds pixels on the
-                            // surface itself; React-side cover fades out on onReadyForDisplay.
-                            poster={slidePosterUri}
-                            posterResizeMode="cover"
                             controls={false}
                             paused={mode === 'detail' ? paused : !isViewable}
                             muted={mode === 'feed' ? !soundOn : false}
@@ -885,6 +885,7 @@ const FeedPostMedia = React.memo(
                             }}
                             onError={(e) => onVideoError(slideRawUrl, e)}
                         />
+                        </Animated.View>
                     </View>
                 ) : null}
 
@@ -1054,9 +1055,7 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         overflow: 'hidden',
         borderRadius: 20,
-        // Transparent, NOT black: with a native poster the surface must not flash black
-        // behind it while ExoPlayer prepares. The frame/chrome below stays on mediaFrame.
-        backgroundColor: 'transparent',
+        backgroundColor: '#000000',
     },
     stillImage: {
         ...StyleSheet.absoluteFill,
@@ -1069,9 +1068,6 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
-        // Transparent so the native poster (and the decoder's first painted frame) are
-        // what the user sees during init, never a hardcoded black backing.
-        backgroundColor: 'transparent',
     },
     /** Sits above Video until first frame, then faded/unmounted. */
     posterCover: {

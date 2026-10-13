@@ -76,7 +76,10 @@ import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { safePositiveLayoutNumber } from '../utils/safeLayoutNative';
 import { FEED_UI } from '../constants/feedUiTokens';
-import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import FeedPostMedia, {
+    type FeedPostMediaHandle,
+    resolveFeedVideoPosterUri,
+} from '../components/FeedPostMedia.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
 import ImageFullscreenModal, {
     type ImageFullscreenOrigin,
@@ -3789,6 +3792,27 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         feedViewabilitySeenRef.current = false;
         lastViewableVideoPostIdRef.current = null;
     }, [feedHasPosts]);
+
+    // Warm the poster cache while a post is still several screens away. FeedPostMedia also
+    // prefetches on cell mount, but that races the first paint: starting the prefetch when
+    // the row ENTERS the render window is too late for a cold thumbnail. Kicking it off the
+    // moment the feed data lands means by the time a card scrolls into view its poster is
+    // already in memory, so the overlay paints instantly and the crossfade has no stall.
+    const prefetchedPosterUrlsRef = useRef<Set<string>>(new Set());
+    React.useEffect(() => {
+        for (const row of flatForRender) {
+            if (row.kind !== 'post') continue;
+            for (const item of row.post.mediaItems ?? []) {
+                const poster = resolveFeedVideoPosterUri(item, row.post);
+                if (!poster || !/^https?:\/\//i.test(poster)) continue;
+                if (prefetchedPosterUrlsRef.current.has(poster)) continue;
+                prefetchedPosterUrlsRef.current.add(poster);
+                void Image.prefetch(poster).catch(() => {});
+            }
+        }
+        // Dedupe runs forever: a poster is fetched once per app session, and this effect
+        // re-runs on every `flatForRender` change (likes, comment counts, pagination).
+    }, [flatForRender]);
     React.useEffect(() => {
         if (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost) || commentsModalOpen) {
             return;
