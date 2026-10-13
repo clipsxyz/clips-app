@@ -4262,6 +4262,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         const postId = String(mergedPost.id);
                         const prevLiked = mergedPost.userLiked === true;
                         const prevLikes = mergedPost.stats?.likes ?? 0;
+                        // Freeze viewability scheduling while this like commits. The optimistic
+                        // setPages swaps FlatList data identity and can re-fire
+                        // onViewableItemsChanged while a just-mounted card is still settling in
+                        // the render window; if that pass reads the card as momentarily
+                        // non-viewable, the active id blips to null/neighbor → TextureView
+                        // unmount/remount → clip restarts from 0 (nothing ≥0.05s to resume on
+                        // first double-tap). Suppressing for one frame keeps the player in place.
+                        suppressFeedViewabilityRef.current = true;
+                        requestAnimationFrame(() => {
+                            suppressFeedViewabilityRef.current = false;
+                        });
                         // Optimistic like-only patch — avoid full post replace (layout churn).
                         setPages((prev) =>
                             prev.map((page) =>
