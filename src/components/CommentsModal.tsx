@@ -606,6 +606,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const handleLikeComment = async (commentId: string) => {
         if (!user) return;
 
+        const original = comments.find(comment => comment.id === commentId);
+
         // Optimistically update like state in UI
         setComments(prev => prev.map(comment => {
             if (comment.id !== commentId) return comment;
@@ -626,17 +628,36 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 return;
             }
 
-            const updatedComment = await toggleCommentLike(commentId);
+            const updatedComment = await toggleCommentLike(commentId, original);
             setComments(prev => prev.map(comment =>
                 comment.id === commentId ? updatedComment : comment
             ));
         } catch (error) {
             console.error('Failed to like comment:', error);
+            if (original) {
+                setComments(prev => prev.map(comment =>
+                    comment.id === commentId ? original : comment
+                ));
+            }
         }
     };
 
     const handleLikeReply = async (parentCommentId: string, replyId: string) => {
         if (!user) return;
+
+        const originalParent = comments.find(comment => comment.id === parentCommentId);
+
+        setComments(prev => prev.map(comment => {
+            if (comment.id !== parentCommentId || !comment.replies) return comment;
+            return {
+                ...comment,
+                replies: comment.replies.map(reply => {
+                    if (reply.id !== replyId) return reply;
+                    const newLiked = !reply.userLiked;
+                    return { ...reply, userLiked: newLiked, likes: (reply.likes || 0) + (newLiked ? 1 : -1) };
+                }),
+            };
+        }));
 
         try {
             if (!online) {
@@ -650,12 +671,17 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 return;
             }
 
-            const updatedParentComment = await toggleReplyLike(parentCommentId, replyId);
+            const updatedParentComment = await toggleReplyLike(parentCommentId, replyId, originalParent);
             setComments(prev => prev.map(comment =>
                 comment.id === parentCommentId ? updatedParentComment : comment
             ));
         } catch (error) {
             console.error('Failed to like reply:', error);
+            if (originalParent) {
+                setComments(prev => prev.map(comment =>
+                    comment.id === parentCommentId ? originalParent : comment
+                ));
+            }
         }
     };
 

@@ -436,13 +436,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     }, [myFeedCommentDraft, myFeedCommentsPost?.id, user?.handle]);
 
     const handleToggleMyFeedCommentLike = React.useCallback(async (commentId: string) => {
+        const original = myFeedComments.find((c) => c.id === commentId);
         try {
-            const updated = await toggleCommentLike(commentId);
+            const updated = await toggleCommentLike(commentId, original);
             setMyFeedComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
         } catch (error) {
             console.error('Error toggling comment like in My feed:', error);
         }
-    }, []);
+    }, [myFeedComments]);
 
     const handleAddMyFeedReply = React.useCallback(async () => {
         if (!myFeedCommentsPost?.id || !myFeedReplyingTo || !user?.handle) return;
@@ -470,13 +471,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     }, [myFeedCommentsPost?.id, myFeedReplyingTo, myFeedReplyDraft, user?.handle]);
 
     const handleToggleMyFeedReplyLike = React.useCallback(async (parentId: string, replyId: string) => {
+        const originalParent = myFeedComments.find((c) => c.id === parentId);
         try {
-            const updatedParent = await toggleReplyLike(parentId, replyId);
+            const updatedParent = await toggleReplyLike(parentId, replyId, originalParent);
             setMyFeedComments((prev) => prev.map((c) => (c.id === parentId ? updatedParent : c)));
         } catch (error) {
             console.error('Error toggling reply like in My feed:', error);
         }
-    }, []);
+    }, [myFeedComments]);
 
     const handleOpenPostFromCommentSafety = React.useCallback(
         (postId: string) => {

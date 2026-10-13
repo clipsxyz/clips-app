@@ -1457,6 +1457,7 @@ export default function ScenesModal({
 
     const handleLikeComment = async (commentId: string) => {
         if (!user || likingCommentId !== null) return;
+        const original = commentsList.find(c => c.id === commentId);
         setLikingCommentId(commentId);
         setCommentsList(prev => prev.map(c => {
             if (c.id !== commentId) return c;
@@ -1468,14 +1469,18 @@ export default function ScenesModal({
                 await enqueue({ type: 'commentLike', commentId, userId: user.id });
                 return;
             }
-            const updated = await toggleCommentLike(commentId);
+            const updated = await toggleCommentLike(commentId, original);
             setCommentsList(prev => prev.map(c => c.id === commentId ? updated : c));
         } catch (err) {
             console.error('Failed to like comment:', err);
-            setCommentsList(prev => prev.map(c => {
-                if (c.id !== commentId) return c;
-                return { ...c, userLiked: !c.userLiked, likes: (c.likes || 0) + (c.userLiked ? 1 : -1) };
-            }));
+            if (original) {
+                setCommentsList(prev => prev.map(c => c.id === commentId ? original : c));
+            } else {
+                setCommentsList(prev => prev.map(c => {
+                    if (c.id !== commentId) return c;
+                    return { ...c, userLiked: !c.userLiked, likes: (c.likes || 0) + (c.userLiked ? 1 : -1) };
+                }));
+            }
         } finally {
             setLikingCommentId(null);
         }
@@ -1484,6 +1489,7 @@ export default function ScenesModal({
     const handleLikeReply = async (parentCommentId: string, replyId: string) => {
         const key = `${parentCommentId}-${replyId}`;
         if (!user || likingReplyKey !== null) return;
+        const originalParent = commentsList.find(c => c.id === parentCommentId);
         setLikingReplyKey(key);
         setCommentsList(prev => prev.map(c => {
             if (c.id !== parentCommentId || !c.replies) return c;
@@ -1501,10 +1507,14 @@ export default function ScenesModal({
                 await enqueue({ type: 'replyLike', parentCommentId, replyId, userId: user.id });
                 return;
             }
-            const updatedParent = await toggleReplyLike(parentCommentId, replyId);
+            const updatedParent = await toggleReplyLike(parentCommentId, replyId, originalParent);
             setCommentsList(prev => prev.map(c => c.id === parentCommentId ? updatedParent : c));
         } catch (err) {
             console.error('Failed to like reply:', err);
+            if (originalParent) {
+                setCommentsList(prev => prev.map(c => c.id === parentCommentId ? originalParent : c));
+                return;
+            }
             setCommentsList(prev => prev.map(c => {
                 if (c.id !== parentCommentId || !c.replies) return c;
                 return {

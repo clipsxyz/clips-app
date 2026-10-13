@@ -3426,23 +3426,80 @@ export async function addComment(postId: string, userHandle: string, text: strin
   return comment;
 }
 
-export async function toggleCommentLike(commentId: string): Promise<Comment> {
+export async function toggleCommentLike(commentId: string, current?: Comment): Promise<Comment> {
+  // Laravel-backed comments never live in the in-memory `comments` array, so the
+  // old lookup threw "Comment not found" for every real comment. Callers pass the
+  // comment they are toggling so we can both target the API and rebuild the row.
+  const base = current ?? comments.find(c => c.id === commentId);
+  const useLive =
+    !!base &&
+    !String(commentId).startsWith('temp') &&
+    shouldUseLivePostApi(resolveCommentsPostId(base.postId));
+
+  if (useLive) {
+    const result = await apiClient.toggleCommentLike(commentId);
+    const liked = !!(result?.liked ?? result?.user_liked);
+    const priorLikes = typeof base!.likes === 'number' ? base!.likes : 0;
+    const delta = (liked ? 1 : 0) - (base!.userLiked ? 1 : 0);
+    const next: Comment = {
+      ...base!,
+      userLiked: liked,
+      likes: Math.max(0, priorLikes + delta),
+    };
+    // Keep any in-memory mirror consistent for mock/fallback readers.
+    const mirror = comments.find(c => c.id === commentId);
+    if (mirror && mirror !== next) {
+      mirror.userLiked = liked;
+      mirror.likes = next.likes;
+    }
+    return next;
+  }
+
   await delay(100);
-  const comment = comments.find(c => c.id === commentId);
+  const comment = comments.find(c => c.id === commentId) ?? base;
   if (!comment) {
     throw new Error('Comment not found');
   }
 
   // Toggle the like state
   comment.userLiked = !comment.userLiked;
-  comment.likes += comment.userLiked ? 1 : -1;
+  comment.likes = (comment.likes || 0) + (comment.userLiked ? 1 : -1);
 
   return comment;
 }
 
-export async function toggleReplyLike(parentCommentId: string, replyId: string): Promise<Comment> {
+export async function toggleReplyLike(
+  parentCommentId: string,
+  replyId: string,
+  parent?: Comment,
+): Promise<Comment> {
+  const baseParent = parent ?? comments.find(c => c.id === parentCommentId);
+  const baseReply = baseParent?.replies?.find(r => r.id === replyId);
+  const useLive =
+    !!baseParent &&
+    !!baseReply &&
+    !String(replyId).startsWith('temp') &&
+    shouldUseLivePostApi(resolveCommentsPostId(baseParent.postId));
+
+  if (useLive) {
+    // Replies share the comments table + `/{id}/like` endpoint on the backend.
+    const result = await apiClient.toggleCommentLike(replyId);
+    const liked = !!(result?.liked ?? result?.user_liked);
+    const priorLikes = typeof baseReply!.likes === 'number' ? baseReply!.likes : 0;
+    const delta = (liked ? 1 : 0) - (baseReply!.userLiked ? 1 : 0);
+    const updatedReply: Comment = {
+      ...baseReply!,
+      userLiked: liked,
+      likes: Math.max(0, priorLikes + delta),
+    };
+    return {
+      ...baseParent!,
+      replies: (baseParent!.replies || []).map(r => (r.id === replyId ? updatedReply : r)),
+    };
+  }
+
   await delay(100);
-  const parentComment = comments.find(c => c.id === parentCommentId);
+  const parentComment = comments.find(c => c.id === parentCommentId) ?? baseParent;
   if (!parentComment || !parentComment.replies) {
     throw new Error('Parent comment or replies not found');
   }

@@ -13,6 +13,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerAlertSheet from './GazetteerAlertSheet.native';
 import { useAuth } from '../context/Auth';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { mapLaravelUserToAppFields, updateAuthProfile } from '../api/client';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import type { User } from '../types';
 
@@ -20,6 +21,12 @@ type Props = {
     visible: boolean;
     onClose: () => void;
 };
+
+/** Local file/data URIs can't be stored by the backend (see AuthController::nullablePublicAvatarUrl). */
+function isPersistableAvatarUrl(url: string | undefined): url is string {
+    if (!url) return false;
+    return /^https?:\/\//i.test(url.trim());
+}
 
 /** Web ProfilePage profile-picture modal parity — preview, change, remove. */
 export default function ProfilePictureModal({ visible, onClose }: Props) {
@@ -33,8 +40,29 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
         showCancelButton?: boolean;
     } | null>(null);
 
-    const saveAvatarUrl = (nextUrl: string | undefined) => {
+    const saveAvatarUrl = async (nextUrl: string | undefined) => {
         if (!user) return;
+        // Persist to the backend first so /auth/me can't revert the avatar on the
+        // next launch. Removal (undefined) clears the stored URL server-side.
+        if (isLaravelApiEnabled() && (nextUrl === undefined || isPersistableAvatarUrl(nextUrl))) {
+            try {
+                const apiUser = await updateAuthProfile({
+                    avatar_url: isPersistableAvatarUrl(nextUrl) ? nextUrl : null,
+                });
+                const fields = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+                login({
+                    ...(user as User),
+                    ...fields,
+                    avatarUrl:
+                        (fields.avatarUrl as string | undefined) ||
+                        (isPersistableAvatarUrl(nextUrl) ? nextUrl : undefined),
+                });
+                return;
+            } catch (error) {
+                console.error('Failed to persist profile avatar:', error);
+                throw error;
+            }
+        }
         login({
             ...user,
             avatarUrl: nextUrl,
@@ -106,7 +134,7 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
                 nextAvatarUrl = uri;
             }
 
-            saveAvatarUrl(nextAvatarUrl);
+            await saveAvatarUrl(nextAvatarUrl);
             onClose();
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Could not update profile picture.';
@@ -128,9 +156,18 @@ export default function ProfilePictureModal({ visible, onClose }: Props) {
             icon: 'alert',
             showCancelButton: true,
             onConfirm: () => {
-                saveAvatarUrl(undefined);
-                setAlertConfig(null);
-                onClose();
+                void saveAvatarUrl(undefined)
+                    .then(() => {
+                        setAlertConfig(null);
+                        onClose();
+                    })
+                    .catch((err: unknown) => {
+                        setAlertConfig({
+                            title: 'Update failed',
+                            message: err instanceof Error ? err.message : 'Could not remove profile picture.',
+                            icon: 'alert',
+                        });
+                    });
             },
         });
     };

@@ -685,6 +685,7 @@ export default function PostCommentsSheet({
     };
 
     const handleLikeComment = async (commentId: string) => {
+        const original = comments.find((c) => c.id === commentId);
         setComments((prev) =>
             prev.map((comment) => {
                 if (comment.id !== commentId) return comment;
@@ -697,19 +698,39 @@ export default function PostCommentsSheet({
             }),
         );
         try {
-            const updated = await toggleCommentLike(commentId);
+            const updated = await toggleCommentLike(commentId, original);
             setComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
         } catch (err) {
             console.error('Failed to like comment:', err);
+            if (original) {
+                setComments((prev) => prev.map((c) => (c.id === commentId ? original : c)));
+            }
         }
     };
 
     const handleLikeReply = async (parentCommentId: string, replyId: string) => {
+        const originalParent = comments.find((c) => c.id === parentCommentId);
+        setComments((prev) =>
+            prev.map((comment) => {
+                if (comment.id !== parentCommentId || !comment.replies) return comment;
+                return {
+                    ...comment,
+                    replies: comment.replies.map((r) => {
+                        if (r.id !== replyId) return r;
+                        const nextLiked = !r.userLiked;
+                        return { ...r, userLiked: nextLiked, likes: (r.likes || 0) + (nextLiked ? 1 : -1) };
+                    }),
+                };
+            }),
+        );
         try {
-            const updatedParent = await toggleReplyLike(parentCommentId, replyId);
+            const updatedParent = await toggleReplyLike(parentCommentId, replyId, originalParent);
             setComments((prev) => prev.map((c) => (c.id === parentCommentId ? updatedParent : c)));
         } catch (err) {
             console.error('Failed to like reply:', err);
+            if (originalParent) {
+                setComments((prev) => prev.map((c) => (c.id === parentCommentId ? originalParent : c)));
+            }
         }
     };
 

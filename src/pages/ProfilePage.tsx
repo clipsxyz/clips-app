@@ -368,13 +368,14 @@ export default function ProfilePage() {
   }, [myFeedCommentDraft, myFeedCommentsPost?.id, user?.handle]);
 
   const handleToggleMyFeedCommentLike = React.useCallback(async (commentId: string) => {
+    const original = myFeedComments.find((c) => c.id === commentId);
     try {
-      const updated = await toggleCommentLike(commentId);
+      const updated = await toggleCommentLike(commentId, original);
       setMyFeedComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
     } catch (error) {
       console.error('Error toggling my feed comment like:', error);
     }
-  }, []);
+  }, [myFeedComments]);
 
   const handleAddMyFeedReply = React.useCallback(async () => {
     if (!myFeedCommentsPost?.id || !myFeedReplyingTo || !user?.handle) return;
@@ -402,13 +403,14 @@ export default function ProfilePage() {
   }, [myFeedCommentsPost?.id, myFeedReplyDraft, myFeedReplyingTo, user?.handle]);
 
   const handleToggleMyFeedReplyLike = React.useCallback(async (parentId: string, replyId: string) => {
+    const originalParent = myFeedComments.find((c) => c.id === parentId);
     try {
-      const updatedParent = await toggleReplyLike(parentId, replyId);
+      const updatedParent = await toggleReplyLike(parentId, replyId, originalParent);
       setMyFeedComments((prev) => prev.map((c) => (c.id === parentId ? updatedParent : c)));
     } catch (error) {
       console.error('Error toggling my feed reply like:', error);
     }
-  }, []);
+  }, [myFeedComments]);
   
   // Location state for cascading dropdowns
   const [national, setNational] = React.useState(user?.national || '');
