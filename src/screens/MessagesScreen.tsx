@@ -2559,7 +2559,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     maxToRenderPerBatch={10}
                     windowSize={11}
                     updateCellsBatchingPeriod={50}
-                    removeClippedSubviews={Platform.OS === 'android'}
+                    removeClippedSubviews={false}
                     keyboardShouldPersistTaps="handled"
                     contentContainerStyle={[
                         styles.messagesContent,
