@@ -5,21 +5,25 @@ import Video, { type OnLoadData, type OnProgressData, type VideoRef } from 'reac
 import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { ox } from '../constants/nativeOpticalScale';
+import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
 
 type Props = {
     uri: string;
     posterUrl?: string | null;
-    /** Width of the media block; height derived from aspect ratio. */
+    /** Extra poster/thumbnail candidates tried (in order) after `posterUrl`. */
+    posterCandidates?: Array<string | null | undefined>;
+    /** Width of the media block; height derived from the unified DM media aspect ratio. */
     width?: number;
 };
 
 /** Inline playable glass video block for DM threads (replaces the "Video" placeholder). */
-export default function DmInlineVideoMessage({ uri, posterUrl, width = 232 }: Props) {
+export default function DmInlineVideoMessage({ uri, posterUrl, posterCandidates, width = DM_MEDIA_MAX_WIDTH }: Props) {
     const videoRef = useRef<VideoRef>(null);
     const [paused, setPaused] = useState(true);
     const [started, setStarted] = useState(false);
     const [loading, setLoading] = useState(false);
     const [failed, setFailed] = useState(false);
+    const [frameReady, setFrameReady] = useState(false);
     const [duration, setDuration] = useState(0);
     const [position, setPosition] = useState(0);
 
@@ -37,7 +41,10 @@ export default function DmInlineVideoMessage({ uri, posterUrl, width = 232 }: Pr
         setPosition(Number(data?.currentTime) || 0);
     }, []);
 
-    const poster = typeof posterUrl === 'string' && posterUrl.trim() ? posterUrl.trim() : undefined;
+    // Poster resolution order: explicit prop, then any extra candidates (e.g. post poster/thumbnail).
+    const poster = [posterUrl, ...(posterCandidates ?? [])]
+        .map((candidate) => (typeof candidate === 'string' ? candidate.trim() : ''))
+        .find((candidate) => candidate.length > 0);
     const progress = duration > 0 ? Math.min(1, position / duration) : 0;
 
     if (failed) {
@@ -52,35 +59,39 @@ export default function DmInlineVideoMessage({ uri, posterUrl, width = 232 }: Pr
         );
     }
 
+    // Without a poster, mount the (paused, muted) video so the platform renders its first
+    // frame as a thumbnail — parity with the web `<video preload="metadata">` fallback.
+    const showPosterImage = !!poster && !started;
+    const mountVideo = started || !poster;
+
     return (
         <View style={[styles.frame, { width }]}>
-            {!started || paused ? (
-                poster ? (
-                    <CachedImage source={{ uri: poster }} style={styles.fill} />
-                ) : (
-                    <View style={[styles.fill, styles.posterFallback]} />
-                )
-            ) : null}
+            {showPosterImage ? <CachedImage source={{ uri: poster }} style={styles.fill} /> : null}
 
-            {started ? (
+            {mountVideo ? (
                 <Video
                     ref={videoRef}
                     source={{ uri }}
                     style={styles.fill}
-                    paused={paused}
-                    muted={false}
+                    paused={!started || paused}
+                    muted={!started}
                     repeat
                     resizeMode="cover"
                     controls={false}
                     progressUpdateInterval={250}
                     onLoadStart={() => setLoading(true)}
                     onLoad={onLoad}
+                    onReadyForDisplay={() => setFrameReady(true)}
                     onProgress={onProgress}
                     onError={() => {
                         setFailed(true);
                         setLoading(false);
                     }}
                 />
+            ) : null}
+
+            {mountVideo && !started && !frameReady ? (
+                <View style={[styles.fill, styles.posterFallback]} pointerEvents="none" />
             ) : null}
 
             <TouchableOpacity activeOpacity={0.9} onPress={toggle} style={styles.touchLayer}>
@@ -115,9 +126,8 @@ export default function DmInlineVideoMessage({ uri, posterUrl, width = 232 }: Pr
 
 const styles = StyleSheet.create({
     frame: {
-        height: undefined,
         maxWidth: '100%',
-        aspectRatio: 4 / 5,
+        aspectRatio: DM_MEDIA_ASPECT_RATIO,
         marginTop: ox(6),
         borderRadius: ox(14),
         overflow: 'hidden',

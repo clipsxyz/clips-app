@@ -21,8 +21,56 @@ export interface ChatMessage {
 
 type ConversationId = string; // sorted `${a}|${b}`
 
+type LaravelReplyPayload = {
+    messageId?: string;
+    message_id?: string;
+    text?: string | null;
+    senderHandle?: string;
+    sender_handle?: string;
+    imageUrl?: string | null;
+    image_url?: string | null;
+    mediaType?: 'image' | 'video' | null;
+    media_type?: 'image' | 'video' | null;
+};
+
+/** Resolve a Laravel message's stored reply preview into the frontend `replyTo` shape. */
+function mapLaravelReplyTo(m: {
+    reply_to?: LaravelReplyPayload | null;
+    replyTo?: LaravelReplyPayload | null;
+    reply_to_message_id?: string | null;
+}): ChatMessage['replyTo'] {
+    const raw = m.reply_to ?? m.replyTo;
+    if (raw && typeof raw === 'object') {
+        const messageId = String(raw.messageId ?? raw.message_id ?? m.reply_to_message_id ?? '');
+        if (!messageId) return undefined;
+        const imageUrl = raw.imageUrl ?? raw.image_url ?? undefined;
+        const mediaType = raw.mediaType ?? raw.media_type ?? undefined;
+        return {
+            messageId,
+            text: typeof raw.text === 'string' ? raw.text : '',
+            senderHandle: String(raw.senderHandle ?? raw.sender_handle ?? ''),
+            imageUrl: imageUrl ?? undefined,
+            mediaType: mediaType ?? undefined,
+        };
+    }
+    if (m.reply_to_message_id) {
+        return { messageId: String(m.reply_to_message_id), text: '', senderHandle: '' };
+    }
+    return undefined;
+}
+
 /** Map Laravel API message to frontend ChatMessage */
-function laravelMsgToChatMessage(m: { id: string; sender_handle: string; text?: string | null; image_url?: string | null; created_at?: string; is_system_message?: boolean }): ChatMessage {
+function laravelMsgToChatMessage(m: {
+    id: string;
+    sender_handle: string;
+    text?: string | null;
+    image_url?: string | null;
+    created_at?: string;
+    is_system_message?: boolean;
+    reply_to?: LaravelReplyPayload | null;
+    replyTo?: LaravelReplyPayload | null;
+    reply_to_message_id?: string | null;
+}): ChatMessage {
     return {
         id: m.id,
         senderHandle: m.sender_handle,
@@ -30,6 +78,7 @@ function laravelMsgToChatMessage(m: { id: string; sender_handle: string; text?: 
         imageUrl: m.image_url ?? undefined,
         timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         isSystemMessage: !!m.is_system_message,
+        replyTo: mapLaravelReplyTo(m),
     };
 }
 
@@ -338,6 +387,7 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
                 source_post_id: message.sourcePostId ?? undefined,
+                reply_to_message_id: message.replyTo?.messageId ?? undefined,
             });
             return laravelMsgToChatMessage(raw);
         } catch (e) {
@@ -651,6 +701,7 @@ export async function appendGroupChatMessage(
                 text: message.text ?? undefined,
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
+                reply_to_message_id: message.replyTo?.messageId ?? undefined,
             });
             return laravelMsgToChatMessage(raw);
         } catch (e) {

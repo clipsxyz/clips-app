@@ -347,7 +347,7 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
         >
             {hasMedia ? (
                 <div className="w-full flex flex-col">
-                    <div className="relative w-full aspect-video" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                    <div className="relative w-full aspect-[4/5]" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
                         {mediaStill ? (
                             <img src={mediaStill} alt="" className="w-full h-full object-cover" />
                         ) : (
@@ -497,11 +497,11 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
                         <div className="mt-2 rounded-lg overflow-hidden relative" style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}>
                             {isVideo ? (
                                 mediaStill ? (
-                                    <img src={mediaStill} alt="" className="w-full h-auto max-h-48 object-cover" />
+                                    <img src={mediaStill} alt="" className="w-full aspect-[4/5] object-cover" />
                                 ) : (
                                     <video
                                         src={displayUrl}
-                                        className="w-full h-auto max-h-48 object-cover"
+                                        className="w-full aspect-[4/5] object-cover"
                                         muted
                                         playsInline
                                         preload="metadata"
@@ -509,7 +509,7 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
                                     />
                                 )
                             ) : (
-                                <img src={displayUrl} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
+                                <img src={displayUrl} alt="Post media" className="w-full aspect-[4/5] object-cover" />
                             )}
                             {isVideo && (
                                 <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.18)' }}>

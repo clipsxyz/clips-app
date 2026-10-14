@@ -1353,7 +1353,7 @@ export async function fetchConversationPage(otherHandle: string, cursor: string 
     return apiRequest(`/messages/conversation/${encoded}/paged?${params}`);
 }
 
-export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string }) {
+export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string; reply_to_message_id?: string }) {
     return apiRequest('/messages/send', {
         method: 'POST',
         body: JSON.stringify({
@@ -1362,6 +1362,7 @@ export async function sendMessage(recipientHandle: string, payload: { text?: str
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
             source_post_id: payload.source_post_id ?? null,
+            reply_to_message_id: payload.reply_to_message_id ?? null,
         }),
     });
 }
@@ -1388,7 +1389,7 @@ export async function fetchGroupConversationPage(groupId: string, cursor: string
 
 export async function sendGroupMessage(
     groupId: string,
-    payload: { text?: string | null; image_url?: string | null; is_system_message?: boolean },
+    payload: { text?: string | null; image_url?: string | null; is_system_message?: boolean; reply_to_message_id?: string | null },
 ) {
     return apiRequest('/messages/send', {
         method: 'POST',
@@ -1397,6 +1398,7 @@ export async function sendGroupMessage(
             text: payload.text ?? null,
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
+            reply_to_message_id: payload.reply_to_message_id ?? null,
         }),
     });
 }

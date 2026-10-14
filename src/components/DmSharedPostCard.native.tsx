@@ -10,6 +10,7 @@ import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
+import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
 
 function resolveDisplayMedia(post: Post | null | undefined): {
     url: string;
@@ -226,11 +227,11 @@ export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: Previe
 const styles = StyleSheet.create({
     tapWrap: {
         width: '100%',
-        maxWidth: ox(320),
+        maxWidth: DM_MEDIA_MAX_WIDTH,
     },
     glassCard: {
         width: '100%',
-        maxWidth: ox(320),
+        maxWidth: DM_MEDIA_MAX_WIDTH,
         borderRadius: ox(18),
         overflow: 'hidden',
         borderWidth: 1,
@@ -299,11 +300,10 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         overflow: 'hidden',
         backgroundColor: 'rgba(0,0,0,0.35)',
-        maxHeight: ox(200),
     },
     mediaImage: {
         width: '100%',
-        height: ox(180),
+        aspectRatio: DM_MEDIA_ASPECT_RATIO,
         resizeMode: 'cover',
     },
     mediaFallback: {
@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
     },
     previewCard: {
         width: '100%',
-        maxWidth: ox(320),
+        maxWidth: DM_MEDIA_MAX_WIDTH,
         borderRadius: ox(18),
         overflow: 'hidden',
         backgroundColor: 'rgba(30,36,46,0.9)',
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
     },
     previewAspect: {
         width: '100%',
-        aspectRatio: 16 / 9,
+        aspectRatio: DM_MEDIA_ASPECT_RATIO,
         backgroundColor: 'rgba(0,0,0,0.5)',
         position: 'relative',
     },

@@ -33,6 +33,7 @@ class MessageController extends Controller
         $conversationId = Message::getConversationId($user->handle, $otherHandle);
 
         $messages = Message::where('conversation_id', $conversationId)
+            ->with('replyToMessage')
             ->orderBy('created_at', 'asc')
             ->get();
 
@@ -62,7 +63,8 @@ class MessageController extends Controller
 
         $query = Message::query()
             ->where('conversation_id', $conversationId)
-            ->whereNull('chat_group_id');
+            ->whereNull('chat_group_id')
+            ->with('replyToMessage');
 
         if ($cursorState['created_at'] && $cursorState['id']) {
             $query->where(function ($q) use ($cursorState) {
@@ -118,6 +120,7 @@ class MessageController extends Controller
         foreach ($conversationIds as $conversationId) {
             $latestMessage = Message::where('conversation_id', $conversationId)
                 ->whereNull('chat_group_id')
+                ->with('replyToMessage')
                 ->orderBy('created_at', 'desc')
                 ->first();
 
@@ -160,6 +163,7 @@ class MessageController extends Controller
         foreach ($memberships as $gm) {
             $group = $gm->chatGroup;
             $latestMessage = Message::where('chat_group_id', $group->id)
+                ->with('replyToMessage')
                 ->orderBy('created_at', 'desc')
                 ->first();
 
@@ -324,6 +328,7 @@ class MessageController extends Controller
         }
 
         $messages = Message::where('chat_group_id', $group->id)
+            ->with('replyToMessage')
             ->orderBy('created_at', 'asc')
             ->get();
 
@@ -369,7 +374,7 @@ class MessageController extends Controller
         $limit = (int) $request->get('limit', 50);
         $cursorState = $this->decodeThreadCursor((string) $request->get('cursor', ''));
 
-        $query = Message::query()->where('chat_group_id', $group->id);
+        $query = Message::query()->where('chat_group_id', $group->id)->with('replyToMessage');
 
         if ($cursorState['created_at'] && $cursorState['id']) {
             $query->where(function ($q) use ($cursorState) {
@@ -448,6 +453,7 @@ class MessageController extends Controller
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
             'source_post_id' => 'nullable|uuid|exists:posts,id',
+            'reply_to_message_id' => 'nullable|uuid|exists:messages,id',
         ]);
 
         if ($validator->fails()) {
@@ -474,8 +480,13 @@ class MessageController extends Controller
             ], 403);
         }
 
-        $message = DB::transaction(function () use ($request, $user, $recipientHandle) {
-            $conversationId = Message::getConversationId($user->handle, $recipientHandle);
+        $conversationId = Message::getConversationId($user->handle, $recipientHandle);
+        $replyToId = $request->input('reply_to_message_id');
+        if ($replyToId && ! Message::where('id', $replyToId)->where('conversation_id', $conversationId)->exists()) {
+            return response()->json(['error' => 'Reply target is not part of this conversation'], 400);
+        }
+
+        $message = DB::transaction(function () use ($request, $user, $recipientHandle, $conversationId, $replyToId) {
             $isFirstConversationMessage = !Message::where('conversation_id', $conversationId)->exists();
 
             $message = Message::create([
@@ -485,6 +496,7 @@ class MessageController extends Controller
                 'text' => $request->text,
                 'image_url' => $request->image_url,
                 'is_system_message' => $request->boolean('is_system_message', false),
+                'reply_to_message_id' => $replyToId,
             ]);
 
             // TODO: Create notification if needed (sticker, reply detection)
@@ -510,6 +522,7 @@ class MessageController extends Controller
             'text' => 'nullable|string|max:1000',
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
+            'reply_to_message_id' => 'nullable|uuid|exists:messages,id',
         ]);
 
         if ($validator->fails()) {
@@ -531,6 +544,11 @@ class MessageController extends Controller
             return response()->json(['error' => 'Not a member of this group'], 403);
         }
 
+        $replyToId = $request->input('reply_to_message_id');
+        if ($replyToId && ! Message::where('id', $replyToId)->where('conversation_id', $group->conversation_id)->exists()) {
+            return response()->json(['error' => 'Reply target is not part of this conversation'], 400);
+        }
+
         $message = Message::create([
             'conversation_id' => $group->conversation_id,
             'chat_group_id' => $group->id,
@@ -539,6 +557,7 @@ class MessageController extends Controller
             'text' => $request->text,
             'image_url' => $request->image_url,
             'is_system_message' => $request->boolean('is_system_message', false),
+            'reply_to_message_id' => $replyToId,
         ]);
 
         return response()->json($message, 201);

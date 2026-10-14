@@ -84,6 +84,7 @@ import {
 } from '../constants/dmImessageTheme.native';
 import { toFileUri } from '../utils/ffmpegNative';
 import { ox } from '../constants/nativeOpticalScale';
+import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 
 function sameDmHandle(a?: string | null, b?: string | null): boolean {
@@ -460,7 +461,15 @@ const DmMessageRow = React.memo(function DmMessageRow({
                     ) : null}
                     {item.imageUrl ? (
                         ctx.isLikelyVideoUrl(item.imageUrl) ? (
-                            <DmInlineVideoMessage uri={item.imageUrl} width={ox(232)} />
+                            <DmInlineVideoMessage
+                                uri={item.imageUrl}
+                                posterUrl={sharedPost?.videoPosterUrl ?? sharedPost?.thumbnailUrl}
+                                posterCandidates={[
+                                    sharedPost?.mediaItems?.[0]?.posterUrl,
+                                    sharedPost?.mediaItems?.[0]?.thumbnailUrl,
+                                ]}
+                                width={DM_MEDIA_MAX_WIDTH}
+                            />
                         ) : (
                             <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
                         )
@@ -3392,8 +3401,9 @@ const styles = StyleSheet.create({
         color: '#F9FAFB',
     },
     messageImage: {
-        width: 200,
-        height: 200,
+        width: DM_MEDIA_MAX_WIDTH,
+        maxWidth: '100%',
+        aspectRatio: DM_MEDIA_ASPECT_RATIO,
         borderRadius: ox(12),
         marginTop: ox(8),
     },

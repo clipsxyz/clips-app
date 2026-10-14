@@ -30,6 +30,7 @@ class Message extends Model
         'text',
         'image_url',
         'is_system_message',
+        'reply_to_message_id',
         'read_at',
     ];
 
@@ -39,6 +40,9 @@ class Message extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /** Serialized quote preview so DM clients can render the reply context after reload. */
+    protected $appends = ['reply_to'];
 
     // Relationships
     public function sender()
@@ -56,9 +60,48 @@ class Message extends Model
         return $this->belongsTo(ChatGroup::class, 'chat_group_id');
     }
 
+    public function replyToMessage()
+    {
+        return $this->belongsTo(Message::class, 'reply_to_message_id');
+    }
+
     public function isGroupMessage(): bool
     {
         return $this->chat_group_id !== null;
+    }
+
+    /**
+     * Compact quote preview attached to the message payload.
+     * Returns null when this message is not a reply (or the parent is gone).
+     */
+    public function getReplyToAttribute(): ?array
+    {
+        if (empty($this->reply_to_message_id)) {
+            return null;
+        }
+
+        /** @var Message|null $parent */
+        $parent = $this->relationLoaded('replyToMessage')
+            ? $this->getRelation('replyToMessage')
+            : $this->replyToMessage;
+
+        if (! $parent) {
+            return null;
+        }
+
+        $imageUrl = $parent->image_url;
+        $mediaType = null;
+        if (! empty($imageUrl)) {
+            $mediaType = preg_match('/\.(mp4|webm|m4v|mov)(\?|#|$)/i', (string) $imageUrl) ? 'video' : 'image';
+        }
+
+        return [
+            'messageId' => (string) $parent->id,
+            'text' => (string) ($parent->text ?? ''),
+            'senderHandle' => (string) $parent->sender_handle,
+            'imageUrl' => $imageUrl,
+            'mediaType' => $mediaType,
+        ];
     }
 
     // Scopes
