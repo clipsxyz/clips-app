@@ -1694,10 +1694,10 @@ export default function InstantCreatePage() {
                                                         style={{ transform: `rotate(${-currentAngleDeg}deg) scale(${scale})` }}
                                                     >
                                                         <div
-                                                            className={`${isCentered ? 'h-[76px] w-[76px]' : 'h-[50px] w-[50px]'} rounded-xl border transition-all duration-300 flex items-center justify-center shadow-lg ${
+                                                            className={`${isCentered ? 'h-[76px] w-[76px]' : 'h-[50px] w-[50px]'} rounded-2xl border transition-all duration-300 flex items-center justify-center shadow-lg ${
                                                                 isCentered
                                                                     ? 'bg-gradient-to-br from-white to-gray-200 border-white/95 shadow-white/25 shadow-black/20'
-                                                                    : 'bg-gradient-to-br from-black/85 to-black/70 border-white/22 shadow-black/60'
+                                                                    : 'bg-white/[0.07] backdrop-blur-md border-white/15 shadow-black/60'
                                                             }`}
                                                         >
                                                             {isCentered && (

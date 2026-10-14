@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiUsers } from 'react-icons/fi';
+import { FiX, FiUsers, FiImage } from 'react-icons/fi';
 import { createChatGroup } from '../api/chatGroups';
 import { uploadFile } from '../api/client';
 import { showToast } from '../utils/toast';
@@ -113,7 +113,7 @@ export default function CreateGroupModal({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Dublin photographers"
             maxLength={120}
-            className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/40"
+            className="w-full rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2.5 text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/40"
             disabled={busy}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void submit();
@@ -121,29 +121,38 @@ export default function CreateGroupModal({
           />
           <div className="space-y-2">
             <label className="block text-xs font-medium text-white/60 uppercase tracking-wide">Group photo (optional)</label>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => fileInputRef.current?.click()}
-                className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-              >
-                {avatarPreviewUrl ? 'Change photo' : 'Choose photo'}
-              </button>
-              {avatarPreviewUrl ? (
+            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3">
+              <div className="w-16 h-16 flex-shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-white/[0.04] flex items-center justify-center">
+                {avatarPreviewUrl ? (
+                  <img src={avatarPreviewUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
+                ) : (
+                  <FiImage className="w-6 h-6 text-white/55" aria-hidden />
+                )}
+              </div>
+              <div className="flex flex-1 flex-col gap-2 min-w-0">
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => {
-                    setAvatarPreviewUrl(null);
-                    setAvatarFile(null);
-                    if (fileInputRef.current) fileInputRef.current.value = '';
-                  }}
-                  className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
                 >
-                  Remove
+                  {avatarPreviewUrl ? 'Change photo' : 'Choose photo'}
                 </button>
-              ) : null}
+                {avatarPreviewUrl ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setAvatarPreviewUrl(null);
+                      setAvatarFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="w-full rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
             </div>
             <input
               ref={fileInputRef}
@@ -167,11 +176,6 @@ export default function CreateGroupModal({
                 reader.readAsDataURL(file);
               }}
             />
-            {avatarPreviewUrl ? (
-              <div className="w-16 h-16 rounded-full overflow-hidden border border-white/20">
-                <img src={avatarPreviewUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
-              </div>
-            ) : null}
           </div>
           <button
             type="button"

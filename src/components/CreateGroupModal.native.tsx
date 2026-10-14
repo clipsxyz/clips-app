@@ -159,28 +159,40 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
                 />
                 {formError ? <Text style={styles.formError}>{formError}</Text> : null}
                 <Text style={styles.label}>Group photo (optional)</Text>
-                <View style={styles.photoRow}>
-                    <TouchableOpacity
-                        style={styles.photoBtn}
-                        onPress={() => void pickPhoto()}
-                        disabled={busy}
-                    >
-                        <Text style={styles.photoBtnText}>
-                            {avatarUri ? 'Change photo' : 'Choose photo'}
-                        </Text>
-                    </TouchableOpacity>
+                <View style={styles.photoCard}>
                     {avatarUri ? (
-                        <>
+                        <View style={styles.avatarPreviewWrap}>
+                            <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
+                        </View>
+                    ) : (
+                        <View style={styles.avatarPreviewWrap}>
+                            <View style={styles.avatarPlaceholder}>
+                                <Icon name="image-outline" size={22} color="rgba(255,255,255,0.55)" />
+                            </View>
+                        </View>
+                    )}
+                    <View style={styles.photoActions}>
+                        <TouchableOpacity
+                            style={styles.photoBtn}
+                            onPress={() => void pickPhoto()}
+                            disabled={busy}
+                        >
+                            <Icon name="camera-outline" size={15} color="#FFFFFF" />
+                            <Text style={styles.photoBtnText}>
+                                {avatarUri ? 'Change photo' : 'Choose photo'}
+                            </Text>
+                        </TouchableOpacity>
+                        {avatarUri ? (
                             <TouchableOpacity
                                 style={styles.photoBtn}
                                 onPress={() => setAvatarUri(null)}
                                 disabled={busy}
                             >
+                                <Icon name="trash-outline" size={15} color="rgba(255,255,255,0.8)" />
                                 <Text style={styles.photoBtnTextMuted}>Remove</Text>
                             </TouchableOpacity>
-                            <Image source={{ uri: avatarUri }} style={styles.avatarPreview} />
-                        </>
-                    ) : null}
+                        ) : null}
+                    </View>
                 </View>
                 <TouchableOpacity
                     style={[styles.submit, busy && styles.submitDisabled]}
@@ -267,13 +279,13 @@ const styles = StyleSheet.create({
         maxHeight: '88%',
         zIndex: 2,
         elevation: 12,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
         overflow: 'hidden',
         backgroundColor: PASSPORT_ABYSS,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     sheetCanvas: {
         backgroundColor: PASSPORT_ABYSS,
@@ -307,7 +319,7 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         paddingBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.1)',
+        borderBottomColor: 'rgba(255,255,255,0.12)',
     },
     headerTitleRow: {
         flex: 1,
@@ -327,10 +339,10 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
     input: {
-        backgroundColor: 'rgba(255,255,255,0.06)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(255,255,255,0.15)',
         padding: 12,
         color: '#FFF',
     },
@@ -339,17 +351,48 @@ const styles = StyleSheet.create({
         fontSize: 13,
         marginTop: 8,
     },
-    photoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' },
-    photoBtn: {
-        borderRadius: 8,
+    photoCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        marginTop: 8,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.05)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    avatarPreviewWrap: {
+        width: 64,
+        height: 64,
+        borderRadius: 16,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+    },
+    avatarPreview: { width: '100%', height: '100%' },
+    avatarPlaceholder: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.04)',
+    },
+    photoActions: { flex: 1, gap: 8, minWidth: 0 },
+    photoBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingVertical: 9,
     },
     photoBtnText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
     photoBtnTextMuted: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '600' },
-    avatarPreview: { width: 64, height: 64, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
     submit: {
         marginTop: 20,
         backgroundColor: '#FFF',

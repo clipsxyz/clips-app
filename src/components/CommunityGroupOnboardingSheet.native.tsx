@@ -154,7 +154,9 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                             <View style={styles.features}>
                                 {copy.features.map((feature) => (
                                     <View key={feature.title} style={styles.featureRow}>
-                                        <Icon name={feature.icon} size={ox(22)} color="#FFFFFF" />
+                                        <View style={styles.featureIcon}>
+                                            <Icon name={feature.icon} size={ox(20)} color="#FFFFFF" />
+                                        </View>
                                         <View style={styles.featureCopy}>
                                             <Text style={styles.featureTitle}>{feature.title}</Text>
                                             <Text style={styles.featureBody}>{feature.body}</Text>
@@ -191,7 +193,7 @@ const styles = StyleSheet.create({
         backgroundColor: PASSPORT_ABYSS,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     sheetInner: {
         paddingHorizontal: 20,
@@ -204,10 +206,12 @@ const styles = StyleSheet.create({
         zIndex: 5,
         width: 34,
         height: 34,
-        borderRadius: 17,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     handleWrap: {
         alignItems: 'center',
@@ -282,9 +286,11 @@ const styles = StyleSheet.create({
         marginLeft: 4,
     },
     incomingBubble: {
-        backgroundColor: 'rgba(42,48,58,0.92)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
         borderRadius: 16,
         borderBottomLeftRadius: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
         paddingHorizontal: 12,
         paddingVertical: 8,
     },
@@ -301,12 +307,12 @@ const styles = StyleSheet.create({
         gap: 4,
         marginTop: -8,
         marginLeft: 10,
-        backgroundColor: '#1f2937',
+        backgroundColor: 'rgba(17,24,39,0.92)',
         borderRadius: 12,
         paddingHorizontal: 7,
         paddingVertical: 3,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(255,255,255,0.15)',
     },
     reactionEmoji: {
         fontSize: 11,
@@ -338,11 +344,18 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     badgeRow: {
+        alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
-        marginBottom: 8,
+        marginBottom: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     badgeSpark: {
         fontSize: 13,
@@ -368,13 +381,28 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
     },
     features: {
-        gap: 16,
+        gap: 10,
         marginBottom: 22,
     },
     featureRow: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 14,
+        alignItems: 'center',
+        gap: 12,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    featureIcon: {
+        width: ox(38),
+        height: ox(38),
+        borderRadius: ox(12),
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(61,155,143,0.22)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     featureCopy: {
         flex: 1,

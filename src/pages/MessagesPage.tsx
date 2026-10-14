@@ -2661,8 +2661,8 @@ export default function MessagesPage() {
                         <FiChevronLeft className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                     </button>
                     {isGroupThread && (
-                        <div className="flex items-center ml-3 flex-1 min-w-0">
-                            <Avatar src={groupAvatarUrl} name={groupDisplayName} size="sm" className="flex-shrink-0" />
+                        <div className="flex items-center ml-2 flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/[0.05] px-2.5 py-1.5">
+                            <Avatar src={groupAvatarUrl} name={groupDisplayName} size="sm" className="flex-shrink-0 ring-1 ring-white/15" />
                             <div className="ml-3 flex-1 min-w-0">
                                 <span className="font-semibold text-white truncate block">{groupDisplayName}</span>
                                 <span className="text-xs text-gray-400">Group chat</span>
@@ -2814,7 +2814,7 @@ export default function MessagesPage() {
                         {isGroupThread && groupId ? (
                             <button
                                 type="button"
-                                className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors text-violet-300`}
+                                className={`${compactPhone ? 'p-1.5' : 'p-2'} rounded-full border border-violet-400/30 bg-violet-500/15 hover:bg-violet-500/25 transition-colors text-violet-200`}
                                 onClick={() => setInviteMemberOpen(true)}
                                 title="Invite someone by username"
                                 aria-label="Invite to group"
@@ -4317,15 +4317,15 @@ export default function MessagesPage() {
                         <div className="relative z-[2] p-4 overflow-y-auto max-h-[calc(80vh-3.5rem)] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                             {isGroupThread && groupId ? (
                                 <>
-                                    <div className="flex items-center gap-4 mb-6">
-                                        <Avatar name={groupDisplayName} size="lg" />
+                                    <div className="flex items-center gap-4 mb-4 rounded-2xl border border-white/10 bg-white/[0.05] p-3">
+                                        <Avatar src={groupAvatarUrl} name={groupDisplayName} size="lg" className="flex-shrink-0 ring-1 ring-white/15" />
                                         <div className="flex-1">
                                             <h4 className="text-white font-semibold text-lg">{groupDisplayName}</h4>
                                             <p className="text-gray-400 text-sm">Group chat</p>
                                         </div>
                                     </div>
-                                    <div className="space-y-2">
-                                        <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                                    <div className="space-y-3">
+                                        <p className="text-xs text-gray-400 leading-relaxed rounded-xl border border-white/10 bg-white/[0.04] p-3">
                                             To add people, use the <span className="text-cyan-400">+</span> button in the chat header, or
                                             open their profile and choose <span className="text-cyan-400">Invite to group</span>.
                                         </p>
@@ -4344,7 +4344,7 @@ export default function MessagesPage() {
                                                     }
                                                 }
                                             }}
-                                            className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
+                                            className="w-full text-left px-4 py-3 rounded-xl border border-red-500/20 bg-red-500/10 hover:bg-red-500/15 flex items-center gap-3 text-red-500 transition-colors"
                                         >
                                             <FiX className="w-5 h-5" />
                                             <span>Leave Group</span>
