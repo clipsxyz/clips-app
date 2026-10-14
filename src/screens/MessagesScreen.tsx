@@ -15,6 +15,7 @@ import {
     Linking,
     PermissionsAndroid,
     ScrollView,
+    type ViewToken,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -25,6 +26,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { useAuth } from '../context/Auth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import {
     fetchConversationMessagesPage,
     fetchGroupThreadMessagesPage,
@@ -122,6 +124,8 @@ type DmMessageRowProps = {
     reactions?: DmReaction[];
     isPlayingAudio: boolean;
     isSwiping: boolean;
+    /** Whether this row sits inside the active message viewport (drives inline video auto-pause). */
+    isActive: boolean;
     reactionFlyEmoji: string | null;
     sharedPost: Post | null;
     swipeAnim: Animated.Value;
@@ -149,6 +153,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
     reactions,
     isPlayingAudio,
     isSwiping,
+    isActive,
     reactionFlyEmoji,
     sharedPost,
     swipeAnim,
@@ -161,6 +166,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
     handlers,
 }: DmMessageRowProps) {
     const ctx = handlers.current;
+    const suppressTapRef = useRef(false);
     const isFromMe = sameDmHandle(item.senderHandle, userHandle);
     const senderAvatar = getAvatarForHandle(item.senderHandle);
     const isStoryInteraction = Boolean(item.storyId);
@@ -265,7 +271,10 @@ const DmMessageRow = React.memo(function DmMessageRow({
                         >
                             <TouchableOpacity
                                 style={styles.reactionPill}
-                                onPress={() => ctx.handleToggleReaction(item.id, reaction.emoji)}
+                                onPress={() => {
+                                    if (suppressTapRef.current) return;
+                                    ctx.handleToggleReaction(item.id, reaction.emoji);
+                                }}
                             >
                                 <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
                                 {reaction.users.length > 1 && (
@@ -387,7 +396,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             styles.sharedPostColumn,
                         ]}
                     >
-                        <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap}>
+                        <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap} suppressTapRef={suppressTapRef}>
                             {sharedCard}
                         </DmMessagePressable>
                         {renderReactionPills()}
@@ -469,6 +478,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                                     sharedPost?.mediaItems?.[0]?.thumbnailUrl,
                                 ]}
                                 width={DM_MEDIA_MAX_WIDTH}
+                                isActive={isActive}
                             />
                         ) : (
                             <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
@@ -478,6 +488,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                         <TouchableOpacity
                             style={styles.audioMessagePill}
                             onPress={() => {
+                                if (suppressTapRef.current) return;
                                 void ctx.handlePlayAudioMessage(item.audioUrl);
                             }}
                         >
@@ -575,7 +586,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             {...(!isFromMe ? bubblePanResponder.panHandlers : {})}
                             style={!isFromMe && isSwiping ? { transform: [{ translateX: swipeAnim }] } : undefined}
                         >
-                            <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap}>
+                            <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap} suppressTapRef={suppressTapRef}>
                                 {bubbleShell}
                             </DmMessagePressable>
                         </Animated.View>
@@ -719,6 +730,35 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [leaveGroupBusy, setLeaveGroupBusy] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
+    const isScreenFocused = useIsFocused();
+    // Message ids currently inside the active viewport — drives inline video auto-pause.
+    const [activeMessageIds, setActiveMessageIds] = useState<Set<string>>(() => new Set());
+    const viewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 55,
+        minimumViewTime: 120,
+    }).current;
+    const onViewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+            const next = new Set<string>();
+            for (const entry of viewableItems) {
+                const id = (entry.item as ChatMessage | undefined)?.id;
+                if (entry.isViewable && id) next.add(id);
+            }
+            setActiveMessageIds((prev) => {
+                if (prev.size === next.size) {
+                    let same = true;
+                    for (const id of next) {
+                        if (!prev.has(id)) {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same) return prev;
+                }
+                return next;
+            });
+        },
+    ).current;
     const [swipingMessageId, setSwipingMessageId] = useState<string | null>(null);
     const audioRecorderRef = useRef(AudioRecorderPlayer);
     const communityCreatedHandledRef = useRef(false);
@@ -2414,6 +2454,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 reactions={messageReactions[item.id]}
                 isPlayingAudio={Boolean(item.audioUrl) && playingAudioId === item.audioUrl}
                 isSwiping={swipingMessageId === item.id}
+                isActive={isScreenFocused && activeMessageIds.has(item.id)}
                 reactionFlyEmoji={
                     reactionFly && reactionFly.messageId === item.id && !reactionFly.target
                         ? reactionFly.emoji
@@ -2570,6 +2611,8 @@ export default function MessagesScreen({ route, navigation }: any) {
                     updateCellsBatchingPeriod={50}
                     removeClippedSubviews={false}
                     keyboardShouldPersistTaps="handled"
+                    viewabilityConfig={viewabilityConfig}
+                    onViewableItemsChanged={onViewableItemsChanged}
                     contentContainerStyle={[
                         styles.messagesContent,
                         messages.length === 0 ? styles.messagesContentEmpty : null,

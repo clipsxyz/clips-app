@@ -12,7 +12,9 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class MessageController extends Controller
 {
@@ -439,6 +441,36 @@ class MessageController extends Controller
     }
 
     /**
+     * Whether the messages table supports reply linkage. Keeps sends working on
+     * environments where the reply migration hasn't been deployed yet.
+     */
+    private function replyColumnAvailable(): bool
+    {
+        static $available = null;
+
+        if ($available === null) {
+            $available = Schema::hasColumn('messages', 'reply_to_message_id');
+        }
+
+        return $available;
+    }
+
+    /**
+     * Coerce a client-supplied reply target into a safe message UUID (or null).
+     * Malformed / optimistic ids are ignored rather than failing the whole send.
+     */
+    private function normalizeReplyTarget($value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return ($trimmed !== '' && Str::isUuid($trimmed)) ? $trimmed : null;
+    }
+
+    /**
      * Send a message
      */
     public function sendMessage(Request $request): JsonResponse
@@ -453,7 +485,7 @@ class MessageController extends Controller
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
             'source_post_id' => 'nullable|uuid|exists:posts,id',
-            'reply_to_message_id' => 'nullable|uuid|exists:messages,id',
+            'reply_to_message_id' => 'nullable|string|max:64',
         ]);
 
         if ($validator->fails()) {
@@ -481,7 +513,9 @@ class MessageController extends Controller
         }
 
         $conversationId = Message::getConversationId($user->handle, $recipientHandle);
-        $replyToId = $request->input('reply_to_message_id');
+        $replyToId = $this->replyColumnAvailable()
+            ? $this->normalizeReplyTarget($request->input('reply_to_message_id'))
+            : null;
         if ($replyToId && ! Message::where('id', $replyToId)->where('conversation_id', $conversationId)->exists()) {
             return response()->json(['error' => 'Reply target is not part of this conversation'], 400);
         }
@@ -489,15 +523,19 @@ class MessageController extends Controller
         $message = DB::transaction(function () use ($request, $user, $recipientHandle, $conversationId, $replyToId) {
             $isFirstConversationMessage = !Message::where('conversation_id', $conversationId)->exists();
 
-            $message = Message::create([
+            $attributes = [
                 'conversation_id' => $conversationId,
                 'sender_handle' => $user->handle,
                 'recipient_handle' => $recipientHandle,
                 'text' => $request->text,
                 'image_url' => $request->image_url,
                 'is_system_message' => $request->boolean('is_system_message', false),
-                'reply_to_message_id' => $replyToId,
-            ]);
+            ];
+            if ($replyToId) {
+                $attributes['reply_to_message_id'] = $replyToId;
+            }
+
+            $message = Message::create($attributes);
 
             // TODO: Create notification if needed (sticker, reply detection)
             // This would be handled by a service or event listener
@@ -522,7 +560,7 @@ class MessageController extends Controller
             'text' => 'nullable|string|max:1000',
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
-            'reply_to_message_id' => 'nullable|uuid|exists:messages,id',
+            'reply_to_message_id' => 'nullable|string|max:64',
         ]);
 
         if ($validator->fails()) {
@@ -544,12 +582,14 @@ class MessageController extends Controller
             return response()->json(['error' => 'Not a member of this group'], 403);
         }
 
-        $replyToId = $request->input('reply_to_message_id');
+        $replyToId = $this->replyColumnAvailable()
+            ? $this->normalizeReplyTarget($request->input('reply_to_message_id'))
+            : null;
         if ($replyToId && ! Message::where('id', $replyToId)->where('conversation_id', $group->conversation_id)->exists()) {
             return response()->json(['error' => 'Reply target is not part of this conversation'], 400);
         }
 
-        $message = Message::create([
+        $attributes = [
             'conversation_id' => $group->conversation_id,
             'chat_group_id' => $group->id,
             'sender_handle' => $user->handle,
@@ -557,8 +597,12 @@ class MessageController extends Controller
             'text' => $request->text,
             'image_url' => $request->image_url,
             'is_system_message' => $request->boolean('is_system_message', false),
-            'reply_to_message_id' => $replyToId,
-        ]);
+        ];
+        if ($replyToId) {
+            $attributes['reply_to_message_id'] = $replyToId;
+        }
+
+        $message = Message::create($attributes);
 
         return response()->json($message, 201);
     }

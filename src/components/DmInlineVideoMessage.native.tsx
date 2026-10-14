@@ -1,11 +1,20 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+    ActivityIndicator,
+    Modal,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Video, { type OnLoadData, type OnProgressData, type VideoRef } from 'react-native-video';
 import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
+import { useDmTapSuppressed } from './DmMessagePressable.native';
 
 type Props = {
     uri: string;
@@ -14,23 +23,64 @@ type Props = {
     posterCandidates?: Array<string | null | undefined>;
     /** Width of the media block; height derived from the unified DM media aspect ratio. */
     width?: number;
+    /**
+     * Whether this message currently sits in the active message viewport. Playback is
+     * auto-paused when the bubble scrolls out of view (Instagram DM parity).
+     */
+    isActive?: boolean;
+    /**
+     * Optional external full-screen target (e.g. Scenes). When omitted, the expand
+     * affordance opens the built-in full-screen player instead.
+     */
+    onOpenFullscreen?: () => void;
 };
 
-/** Inline playable glass video block for DM threads (replaces the "Video" placeholder). */
-export default function DmInlineVideoMessage({ uri, posterUrl, posterCandidates, width = DM_MEDIA_MAX_WIDTH }: Props) {
+/**
+ * Inline playable glass video block for DM threads.
+ *
+ * Tapping the bubble (or the mini control) only ever toggles inline play/pause — it never
+ * navigates. Full-screen playback is intentionally opt-in via the explicit expand button,
+ * matching Instagram's DM video behaviour where immersive viewing is a deliberate action.
+ */
+export default function DmInlineVideoMessage({
+    uri,
+    posterUrl,
+    posterCandidates,
+    width = DM_MEDIA_MAX_WIDTH,
+    isActive = true,
+    onOpenFullscreen,
+}: Props) {
     const videoRef = useRef<VideoRef>(null);
-    const [paused, setPaused] = useState(true);
+    const suppressTap = useDmTapSuppressed();
     const [started, setStarted] = useState(false);
+    const [userPaused, setUserPaused] = useState(false);
     const [loading, setLoading] = useState(false);
     const [failed, setFailed] = useState(false);
     const [frameReady, setFrameReady] = useState(false);
     const [duration, setDuration] = useState(0);
     const [position, setPosition] = useState(0);
+    const [fullscreen, setFullscreen] = useState(false);
 
-    const toggle = useCallback(() => {
+    // Off-screen (scrolled away) or unfocused videos pause without losing the user's
+    // play intent, so they resume automatically when the bubble returns to view.
+    const effectivePaused = !started || userPaused || !isActive || fullscreen;
+
+    const toggleInline = useCallback(() => {
+        // A press-and-hold opens the action sheet; swallow the tap that follows it.
+        if (suppressTap?.current) return;
+        setUserPaused((prev) => (started ? !prev : false));
         setStarted(true);
-        setPaused((prev) => !prev);
-    }, []);
+    }, [started, suppressTap]);
+
+    const openFullscreen = useCallback(() => {
+        if (suppressTap?.current) return;
+        if (onOpenFullscreen) {
+            onOpenFullscreen();
+            return;
+        }
+        setStarted(true);
+        setFullscreen(true);
+    }, [onOpenFullscreen, suppressTap]);
 
     const onLoad = useCallback((data: OnLoadData) => {
         setDuration(Number(data?.duration) || 0);
@@ -73,7 +123,7 @@ export default function DmInlineVideoMessage({ uri, posterUrl, posterCandidates,
                     ref={videoRef}
                     source={{ uri }}
                     style={styles.fill}
-                    paused={!started || paused}
+                    paused={effectivePaused}
                     muted={!started}
                     repeat
                     resizeMode="cover"
@@ -94,7 +144,7 @@ export default function DmInlineVideoMessage({ uri, posterUrl, posterCandidates,
                 <View style={[styles.fill, styles.posterFallback]} pointerEvents="none" />
             ) : null}
 
-            <TouchableOpacity activeOpacity={0.9} onPress={toggle} style={styles.touchLayer}>
+            <TouchableOpacity activeOpacity={0.9} onPress={toggleInline} style={styles.touchLayer}>
                 {!started ? (
                     <View style={styles.playButton}>
                         <Icon name="play" size={ox(26)} color="#FFFFFF" />
@@ -106,8 +156,12 @@ export default function DmInlineVideoMessage({ uri, posterUrl, posterCandidates,
 
             {started && !loading ? (
                 <View style={styles.controls} pointerEvents="box-none">
-                    <TouchableOpacity onPress={toggle} style={styles.miniButton} hitSlop={8}>
-                        <Icon name={paused ? 'play' : 'pause'} size={ox(14)} color="#FFFFFF" />
+                    <TouchableOpacity onPress={toggleInline} style={styles.miniButton} hitSlop={8}>
+                        <Icon
+                            name={effectivePaused ? 'play' : 'pause'}
+                            size={ox(14)}
+                            color="#FFFFFF"
+                        />
                     </TouchableOpacity>
                     <View style={styles.progressTrack}>
                         <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
@@ -115,11 +169,53 @@ export default function DmInlineVideoMessage({ uri, posterUrl, posterCandidates,
                 </View>
             ) : null}
 
+            <TouchableOpacity
+                onPress={openFullscreen}
+                style={styles.fullscreenButton}
+                hitSlop={10}
+                accessibilityLabel="Play full screen"
+                accessibilityRole="button"
+            >
+                <Icon name="expand-outline" size={ox(16)} color="#FFFFFF" />
+            </TouchableOpacity>
+
             <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.35)']}
                 style={styles.bottomScrim}
                 pointerEvents="none"
             />
+
+            <Modal
+                visible={fullscreen}
+                animationType="fade"
+                statusBarTranslucent
+                supportedOrientations={['portrait', 'landscape']}
+                onRequestClose={() => setFullscreen(false)}
+            >
+                <View style={styles.fsRoot}>
+                    <StatusBar barStyle="light-content" backgroundColor="#000000" />
+                    <Video
+                        source={{ uri }}
+                        style={styles.fsVideo}
+                        paused={false}
+                        muted={false}
+                        repeat
+                        resizeMode="contain"
+                        controls={false}
+                        poster={poster}
+                        posterResizeMode="contain"
+                    />
+                    <TouchableOpacity
+                        style={styles.fsClose}
+                        onPress={() => setFullscreen(false)}
+                        hitSlop={12}
+                        accessibilityLabel="Close full screen"
+                        accessibilityRole="button"
+                    >
+                        <Icon name="close" size={ox(24)} color="#FFFFFF" />
+                    </TouchableOpacity>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -200,11 +296,45 @@ const styles = StyleSheet.create({
         borderRadius: ox(2),
         backgroundColor: '#FFFFFF',
     },
+    fullscreenButton: {
+        position: 'absolute',
+        top: ox(8),
+        right: ox(8),
+        width: ox(30),
+        height: ox(30),
+        borderRadius: ox(15),
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.35)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     bottomScrim: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
         height: ox(48),
+    },
+    fsRoot: {
+        flex: 1,
+        backgroundColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    fsVideo: {
+        width: '100%',
+        height: '100%',
+    },
+    fsClose: {
+        position: 'absolute',
+        top: ox(44),
+        right: ox(16),
+        width: ox(40),
+        height: ox(40),
+        borderRadius: ox(20),
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

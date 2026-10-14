@@ -11,6 +11,7 @@ import VerifiedBadge from './VerifiedBadge.native';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
+import { useDmTapSuppressed } from './DmMessagePressable.native';
 
 function resolveDisplayMedia(post: Post | null | undefined): {
     url: string;
@@ -78,6 +79,7 @@ type SharedPostCardProps = {
 
 /** Glass (frosted dark) shared post card — native DM parity with web MessagesPage. */
 export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
+    const suppressTap = useDmTapSuppressed();
     const { url: displayUrl, posterUrl, isVideo } = resolveDisplayMedia(post);
     const mediaStill = isVideo ? posterUrl : displayUrl;
     const hasDisplayMedia = displayUrl.length > 0;
@@ -153,7 +155,14 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
     if (!onTap) return card;
 
     return (
-        <TouchableOpacity activeOpacity={0.92} onPress={() => onTap(post)} style={styles.tapWrap}>
+        <TouchableOpacity
+            activeOpacity={0.92}
+            onPress={() => {
+                if (suppressTap?.current) return;
+                onTap(post);
+            }}
+            style={styles.tapWrap}
+        >
             {card}
         </TouchableOpacity>
     );
@@ -168,6 +177,7 @@ type PreviewProps = {
 
 /** Compact loading/preview card while shared post resolves. */
 export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: PreviewProps) {
+    const suppressTap = useDmTapSuppressed();
     const [previewPost, setPreviewPost] = useState<Post | null>(null);
 
     useEffect(() => {
@@ -192,7 +202,14 @@ export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: Previe
     const hasMedia = mediaStill.length > 0;
 
     return (
-        <TouchableOpacity activeOpacity={0.9} onPress={onTap} style={styles.previewCard}>
+        <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => {
+                if (suppressTap?.current) return;
+                onTap();
+            }}
+            style={styles.previewCard}
+        >
             {hasMedia ? (
                 <View style={styles.previewMediaBlock}>
                     <View style={styles.previewAspect}>

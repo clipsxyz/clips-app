@@ -1124,6 +1124,17 @@ function isProfileUuid(value: string): boolean {
     );
 }
 
+/**
+ * Replies may be attached to optimistic (locally generated) message ids, so only forward
+ * well-formed server UUIDs. Anything else is sent as null to keep the send request valid.
+ */
+function normalizeReplyToMessageId(value: string | null | undefined): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return isProfileUuid(trimmed) ? trimmed : null;
+}
+
 async function laravelUsersGet(pathAndQuery: string): Promise<any> {
     if (isMockMode()) {
         console.log('[laravelUsersGet] IS_MOCK=true → skip Laravel', pathAndQuery);
@@ -1362,7 +1373,7 @@ export async function sendMessage(recipientHandle: string, payload: { text?: str
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
             source_post_id: payload.source_post_id ?? null,
-            reply_to_message_id: payload.reply_to_message_id ?? null,
+            reply_to_message_id: normalizeReplyToMessageId(payload.reply_to_message_id),
         }),
     });
 }
@@ -1398,7 +1409,7 @@ export async function sendGroupMessage(
             text: payload.text ?? null,
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
-            reply_to_message_id: payload.reply_to_message_id ?? null,
+            reply_to_message_id: normalizeReplyToMessageId(payload.reply_to_message_id),
         }),
     });
 }
