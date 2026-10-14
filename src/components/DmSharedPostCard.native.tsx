@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
-import { getPostById } from '../api/posts';
+import { getPostById, loadSharedPost } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
@@ -12,16 +13,61 @@ import { ox } from '../constants/nativeOpticalScale';
 
 function resolveDisplayMedia(post: Post | null | undefined): {
     url: string;
+    posterUrl: string;
     isVideo: boolean;
 } {
-    if (!post) return { url: '', isVideo: false };
+    if (!post) return { url: '', posterUrl: '', isVideo: false };
     const first = post.mediaItems?.[0];
-    const firstUrl =
-        first &&
-        (first.url ?? (first as { media_url?: string }).media_url);
+    const firstAny = first as
+        | {
+              media_url?: string;
+              posterUrl?: string;
+              poster_url?: string;
+              thumbnailUrl?: string;
+              thumbnail_url?: string;
+          }
+        | undefined;
+    const firstUrl = first?.url ?? firstAny?.media_url;
     const url = (post.mediaUrl?.trim() || (typeof firstUrl === 'string' ? firstUrl.trim() : '') || '').trim();
     const isVideo = post.mediaType === 'video' || first?.type === 'video';
-    return { url, isVideo };
+    const posterCandidates = [
+        post.videoPosterUrl,
+        post.thumbnailUrl,
+        firstAny?.posterUrl,
+        firstAny?.poster_url,
+        firstAny?.thumbnailUrl,
+        firstAny?.thumbnail_url,
+    ];
+    const posterUrl =
+        posterCandidates.find(
+            (candidate): candidate is string =>
+                typeof candidate === 'string' && candidate.trim().length > 0,
+        )?.trim() || '';
+    return { url, posterUrl, isVideo };
+}
+
+/** Glass post meta line — location + relative time (used in both card branches). */
+function PostMeta({ post, light }: { post: Post; light?: boolean }) {
+    const iconColor = light ? '#CBD5E1' : '#4B5563';
+    const textColor = light ? '#CBD5E1' : '#4B5563';
+    const mutedColor = light ? '#94A3B8' : '#9CA3AF';
+    if (!post.locationLabel && !post.createdAt) return null;
+    return (
+        <View style={styles.metaRow}>
+            {post.locationLabel ? (
+                <>
+                    <Icon name="location-outline" size={ox(11)} color={iconColor} />
+                    <Text style={[styles.metaText, { color: textColor }]} numberOfLines={1}>
+                        {post.locationLabel}
+                    </Text>
+                    {post.createdAt ? <Text style={[styles.metaText, { color: mutedColor }]}> · </Text> : null}
+                </>
+            ) : null}
+            {post.createdAt ? (
+                <Text style={[styles.metaText, { color: mutedColor }]}>{timeAgo(post.createdAt)}</Text>
+            ) : null}
+        </View>
+    );
 }
 
 type SharedPostCardProps = {
@@ -29,85 +75,78 @@ type SharedPostCardProps = {
     onTap?: (post: Post) => void;
 };
 
-/** White Twitter-style shared post card (web MessagesPage parity). */
+/** Glass (frosted dark) shared post card — native DM parity with web MessagesPage. */
 export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
-    const { url: displayUrl, isVideo } = resolveDisplayMedia(post);
+    const { url: displayUrl, posterUrl, isVideo } = resolveDisplayMedia(post);
+    const mediaStill = isVideo ? posterUrl : displayUrl;
     const hasDisplayMedia = displayUrl.length > 0;
-    const isTextOnly = !!post.text && !hasDisplayMedia;
+    const isTextOnly = !hasDisplayMedia;
 
-    const card = isTextOnly ? (
-        <View style={styles.whiteCard}>
-            <View style={styles.cardHeader}>
+    const card = (
+        <LinearGradient
+            colors={['rgba(30,36,46,0.94)', 'rgba(15,19,26,0.97)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.glassCard}
+        >
+            <View style={styles.headerRow}>
                 <Avatar
                     src={getAvatarForHandle(post.userHandle)}
                     name={post.userHandle.split('@')[0]}
                     size={ox(28)}
                 />
-                <View style={styles.cardHeaderText}>
+                <View style={styles.headerText}>
                     <View style={styles.handleRow}>
-                        <Text style={styles.handleDark}>{post.userHandle}</Text>
+                        <Text style={styles.handleLight} numberOfLines={1}>
+                            {post.userHandle}
+                        </Text>
                         <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
                     </View>
-                    <View style={styles.metaRow}>
-                        {post.locationLabel ? (
-                            <>
-                                <Icon name="location-outline" size={ox(11)} color="#4B5563" />
-                                <Text style={styles.metaDark}>{post.locationLabel}</Text>
-                                {post.createdAt ? <Text style={styles.metaMuted}> · </Text> : null}
-                            </>
-                        ) : null}
-                        {post.createdAt ? (
-                            <Text style={styles.metaMuted}>{timeAgo(post.createdAt)}</Text>
-                        ) : null}
+                    <PostMeta post={post} light />
+                </View>
+            </View>
+
+            {isTextOnly ? (
+                <View style={styles.textOnlyPad}>
+                    <View style={styles.textOnlyBox}>
+                        <Text style={styles.textOnlyBody}>{post.text}</Text>
                     </View>
                 </View>
-            </View>
-            <View style={styles.textOnlyPad}>
-                <View style={styles.textOnlyBox}>
-                    <Text style={styles.textOnlyBody}>{post.text}</Text>
-                </View>
-            </View>
-        </View>
-    ) : (
-        <View style={styles.whiteCard}>
-            <View style={styles.mediaCardPad}>
-                <View style={styles.handleRow}>
-                    <Avatar
-                        src={getAvatarForHandle(post.userHandle)}
-                        name={post.userHandle.split('@')[0]}
-                        size={ox(28)}
-                    />
-                    <Text style={styles.handleDark}>{post.userHandle}</Text>
-                    <VerifiedBadge accountType={post.userAccountType} size={ox(12)} />
-                </View>
-                {post.text ? (
-                    <Text style={styles.captionDark} numberOfLines={2}>
-                        {post.text}
-                    </Text>
-                ) : null}
-                {displayUrl ? (
-                    <View style={styles.mediaWrap}>
-                        {isVideo ? (
-                            <View style={styles.videoFrame}>
-                                <CachedImage source={{ uri: displayUrl }} style={styles.mediaImage} />
+            ) : (
+                <View style={styles.mediaCardPad}>
+                    {post.text ? (
+                        <Text style={styles.captionLight} numberOfLines={2}>
+                            {post.text}
+                        </Text>
+                    ) : null}
+                    {hasDisplayMedia ? (
+                        <View style={styles.mediaWrap}>
+                            {mediaStill ? (
+                                <CachedImage source={{ uri: mediaStill }} style={styles.mediaImage} />
+                            ) : (
+                                <View style={[styles.mediaImage, styles.mediaFallback]}>
+                                    <Icon name="videocam" size={ox(26)} color="#E5E7EB" />
+                                </View>
+                            )}
+                            {isVideo ? (
                                 <View style={styles.playOverlay}>
                                     <View style={styles.playCircle}>
                                         <Icon name="play" size={ox(22)} color="#FFFFFF" />
                                     </View>
                                 </View>
-                            </View>
-                        ) : (
-                            <CachedImage source={{ uri: displayUrl }} style={styles.mediaImage} />
-                        )}
-                    </View>
-                ) : null}
-            </View>
+                            ) : null}
+                        </View>
+                    ) : null}
+                </View>
+            )}
+
             {onTap ? (
                 <View style={styles.scenesCta}>
+                    <Icon name="images-outline" size={ox(13)} color="#E5E7EB" />
                     <Text style={styles.scenesCtaText}>Tap to view in Scenes</Text>
                 </View>
             ) : null}
-        </View>
+        </LinearGradient>
     );
 
     if (!onTap) return card;
@@ -120,18 +159,24 @@ export function DmSharedPostCard({ post, onTap }: SharedPostCardProps) {
 }
 
 type PreviewProps = {
-    postId: string;
+    postId?: string;
+    token?: string;
     userId?: string;
     onTap: () => void;
 };
 
 /** Compact loading/preview card while shared post resolves. */
-export function DmSharedPostPreviewCard({ postId, userId, onTap }: PreviewProps) {
+export function DmSharedPostPreviewCard({ postId, token, userId, onTap }: PreviewProps) {
     const [previewPost, setPreviewPost] = useState<Post | null>(null);
 
     useEffect(() => {
         let cancelled = false;
-        getPostById(postId, userId)
+        const resolve = token
+            ? loadSharedPost({ token })
+            : postId
+              ? getPostById(postId, userId)
+              : Promise.resolve(null);
+        resolve
             .then((post) => {
                 if (!cancelled && post) setPreviewPost(post);
             })
@@ -139,17 +184,18 @@ export function DmSharedPostPreviewCard({ postId, userId, onTap }: PreviewProps)
         return () => {
             cancelled = true;
         };
-    }, [postId, userId]);
+    }, [postId, token, userId]);
 
-    const { url: displayUrl, isVideo } = resolveDisplayMedia(previewPost);
-    const hasMedia = displayUrl.length > 0;
+    const { url: displayUrl, posterUrl, isVideo } = resolveDisplayMedia(previewPost);
+    const mediaStill = isVideo ? posterUrl : displayUrl;
+    const hasMedia = mediaStill.length > 0;
 
     return (
         <TouchableOpacity activeOpacity={0.9} onPress={onTap} style={styles.previewCard}>
             {hasMedia ? (
                 <View style={styles.previewMediaBlock}>
                     <View style={styles.previewAspect}>
-                        <CachedImage source={{ uri: displayUrl }} style={styles.mediaImage} />
+                        <CachedImage source={{ uri: mediaStill }} style={styles.mediaImage} />
                         {isVideo ? (
                             <View style={styles.playOverlay}>
                                 <View style={styles.playCircle}>
@@ -159,6 +205,7 @@ export function DmSharedPostPreviewCard({ postId, userId, onTap }: PreviewProps)
                         ) : null}
                     </View>
                     <View style={styles.scenesCta}>
+                        <Icon name="images-outline" size={ox(13)} color="#E5E7EB" />
                         <Text style={styles.scenesCtaText}>Tap to view in Scenes</Text>
                     </View>
                 </View>
@@ -181,27 +228,25 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: ox(320),
     },
-    whiteCard: {
+    glassCard: {
         width: '100%',
         maxWidth: ox(320),
-        borderRadius: ox(16),
+        borderRadius: ox(18),
         overflow: 'hidden',
-        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: 'rgba(255,255,255,0.14)',
     },
-    cardHeader: {
+    headerRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: ox(10),
         paddingHorizontal: ox(14),
-        paddingTop: ox(14),
+        paddingTop: ox(12),
         paddingBottom: ox(10),
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#E5E7EB',
-        backgroundColor: '#FFFFFF',
+        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
-    cardHeaderText: {
+    headerText: {
         flex: 1,
         minWidth: 0,
     },
@@ -209,100 +254,102 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(6),
-        marginBottom: ox(6),
     },
-    handleDark: {
-        color: '#111827',
+    handleLight: {
+        color: '#F8FAFC',
         fontSize: ox(13),
         fontWeight: '700',
+        flexShrink: 1,
     },
     metaRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: ox(3),
         flexWrap: 'wrap',
+        marginTop: ox(3),
     },
-    metaDark: {
-        color: '#4B5563',
-        fontSize: ox(11),
-    },
-    metaMuted: {
-        color: '#9CA3AF',
+    metaText: {
         fontSize: ox(11),
     },
     textOnlyPad: {
         padding: ox(14),
-        backgroundColor: '#FFFFFF',
     },
     textOnlyBox: {
-        backgroundColor: '#000000',
-        borderRadius: ox(10),
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderRadius: ox(12),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
         padding: ox(14),
     },
     textOnlyBody: {
-        color: '#FFFFFF',
+        color: '#F1F5F9',
         fontSize: ox(15),
         lineHeight: ox(22),
     },
     mediaCardPad: {
         padding: ox(14),
-        backgroundColor: '#FFFFFF',
     },
-    captionDark: {
-        color: '#374151',
+    captionLight: {
+        color: '#E2E8F0',
         fontSize: ox(13),
         marginBottom: ox(8),
     },
     mediaWrap: {
-        marginTop: ox(8),
-        borderRadius: ox(10),
+        marginTop: ox(4),
+        borderRadius: ox(12),
         overflow: 'hidden',
-        backgroundColor: '#000000',
-        maxHeight: ox(192),
-    },
-    videoFrame: {
-        position: 'relative',
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        maxHeight: ox(200),
     },
     mediaImage: {
         width: '100%',
         height: ox(180),
         resizeMode: 'cover',
     },
+    mediaFallback: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.04)',
+    },
     playOverlay: {
         ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.18)',
     },
     playCircle: {
         width: ox(48),
         height: ox(48),
         borderRadius: ox(24),
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.35)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     scenesCta: {
-        backgroundColor: '#0284C7',
-        paddingVertical: ox(10),
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        borderTopWidth: 1,
-        borderTopColor: '#0EA5E9',
+        gap: ox(6),
+        paddingVertical: ox(10),
+        backgroundColor: 'rgba(255,255,255,0.07)',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.1)',
     },
     scenesCtaText: {
-        color: '#FFFFFF',
+        color: '#E5E7EB',
         fontSize: ox(13),
         fontWeight: '700',
     },
     previewCard: {
         width: '100%',
         maxWidth: ox(320),
-        borderRadius: ox(16),
+        borderRadius: ox(18),
         overflow: 'hidden',
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(30,36,46,0.9)',
         borderWidth: 1,
-        borderColor: '#4B5563',
+        borderColor: 'rgba(255,255,255,0.14)',
         minHeight: ox(100),
     },
     previewMediaBlock: {
@@ -311,7 +358,7 @@ const styles = StyleSheet.create({
     previewAspect: {
         width: '100%',
         aspectRatio: 16 / 9,
-        backgroundColor: '#000000',
+        backgroundColor: 'rgba(0,0,0,0.5)',
         position: 'relative',
     },
     previewEmpty: {

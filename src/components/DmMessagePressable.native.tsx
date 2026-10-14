@@ -3,6 +3,8 @@ import { View, type StyleProp, type ViewStyle, type GestureResponderEvent } from
 
 type Props = {
     onLongPress: () => void;
+    /** Fired on a quick double tap (used for the heart reaction). */
+    onDoubleTap?: () => void;
     /** Hold duration before menu opens. Instagram-ish ~250–300ms. */
     delayMs?: number;
     /** Cancel long-press only after finger moves this far (px). */
@@ -18,6 +20,7 @@ type Props = {
  */
 export default function DmMessagePressable({
     onLongPress,
+    onDoubleTap,
     delayMs = 280,
     moveTolerance = 18,
     style,
@@ -26,8 +29,11 @@ export default function DmMessagePressable({
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const startRef = useRef({ x: 0, y: 0 });
     const firedRef = useRef(false);
+    const lastTapRef = useRef(0);
     const onLongPressRef = useRef(onLongPress);
     onLongPressRef.current = onLongPress;
+    const onDoubleTapRef = useRef(onDoubleTap);
+    onDoubleTapRef.current = onDoubleTap;
 
     const clearTimer = () => {
         if (timerRef.current) {
@@ -62,6 +68,18 @@ export default function DmMessagePressable({
 
     const onTouchEnd = () => {
         clearTimer();
+        if (firedRef.current) {
+            firedRef.current = false;
+            return;
+        }
+        if (!onDoubleTapRef.current) return;
+        const now = Date.now();
+        if (now - lastTapRef.current < 280) {
+            lastTapRef.current = 0;
+            onDoubleTapRef.current();
+        } else {
+            lastTapRef.current = now;
+        }
     };
 
     return (

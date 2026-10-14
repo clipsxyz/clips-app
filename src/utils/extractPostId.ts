@@ -1,3 +1,29 @@
+export type SharedPostRef = { postId?: string; token?: string };
+
+/** Match public share links (`https://host/p/<token>`) emitted by buildShareablePostUrl. */
+const sharedTokenPattern = /https?:\/\/[^\s/]+\/p\/([A-Za-z0-9_-]{4,})(?:\/|\?|#|$|\s)/i;
+
+/** Stable cache key for a resolved shared post reference. */
+export function sharedPostRefKey(ref: SharedPostRef): string {
+    return ref.token ? `token:${ref.token}` : `post:${ref.postId ?? ''}`;
+}
+
+/**
+ * Resolve a shareable post reference from DM text. Prefers `/p/<token>`
+ * public links, then falls back to any recognizable post id.
+ */
+export function extractSharedPostRef(text: string): SharedPostRef | null {
+    if (!text) return null;
+
+    const tokenMatch = text.match(sharedTokenPattern);
+    if (tokenMatch?.[1]) return { token: tokenMatch[1] };
+
+    const postId = extractPostId(text);
+    if (postId) return { postId };
+
+    return null;
+}
+
 /** Extract a post id from DM text (URL, path, or known id formats). */
 export function extractPostId(text: string): string | null {
     if (!text) return null;

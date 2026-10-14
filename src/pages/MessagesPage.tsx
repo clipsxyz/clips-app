@@ -194,6 +194,23 @@ function extractPostId(text: string): string | null {
     return null;
 }
 
+/** Resolve card media URL + video poster (parity with native DmSharedPostCard). */
+function resolveCardMedia(post: Post | null | undefined): { url: string; posterUrl: string; isVideo: boolean } {
+    if (!post) return { url: '', posterUrl: '', isVideo: false };
+    const first = post.mediaItems?.[0];
+    const firstAny = first as
+        | { media_url?: string; posterUrl?: string; poster_url?: string; thumbnailUrl?: string; thumbnail_url?: string }
+        | undefined;
+    const firstUrl = first && (first.url ?? firstAny?.media_url);
+    const url = (post.mediaUrl?.trim() || (typeof firstUrl === 'string' ? firstUrl.trim() : '') || '').trim();
+    const isVideo = post.mediaType === 'video' || first?.type === 'video';
+    const posterUrl =
+        [post.videoPosterUrl, post.thumbnailUrl, firstAny?.posterUrl, firstAny?.poster_url, firstAny?.thumbnailUrl, firstAny?.thumbnail_url]
+            .find((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0)
+            ?.trim() || '';
+    return { url, posterUrl, isVideo };
+}
+
 
 // Component to render comment notification with post preview (Twitter/X style)
 function CommentCard({ post, commentText, commenterHandle }: { post: Post; commentText: string; commenterHandle: string }) {
@@ -312,11 +329,9 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
     }, [postId, userId]);
 
     // Media can be in mediaUrl OR in mediaItems (still-image posts often only have media_items)
-    const firstMediaItem = previewPost?.mediaItems?.[0];
-    const firstItemUrl = firstMediaItem && (firstMediaItem.url ?? (firstMediaItem as { media_url?: string }).media_url);
-    const displayUrl = (previewPost?.mediaUrl?.trim() || (typeof firstItemUrl === 'string' && firstItemUrl.trim()) || '').trim() || '';
+    const { url: displayUrl, posterUrl, isVideo } = resolveCardMedia(previewPost);
+    const mediaStill = isVideo ? posterUrl : displayUrl;
     const hasMedia = displayUrl.length > 0;
-    const isVideo = previewPost?.mediaType === 'video' || firstMediaItem?.type === 'video';
 
     return (
         <button
@@ -324,12 +339,18 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
             onClick={onTap}
             aria-label="View post in Scenes"
             data-post-id={postId}
-            className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-600 shadow-lg flex flex-col hover:bg-gray-750 active:opacity-90 transition-opacity min-h-[100px]"
+            className="w-full max-w-md rounded-2xl overflow-hidden border shadow-lg flex flex-col transition-opacity min-h-[100px]"
+            style={{
+                background: 'linear-gradient(135deg, rgba(30,36,46,0.94), rgba(15,19,26,0.97))',
+                borderColor: 'rgba(255,255,255,0.14)',
+            }}
         >
             {hasMedia ? (
                 <div className="w-full flex flex-col">
-                    <div className="relative w-full aspect-video bg-black">
-                        {isVideo ? (
+                    <div className="relative w-full aspect-video" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                        {mediaStill ? (
+                            <img src={mediaStill} alt="" className="w-full h-full object-cover" />
+                        ) : (
                             <video
                                 src={displayUrl}
                                 className="w-full h-full object-cover"
@@ -338,184 +359,183 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
                                 preload="metadata"
                                 disablePictureInPicture
                             />
-                        ) : (
-                            <img src={displayUrl} alt="" className="w-full h-full object-cover" />
                         )}
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                            <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                        <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.18)' }}>
+                            <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.35)' }}>
                                 <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
                                     <path d="M8 5v14l11-7L8 5z" />
                                 </svg>
                             </div>
                         </div>
                     </div>
-                    <div className="w-full bg-sky-600 px-3 py-3 flex items-center justify-center border-t-2 border-sky-500">
-                        <span className="text-white text-base font-bold">Tap to view in Scenes</span>
+                    <div className="w-full px-3 py-3 flex items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.07)', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                        <span className="text-base font-bold" style={{ color: '#e5e7eb' }}>Tap to view in Scenes</span>
                     </div>
                 </div>
             ) : (
                 <div className="p-6 flex flex-col items-center justify-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center">
-                        <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+                        <svg className="w-6 h-6" style={{ color: '#9ca3af' }} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
                             <path d="M8 5v14l11-7L8 5z" />
                         </svg>
                     </div>
-                    <span className="text-white text-base font-semibold">Tap to view in Scenes</span>
+                    <span className="text-base font-semibold" style={{ color: '#f8fafc' }}>Tap to view in Scenes</span>
                 </div>
             )}
         </button>
     );
 }
 
-// Component to render shared post card (matching ScenesModal format exactly - Twitter card style)
+// Component to render shared post card (glass card parity with native DmSharedPostCard)
 function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => void }) {
-    // Derive display URL from mediaUrl or first mediaItems item (still-image posts often only have media_items)
-    const firstMediaItem = post.mediaItems?.[0];
-    const firstItemUrl = firstMediaItem && (firstMediaItem.url ?? (firstMediaItem as { media_url?: string }).media_url);
-    const displayMediaUrlForCheck = (post.mediaUrl?.trim() || (typeof firstItemUrl === 'string' && firstItemUrl.trim()) || '').trim() || '';
-    const hasDisplayMedia = displayMediaUrlForCheck.length > 0;
-    // Text-only = has text and no media to display (still images and video both count as media)
-    const isTextOnly = !!post.text && !hasDisplayMedia;
-    
+    const { url: displayUrl, posterUrl, isVideo } = resolveCardMedia(post);
+    const mediaStill = isVideo ? posterUrl : displayUrl;
+    const hasDisplayMedia = displayUrl.length > 0;
+    const isTextOnly = !hasDisplayMedia;
+
+    const glassCardStyle: React.CSSProperties = {
+        background: 'linear-gradient(135deg, rgba(30,36,46,0.94), rgba(15,19,26,0.97))',
+        borderColor: 'rgba(255,255,255,0.14)',
+    };
+
     const cardContent = (() => {
-    // Always show text-only posts as white Twitter card (matching ScenesModal)
-    // Force white background regardless of dark mode - use !important via inline styles
-    if (isTextOnly) {
-        // Match ScenesModal EXACTLY - copy the exact same structure and classes
-        // This is the Twitter card style: white card with black text box
-        return (
-            <div 
-                className="w-full max-w-md rounded-2xl overflow-hidden border shadow-2xl"
-                style={{ 
-                    maxWidth: '100%', 
-                    boxSizing: 'border-box',
-                    backgroundColor: '#ffffff', // Force white background
-                    borderColor: '#e5e7eb', // Light gray border
-                    display: 'block',
-                    visibility: 'visible',
-                    opacity: 1,
-                    color: '#000000', // Force black text for header
-                    background: '#ffffff' // Double-set to override dark mode
-                }}
-            >
-                {/* Post Header - exactly like ScenesModal */}
-                <div 
-                    className="flex items-start justify-between px-4 pt-4 pb-3 border-b" 
-                    style={{ 
-                        backgroundColor: '#ffffff',
-                        borderColor: '#e5e7eb' // Light gray border
-                    }}
+        if (isTextOnly) {
+            return (
+                <div
+                    className="w-full max-w-md rounded-2xl overflow-hidden border shadow-2xl"
+                    style={{ maxWidth: '100%', boxSizing: 'border-box', ...glassCardStyle }}
                 >
-                    <div className="flex items-center gap-3 flex-1">
+                    <div
+                        className="flex items-start justify-between px-4 pt-4 pb-3 border-b"
+                        style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+                    >
+                        <div className="flex items-center gap-3 flex-1">
+                            <Avatar
+                                src={getAvatarForHandle(post.userHandle)}
+                                name={post.userHandle.split('@')[0]}
+                                size="sm"
+                            />
+                            <div className="flex-1">
+                                <h3 className="font-semibold flex items-center gap-1.5 text-sm" style={{ color: '#f8fafc' }}>
+                                    <span>{post.userHandle}</span>
+                                    <VerifiedBadge accountType="personal" size={14} />
+                                </h3>
+                                <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: '#cbd5e1' }}>
+                                    {post.locationLabel && (
+                                        <>
+                                            <span className="flex items-center gap-1">
+                                                <FiMapPin className="w-3 h-3" />
+                                                {post.locationLabel}
+                                            </span>
+                                            {post.createdAt && <span style={{ color: '#94a3b8' }}>·</span>}
+                                        </>
+                                    )}
+                                    {post.createdAt && (
+                                        <span style={{ color: '#94a3b8' }}>{timeAgo(post.createdAt)}</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                        <div
+                            className="p-4 rounded-lg overflow-hidden w-full"
+                            style={{
+                                maxWidth: '100%',
+                                boxSizing: 'border-box',
+                                backgroundColor: 'rgba(255,255,255,0.06)',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                            }}
+                        >
+                            <div
+                                className="text-base leading-relaxed whitespace-pre-wrap font-normal break-words w-full"
+                                style={{
+                                    wordBreak: 'break-word',
+                                    overflowWrap: 'anywhere',
+                                    maxWidth: '100%',
+                                    boxSizing: 'border-box',
+                                    color: '#f1f5f9',
+                                }}
+                            >
+                                {post.text}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="w-full max-w-sm rounded-2xl overflow-hidden border shadow-lg mt-2" style={glassCardStyle}>
+                <div className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
                         <Avatar
                             src={getAvatarForHandle(post.userHandle)}
                             name={post.userHandle.split('@')[0]}
                             size="sm"
                         />
-                        <div className="flex-1">
-                            <h3 className="font-semibold flex items-center gap-1.5 text-sm" style={{ color: '#111827' }}>
-                                <span>{post.userHandle}</span>
-                                <VerifiedBadge accountType="personal" size={14} />
-                            </h3>
-                            <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: '#4b5563' }}>
-                                {post.locationLabel && (
-                                    <>
-                                        <span className="flex items-center gap-1">
-                                            <FiMapPin className="w-3 h-3" />
-                                            {post.locationLabel}
-                                        </span>
-                                        {post.createdAt && <span style={{ color: '#9ca3af' }}>·</span>}
-                                    </>
-                                )}
-                                {post.createdAt && (
-                                    <span>{timeAgo(post.createdAt)}</span>
-                                )}
-                            </div>
-                        </div>
+                        <span className="font-semibold text-sm" style={{ color: '#f8fafc' }}>{post.userHandle}</span>
+                        <VerifiedBadge accountType="personal" size={12} />
                     </div>
+                    <div className="text-xs flex items-center gap-2 mb-2" style={{ color: '#cbd5e1' }}>
+                        {post.locationLabel && (
+                            <>
+                                <span className="flex items-center gap-1">
+                                    <FiMapPin className="w-3 h-3" />
+                                    {post.locationLabel}
+                                </span>
+                                {post.createdAt && <span style={{ color: '#94a3b8' }}>·</span>}
+                            </>
+                        )}
+                        {post.createdAt && <span style={{ color: '#94a3b8' }}>{timeAgo(post.createdAt)}</span>}
+                    </div>
+                    {post.text && (
+                        <p className="text-sm line-clamp-2" style={{ color: '#e2e8f0' }}>{post.text}</p>
+                    )}
+                    {displayUrl && (
+                        <div className="mt-2 rounded-lg overflow-hidden relative" style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}>
+                            {isVideo ? (
+                                mediaStill ? (
+                                    <img src={mediaStill} alt="" className="w-full h-auto max-h-48 object-cover" />
+                                ) : (
+                                    <video
+                                        src={displayUrl}
+                                        className="w-full h-auto max-h-48 object-cover"
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                        disablePictureInPicture
+                                    />
+                                )
+                            ) : (
+                                <img src={displayUrl} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
+                            )}
+                            {isVideo && (
+                                <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.18)' }}>
+                                    <div
+                                        className="w-12 h-12 rounded-full flex items-center justify-center"
+                                        style={{ backgroundColor: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.35)' }}
+                                    >
+                                        <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                            <path d="M8 5v14l11-7L8 5z" />
+                                        </svg>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
-
-                {/* Text Content - styled exactly like ScenesModal - white card with black text box */}
-                <div 
-                    className="p-4 w-full overflow-hidden" 
-                    style={{ 
-                        maxWidth: '100%', 
-                        boxSizing: 'border-box', 
-                        backgroundColor: '#ffffff' // White background
-                    }}
-                >
-                    <div 
-                        className="p-4 rounded-lg overflow-hidden w-full" 
-                        style={{ 
-                            maxWidth: '100%', 
-                            boxSizing: 'border-box', 
-                            backgroundColor: '#000000' // Black box for text
-                        }}
+                {onTap && (
+                    <div
+                        className="w-full px-3 py-2.5 flex items-center justify-center rounded-b-2xl"
+                        style={{ backgroundColor: 'rgba(255,255,255,0.07)', borderTop: '1px solid rgba(255,255,255,0.1)' }}
                     >
-                        <div 
-                            className="text-base leading-relaxed whitespace-pre-wrap font-normal break-words w-full" 
-                            style={{ 
-                                wordBreak: 'break-word', 
-                                overflowWrap: 'anywhere', 
-                                maxWidth: '100%', 
-                                boxSizing: 'border-box', 
-                                color: '#ffffff' // White text in black box
-                            }}
-                        >
-                            {post.text}
-                        </div>
+                        <span className="text-sm font-bold" style={{ color: '#e5e7eb' }}>Tap to view in Scenes</span>
                     </div>
-                </div>
+                )}
             </div>
         );
-    }
-    
-    // For posts with media, show a simple preview (video = static frame, tap opens Scenes)
-    const isVideo = post.mediaType === 'video' || firstMediaItem?.type === 'video';
-    return (
-        <div 
-            className="w-full max-w-sm rounded-2xl overflow-hidden border shadow-lg mt-2"
-            style={{
-                backgroundColor: '#ffffff',
-                borderColor: '#e5e7eb'
-            }}
-        >
-            <div className="p-4" style={{ backgroundColor: '#ffffff' }}>
-                <div className="flex items-center gap-2 mb-2">
-                    <Avatar
-                        src={getAvatarForHandle(post.userHandle)}
-                        name={post.userHandle.split('@')[0]}
-                        size="sm"
-                    />
-                    <span className="font-semibold text-sm" style={{ color: '#111827' }}>{post.userHandle}</span>
-                </div>
-                {post.text && (
-                    <p className="text-sm line-clamp-2" style={{ color: '#374151' }}>{post.text}</p>
-                )}
-                {displayMediaUrlForCheck && (
-                    <div className="mt-2 rounded-lg overflow-hidden bg-black">
-                        {isVideo ? (
-                            <video
-                                src={displayMediaUrlForCheck}
-                                className="w-full h-auto max-h-48 object-cover"
-                                muted
-                                playsInline
-                                preload="metadata"
-                                disablePictureInPicture
-                            />
-                        ) : (
-                            <img src={displayMediaUrlForCheck} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
-                        )}
-                    </div>
-                )}
-            </div>
-            {onTap && (
-                <div className="w-full bg-sky-600 px-3 py-2.5 flex items-center justify-center border-t border-sky-500 rounded-b-2xl">
-                    <span className="text-white text-sm font-bold">Tap to view in Scenes</span>
-                </div>
-            )}
-        </div>
-    );
     })();
 
     if (onTap) {

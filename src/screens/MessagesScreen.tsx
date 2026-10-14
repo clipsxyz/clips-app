@@ -47,10 +47,14 @@ import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/c
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { getAvatarForHandle } from '../api/users';
-import { getPostById, getFollowedUsers, getState, getFollowState } from '../api/posts';
+import { getFollowedUsers, getState, getFollowState, loadSharedPost } from '../api/posts';
 import { fetchUserProfile } from '../api/client';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
-import { extractPostId } from '../utils/extractPostId';
+import {
+    extractSharedPostRef,
+    sharedPostRefKey,
+    type SharedPostRef,
+} from '../utils/extractPostId';
 import { DmSharedPostCard, DmSharedPostPreviewCard } from '../components/DmSharedPostCard.native';
 import { hasPendingFollowRequest } from '../api/privacy';
 import { followOrRequest } from '../utils/followOrRequest';
@@ -67,9 +71,9 @@ import DmReactionFlyOverlay, {
     type ReactionFlyTarget,
 } from '../components/DmReactionFlyOverlay.native';
 import DmMessagePressable from '../components/DmMessagePressable.native';
+import DmInlineVideoMessage from '../components/DmInlineVideoMessage.native';
 import IMessageDmBubbleShell from '../components/IMessageDmBubbleShell.native';
 import {
-    DM_RECEIVED,
     DM_SENT_BRASS,
     DM_SENT_PASSPORT,
     dmSentBubbleColor,
@@ -85,6 +89,507 @@ import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
 function sameDmHandle(a?: string | null, b?: string | null): boolean {
     return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 }
+
+/** Derive a shareable post reference from a DM message (explicit id or share URL). */
+function getMessageSharedRef(msg: ChatMessage): SharedPostRef | null {
+    if (msg.postId) return { postId: msg.postId };
+    if (msg.text) return extractSharedPostRef(msg.text);
+    return null;
+}
+
+type DmReaction = { emoji: string; users: string[] };
+
+type DmRowHandlers = {
+    openMessageActions: (item: ChatMessage) => void;
+    handleToggleReaction: (messageId: string, emoji: string) => void;
+    handleReactWithAnimation: (messageId: string, emoji: string) => void;
+    handlePlayAudioMessage: (audioUrl?: string) => void;
+    openScenesForPost: (post: Post) => void;
+    openScenesForRef: (ref: SharedPostRef) => void;
+    formatMessageClock: (ts: number) => string;
+    isLikelyVideoUrl: (url?: string) => boolean;
+};
+
+type DmMessageRowProps = {
+    message: ChatMessage;
+    userHandle?: string;
+    userId?: string;
+    threadHandle?: string;
+    isGroupThread: boolean;
+    dmSentStyle: DmSentBubbleStyle;
+    translatedText?: string;
+    reactions?: DmReaction[];
+    isPlayingAudio: boolean;
+    isSwiping: boolean;
+    reactionFlyEmoji: string | null;
+    sharedPost: Post | null;
+    swipeAnim: Animated.Value;
+    navigation: any;
+    setReplyingTo: (item: ChatMessage | null) => void;
+    setEditingMessage: (item: ChatMessage | null) => void;
+    setSwipingMessageId: (id: string | null) => void;
+    swipeMessageIdRef: React.MutableRefObject<string | null>;
+    reactionPillRefs: React.MutableRefObject<Record<string, View | null>>;
+    handlers: React.MutableRefObject<DmRowHandlers>;
+};
+
+/**
+ * Memoized DM thread row. Callbacks/refs arrive through `handlers` (a stable ref)
+ * so only rows whose visible data changed re-render during thread updates.
+ */
+const DmMessageRow = React.memo(function DmMessageRow({
+    message: item,
+    userHandle,
+    userId,
+    threadHandle,
+    isGroupThread,
+    dmSentStyle,
+    translatedText,
+    reactions,
+    isPlayingAudio,
+    isSwiping,
+    reactionFlyEmoji,
+    sharedPost,
+    swipeAnim,
+    navigation,
+    setReplyingTo,
+    setEditingMessage,
+    setSwipingMessageId,
+    swipeMessageIdRef,
+    reactionPillRefs,
+    handlers,
+}: DmMessageRowProps) {
+    const ctx = handlers.current;
+    const isFromMe = sameDmHandle(item.senderHandle, userHandle);
+    const senderAvatar = getAvatarForHandle(item.senderHandle);
+    const isStoryInteraction = Boolean(item.storyId);
+    const isLegacyStoryContextText =
+        !!item.isSystemMessage &&
+        typeof item.text === 'string' &&
+        item.text.trim().toLowerCase().startsWith('replying to @') &&
+        item.text.toLowerCase().includes('story');
+
+    const entry = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+        Animated.spring(entry, {
+            toValue: 1,
+            friction: 8,
+            tension: 90,
+            useNativeDriver: true,
+        }).start();
+    }, [entry]);
+    const entryStyle = {
+        opacity: entry,
+        transform: [
+            {
+                translateY: entry.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [10, 0],
+                }),
+            },
+        ],
+    };
+
+    const bubblePanResponder = PanResponder.create({
+        // Don't claim touch on start — that blocks long-press / reply menu.
+        onStartShouldSetPanResponder: () => false,
+        // Higher threshold so a soft hold (with tiny jitter) isn't stolen as a swipe.
+        onMoveShouldSetPanResponder: (_evt, gestureState) =>
+            !isFromMe &&
+            gestureState.dx > 28 &&
+            Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.35,
+        onPanResponderGrant: () => {
+            swipeMessageIdRef.current = item.id;
+            swipeAnim.stopAnimation();
+            swipeAnim.setValue(0);
+            setSwipingMessageId(item.id);
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+            if (isFromMe) return;
+            const dx = Math.max(0, Math.min(gestureState.dx, 84));
+            const dy = Math.abs(gestureState.dy);
+            if (dx > dy * 0.6) {
+                swipeAnim.setValue(dx);
+            }
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+            const shouldReply = !isFromMe && gestureState.dx > 48;
+            Animated.spring(swipeAnim, {
+                toValue: 0,
+                friction: 7,
+                tension: 140,
+                useNativeDriver: true,
+            }).start(() => {
+                if (swipeMessageIdRef.current === item.id) {
+                    setSwipingMessageId(null);
+                    swipeMessageIdRef.current = null;
+                }
+            });
+            if (shouldReply) {
+                setReplyingTo(item);
+                setEditingMessage(null);
+            }
+        },
+        onPanResponderTerminate: () => {
+            Animated.spring(swipeAnim, {
+                toValue: 0,
+                friction: 7,
+                tension: 140,
+                useNativeDriver: true,
+            }).start(() => {
+                setSwipingMessageId(null);
+                swipeMessageIdRef.current = null;
+            });
+        },
+    });
+
+    const renderReactionPills = () => {
+        if (!reactions?.length) return null;
+        return (
+            <View style={styles.reactionsRow}>
+                {reactions.map((reaction) => {
+                    const pillKey = `${item.id}::${reaction.emoji}`;
+                    return (
+                        <View
+                            key={pillKey}
+                            ref={(node) => {
+                                reactionPillRefs.current[pillKey] = node;
+                            }}
+                            collapsable={false}
+                            onLayout={() => {
+                                if (reactionFlyEmoji === reaction.emoji) {
+                                    // Pill just appeared during pop — ready to measure soon
+                                }
+                            }}
+                        >
+                            <TouchableOpacity
+                                style={styles.reactionPill}
+                                onPress={() => ctx.handleToggleReaction(item.id, reaction.emoji)}
+                            >
+                                <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+                                {reaction.users.length > 1 && (
+                                    <Text style={styles.reactionCount}>{reaction.users.length}</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    );
+                })}
+            </View>
+        );
+    };
+
+    const onDoubleTap = () => ctx.handleReactWithAnimation(item.id, '❤️');
+
+    let inner: React.ReactNode;
+
+    if (isStoryInteraction || isLegacyStoryContextText) {
+        const trimmed = (item.text || '').trim();
+        const reactionOnly =
+            !!item.storyId &&
+            (item.storyContextText === 'Reacted to your story' ||
+                (trimmed.length > 0 && trimmed.length <= 4 && !/\s/.test(trimmed)));
+        const label = reactionOnly
+            ? isFromMe
+                ? 'You reacted to their story'
+                : 'Reacted to your story'
+            : isFromMe
+              ? 'You replied to their story'
+              : 'Replied to your story';
+        const bodyText = reactionOnly
+            ? trimmed
+            : trimmed && trimmed !== 'Replied to your story'
+              ? trimmed
+              : item.storyContextText && item.storyContextText !== 'Reacted to your story'
+                ? item.storyContextText
+                : null;
+
+        inner = (
+            <>
+                {!isFromMe ? (
+                    <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
+                ) : null}
+                <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
+                    <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => {
+                            if (!item.storyId) return;
+                            navigation.navigate('Stories', {
+                                openUserHandle: isFromMe
+                                    ? threadHandle
+                                    : item.storyContextOwner || threadHandle,
+                                openStoryId: item.storyId,
+                            });
+                        }}
+                        onLongPress={() => ctx.openMessageActions(item)}
+                    >
+                        <View style={[styles.storyStickerCard, isFromMe && styles.storyStickerCardMine]}>
+                            {item.imageUrl ? (
+                                <Image source={{ uri: item.imageUrl }} style={styles.storyStickerThumb} />
+                            ) : (
+                                <View style={[styles.storyStickerThumb, styles.storyStickerThumbFallback]}>
+                                    <Icon name="images-outline" size={22} color="#9CA3AF" />
+                                </View>
+                            )}
+                            <View style={styles.storyStickerMeta}>
+                                <Text style={styles.storyStickerLabel}>{label}</Text>
+                                {bodyText ? (
+                                    <Text style={styles.storyStickerBody} numberOfLines={3}>
+                                        {bodyText}
+                                    </Text>
+                                ) : null}
+                                {item.storyId ? (
+                                    <Text style={styles.storyStickerHint}>Tap to view story</Text>
+                                ) : null}
+                            </View>
+                        </View>
+                    </TouchableOpacity>
+                    {renderReactionPills()}
+                </View>
+            </>
+        );
+    } else {
+        const sharedRef = getMessageSharedRef(item);
+        if (sharedRef) {
+            const sharedCard = sharedPost ? (
+                <DmSharedPostCard post={sharedPost} onTap={ctx.openScenesForPost} />
+            ) : (
+                <DmSharedPostPreviewCard
+                    postId={sharedRef.postId}
+                    token={sharedRef.token}
+                    userId={userId}
+                    onTap={() => ctx.openScenesForRef(sharedRef)}
+                />
+            );
+            inner = (
+                <>
+                    {!isFromMe ? (
+                        <TouchableOpacity
+                            onPress={() => {
+                                if (item.senderHandle) {
+                                    navigation.navigate('ViewProfile', {
+                                        handle: item.senderHandle,
+                                    });
+                                }
+                            }}
+                        >
+                            <Avatar
+                                src={senderAvatar}
+                                name={item.senderHandle?.split('@')[0] || 'User'}
+                                size={ox(28)}
+                            />
+                        </TouchableOpacity>
+                    ) : null}
+                    <View
+                        style={[
+                            styles.messageColumn,
+                            isFromMe ? styles.messageColumnMe : styles.messageColumnOther,
+                            styles.sharedPostColumn,
+                        ]}
+                    >
+                        <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap}>
+                            {sharedCard}
+                        </DmMessagePressable>
+                        {renderReactionPills()}
+                        <View
+                            style={[
+                                styles.messageMetaRow,
+                                isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther,
+                            ]}
+                        >
+                            <Text style={styles.messageTimeOutside}>
+                                {ctx.formatMessageClock(item.timestamp)}
+                            </Text>
+                        </View>
+                    </View>
+                </>
+            );
+        } else {
+            const sentBubbleColor = dmSentBubbleColor(dmSentStyle);
+            const sentGradient = dmSentBubbleGradient(dmSentStyle);
+            const isMediaOnlyMessage = Boolean(
+                item.imageUrl && !item.text?.trim() && !item.audioUrl && !(item as any).replyTo
+            );
+            const bubbleFill = isFromMe ? sentBubbleColor : 'rgba(255,255,255,0.08)';
+
+            const bubbleContent = (
+                <>
+                    {(item as any).replyTo ? (
+                        <View style={styles.replyPreviewWrap}>
+                            <View style={styles.replyPreviewBar} />
+                            {((item as any).replyTo?.imageUrl as string | undefined) ? (
+                                <View style={styles.replyPreviewThumb}>
+                                    {ctx.isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
+                                        <View style={styles.replyPreviewVideoBadge}>
+                                            <Icon name="videocam" size={ox(12)} color="#FFFFFF" />
+                                        </View>
+                                    ) : (
+                                        <Image
+                                            source={{ uri: (item as any).replyTo.imageUrl }}
+                                            style={styles.replyPreviewImage}
+                                        />
+                                    )}
+                                </View>
+                            ) : null}
+                            <View style={styles.replyPreviewTextWrap}>
+                                <Text style={styles.replyPreviewSender} numberOfLines={1}>
+                                    {(item as any).replyTo?.senderHandle || 'Reply'}
+                                </Text>
+                                <Text style={styles.replyPreviewText} numberOfLines={1}>
+                                    {(item as any).replyTo?.imageUrl
+                                        ? ctx.isLikelyVideoUrl((item as any).replyTo.imageUrl)
+                                            ? 'Video'
+                                            : 'Photo'
+                                        : (item as any).replyTo?.text || 'Message'}
+                                </Text>
+                            </View>
+                        </View>
+                    ) : null}
+                    {item.text ? (
+                        <Text
+                            style={[
+                                styles.messageText,
+                                isMediaOnlyMessage ? styles.messageTextPlain : null,
+                                isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
+                            ]}
+                        >
+                            {translatedText || item.text}
+                        </Text>
+                    ) : null}
+                    {!!translatedText && !!item.text ? (
+                        <Text style={styles.translatedOriginalText}>Original: {item.text}</Text>
+                    ) : null}
+                    {item.imageUrl ? (
+                        ctx.isLikelyVideoUrl(item.imageUrl) ? (
+                            <DmInlineVideoMessage uri={item.imageUrl} width={ox(232)} />
+                        ) : (
+                            <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+                        )
+                    ) : null}
+                    {item.audioUrl ? (
+                        <TouchableOpacity
+                            style={styles.audioMessagePill}
+                            onPress={() => {
+                                void ctx.handlePlayAudioMessage(item.audioUrl);
+                            }}
+                        >
+                            <Icon
+                                name={isPlayingAudio ? 'pause' : 'play'}
+                                size={ox(16)}
+                                color="#FFFFFF"
+                            />
+                            <Text style={styles.audioMessageText}>
+                                {isPlayingAudio ? 'Playing...' : 'Voice message'}
+                            </Text>
+                        </TouchableOpacity>
+                    ) : null}
+                    {renderReactionPills()}
+                </>
+            );
+
+            const messageMeta = (
+                <View style={[styles.messageMetaRow, isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther]}>
+                    <Text style={styles.messageTimeOutside}>{ctx.formatMessageClock(item.timestamp)}</Text>
+                    {isFromMe && !isGroupThread ? (
+                        <Icon
+                            name="checkmark-done"
+                            size={ox(13)}
+                            color={(item as any).read ? dmSentBubbleColor(dmSentStyle) : '#8E8E93'}
+                        />
+                    ) : null}
+                </View>
+            );
+
+            const bubbleShell = (
+                <IMessageDmBubbleShell
+                    isFromMe={isFromMe}
+                    tailBackgroundColor={bubbleFill}
+                    showTail={false}
+                    gradientColors={isFromMe && !isMediaOnlyMessage ? [...sentGradient] : undefined}
+                    bubbleStyle={
+                        isMediaOnlyMessage
+                            ? {
+                                  backgroundColor: 'transparent',
+                                  paddingHorizontal: 0,
+                                  paddingVertical: 0,
+                                  shadowOpacity: 0,
+                                  elevation: 0,
+                                  borderBottomLeftRadius: 18,
+                                  borderBottomRightRadius: 18,
+                              }
+                            : [
+                                  !isFromMe
+                                      ? {
+                                            borderWidth: 1,
+                                            borderColor: 'rgba(255,255,255,0.12)',
+                                        }
+                                      : null,
+                                  reactions?.length ? { paddingBottom: ox(22) } : null,
+                              ]
+                    }
+                >
+                    {bubbleContent}
+                </IMessageDmBubbleShell>
+            );
+
+            inner = (
+                <>
+                    {!isFromMe ? (
+                        <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
+                    ) : null}
+                    {!isFromMe && isSwiping ? (
+                        <Animated.View
+                            style={[
+                                styles.swipeReplyCue,
+                                {
+                                    opacity: swipeAnim.interpolate({
+                                        inputRange: [0, 24, 48],
+                                        outputRange: [0, 0.55, 1],
+                                        extrapolate: 'clamp',
+                                    }),
+                                    transform: [
+                                        {
+                                            scale: swipeAnim.interpolate({
+                                                inputRange: [0, 48, 84],
+                                                outputRange: [0.55, 1, 1.08],
+                                                extrapolate: 'clamp',
+                                            }),
+                                        },
+                                    ],
+                                },
+                            ]}
+                        >
+                            <Icon name="arrow-undo" size={ox(14)} color="#E5E7EB" />
+                        </Animated.View>
+                    ) : null}
+                    <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
+                        <Animated.View
+                            {...(!isFromMe ? bubblePanResponder.panHandlers : {})}
+                            style={!isFromMe && isSwiping ? { transform: [{ translateX: swipeAnim }] } : undefined}
+                        >
+                            <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap}>
+                                {bubbleShell}
+                            </DmMessagePressable>
+                        </Animated.View>
+                        {messageMeta}
+                    </View>
+                </>
+            );
+        }
+    }
+
+    return (
+        <Animated.View
+            style={[
+                styles.messageContainer,
+                isFromMe ? styles.messageFromMe : styles.messageFromOther,
+                entryStyle,
+            ]}
+        >
+            {inner}
+        </Animated.View>
+    );
+});
+
 
 type VoiceDraftSegment = { audioUrl: string; durationSeconds: number };
 type VoiceDraftState = {
@@ -197,6 +702,7 @@ export default function MessagesScreen({ route, navigation }: any) {
         target: ReactionFlyTarget | null;
     } | null>(null);
     const reactionPillRefs = useRef<Record<string, View | null>>({});
+    const rowHandlersRef = useRef<DmRowHandlers>(null as unknown as DmRowHandlers);
     const swipeAnim = useRef(new Animated.Value(0)).current;
     const replyBarAnim = useRef(new Animated.Value(0)).current;
     const swipeMessageIdRef = useRef<string | null>(null);
@@ -485,23 +991,24 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         let cancelled = false;
-        const postIds = new Set<string>();
+        const refs = new Map<string, SharedPostRef>();
         for (const msg of messages) {
-            if (msg.postId) postIds.add(msg.postId);
-            if (msg.text) {
-                const pid = extractPostId(msg.text);
-                if (pid) postIds.add(pid);
-            }
+            const ref = getMessageSharedRef(msg);
+            if (ref) refs.set(sharedPostRefKey(ref), ref);
         }
-        const missing = Array.from(postIds).filter((id) => !sharedPosts[id]);
+        const missing = Array.from(refs.entries()).filter(([key]) => !sharedPosts[key]);
         if (missing.length === 0) return;
         void Promise.all(
-            missing.map(async (postId) => {
+            missing.map(async ([key, ref]) => {
                 try {
-                    const post = await getPostById(postId, user?.id);
+                    const post = await loadSharedPost({
+                        token: ref.token,
+                        postId: ref.postId,
+                        userId: user?.id,
+                    });
                     if (!cancelled && post) {
                         setSharedPosts((prev) =>
-                            prev[postId] ? prev : { ...prev, [postId]: post },
+                            prev[key] ? prev : { ...prev, [key]: post },
                         );
                     }
                 } catch {
@@ -512,7 +1019,7 @@ export default function MessagesScreen({ route, navigation }: any) {
         return () => {
             cancelled = true;
         };
-        // sharedPosts intentionally omitted — we only fetch missing ids from messages
+        // sharedPosts intentionally omitted — we only fetch missing refs from messages
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [messages, user?.id]);
 
@@ -528,11 +1035,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         });
     };
 
-    const openScenesForPostId = (postId: string) => {
-        getPostById(postId, user?.id)
+    const openScenesForRef = (ref: SharedPostRef) => {
+        const key = sharedPostRefKey(ref);
+        loadSharedPost({ token: ref.token, postId: ref.postId, userId: user?.id })
             .then((post) => {
                 if (post) {
-                    setSharedPosts((prev) => ({ ...prev, [postId]: post }));
+                    setSharedPosts((prev) => ({ ...prev, [key]: post }));
                     openScenesForPost(post);
                 } else {
                     showAlert({
@@ -1883,425 +2391,57 @@ export default function MessagesScreen({ route, navigation }: any) {
     }, []);
 
     const renderMessage = ({ item }: { item: ChatMessage }) => {
-        const isFromMe = sameDmHandle(item.senderHandle, user?.handle);
-        const senderAvatar = getAvatarForHandle(item.senderHandle);
-        const isStoryInteraction = Boolean(item.storyId);
-        const isLegacyStoryContextText =
-            !!item.isSystemMessage &&
-            typeof item.text === 'string' &&
-            item.text.trim().toLowerCase().startsWith('replying to @') &&
-            item.text.toLowerCase().includes('story');
-
-        const bubblePanResponder = PanResponder.create({
-            // Don't claim touch on start — that blocks long-press / reply menu.
-            onStartShouldSetPanResponder: () => false,
-            // Higher threshold so a soft hold (with tiny jitter) isn't stolen as a swipe.
-            onMoveShouldSetPanResponder: (_evt, gestureState) =>
-                !isFromMe &&
-                gestureState.dx > 28 &&
-                Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.35,
-            onPanResponderGrant: () => {
-                swipeMessageIdRef.current = item.id;
-                swipeAnim.stopAnimation();
-                swipeAnim.setValue(0);
-                setSwipingMessageId(item.id);
-            },
-            onPanResponderMove: (_evt, gestureState) => {
-                if (isFromMe) return;
-                const dx = Math.max(0, Math.min(gestureState.dx, 84));
-                const dy = Math.abs(gestureState.dy);
-                if (dx > dy * 0.6) {
-                    swipeAnim.setValue(dx);
-                }
-            },
-            onPanResponderRelease: (_evt, gestureState) => {
-                const shouldReply = !isFromMe && gestureState.dx > 48;
-                Animated.spring(swipeAnim, {
-                    toValue: 0,
-                    friction: 7,
-                    tension: 140,
-                    useNativeDriver: true,
-                }).start(() => {
-                    if (swipeMessageIdRef.current === item.id) {
-                        setSwipingMessageId(null);
-                        swipeMessageIdRef.current = null;
-                    }
-                });
-                if (shouldReply) {
-                    setReplyingTo(item);
-                    setEditingMessage(null);
-                }
-            },
-            onPanResponderTerminate: () => {
-                Animated.spring(swipeAnim, {
-                    toValue: 0,
-                    friction: 7,
-                    tension: 140,
-                    useNativeDriver: true,
-                }).start(() => {
-                    setSwipingMessageId(null);
-                    swipeMessageIdRef.current = null;
-                });
-            },
-        });
-
-        const renderReactionPills = () => {
-            const reactions = messageReactions[item.id];
-            if (!reactions?.length) return null;
-            return (
-                <View style={styles.reactionsRow}>
-                    {reactions.map((reaction) => {
-                        const pillKey = `${item.id}::${reaction.emoji}`;
-                        return (
-                            <View
-                                key={pillKey}
-                                ref={(node) => {
-                                    reactionPillRefs.current[pillKey] = node;
-                                }}
-                                collapsable={false}
-                                onLayout={() => {
-                                    if (
-                                        reactionFly &&
-                                        reactionFly.messageId === item.id &&
-                                        reactionFly.emoji === reaction.emoji &&
-                                        !reactionFly.target
-                                    ) {
-                                        // Pill just appeared during pop — ready to measure soon
-                                    }
-                                }}
-                            >
-                                <TouchableOpacity
-                                    style={styles.reactionPill}
-                                    onPress={() => handleToggleReaction(item.id, reaction.emoji)}
-                                >
-                                    <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
-                                    {reaction.users.length > 1 && (
-                                        <Text style={styles.reactionCount}>{reaction.users.length}</Text>
-                                    )}
-                                </TouchableOpacity>
-                            </View>
-                        );
-                    })}
-                </View>
-            );
-        };
-
-        if (isStoryInteraction || isLegacyStoryContextText) {
-            const trimmed = (item.text || '').trim();
-            const reactionOnly =
-                !!item.storyId &&
-                (item.storyContextText === 'Reacted to your story' ||
-                    (trimmed.length > 0 && trimmed.length <= 4 && !/\s/.test(trimmed)));
-            const label = reactionOnly
-                ? isFromMe
-                    ? 'You reacted to their story'
-                    : 'Reacted to your story'
-                : isFromMe
-                  ? 'You replied to their story'
-                  : 'Replied to your story';
-            const bodyText =
-                reactionOnly
-                    ? trimmed
-                    : trimmed && trimmed !== 'Replied to your story'
-                      ? trimmed
-                      : item.storyContextText && item.storyContextText !== 'Reacted to your story'
-                        ? item.storyContextText
-                        : null;
-
-            return (
-                <View
-                    style={[
-                        styles.messageContainer,
-                        isFromMe ? styles.messageFromMe : styles.messageFromOther,
-                    ]}
-                >
-                    {!isFromMe ? (
-                        <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
-                    ) : null}
-                    <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
-                        <TouchableOpacity
-                            activeOpacity={0.85}
-                            onPress={() => {
-                                if (!item.storyId) return;
-                                navigation.navigate('Stories', {
-                                    openUserHandle: isFromMe
-                                        ? handle
-                                        : item.storyContextOwner || handle,
-                                    openStoryId: item.storyId,
-                                });
-                            }}
-                            onLongPress={() => openMessageActions(item)}
-                        >
-                            <View style={[styles.storyStickerCard, isFromMe && styles.storyStickerCardMine]}>
-                                {item.imageUrl ? (
-                                    <Image source={{ uri: item.imageUrl }} style={styles.storyStickerThumb} />
-                                ) : (
-                                    <View style={[styles.storyStickerThumb, styles.storyStickerThumbFallback]}>
-                                        <Icon name="images-outline" size={22} color="#9CA3AF" />
-                                    </View>
-                                )}
-                                <View style={styles.storyStickerMeta}>
-                                    <Text style={styles.storyStickerLabel}>{label}</Text>
-                                    {bodyText ? (
-                                        <Text style={styles.storyStickerBody} numberOfLines={3}>
-                                            {bodyText}
-                                        </Text>
-                                    ) : null}
-                                    {item.storyId ? (
-                                        <Text style={styles.storyStickerHint}>Tap to view story</Text>
-                                    ) : null}
-                                </View>
-                            </View>
-                        </TouchableOpacity>
-                        {renderReactionPills()}
-                    </View>
-                </View>
-            );
-        }
-
-        const sharedPostId = item.postId || (item.text ? extractPostId(item.text) : null);
-        const sharedPost = sharedPostId ? sharedPosts[sharedPostId] : null;
-        if (sharedPostId) {
-            const sharedCard = sharedPost ? (
-                <DmSharedPostCard post={sharedPost} onTap={openScenesForPost} />
-            ) : (
-                <DmSharedPostPreviewCard
-                    postId={sharedPostId}
-                    userId={user?.id}
-                    onTap={() => openScenesForPostId(sharedPostId)}
-                />
-            );
-            return (
-                <View
-                    style={[
-                        styles.messageContainer,
-                        isFromMe ? styles.messageFromMe : styles.messageFromOther,
-                    ]}
-                >
-                    {!isFromMe ? (
-                        <TouchableOpacity
-                            onPress={() => {
-                                if (item.senderHandle) {
-                                    navigation.navigate('ViewProfile', {
-                                        handle: item.senderHandle,
-                                    });
-                                }
-                            }}
-                        >
-                            <Avatar
-                                src={senderAvatar}
-                                name={item.senderHandle?.split('@')[0] || 'User'}
-                                size={ox(28)}
-                            />
-                        </TouchableOpacity>
-                    ) : null}
-                    <View
-                        style={[
-                            styles.messageColumn,
-                            isFromMe ? styles.messageColumnMe : styles.messageColumnOther,
-                            styles.sharedPostColumn,
-                        ]}
-                    >
-                        <DmMessagePressable onLongPress={() => openMessageActions(item)}>
-                            {sharedCard}
-                        </DmMessagePressable>
-                        {renderReactionPills()}
-                        <View
-                            style={[
-                                styles.messageMetaRow,
-                                isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther,
-                            ]}
-                        >
-                            <Text style={styles.messageTimeOutside}>
-                                {formatMessageClock(item.timestamp)}
-                            </Text>
-                        </View>
-                    </View>
-                </View>
-            );
-        }
-
-        const sentBubbleColor = dmSentBubbleColor(dmSentStyle);
-        const sentGradient = dmSentBubbleGradient(dmSentStyle);
-        const isMediaOnlyMessage = Boolean(
-            item.imageUrl && !item.text?.trim() && !item.audioUrl && !(item as any).replyTo
-        );
-        const bubbleFill = isFromMe ? sentBubbleColor : DM_RECEIVED;
-
-        const bubbleContent = (
-            <>
-                {(item as any).replyTo ? (
-                    <View style={styles.replyPreviewWrap}>
-                        <View style={styles.replyPreviewBar} />
-                        {((item as any).replyTo?.imageUrl as string | undefined) ? (
-                            <View style={styles.replyPreviewThumb}>
-                                {isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
-                                    <View style={styles.replyPreviewVideoBadge}>
-                                        <Icon name="videocam" size={ox(12)} color="#FFFFFF" />
-                                    </View>
-                                ) : (
-                                    <Image
-                                        source={{ uri: (item as any).replyTo.imageUrl }}
-                                        style={styles.replyPreviewImage}
-                                    />
-                                )}
-                            </View>
-                        ) : null}
-                        <View style={styles.replyPreviewTextWrap}>
-                            <Text style={styles.replyPreviewSender} numberOfLines={1}>
-                                {(item as any).replyTo?.senderHandle || 'Reply'}
-                            </Text>
-                            <Text style={styles.replyPreviewText} numberOfLines={1}>
-                                {(item as any).replyTo?.imageUrl
-                                    ? isLikelyVideoUrl((item as any).replyTo.imageUrl)
-                                        ? 'Video'
-                                        : 'Photo'
-                                    : (item as any).replyTo?.text || 'Message'}
-                            </Text>
-                        </View>
-                    </View>
-                ) : null}
-                {item.text ? (
-                    <Text
-                        style={[
-                            styles.messageText,
-                            isMediaOnlyMessage ? styles.messageTextPlain : null,
-                            isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
-                        ]}
-                    >
-                        {translatedMessages[item.id] || item.text}
-                    </Text>
-                ) : null}
-                {!!translatedMessages[item.id] && !!item.text ? (
-                    <Text style={styles.translatedOriginalText}>Original: {item.text}</Text>
-                ) : null}
-                {item.imageUrl ? (
-                    isLikelyVideoUrl(item.imageUrl) ? (
-                        <View style={styles.messageVideoFallback}>
-                            <Icon name="videocam" size={ox(18)} color="#FFFFFF" />
-                            <Text style={styles.messageVideoFallbackText}>Video</Text>
-                        </View>
-                    ) : (
-                        <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
-                    )
-                ) : null}
-                {item.audioUrl ? (
-                    <TouchableOpacity
-                        style={styles.audioMessagePill}
-                        onPress={() => {
-                            void handlePlayAudioMessage(item.audioUrl);
-                        }}
-                    >
-                        <Icon
-                            name={playingAudioId === item.audioUrl ? 'pause' : 'play'}
-                            size={ox(16)}
-                            color="#FFFFFF"
-                        />
-                        <Text style={styles.audioMessageText}>
-                            {playingAudioId === item.audioUrl ? 'Playing...' : 'Voice message'}
-                        </Text>
-                    </TouchableOpacity>
-                ) : null}
-                {renderReactionPills()}
-            </>
-        );
-
-        const messageMeta = (
-            <View style={[styles.messageMetaRow, isFromMe ? styles.messageMetaRowMe : styles.messageMetaRowOther]}>
-                <Text style={styles.messageTimeOutside}>{formatMessageClock(item.timestamp)}</Text>
-                {isFromMe && !isGroupThread ? (
-                    <Icon
-                        name="checkmark-done"
-                        size={ox(13)}
-                        color={(item as any).read ? dmSentBubbleColor(dmSentStyle) : '#8E8E93'}
-                    />
-                ) : null}
-            </View>
-        );
-
-        const bubbleShell = (
-            <IMessageDmBubbleShell
-                isFromMe={isFromMe}
-                tailBackgroundColor={bubbleFill}
-                showTail={false}
-                gradientColors={
-                    isFromMe && !isMediaOnlyMessage ? [...sentGradient] : undefined
-                }
-                bubbleStyle={
-                    isMediaOnlyMessage
-                        ? {
-                              backgroundColor: 'transparent',
-                              paddingHorizontal: 0,
-                              paddingVertical: 0,
-                              shadowOpacity: 0,
-                              elevation: 0,
-                              borderBottomLeftRadius: 18,
-                              borderBottomRightRadius: 18,
-                          }
-                        : messageReactions[item.id]?.length
-                          ? { paddingBottom: ox(22) }
-                          : undefined
-                }
-            >
-                {bubbleContent}
-            </IMessageDmBubbleShell>
-        );
-
+        const sharedRef = getMessageSharedRef(item);
+        const sharedKey = sharedRef ? sharedPostRefKey(sharedRef) : null;
         return (
-            <View style={[
-                styles.messageContainer,
-                isFromMe ? styles.messageFromMe : styles.messageFromOther,
-            ]}>
-                {!isFromMe ? (
-                    <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={ox(32)} />
-                ) : null}
-                {!isFromMe && swipingMessageId === item.id ? (
-                    <Animated.View
-                        style={[
-                            styles.swipeReplyCue,
-                            {
-                                opacity: swipeAnim.interpolate({
-                                    inputRange: [0, 24, 48],
-                                    outputRange: [0, 0.55, 1],
-                                    extrapolate: 'clamp',
-                                }),
-                                transform: [
-                                    {
-                                        scale: swipeAnim.interpolate({
-                                            inputRange: [0, 48, 84],
-                                            outputRange: [0.55, 1, 1.08],
-                                            extrapolate: 'clamp',
-                                        }),
-                                    },
-                                ],
-                            },
-                        ]}
-                    >
-                        <Icon name="arrow-undo" size={ox(14)} color="#E5E7EB" />
-                    </Animated.View>
-                ) : null}
-                <View style={[styles.messageColumn, isFromMe ? styles.messageColumnMe : styles.messageColumnOther]}>
-                    <Animated.View
-                        {...(!isFromMe ? bubblePanResponder.panHandlers : {})}
-                        style={
-                            !isFromMe && swipingMessageId === item.id
-                                ? { transform: [{ translateX: swipeAnim }] }
-                                : undefined
-                        }
-                    >
-                        <DmMessagePressable onLongPress={() => openMessageActions(item)}>
-                            {bubbleShell}
-                        </DmMessagePressable>
-                    </Animated.View>
-                    {messageMeta}
-                </View>
-            </View>
+            <DmMessageRow
+                message={item}
+                userHandle={user?.handle}
+                userId={user?.id}
+                threadHandle={handle}
+                isGroupThread={isGroupThread}
+                dmSentStyle={dmSentStyle}
+                translatedText={translatedMessages[item.id]}
+                reactions={messageReactions[item.id]}
+                isPlayingAudio={Boolean(item.audioUrl) && playingAudioId === item.audioUrl}
+                isSwiping={swipingMessageId === item.id}
+                reactionFlyEmoji={
+                    reactionFly && reactionFly.messageId === item.id && !reactionFly.target
+                        ? reactionFly.emoji
+                        : null
+                }
+                sharedPost={sharedKey ? sharedPosts[sharedKey] ?? null : null}
+                swipeAnim={swipeAnim}
+                navigation={navigation}
+                setReplyingTo={setReplyingTo}
+                setEditingMessage={setEditingMessage}
+                setSwipingMessageId={setSwipingMessageId}
+                swipeMessageIdRef={swipeMessageIdRef}
+                reactionPillRefs={reactionPillRefs}
+                handlers={rowHandlersRef}
+            />
         );
+    };
+
+    rowHandlersRef.current = {
+        openMessageActions,
+        handleToggleReaction,
+        handleReactWithAnimation,
+        handlePlayAudioMessage,
+        openScenesForPost,
+        openScenesForRef,
+        formatMessageClock,
+        isLikelyVideoUrl,
     };
 
     return (
         <GazetteerScreenShell ambient={false} style={styles.pageShell}>
-            <View style={styles.header}>
+            <LinearGradient
+                colors={['rgba(32,38,48,0.82)', 'rgba(11,14,19,0.94)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.header}
+            >
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBackBtn} hitSlop={8}>
                     <Icon name="chevron-back" size={ox(26)} color="#FFFFFF" />
                 </TouchableOpacity>
@@ -2402,7 +2542,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         <Icon name="ellipsis-horizontal" size={ox(22)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
-            </View>
+            </LinearGradient>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -2415,6 +2555,12 @@ export default function MessagesScreen({ route, navigation }: any) {
                     renderItem={renderMessage}
                     keyExtractor={(item) => item.id}
                     style={styles.messagesList}
+                    initialNumToRender={14}
+                    maxToRenderPerBatch={10}
+                    windowSize={11}
+                    updateCellsBatchingPeriod={50}
+                    removeClippedSubviews={Platform.OS === 'android'}
+                    keyboardShouldPersistTaps="handled"
                     contentContainerStyle={[
                         styles.messagesContent,
                         messages.length === 0 ? styles.messagesContentEmpty : null,
@@ -2470,10 +2616,10 @@ export default function MessagesScreen({ route, navigation }: any) {
                         <View style={styles.composerContextBar} />
                         {(() => {
                             if (editingMessage) return null;
-                            const replyPostId =
-                                replyingTo?.postId ||
-                                (replyingTo?.text ? extractPostId(replyingTo.text) : null);
-                            const replyPost = replyPostId ? sharedPosts[replyPostId] : null;
+                            const replyRef = replyingTo ? getMessageSharedRef(replyingTo) : null;
+                            const replyPost = replyRef
+                                ? sharedPosts[sharedPostRefKey(replyRef)]
+                                : null;
                             const replyThumbUrl =
                                 replyingTo?.imageUrl ||
                                 replyPost?.mediaUrl ||
@@ -2508,11 +2654,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 {editingMessage?.text ||
                                     (() => {
                                         if (!replyingTo) return 'Message';
-                                        const replyPostId =
-                                            replyingTo.postId ||
-                                            (replyingTo.text ? extractPostId(replyingTo.text) : null);
-                                        const replyPost = replyPostId
-                                            ? sharedPosts[replyPostId]
+                                        const replyRef = getMessageSharedRef(replyingTo);
+                                        const replyPost = replyRef
+                                            ? sharedPosts[sharedPostRefKey(replyRef)]
                                             : null;
                                         const replyThumbUrl =
                                             replyingTo.imageUrl ||
@@ -3092,9 +3236,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: ox(12),
         paddingVertical: ox(10),
-        backgroundColor: 'rgba(0,0,0,0.95)',
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.08)',
+        borderBottomColor: 'rgba(255,255,255,0.12)',
     },
     headerBackBtn: {
         width: ox(36),
@@ -3382,7 +3525,7 @@ const styles = StyleSheet.create({
         paddingBottom: 0,
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: '#000000',
+        backgroundColor: 'rgba(12,15,20,0.92)',
     },
     inputRow: {
         flexDirection: 'row',
@@ -3445,8 +3588,10 @@ const styles = StyleSheet.create({
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#16181C',
+        backgroundColor: 'rgba(255,255,255,0.08)',
         borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
         paddingLeft: 14,
         paddingRight: 14,
         minHeight: 40,
