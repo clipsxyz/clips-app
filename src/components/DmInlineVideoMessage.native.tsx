@@ -14,6 +14,7 @@ import CachedImage from './CachedImage.native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
+import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { useDmTapSuppressed } from './DmMessagePressable.native';
 
 type Props = {
@@ -56,6 +57,7 @@ export default function DmInlineVideoMessage({
     const [userPaused, setUserPaused] = useState(false);
     const [loading, setLoading] = useState(false);
     const [failed, setFailed] = useState(false);
+    const [posterFailed, setPosterFailed] = useState(false);
     const [frameReady, setFrameReady] = useState(false);
     const [duration, setDuration] = useState(0);
     const [position, setPosition] = useState(0);
@@ -91,16 +93,32 @@ export default function DmInlineVideoMessage({
         setPosition(Number(data?.currentTime) || 0);
     }, []);
 
-    // Poster resolution order: explicit prop, then any extra candidates (e.g. post poster/thumbnail).
-    const poster = [posterUrl, ...(posterCandidates ?? [])]
+    // Poster order: explicit prop → extra candidates → JPEG sitting next to the MP4.
+    // Never accept a video/data:video URL — `<Image>` cannot decode it and would paint blank.
+    const poster = [posterUrl, ...(posterCandidates ?? []), siblingJpegFromVideoUrl(uri)]
         .map((candidate) => (typeof candidate === 'string' ? candidate.trim() : ''))
-        .find((candidate) => candidate.length > 0);
+        .find(
+            (candidate) =>
+                candidate.length > 0 &&
+                !isVideoMediaUri(candidate) &&
+                !/^data:video\//i.test(candidate),
+        );
     const progress = duration > 0 ? Math.min(1, position / duration) : 0;
+
+    React.useEffect(() => {
+        setPosterFailed(false);
+    }, [poster]);
 
     if (failed) {
         return (
             <View style={[styles.frame, { width }]}>
-                {poster ? <CachedImage source={{ uri: poster }} style={styles.fill} /> : null}
+                {poster && !posterFailed ? (
+                    <CachedImage
+                        source={{ uri: poster }}
+                        style={styles.fill}
+                        onError={() => setPosterFailed(true)}
+                    />
+                ) : null}
                 <View style={styles.centerOverlay}>
                     <Icon name="videocam-off-outline" size={ox(24)} color="#E5E7EB" />
                     <Text style={styles.failedText}>Video unavailable</Text>
@@ -111,12 +129,18 @@ export default function DmInlineVideoMessage({
 
     // Without a poster, mount the (paused, muted) video so the platform renders its first
     // frame as a thumbnail — parity with the web `<video preload="metadata">` fallback.
-    const showPosterImage = !!poster && !started;
-    const mountVideo = started || !poster;
+    const showPosterImage = !!poster && !started && !posterFailed;
+    const mountVideo = started || !poster || posterFailed;
 
     return (
         <View style={[styles.frame, { width }]}>
-            {showPosterImage ? <CachedImage source={{ uri: poster }} style={styles.fill} /> : null}
+            {showPosterImage ? (
+                <CachedImage
+                    source={{ uri: poster }}
+                    style={styles.fill}
+                    onError={() => setPosterFailed(true)}
+                />
+            ) : null}
 
             {mountVideo ? (
                 <Video

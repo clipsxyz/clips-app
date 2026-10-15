@@ -11,6 +11,7 @@ import VerifiedBadge from './VerifiedBadge.native';
 import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
 import { DM_MEDIA_ASPECT_RATIO, DM_MEDIA_MAX_WIDTH } from '../constants/dmMedia.native';
+import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
 import { useDmTapSuppressed } from './DmMessagePressable.native';
 
 function resolveDisplayMedia(post: Post | null | undefined): {
@@ -40,11 +41,17 @@ function resolveDisplayMedia(post: Post | null | undefined): {
         firstAny?.thumbnailUrl,
         firstAny?.thumbnail_url,
     ];
-    const posterUrl =
-        posterCandidates.find(
+    const explicitPoster = posterCandidates
+        .find(
             (candidate): candidate is string =>
-                typeof candidate === 'string' && candidate.trim().length > 0,
-        )?.trim() || '';
+                typeof candidate === 'string' &&
+                candidate.trim().length > 0 &&
+                !isVideoMediaUri(candidate) &&
+                !/^data:video\//i.test(candidate),
+        )
+        ?.trim();
+    const posterUrl =
+        explicitPoster || (isVideo ? siblingJpegFromVideoUrl(url) : undefined) || '';
     return { url, posterUrl, isVideo };
 }
 

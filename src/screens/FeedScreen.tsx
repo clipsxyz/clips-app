@@ -375,6 +375,10 @@ function PillTabs({
 }) {
     const { user } = useAuth();
     const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
+    const [passportAvatarFailed, setPassportAvatarFailed] = React.useState(false);
+    React.useEffect(() => {
+        setPassportAvatarFailed(false);
+    }, [user?.avatarUrl]);
     const onHeaderPlacePickRef = useRef(onHeaderPlacePick);
     const onSearchLocationRef = useRef(onSearchLocation);
     onHeaderPlacePickRef.current = onHeaderPlacePick;
@@ -1020,7 +1024,7 @@ function PillTabs({
                     >
                         <View style={styles.feedHeaderNotifWrap}>
                             <View style={FEED_HEADER_PASSPORT_AVATAR}>
-                                {user?.avatarUrl ? (
+                                {user?.avatarUrl && !passportAvatarFailed ? (
                                     <Image
                                         source={{
                                             uri:
@@ -1028,9 +1032,7 @@ function PillTabs({
                                                 user.avatarUrl,
                                         }}
                                         style={styles.feedHeaderPassportAvatarImage}
-                                        onError={() => {
-                                            /* fall through to initials on next paint via missing uri */
-                                        }}
+                                        onError={() => setPassportAvatarFailed(true)}
                                     />
                                 ) : (
                                     <Text style={FEED_HEADER_PASSPORT_INITIALS}>{passportInitials}</Text>
@@ -1594,6 +1596,7 @@ const FeedCard = React.memo(function FeedCard({
                     {carouselThumbItems.length > 1 ? (
                         <FeedMediaCarouselThumbs
                             items={carouselThumbItems}
+                            post={post}
                             activeIndex={carouselIndex}
                             onSelect={setCarouselIndex}
                         />

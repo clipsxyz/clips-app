@@ -423,6 +423,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                             {carouselThumbItems.length > 1 ? (
                                 <FeedMediaCarouselThumbs
                                     items={carouselThumbItems}
+                                    post={post}
                                     activeIndex={carouselIndex}
                                     onSelect={setCarouselIndex}
                                 />

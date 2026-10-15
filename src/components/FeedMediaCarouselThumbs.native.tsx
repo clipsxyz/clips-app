@@ -3,7 +3,8 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-nati
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import CachedImage from './CachedImage.native';
-import { isVideoMediaUri, siblingJpegFromVideoUrl } from '../utils/postMedia';
+import type { Post, PostMediaItem } from '../types';
+import { resolveCarouselItemStillUri } from '../utils/postMedia';
 import {
     FEED_CARD_CAROUSEL_COUNT,
     FEED_CARD_CAROUSEL_HEADER,
@@ -14,51 +15,29 @@ import {
     FEED_CARD_CAROUSEL_WRAP,
 } from './FeedPageLayout.native';
 
-export type CarouselThumbItem = {
-    url: string;
-    type: 'image' | 'video' | 'text';
-    /** Server-generated poster for a video slide (any of these aliases). */
-    posterUrl?: string | null;
-    poster_url?: string | null;
-    thumbnailUrl?: string | null;
-    thumbnail_url?: string | null;
-};
-
 type Props = {
-    items: CarouselThumbItem[];
+    items: PostMediaItem[];
+    post: Post;
     activeIndex: number;
     onSelect: (index: number) => void;
 };
 
-/**
- * A still image for one tile. Never return the MP4 URL — Android `Image` cannot decode
- * video and paints a black box. Order: explicit poster/thumbnail → the slide's own image
- * → a JPEG sitting next to the MP4 (`clip.mp4` → `clip.jpg`).
- */
-function resolveThumbStillUri(item: CarouselThumbItem): string | undefined {
-    const explicit =
-        item.thumbnail_url || item.thumbnailUrl || item.poster_url || item.posterUrl;
-    if (explicit && !isVideoMediaUri(explicit)) return String(explicit).trim() || undefined;
-
-    if (item.type !== 'video' && item.url && !isVideoMediaUri(item.url)) {
-        return item.url;
-    }
-    if (item.type === 'video') {
-        return siblingJpegFromVideoUrl(item.url);
-    }
-    return undefined;
-}
-
 function CarouselThumb({
     item,
+    post,
+    index,
+    items,
     active,
     onPress,
 }: {
-    item: CarouselThumbItem;
+    item: PostMediaItem;
+    post: Post;
+    index: number;
+    items: PostMediaItem[];
     active: boolean;
     onPress: () => void;
 }) {
-    const stillUri = resolveThumbStillUri(item);
+    const stillUri = resolveCarouselItemStillUri(item, post, index, items);
     const [failed, setFailed] = React.useState(false);
 
     React.useEffect(() => {
@@ -103,7 +82,7 @@ function CarouselThumb({
     );
 }
 
-export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }: Props) {
+export default function FeedMediaCarouselThumbs({ items, post, activeIndex, onSelect }: Props) {
     if (items.length <= 1) return null;
 
     return (
@@ -119,6 +98,9 @@ export default function FeedMediaCarouselThumbs({ items, activeIndex, onSelect }
                     <CarouselThumb
                         key={`thumb-${index}`}
                         item={item}
+                        post={post}
+                        index={index}
+                        items={items}
                         active={index === activeIndex}
                         onPress={() => onSelect(index)}
                     />
