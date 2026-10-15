@@ -38,7 +38,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
@@ -111,6 +111,7 @@ type ProfileAlertConfig = {
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { height: windowHeight } = useWindowDimensions();
     const { user, logout, login } = useAuth();
+    const isProfileFocused = useIsFocused();
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -1642,6 +1643,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     postHasVideoMedia(item) &&
                                     String(myFeedActiveVideoPostId) === String(item.id)
                                 }
+                                suspendNativeVideo={!isProfileFocused}
                                 onLike={async () => {
                                     if (!user?.id) return;
                                     const updated = await toggleLike(user.id, item.id, item);

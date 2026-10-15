@@ -12,6 +12,7 @@ import {
     type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { FeedCard } from '../screens/FeedScreen';
@@ -50,6 +51,7 @@ export default function ViewProfilePostsSheet({
         Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 0,
     );
     const listRef = useRef<FlatList<Post>>(null);
+    const isScreenFocused = useIsFocused();
     const [feedPosts, setFeedPosts] = useState<Post[]>(posts);
     const [commentsPost, setCommentsPost] = useState<Post | null>(null);
     const [sharePost, setSharePost] = useState<Post | null>(null);
@@ -203,6 +205,7 @@ export default function ViewProfilePostsSheet({
                                         postHasVideoMedia(item) &&
                                         String(activeVideoPostId) === String(item.id)
                                     }
+                                    suspendNativeVideo={!isScreenFocused}
                                     onLike={() => handleLike(item)}
                                     onView={async () => {
                                         if (!user?.id) return;
