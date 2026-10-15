@@ -256,6 +256,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
         try {
             const updated = await toggleLike(userId, post.id, post);
             setPost(updated);
+            upsertLocalPost(updated);
             syncPostOut(updated);
         } catch (err) {
             console.error('Error liking post:', err);
@@ -289,7 +290,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
         });
         try {
             const result = await reclipPost(userId, post.id, user.handle);
-            if (result.originalPost) setPost(result.originalPost);
+            if (result.originalPost) {
+                setPost(result.originalPost);
+                upsertLocalPost(result.originalPost);
+            }
         } catch (err: any) {
             console.warn('Reclip failed:', err);
             setReclipState(userId, post.id, false);

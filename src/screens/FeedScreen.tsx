@@ -65,6 +65,7 @@ import {
     setCommentModerationState,
     decorateForUser,
     getLocalPostById,
+    upsertLocalPost,
     mergeEngagementStats,
     postMatchesLocationTab,
     clearLocalFeedPostsStorage,
@@ -1334,6 +1335,32 @@ const FeedCard = React.memo(function FeedCard({
             setLocalLike(revert);
         }
     }, [isClientUploadFailed, isClientUploading, onLikePersisted, post, viewerUserId]);
+
+    /**
+     * Reconcile the isolated media-card like with authoritative post state.
+     *
+     * The feed (`pages`), the in-feed fullscreen modal (`syncFullscreenPost`) and the
+     * PostDetail bridge all write fresh like values back into `post`. Without this the
+     * stale `localLike` override would mask them — e.g. unliking in the fullscreen modal
+     * left the card's heart filled, and a like made in full screen/detail never reached
+     * a card the user had already tapped.
+     *
+     * Keyed on the like VALUES, not the post object (the parent rebuilds `post` every
+     * render for bookmarks). While a request is in flight the authoritative values are
+     * unchanged, so the optimistic override is preserved; once `pages` settles — from
+     * this card or any other surface — the override yields to `post`.
+     */
+    React.useEffect(() => {
+        const override = localLikeRef.current;
+        if (!override) return;
+        const authoritativeLiked = post.userLiked === true;
+        const authoritativeCount = post.stats?.likes ?? 0;
+        if (override.liked === authoritativeLiked && override.count === authoritativeCount) {
+            return;
+        }
+        localLikeRef.current = null;
+        setLocalLike(null);
+    }, [post.id, post.userLiked, post.stats?.likes]);
 
     const handleMediaDoubleLike = React.useCallback(() => {
         // Media cards (TextureView active) — local only, no parent setPages on the tap.
@@ -4431,12 +4458,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                       }
                                     : p,
                             );
-                            syncFullscreenPost({
+                            const settledPost = {
                                 ...mergedPost,
                                 ...updated,
                                 userLiked: nextLiked,
                                 stats: { ...mergedPost.stats, ...updated.stats, likes: nextLikes },
-                            });
+                            };
+                            syncFullscreenPost(settledPost);
+                            // Keep the shared in-memory store fresh so PostDetail's
+                            // getPostById resolves this like without a server round trip.
+                            upsertLocalPost(settledPost);
                         } catch {
                             setPages((prev) =>
                                 prev.map((page) =>
@@ -4475,12 +4506,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 ? { ...p, userLiked, stats: { ...p.stats, ...updated.stats } }
                                 : p,
                         );
-                        syncFullscreenPost({
+                        const settledPost = {
                             ...mergedPost,
                             ...updated,
                             userLiked,
                             stats: { ...mergedPost.stats, ...updated.stats },
-                        });
+                        };
+                        syncFullscreenPost(settledPost);
+                        // Same as above: give PostDetail's getPostById a fresh local copy.
+                        upsertLocalPost(settledPost);
                     }}
                     onLikeBurst={showFeedLikeBurst}
                     onFollow={async () => {
@@ -5068,6 +5102,7 @@ onVisitProfile={() =>
                                   ),
                               );
                               syncFullscreenPost(updated);
+                              upsertLocalPost(updated);
                           }
                         : undefined
                 }
