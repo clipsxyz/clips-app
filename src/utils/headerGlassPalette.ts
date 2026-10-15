@@ -1,11 +1,7 @@
 import { normalizeHex } from './feedAmbientPalette';
 
 /**
- * Vibrant accents the feed header cycles through as cards reach the top.
- *
- * Fixed rather than sampled from each post's `dominant_color` so consecutive cards always
- * land on clearly distinct hues — a server-extracted colour often lands on two near
- * identical dark tones back to back, which reads as "the header stopped working".
+ * Vibrant accents for the pinned feed header. Each feed scope pairs two of these.
  */
 export const HEADER_GLASS_PALETTE = [
     '#FF4D6D', // 0: Vivid Pink
@@ -30,6 +26,24 @@ export const HEADER_GLASS_PALETTE = [
  * vibrant palette.
  */
 export const HEADER_GLASS_NEUTRAL = '#0B0E14';
+
+/** Feed scopes that own the pinned header canvas. Scroll position does not. */
+export type HeaderFeedScope = 'local' | 'regional' | 'national' | 'following';
+
+/**
+ * Scope → header ramp, taken from `HEADER_GLASS_PALETTE` (the feed header accents).
+ * Top stop is the saturated hue; the second stop is its pair. The canvas layer fades
+ * both into transparent so `HEADER_GLASS_NEUTRAL` shows through underneath.
+ */
+export const HEADER_SCOPE_GRADIENTS: Record<
+    HeaderFeedScope,
+    { primary: string; secondary: string }
+> = {
+    local: { primary: HEADER_GLASS_PALETTE[4], secondary: HEADER_GLASS_PALETTE[8] },
+    regional: { primary: HEADER_GLASS_PALETTE[3], secondary: HEADER_GLASS_PALETTE[0] },
+    national: { primary: HEADER_GLASS_PALETTE[1], secondary: HEADER_GLASS_PALETTE[6] },
+    following: { primary: HEADER_GLASS_PALETTE[6], secondary: HEADER_GLASS_PALETTE[11] },
+};
 
 /**
  * Palette colour for a post's ordinal position in the feed, cycling through the ramp.

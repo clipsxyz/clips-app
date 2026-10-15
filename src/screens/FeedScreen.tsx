@@ -44,7 +44,7 @@ import Reanimated, {
 import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import FeedAmbientCanvas from '../components/FeedAmbientCanvas.native';
 import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
-import { headerGlassColorAt, hexToRgba } from '../utils/headerGlassPalette';
+import type { HeaderFeedScope } from '../utils/headerGlassPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
 import {
@@ -1903,6 +1903,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null);
     const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
     const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
+    const [customFeedScope, setCustomFeedScope] = useState<'local' | 'regional' | 'national' | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -2056,24 +2057,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         minimumViewTime: 80,
     });
 
-    /**
-     * Header glow leads the autoplay threshold on purpose: the glow should already be lit
-     * as a card enters the top of the viewport, not wait until 70% of it is on screen.
-     * This is a SEPARATE config pair with its own callback so the 70%/80ms autoplay pair
-     * above is left exactly as-is — sharing it would either delay the glow or loosen the
-     * playback threshold, and playback state is off limits here.
-     */
-    const headerViewabilityConfigRef = useRef({
-        itemVisiblePercentThreshold: 10,
-        minimumViewTime: 40,
-    });
-
-    // Header tint follows the top-most visible post. Reusing the existing viewability
-    // callback (rather than adding a second config pair) keeps this off any new
-    // scroll/touch plumbing and cannot perturb video autoplay, which shares this
-    // 70% / 80ms threshold.
-    const [headerTintColor, setHeaderTintColor] = useState<string | null>(null);
-    const headerTintRef = useRef<string | null>(null);
     const feedScrollingRef = useRef(false);
     const feedScrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastViewableVideoPostIdRef = useRef<string | null>(null);
@@ -2417,48 +2400,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     ).current;
 
-    /**
-     * Header glow trigger — reads ONLY viewability, never playback or autoplay state, so
-     * it cannot influence which video plays. Uses the low threshold above so the tint
-     * changes as a card enters the top of the viewport instead of waiting for 70%.
-     */
-    const onHeaderViewableItemsChanged = useRef(
-        ({
-            viewableItems,
-        }: {
-            viewableItems: Array<{ item?: FeedListRow; index?: number | null }>;
-        }) => {
-            // Top-most visible post wins, so the glow tracks the card arriving at (or
-            // resting under) the header. Non-post rows (Stories, interests, ads) are
-            // skipped, leaving the header on its neutral canvas tint.
-            let topIndex: number | null = null;
-            let best = Number.POSITIVE_INFINITY;
-            for (const token of viewableItems) {
-                const row = token.item;
-                if (!row || row.kind !== 'post') continue;
-                const rowIndex = token.index ?? Number.POSITIVE_INFINITY;
-                if (rowIndex >= best) continue;
-                best = rowIndex;
-                topIndex = rowIndex;
-            }
-            const nextTint =
-                topIndex === null
-                    ? null
-                    : postPaletteByRowRef.current.get(topIndex) ?? null;
-            if (nextTint === headerTintRef.current) return;
-            headerTintRef.current = nextTint;
-            setHeaderTintColor(nextTint);
-        },
-    ).current;
-
     const viewabilityConfigCallbackPairs = useRef([
         {
             viewabilityConfig: viewabilityConfigRef.current,
             onViewableItemsChanged,
-        },
-        {
-            viewabilityConfig: headerViewabilityConfigRef.current,
-            onViewableItemsChanged: onHeaderViewableItemsChanged,
         },
     ]);
 
@@ -2530,6 +2475,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             : showFollowingFeed
                 ? 'discover'
                 : active;
+
+    const headerFeedScope = useMemo((): HeaderFeedScope => {
+        if (showFollowingFeed || active === 'Following') return 'following';
+        if (customLocation) return customFeedScope ?? 'national';
+        const local = user?.local || 'Finglas';
+        const regional = user?.regional || 'Dublin';
+        const national = user?.national || 'Ireland';
+        if (active === local) return 'local';
+        if (active === regional) return 'regional';
+        if (active === national) return 'national';
+        return 'national';
+    }, [
+        active,
+        customFeedScope,
+        customLocation,
+        showFollowingFeed,
+        user?.local,
+        user?.national,
+        user?.regional,
+    ]);
 
     const feedFetchFilter = useMemo(() => {
         if (customLocation != null && String(customLocation).trim() !== '') {
@@ -2978,6 +2943,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setCustomLocationLabel(null);
             setCustomLocationPlaceId(null);
             setCustomFilterType(null);
+            setCustomFeedScope(null);
             setPages([]);
             setCursor(0);
             setEnd(false);
@@ -3448,6 +3414,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setCustomLocationLabel(null);
             setCustomLocationPlaceId(null);
             setCustomFilterType(null);
+            setCustomFeedScope(null);
             setActive('Following'); // Set active to Following so it's highlighted
         } else {
             setShowFollowingFeed(false);
@@ -3455,6 +3422,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setCustomLocationLabel(null);
             setCustomLocationPlaceId(null);
             setCustomFilterType(null);
+            setCustomFeedScope(null);
             setActive(tab);
         }
         try {
@@ -3474,6 +3442,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const applyCustomLocationFeed = useCallback(
         (selection: PlaceFeedSelection, filterType: 'location' | 'venue' | 'landmark') => {
             setShowFollowingFeed(false);
+            setCustomFeedScope(selection.scope);
             setCustomLocation(selection.filter);
             setCustomLocationLabel(selection.label);
             setCustomLocationPlaceId(selection.placeId?.trim() || null);
@@ -3579,6 +3548,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setCustomLocationLabel(null);
         setCustomLocationPlaceId(null);
         setCustomFilterType(null);
+        setCustomFeedScope(null);
         setPages([]);
         setCursor(0);
         setEnd(false);
@@ -3912,24 +3882,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
         return () => sub.remove();
     }, []);
-
-    /**
-     * Row index -> header palette colour, keyed by each post's ordinal position among
-     * posts (not the raw row index) so interleaved non-post rows cannot shift a given
-     * post's colour. Rebuilt only when the flattened feed changes.
-     */
-    const postPaletteByRowRef = useRef<Map<number, string>>(new Map());
-    postPaletteByRowRef.current = React.useMemo(() => {
-        const map = new Map<number, string>();
-        let ordinal = 0;
-        flatForRender.forEach((row, index) => {
-            if (row.kind !== 'post') return;
-            const rgba = hexToRgba(headerGlassColorAt(ordinal), 1);
-            if (rgba) map.set(index, rgba);
-            ordinal += 1;
-        });
-        return map;
-    }, [flatForRender]);
 
     // First-paint bootstrap only. Like/comment patch `pages` → new `flat` identity;
     // that must NEVER re-arm a player. After viewability has spoken, it owns autoplay.
@@ -4760,7 +4712,7 @@ onVisitProfile={() =>
                 online={online}
                 error={error}
                 backdrop={<FeedAmbientCanvas />}
-                headerTint={headerTintColor}
+                headerScope={headerFeedScope}
                 onRetry={() => {
                     setError(null);
                     void reloadFeedFromStartRef.current();

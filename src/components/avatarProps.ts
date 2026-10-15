@@ -13,6 +13,11 @@ export type AvatarProps = {
     className?: string;
     hasStory?: boolean;
     /**
+     * Skip the built-in outline so a parent can draw the ring (feed cards use the
+     * Inbox story gradient). Defaults to the standard 2px border.
+     */
+    hideBorder?: boolean;
+    /**
      * Opt-in squircle radius. When set, the avatar (inner image + story ring)
      * renders as a rounded square instead of a full circle. Defaults to a circle
      * (`dim / 2`) so existing circular avatars are unaffected.

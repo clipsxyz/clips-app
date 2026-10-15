@@ -25,6 +25,7 @@ export default function Avatar({
     name,
     size = 'md',
     hasStory = false,
+    hideBorder = false,
     cornerRadius,
     onClick,
 }: AvatarProps) {
@@ -43,8 +44,9 @@ export default function Avatar({
     // Outer circle/square is always `dim` so every avatar shares identical
     // dimensions; the 2px outline + 2px inner padding are uniform in both
     // story states and the inner radius stays concentric with the outer ring.
-    const innerDim = Math.max(0, dim - AVATAR_STORY_BORDER_WIDTH * 2);
-    const innerRadius = Math.max(0, outerRadius - AVATAR_STORY_BORDER_WIDTH);
+    const borderWidth = hideBorder ? 0 : AVATAR_STORY_BORDER_WIDTH;
+    const innerDim = Math.max(0, dim - borderWidth * 2);
+    const innerRadius = Math.max(0, outerRadius - borderWidth);
 
     const inner = (
         <View
@@ -81,8 +83,8 @@ export default function Avatar({
                     width: dim,
                     height: dim,
                     borderRadius: outerRadius,
-                    borderWidth: AVATAR_STORY_BORDER_WIDTH,
-                    borderColor: avatarBorderColor(hasStory),
+                    borderWidth,
+                    borderColor: hideBorder ? 'transparent' : avatarBorderColor(hasStory),
                 },
             ]}
         >

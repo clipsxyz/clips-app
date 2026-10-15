@@ -17,13 +17,15 @@ import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
-/**
- * Feed header avatar size. Matches the prominent circular avatars used in the
- * Stories rail (48) and Reels overlay (36) so the feed reads as the same family.
- */
-const FEED_HEADER_AVATAR_SIZE = 34;
-/** Squircle corners scale with the avatar to match the 36dp top-bar buttons. */
-const FEED_HEADER_AVATAR_RADIUS = 9;
+/** Outer ring on newsfeed cards. Smaller than the 38px header so the photo doesn't dominate the row. */
+const FEED_HEADER_AVATAR_SIZE = 30;
+/** Same 2px ring thickness as the Inbox story avatars. */
+const FEED_HEADER_AVATAR_RING_PAD = 2;
+const FEED_HEADER_AVATAR_INNER = FEED_HEADER_AVATAR_SIZE - FEED_HEADER_AVATAR_RING_PAD * 2;
+/** Rounded square, not a circle. Corners stay concentric inside the gradient ring. */
+const FEED_HEADER_AVATAR_RADIUS = 6;
+/** Inbox Notifications story ring: teal → sky → fuchsia, bottom-left to top-right. */
+const FEED_HEADER_STORY_RING_COLORS = ['#2DD4BF', '#0EA5E9', '#D946EF'] as const;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
 const FEED_HEADER_BADGE_SIZE = 12;
 const FEED_HEADER_BADGE_ICON = 7;
@@ -146,13 +148,23 @@ export default function FeedPostHeader({
                 accessibilityRole="button"
                 accessibilityLabel={hasStory ? `View ${safeHandle} stories` : `View ${safeHandle} profile`}
             >
-                <Avatar
-                    src={avatarSrc}
-                    name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                    size={FEED_HEADER_AVATAR_SIZE}
-                    cornerRadius={FEED_HEADER_AVATAR_RADIUS}
-                    hasStory={hasStory}
-                />
+                <LinearGradient
+                    colors={[...FEED_HEADER_STORY_RING_COLORS]}
+                    start={{ x: 0, y: 1 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.storyRing}
+                >
+                    <View style={styles.storyRingInner}>
+                        <Avatar
+                            src={avatarSrc}
+                            name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                            size={FEED_HEADER_AVATAR_INNER}
+                            cornerRadius={FEED_HEADER_AVATAR_RADIUS - FEED_HEADER_AVATAR_RING_PAD}
+                            hideBorder
+                            hasStory={hasStory}
+                        />
+                    </View>
+                </LinearGradient>
             </TouchableOpacity>
             {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
@@ -341,6 +353,24 @@ const styles = StyleSheet.create({
     avatarHit: {
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    storyRing: {
+        width: FEED_HEADER_AVATAR_SIZE,
+        height: FEED_HEADER_AVATAR_SIZE,
+        borderRadius: FEED_HEADER_AVATAR_RADIUS,
+        padding: FEED_HEADER_AVATAR_RING_PAD,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    storyRingInner: {
+        width: '100%',
+        height: '100%',
+        borderRadius: FEED_HEADER_AVATAR_RADIUS - FEED_HEADER_AVATAR_RING_PAD,
+        backgroundColor: '#000',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
     },
     followPlus: {
         position: 'absolute',

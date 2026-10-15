@@ -33,30 +33,42 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ox } from '../constants/nativeOpticalScale';
-import { HEADER_GLASS_NEUTRAL } from '../utils/headerGlassPalette';
+import {
+    HEADER_GLASS_NEUTRAL,
+    HEADER_SCOPE_GRADIENTS,
+    type HeaderFeedScope,
+} from '../utils/headerGlassPalette';
 
 /** News feed shell / ambient canvas floor — matches share-card Passport abyss. */
 export const FEED_PAGE_BG = '#060d16';
 
-/** Header tint morph cadence — matches the ambient canvas settle rhythm. */
-const HEADER_TINT_MORPH_MS = 350;
+/** Scope-change fade. Scroll does not drive this. */
+const HEADER_SCOPE_MORPH_MS = 300;
+
+function colorChannels(color: string): [string, string, string] | null {
+    const channels = color.match(/[\d.]+/g);
+    if (!channels || channels.length < 3) return null;
+    return [channels[0], channels[1], channels[2]];
+}
 
 /**
- * Turns an interpolated tint into the header's three-stop ramp: ~95% at the status bar,
- * ~50% glow behind the Stories row, then clear so it dissolves into the solid backdrop.
+ * Scope ramp: saturated accent at the status bar, its palette pair through the pill
+ * row, then fully transparent so the dark canvas (`HEADER_GLASS_NEUTRAL`) shows through.
  *
- * `interpolateColor` emits `rgba(r, g, b, a)` rather than hex, so the alphas are rebuilt
- * per stop instead of concatenating a hex suffix (which would produce an invalid colour and
- * silently drop the gradient). The neutral fallback keeps the header readable when the
- * interpolation has not produced a parseable colour yet.
+ * `interpolateColor` emits `rgba()`, so alphas are rebuilt per stop instead of appending
+ * a hex suffix (invalid on some Android gradient parsers).
  */
-function headerTintStops(tint: string): [string, string, string] {
-    const channels = tint.match(/[\d.]+/g);
-    if (!channels || channels.length < 3) {
+function headerScopeStops(primary: string, secondary: string): [string, string, string] {
+    const top = colorChannels(primary);
+    const mid = colorChannels(secondary);
+    if (!top || !mid) {
         return [...FEED_CHROME_HEADER_GRADIENT];
     }
-    const [r, g, b] = channels;
-    return [`rgba(${r}, ${g}, ${b}, 0.95)`, `rgba(${r}, ${g}, ${b}, 0.5)`, 'transparent'];
+    return [
+        `rgba(${top[0]}, ${top[1]}, ${top[2]}, 0.95)`,
+        `rgba(${mid[0]}, ${mid[1]}, ${mid[2]}, 0.5)`,
+        'transparent',
+    ];
 }
 
 /** Web post card / article background — Gazetteer Swal sheet (`#060d16`). */
@@ -73,8 +85,8 @@ export const FEED_CARD_CHROME_BG = '#060d16';
  */
 export const FEED_CHROME_GLASS = 'transparent';
 /**
- * Neutral header ramp, applied before/without an active post tint. The live header stops
- * are built at runtime by `headerTintStops` so the dominant colour can be interpolated.
+ * Neutral header ramp, used only when a scope colour cannot be parsed. Live stops come
+ * from `headerScopeStops` and follow the active feed scope.
  */
 export const FEED_CHROME_HEADER_GRADIENT = [
     'rgba(11, 14, 20, 0.95)',
@@ -716,11 +728,10 @@ export type FeedPageLayoutProps = {
      */
     backdrop?: ReactNode;
     /**
-     * Active post's `dominant_color` (already validated/amplified by the caller). Drives
-     * the frosted tint on the pinned chrome only — the ambient canvas behind the feed is
-     * untouched. Falsy falls back to HEADER_GLASS_NEUTRAL so the header reads as neutral.
+     * Active feed scope. The pinned header gradient is this scope's palette only —
+     * it does not change as posts scroll under the chrome.
      */
-    headerTint?: string | null;
+    headerScope?: HeaderFeedScope;
     online?: boolean;
     error?: string | null;
     onRetry?: () => void;
@@ -731,7 +742,7 @@ export default function FeedPageLayout({
     header,
     children,
     backdrop,
-    headerTint = null,
+    headerScope = 'national',
     online = true,
     error = null,
     onRetry,
@@ -740,43 +751,65 @@ export default function FeedPageLayout({
     const insets = useSafeAreaInsets();
     const glassScrollHost = backdrop ? styles.scrollHostGlass : null;
 
-    // --- Dynamic header tint -------------------------------------------------
-    // The morph itself runs on the UI thread (`tintMix` + `interpolateColor`); only the
-    // resolved colour crosses to JS, and only while the 350ms timing is in flight.
-    const tintMix = useSharedValue(1);
-    const tintFrom = useSharedValue<string>(HEADER_GLASS_NEUTRAL);
-    const tintTo = useSharedValue<string>(HEADER_GLASS_NEUTRAL);
+    // --- Scope header gradient -----------------------------------------------
+    // Morph runs on the UI thread. Only the packed rgba pair crosses to JS, and only
+    // while the 300ms timing is in flight. Scroll never writes these shared values.
+    const scopeMix = useSharedValue(1);
+    const fromPrimary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.primary);
+    const toPrimary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.primary);
+    const fromSecondary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.secondary);
+    const toSecondary = useSharedValue(HEADER_SCOPE_GRADIENTS.national.secondary);
+
+    const applyScopeStops = React.useCallback((packed: string) => {
+        const separator = packed.indexOf('|');
+        if (separator <= 0) return;
+        const primary = packed.slice(0, separator);
+        const secondary = packed.slice(separator + 1);
+        if (!primary || !secondary) return;
+        setHeaderStops(headerScopeStops(primary, secondary));
+    }, []);
 
     useEffect(() => {
-        const next = headerTint ?? HEADER_GLASS_NEUTRAL;
-        // Chain from the previous target so rapid scroll reversals interpolate smoothly
-        // instead of snapping back to the base colour.
-        tintFrom.value = tintTo.value;
-        tintTo.value = next;
-        tintMix.value = 0;
-        tintMix.value = withTiming(1, {
-            duration: HEADER_TINT_MORPH_MS,
+        const next = HEADER_SCOPE_GRADIENTS[headerScope] ?? HEADER_SCOPE_GRADIENTS.national;
+        if (toPrimary.value === next.primary && toSecondary.value === next.secondary) return;
+        fromPrimary.value = toPrimary.value;
+        fromSecondary.value = toSecondary.value;
+        toPrimary.value = next.primary;
+        toSecondary.value = next.secondary;
+        scopeMix.value = 0;
+        scopeMix.value = withTiming(1, {
+            duration: HEADER_SCOPE_MORPH_MS,
             easing: Easing.out(Easing.cubic),
         });
-    }, [headerTint, tintFrom, tintMix, tintTo]);
+    }, [fromPrimary, fromSecondary, headerScope, scopeMix, toPrimary, toSecondary]);
 
-    const [headerTintRgba, setHeaderTintRgba] = useState<string>(HEADER_GLASS_NEUTRAL);
-
-    useAnimatedReaction(
-        () => interpolateColor(tintMix.value, [0, 1], [tintFrom.value, tintTo.value]),
-        (current, previous) => {
-            if (current !== previous) runOnJS(setHeaderTintRgba)(current);
-        },
-        [tintFrom, tintTo],
+    const [headerStops, setHeaderStops] = useState<[string, string, string]>(() =>
+        headerScopeStops(
+            HEADER_SCOPE_GRADIENTS.national.primary,
+            HEADER_SCOPE_GRADIENTS.national.secondary,
+        ),
     );
 
-    const headerTintStopsMemo = headerTintStops(headerTintRgba);
+    useAnimatedReaction(
+        () => {
+            const primary = interpolateColor(scopeMix.value, [0, 1], [fromPrimary.value, toPrimary.value]);
+            const secondary = interpolateColor(scopeMix.value, [0, 1], [
+                fromSecondary.value,
+                toSecondary.value,
+            ]);
+            return `${primary}|${secondary}`;
+        },
+        (current, previous) => {
+            if (current !== previous) runOnJS(applyScopeStops)(current);
+        },
+        [fromPrimary, fromSecondary, toPrimary, toSecondary],
+    );
 
-    // Opaque path (no ambient canvas) has no gradient to tint, so morph a flat colour.
+    // Opaque path (no ambient canvas) has no gradient, so morph the primary scope colour.
     const pinnedChromeSolidStyle = useAnimatedStyle(() => ({
-        backgroundColor: interpolateColor(tintMix.value, [0, 1], [
-            tintFrom.value,
-            tintTo.value,
+        backgroundColor: interpolateColor(scopeMix.value, [0, 1], [
+            fromPrimary.value,
+            toPrimary.value,
         ]),
     }));
 
@@ -835,15 +868,21 @@ export default function FeedPageLayout({
               composites rgba glass against black — looking like solid #000 bars.
             */}
             {backdrop ? (
-                <LinearGradient
-                    colors={headerTintStopsMemo}
-                    locations={[0, 0.55, 1]}
+                <View
                     pointerEvents="box-none"
                     collapsable={false}
                     style={[styles.pinnedChromeGlass, { paddingTop: insets.top }]}
                 >
+                    <LinearGradient
+                        colors={headerStops}
+                        locations={[0, 0.55, 1]}
+                        start={{ x: 0.5, y: 0 }}
+                        end={{ x: 0.5, y: 1 }}
+                        pointerEvents="none"
+                        style={styles.headerCanvasGradient}
+                    />
                     {chromeBody}
-                </LinearGradient>
+                </View>
             ) : (
                 <Animated.View
                     style={[
@@ -938,6 +977,14 @@ const styles = StyleSheet.create({
         // of this fill, so its transparent final stop reveals the solid colour below —
         // which is why no extra wrapper view (and no zIndex'd offscreen layer) is needed.
         backgroundColor: HEADER_GLASS_NEUTRAL,
+    },
+    /** Painted under the pill row. Touches pass through to the header controls. */
+    headerCanvasGradient: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
     },
     bottomChromeGlass: {
         position: 'absolute',
