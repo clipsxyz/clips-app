@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Local development network policy.
+
+  The React Native Gradle plugin only enables cleartext in the debug variant; this
+  config makes the allowance explicit and also covers release builds that talk to a
+  local development machine. `base-config` permits cleartext for the private LAN
+  range (e.g. 192.168.1.*) since Android's network security config cannot express
+  IP subnets/wildcards. Named dev hosts are listed explicitly for clarity:
+    - 127.0.0.1 / localhost : Metro + API via `adb reverse`
+    - 10.0.2.2              : Android emulator host loopback
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
