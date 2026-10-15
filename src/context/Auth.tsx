@@ -359,7 +359,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       countryFlag:
         normalizeCountryFlagInput(userData.countryFlag || '', userData.national || '') || undefined,
       avatarUrl: userData.avatarUrl || userData.avatar_url || undefined,
-      profileBackgroundUrl: userData.profileBackgroundUrl || undefined,
+      profileBackgroundUrl: userData.profileBackgroundUrl || userData.profile_background_url || undefined,
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
       placesTraveled: userData.placesTraveled || undefined,

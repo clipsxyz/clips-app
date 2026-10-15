@@ -82,8 +82,30 @@ export function isMockMode(): boolean {
   return String(raw ?? '').trim().toLowerCase() === 'true';
 }
 
+/**
+ * Dev-machine host parsed from the configured API env URL so it tracks the current
+ * machine instead of a hardcoded address. `getApiBaseUrl` still prefers Metro's live
+ * host / the last successfully-used base, so this is only a last-resort fallback.
+ */
+function deriveConfiguredApiHost(): string | null {
+  try {
+    const configured =
+      getRuntimeEnv('EXPO_PUBLIC_API_BASE_URL') ||
+      getRuntimeEnv('EXPO_PUBLIC_API_URL') ||
+      getRuntimeEnv('REACT_NATIVE_API_URL') ||
+      getRuntimeEnv('VITE_API_URL');
+    if (configured) {
+      const host = new URL(configured).hostname;
+      if (host && host !== 'localhost' && host !== '127.0.0.1') return host;
+    }
+  } catch {
+    /* ignore malformed / relative env URL */
+  }
+  return null;
+}
+
 /** Mac LAN IP when the phone cannot reach localhost (adb reverse drops). */
-export const DEV_LAN_API_HOST = '192.168.1.9';
+export const DEV_LAN_API_HOST = deriveConfiguredApiHost() ?? '192.168.1.9';
 export const DEV_LAN_API_BASE_URL = `http://${DEV_LAN_API_HOST}:8000/api`;
 export const DEV_LOOPBACK_API_BASE_URL = 'http://127.0.0.1:8000/api';
 export const DEV_ANDROID_EMULATOR_API_HOST = '10.0.2.2';
@@ -92,6 +114,7 @@ export const DEV_ANDROID_EMULATOR_API_BASE_URL = `http://${DEV_ANDROID_EMULATOR_
 /** Remember which API host last worked on this RN session (adb reverse ↔ LAN ↔ emulator). */
 export type RnApiHostPreference = 'loopback' | 'lan' | 'emulator';
 let preferredRnApiHost: RnApiHostPreference | null = null;
+let lastWorkingApiBaseUrl: string | null = null;
 
 export function getPreferredRnApiHost(): RnApiHostPreference | null {
   return preferredRnApiHost;
@@ -101,9 +124,17 @@ export function setPreferredRnApiHost(pref: RnApiHostPreference | null): void {
   preferredRnApiHost = pref;
 }
 
+/** Exact API base that last answered on this session — the most reliable active origin. */
+export function getLastWorkingApiBaseUrl(): string | null {
+  return lastWorkingApiBaseUrl;
+}
+
 export function rememberSuccessfulApiBaseUrl(apiBaseUrl: string): void {
   try {
-    const host = new URL(String(apiBaseUrl || '').trim()).hostname;
+    const trimmed = String(apiBaseUrl || '').trim().replace(/\/$/, '');
+    if (!trimmed) return;
+    lastWorkingApiBaseUrl = trimmed;
+    const host = new URL(trimmed).hostname;
     if (host === '127.0.0.1' || host === 'localhost') {
       preferredRnApiHost = 'loopback';
     } else if (host === DEV_ANDROID_EMULATOR_API_HOST) {

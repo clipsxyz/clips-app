@@ -3,6 +3,7 @@ import {
     DEV_LOOPBACK_API_BASE_URL,
     DEV_ANDROID_EMULATOR_API_BASE_URL,
     getConfiguredApiEnvUrl,
+    getLastWorkingApiBaseUrl,
     getPreferredRnApiHost,
     getReactNativeDefaultApiBaseUrl,
     isLoopbackApiHost,
@@ -80,6 +81,12 @@ export function getApiBaseUrl(): string {
     const isRn = isReactNativeRuntime() || !browserHost;
 
     if (isRn) {
+        // Trust the exact base that already answered this session before any guesswork —
+        // otherwise a stale LAN IP baked into the bundle keeps media pointing at a dead host.
+        const lastWorking = getLastWorkingApiBaseUrl();
+        if (lastWorking) {
+            return lastWorking;
+        }
         const preferred = getPreferredRnApiHost();
         if (preferred === 'loopback') {
             return DEV_LOOPBACK_API_BASE_URL;
@@ -94,12 +101,14 @@ export function getApiBaseUrl(): string {
         let resolved: string;
         if (fromMetro && isLoopbackApiHost(fromMetro)) {
             resolved = DEV_LOOPBACK_API_BASE_URL;
+        } else if (fromMetro) {
+            // Metro serves the bundle from the dev machine, so its host is the live one —
+            // prefer it over EXPO_PUBLIC_API_BASE_URL, which may pin a stale LAN address.
+            resolved = fromMetro.replace(/\/$/, '');
         } else {
             const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
             if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
                 resolved = trimmedEnv;
-            } else if (fromMetro) {
-                resolved = fromMetro.replace(/\/$/, '');
             } else if (trimmedEnv) {
                 resolved = rewriteLoopbackApiUrlToLan(trimmedEnv) || FALLBACK_API;
             } else {

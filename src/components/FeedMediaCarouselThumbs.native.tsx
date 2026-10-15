@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import CachedImage from './CachedImage.native';
 import type { Post, PostMediaItem } from '../types';
-import { resolveCarouselItemStillUri } from '../utils/postMedia';
+import { resolveCarouselItemStillUri, isVideoMediaUri } from '../utils/postMedia';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import {
     FEED_CARD_CAROUSEL_COUNT,
     FEED_CARD_CAROUSEL_HEADER,
@@ -38,13 +38,23 @@ function CarouselThumb({
     onPress: () => void;
 }) {
     const stillUri = resolveCarouselItemStillUri(item, post, index, items);
-    const [failed, setFailed] = React.useState(false);
+    // Last-ditch poster frame from the parent post (helps video tiles whose own still is
+    // missing), resolved against the active API origin so it loads on device.
+    const postPosterUri = React.useMemo(() => {
+        const candidate = resolvePublicMediaUrl(post.videoPosterUrl || post.thumbnailUrl || '');
+        if (!candidate || candidate === stillUri || isVideoMediaUri(candidate)) return undefined;
+        return candidate;
+    }, [post.videoPosterUrl, post.thumbnailUrl, stillUri]);
+    const [primaryFailed, setPrimaryFailed] = React.useState(false);
+    const [posterFailed, setPosterFailed] = React.useState(false);
 
     React.useEffect(() => {
-        setFailed(false);
-    }, [stillUri]);
+        setPrimaryFailed(false);
+        setPosterFailed(false);
+    }, [stillUri, postPosterUri]);
 
-    const showImage = Boolean(stillUri) && !failed;
+    const primaryUri = stillUri && !primaryFailed ? stillUri : undefined;
+    const imageUri = primaryUri || (!posterFailed ? postPosterUri : undefined);
 
     return (
         <TouchableOpacity
@@ -52,26 +62,21 @@ function CarouselThumb({
             onPress={onPress}
             activeOpacity={0.9}
         >
-            {showImage ? (
+            {imageUri ? (
                 <CachedImage
-                    source={{ uri: stillUri as string }}
+                    source={{ uri: imageUri }}
                     style={styles.thumbImg}
                     resizeMode="cover"
-                    onError={() => setFailed(true)}
+                    onError={() => (primaryUri ? setPrimaryFailed(true) : setPosterFailed(true))}
                 />
             ) : (
-                <LinearGradient
-                    colors={['#374151', '#1F2937']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.thumbFallback}
-                >
+                <View style={styles.thumbPlaceholder}>
                     <Icon
-                        name={item.type === 'video' ? 'videocam' : 'image-outline'}
+                        name={item.type === 'video' ? 'videocam-outline' : 'image-outline'}
                         size={20}
-                        color="rgba(255,255,255,0.75)"
+                        color="rgba(255,255,255,0.6)"
                     />
-                </LinearGradient>
+                </View>
             )}
             {item.type === 'video' ? (
                 <View style={styles.vidBadge}>
@@ -115,11 +120,12 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
-    thumbFallback: {
+    thumbPlaceholder: {
         width: '100%',
         height: '100%',
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: 'rgba(148,163,184,0.18)',
     },
     vidBadge: {
         position: 'absolute',

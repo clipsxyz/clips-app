@@ -1,4 +1,5 @@
 import type { ImageSourcePropType } from 'react-native';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 
 /** Bundled default cover — same asset as web `/placeholders/world-map.jpg`. */
 export const DEFAULT_PROFILE_COVER_SOURCE: ImageSourcePropType = require('../assets/world-map.jpg');
@@ -7,13 +8,25 @@ export const DEFAULT_PROFILE_COVER_SOURCE: ImageSourcePropType = require('../ass
 export const DEFAULT_PROFILE_COVER_URI =
     'https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular_projection_SW.jpg';
 
-function normalizeCover(coverUrl?: string | null): string {
+/** Raw stored value, trimmed (never resolved — stock detection needs the original path). */
+function trimCover(coverUrl?: string | null): string {
     return String(coverUrl || '').trim();
+}
+
+/**
+ * Turn a stored cover into a loadable URL: relative `/storage/...` paths and leftover
+ * `localhost:8000` / stale-LAN URLs are resolved against the currently active API origin
+ * (see `resolvePublicMediaUrl`), matching how avatars are handled.
+ */
+function normalizeCover(coverUrl?: string | null): string {
+    const raw = trimCover(coverUrl);
+    if (!raw) return '';
+    return resolvePublicMediaUrl(raw) || raw;
 }
 
 /** True when cover is empty or the stock world-map placeholder (not a user upload). */
 export function isStockProfileCover(coverUrl?: string | null): boolean {
-    const trimmed = normalizeCover(coverUrl);
+    const trimmed = trimCover(coverUrl);
     if (!trimmed) return true;
     const lower = trimmed.toLowerCase();
     if (lower.includes('world-map.jpg')) return true;

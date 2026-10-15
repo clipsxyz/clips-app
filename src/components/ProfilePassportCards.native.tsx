@@ -377,6 +377,7 @@ export default function ProfilePassportCards({
         }
         const localHandles = await getFollowedUsers(String(user.id)).catch(() => [] as string[]);
         let handles: string[] = localHandles;
+        let liveFetchFailed = false;
         if (user?.handle && isLaravelApiEnabled()) {
             try {
                 // Live source of truth from /api/users/{handle}/following (mirrors the DB, not
@@ -392,8 +393,15 @@ export default function ProfilePassportCards({
                     handles = [...new Set([...apiHandles, ...localHandles])];
                 }
             } catch (err) {
+                liveFetchFailed = true;
                 console.warn('refreshFollowing: live fetch failed, using local list', err);
             }
+        }
+        // A transient failure with no cached rows must not regress the card to 0.
+        if (liveFetchFailed && handles.length === 0) {
+            setFollowingList((prev) => (prev.length > 0 ? prev : handles));
+            setFollowingCount((prev) => (prev > 0 ? prev : handles.length));
+            return;
         }
         setFollowingList(handles);
         setFollowingCount(handles.length);
@@ -415,9 +423,9 @@ export default function ProfilePassportCards({
                 .filter(Boolean);
             setFollowersList(handles);
             setFollowersCount(handles.length);
-        } catch {
-            setFollowersCount(0);
-            setFollowersList([]);
+        } catch (err) {
+            // Preserve the last-known list/count so a transient outage doesn't blank the card.
+            console.warn('refreshFollowers: live fetch failed, keeping last known count', err);
         }
     }, [user?.handle]);
 
