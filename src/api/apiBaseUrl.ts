@@ -51,6 +51,37 @@ function isDomBrowser(): boolean {
     }
 }
 
+/**
+ * True only when Android reports an emulator fingerprint or model.
+ * A missing signal is not an emulator: wireless handsets must keep the configured
+ * LAN origin instead of falling back to `adb reverse` localhost.
+ */
+function isAndroidEmulator(): boolean {
+    try {
+        // Gate on the RN runtime check (mocked to false in unit tests) so requiring
+        // react-native is skipped under Node/vitest.
+        if (!isReactNativeRuntime()) return false;
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { Platform } = require('react-native') as typeof import('react-native');
+        const constants = (Platform as { constants?: Record<string, unknown> }).constants || {};
+        const fingerprint = String(constants.Fingerprint || '').toLowerCase();
+        const model = String(constants.Model || '').toLowerCase();
+        return (
+            fingerprint.includes('generic') ||
+            fingerprint.includes('emulator') ||
+            fingerprint.includes('vbox') ||
+            fingerprint.includes('goldfish') ||
+            fingerprint.includes('ranchu') ||
+            fingerprint.includes('sdk_gphone') ||
+            model.includes('sdk_gphone') ||
+            model.includes('emulator') ||
+            model.includes('android sdk built for')
+        );
+    } catch {
+        return false;
+    }
+}
+
 export function getApiBaseUrl(): string {
     const envUrl = getConfiguredApiEnvUrl();
     const browserHost = getBrowserHostname();
@@ -81,6 +112,16 @@ export function getApiBaseUrl(): string {
     const isRn = isReactNativeRuntime() || !browserHost;
 
     if (isRn) {
+        const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
+        const envIsReachableLan = !!trimmedEnv && !isLoopbackApiHost(trimmedEnv);
+
+        // Configured LAN origin (e.g. http://192.168.x.x:8000/api) is the wireless
+        // path. Use it directly so login and media do not depend on `adb reverse`.
+        // Emulators keep 10.0.2.2 / loopback below.
+        if (envIsReachableLan && !isAndroidEmulator()) {
+            return trimmedEnv;
+        }
+
         // Trust the exact base that already answered this session before any guesswork —
         // otherwise a stale LAN IP baked into the bundle keeps media pointing at a dead host.
         const lastWorking = getLastWorkingApiBaseUrl();
@@ -100,20 +141,19 @@ export function getApiBaseUrl(): string {
         const fromMetro = getReactNativeDefaultApiBaseUrl();
         let resolved: string;
         if (fromMetro && isLoopbackApiHost(fromMetro)) {
+            // Metro is reached over loopback (adb reverse). Emulators/simulators keep
+            // loopback; physical devices already returned the LAN env URL above.
             resolved = DEV_LOOPBACK_API_BASE_URL;
         } else if (fromMetro) {
             // Metro serves the bundle from the dev machine, so its host is the live one —
             // prefer it over EXPO_PUBLIC_API_BASE_URL, which may pin a stale LAN address.
             resolved = fromMetro.replace(/\/$/, '');
+        } else if (envIsReachableLan) {
+            resolved = trimmedEnv;
+        } else if (trimmedEnv) {
+            resolved = rewriteLoopbackApiUrlToLan(trimmedEnv) || FALLBACK_API;
         } else {
-            const trimmedEnv = envUrl ? envUrl.replace(/\/$/, '') : '';
-            if (trimmedEnv && !isLoopbackApiHost(trimmedEnv)) {
-                resolved = trimmedEnv;
-            } else if (trimmedEnv) {
-                resolved = rewriteLoopbackApiUrlToLan(trimmedEnv) || FALLBACK_API;
-            } else {
-                resolved = FALLBACK_API;
-            }
+            resolved = FALLBACK_API;
         }
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
             console.debug('[getApiBaseUrl]', {
@@ -122,6 +162,7 @@ export function getApiBaseUrl(): string {
                 envUrl: envUrl || null,
                 lanFallback: FALLBACK_API,
                 preferred,
+                androidEmulator: isAndroidEmulator(),
             });
         }
         return resolved;
