@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -100,6 +100,136 @@ function getMessageSharedRef(msg: ChatMessage): SharedPostRef | null {
     return null;
 }
 
+/** Normalized quoted-reply data rendered inside bubbles and the composer strip. */
+type DmReplyPreview = {
+    senderHandle: string;
+    text: string;
+    thumbUrl?: string;
+    isVideo: boolean;
+};
+
+/** Resolve a shared-post thumbnail for a parent message (plain media or embedded post ref). */
+function resolveReplyThumb(
+    msg: ChatMessage | undefined,
+    sharedPosts: Record<string, Post>,
+): { thumbUrl?: string; isVideo: boolean } {
+    if (!msg) return { thumbUrl: undefined, isVideo: false };
+    if (msg.imageUrl) {
+        return { thumbUrl: msg.imageUrl, isVideo: isVideoUrlString(msg.imageUrl) };
+    }
+    const ref = getMessageSharedRef(msg);
+    const post = ref ? sharedPosts[sharedPostRefKey(ref)] : undefined;
+    if (!post) return { thumbUrl: undefined, isVideo: false };
+    const item = post.mediaItems?.[0];
+    const thumbUrl =
+        post.videoPosterUrl ||
+        post.thumbnailUrl ||
+        post.mediaUrl ||
+        item?.posterUrl ||
+        item?.thumbnailUrl ||
+        item?.url;
+    const isVideo =
+        post.mediaType === 'video' ||
+        item?.type === 'video' ||
+        isVideoUrlString(thumbUrl);
+    return { thumbUrl, isVideo };
+}
+
+/** Compact snippet label for a quoted reply (prefers media label over raw share URLs). */
+function replySnippetLabel(text: string, thumbUrl: string | undefined, isVideo: boolean): string {
+    const trimmed = text.trim();
+    if (thumbUrl && (!trimmed || /^https?:\/\//i.test(trimmed))) {
+        return isVideo ? 'Video' : 'Photo';
+    }
+    return trimmed || 'Message';
+}
+
+function isVideoUrlString(url?: string): boolean {
+    if (!url) return false;
+    const trimmed = url.trim();
+    return /^data:video\//i.test(trimmed) || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(trimmed);
+}
+
+/** Build the quoted preview for a reply message, enriching from the parent when the payload is thin. */
+function resolveReplyPreview(
+    item: ChatMessage,
+    messagesById: Map<string, ChatMessage>,
+    sharedPosts: Record<string, Post>,
+): DmReplyPreview | null {
+    const replyTo = item.replyTo;
+    const rawReplyId =
+        replyTo?.messageId ||
+        ((item as { reply_to_message_id?: string | null }).reply_to_message_id ?? undefined);
+    if (!replyTo && !rawReplyId) return null;
+    const parent = rawReplyId ? messagesById.get(rawReplyId) : undefined;
+    const fromParent = resolveReplyThumb(parent, sharedPosts);
+    const thumbUrl = replyTo?.imageUrl || fromParent.thumbUrl;
+    const isVideo =
+        replyTo?.mediaType === 'video' || fromParent.isVideo || isVideoUrlString(thumbUrl);
+    return {
+        senderHandle: replyTo?.senderHandle || parent?.senderHandle || '',
+        text: replySnippetLabel(replyTo?.text || parent?.text || '', thumbUrl, isVideo),
+        thumbUrl,
+        isVideo,
+    };
+}
+
+/** Build the quoted preview for a message being replied to from the composer. */
+function previewFromMessage(msg: ChatMessage, sharedPosts: Record<string, Post>): DmReplyPreview {
+    const { thumbUrl, isVideo } = resolveReplyThumb(msg, sharedPosts);
+    return {
+        senderHandle: msg.senderHandle || '',
+        text: replySnippetLabel(msg.text || '', thumbUrl, isVideo),
+        thumbUrl,
+        isVideo,
+    };
+}
+
+/**
+ * Instagram/WhatsApp-style quoted reply card. Shared by thread bubbles and the composer
+ * strip so both read identically: dark translucent glass, left accent, sender + snippet.
+ */
+function DmQuotedReply({
+    preview,
+    variant = 'bubble',
+}: {
+    preview: DmReplyPreview;
+    variant?: 'bubble' | 'composer';
+}) {
+    const isComposer = variant === 'composer';
+    const senderLabel = preview.senderHandle ? `Replying to ${preview.senderHandle}` : 'Replying to';
+    return (
+        <View
+            style={[
+                styles.quotedReply,
+                isComposer ? styles.quotedReplyComposer : styles.quotedReplyBubble,
+            ]}
+            testID="dm-quoted-reply"
+        >
+            <View style={styles.quotedReplyAccent} />
+            {preview.thumbUrl ? (
+                <View style={[styles.quotedReplyThumb, isComposer && styles.quotedReplyThumbComposer]}>
+                    {preview.isVideo ? (
+                        <View style={styles.quotedReplyVideoBadge}>
+                            <Icon name="videocam" size={ox(isComposer ? 16 : 12)} color="#FFFFFF" />
+                        </View>
+                    ) : (
+                        <Image source={{ uri: preview.thumbUrl }} style={styles.quotedReplyThumbImage} />
+                    )}
+                </View>
+            ) : null}
+            <View style={styles.quotedReplyBody}>
+                <Text style={styles.quotedReplySender} numberOfLines={1}>
+                    {senderLabel}
+                </Text>
+                <Text style={styles.quotedReplyText} numberOfLines={1}>
+                    {preview.text}
+                </Text>
+            </View>
+        </View>
+    );
+}
+
 type DmReaction = { emoji: string; users: string[] };
 
 type DmRowHandlers = {
@@ -126,6 +256,8 @@ type DmMessageRowProps = {
     isSwiping: boolean;
     /** Whether this row sits inside the active message viewport (drives inline video auto-pause). */
     isActive: boolean;
+    /** Normalized quoted-reply data for this message, if it is a reply. */
+    replyPreview: DmReplyPreview | null;
     reactionFlyEmoji: string | null;
     sharedPost: Post | null;
     swipeAnim: Animated.Value;
@@ -154,6 +286,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
     isPlayingAudio,
     isSwiping,
     isActive,
+    replyPreview,
     reactionFlyEmoji,
     sharedPost,
     swipeAnim,
@@ -396,6 +529,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
                             styles.sharedPostColumn,
                         ]}
                     >
+                        {replyPreview ? <DmQuotedReply preview={replyPreview} /> : null}
                         <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap} suppressTapRef={suppressTapRef}>
                             {sharedCard}
                         </DmMessagePressable>
@@ -423,37 +557,7 @@ const DmMessageRow = React.memo(function DmMessageRow({
 
             const bubbleContent = (
                 <>
-                    {(item as any).replyTo ? (
-                        <View style={styles.replyPreviewWrap}>
-                            <View style={styles.replyPreviewBar} />
-                            {((item as any).replyTo?.imageUrl as string | undefined) ? (
-                                <View style={styles.replyPreviewThumb}>
-                                    {ctx.isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
-                                        <View style={styles.replyPreviewVideoBadge}>
-                                            <Icon name="videocam" size={ox(12)} color="#FFFFFF" />
-                                        </View>
-                                    ) : (
-                                        <Image
-                                            source={{ uri: (item as any).replyTo.imageUrl }}
-                                            style={styles.replyPreviewImage}
-                                        />
-                                    )}
-                                </View>
-                            ) : null}
-                            <View style={styles.replyPreviewTextWrap}>
-                                <Text style={styles.replyPreviewSender} numberOfLines={1}>
-                                    {(item as any).replyTo?.senderHandle || 'Reply'}
-                                </Text>
-                                <Text style={styles.replyPreviewText} numberOfLines={1}>
-                                    {(item as any).replyTo?.imageUrl
-                                        ? ctx.isLikelyVideoUrl((item as any).replyTo.imageUrl)
-                                            ? 'Video'
-                                            : 'Photo'
-                                        : (item as any).replyTo?.text || 'Message'}
-                                </Text>
-                            </View>
-                        </View>
-                    ) : null}
+                    {replyPreview ? <DmQuotedReply preview={replyPreview} /> : null}
                     {item.text ? (
                         <Text
                             style={[
@@ -659,6 +763,12 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [groupName, setGroupName] = useState(initialGroupName);
     const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    // Parent lookup for enriching thin reply payloads (id-only) into full quote cards.
+    const messagesById = useMemo(() => {
+        const map = new Map<string, ChatMessage>();
+        for (const m of messages) map.set(m.id, m);
+        return map;
+    }, [messages]);
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
     const [threadCursor, setThreadCursor] = useState<string | null>(null);
@@ -1349,13 +1459,16 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
 
         const replyToPayload = replyingTo
-            ? {
-                messageId: replyingTo.id,
-                text: replyingTo.text || '',
-                senderHandle: replyingTo.senderHandle,
-                imageUrl: replyingTo.imageUrl,
-                mediaType: (isLikelyVideoUrl(replyingTo.imageUrl) ? 'video' : 'image') as 'image' | 'video',
-            }
+            ? (() => {
+                const preview = previewFromMessage(replyingTo, sharedPosts);
+                return {
+                    messageId: replyingTo.id,
+                    text: preview.text,
+                    senderHandle: replyingTo.senderHandle,
+                    imageUrl: preview.thumbUrl,
+                    mediaType: (preview.isVideo ? 'video' : 'image') as 'image' | 'video',
+                };
+            })()
             : undefined;
 
         const newMessage: ChatMessage = {
@@ -2455,6 +2568,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 isPlayingAudio={Boolean(item.audioUrl) && playingAudioId === item.audioUrl}
                 isSwiping={swipingMessageId === item.id}
                 isActive={isScreenFocused && activeMessageIds.has(item.id)}
+                replyPreview={resolveReplyPreview(item, messagesById, sharedPosts)}
                 reactionFlyEmoji={
                     reactionFly && reactionFly.messageId === item.id && !reactionFly.target
                         ? reactionFly.emoji
@@ -2665,66 +2779,19 @@ export default function MessagesScreen({ route, navigation }: any) {
                             },
                         ]}
                     >
-                        <View style={styles.composerContextBar} />
-                        {(() => {
-                            if (editingMessage) return null;
-                            const replyRef = replyingTo ? getMessageSharedRef(replyingTo) : null;
-                            const replyPost = replyRef
-                                ? sharedPosts[sharedPostRefKey(replyRef)]
-                                : null;
-                            const replyThumbUrl =
-                                replyingTo?.imageUrl ||
-                                replyPost?.mediaUrl ||
-                                replyPost?.mediaItems?.[0]?.url;
-                            if (!replyThumbUrl) return null;
-                            const isVideoReply =
-                                replyPost?.mediaType === 'video' ||
-                                replyPost?.mediaItems?.[0]?.type === 'video' ||
-                                isLikelyVideoUrl(replyThumbUrl);
-                            return (
-                                <View style={styles.composerContextThumbWrap}>
-                                    {isVideoReply ? (
-                                        <View style={styles.composerContextThumbFallback}>
-                                            <Icon name="videocam" size={ox(16)} color="#E5E7EB" />
-                                        </View>
-                                    ) : (
-                                        <Image
-                                            source={{ uri: replyThumbUrl }}
-                                            style={styles.composerContextThumb}
-                                        />
-                                    )}
-                                </View>
-                            );
-                        })()}
-                        <View style={styles.composerContextBody}>
-                            <Text style={styles.composerContextTitle}>
-                                {editingMessage
-                                    ? 'Editing message'
-                                    : `Replying to ${replyingTo?.senderHandle || ''}`}
-                            </Text>
-                            <Text style={styles.composerContextText} numberOfLines={1}>
-                                {editingMessage?.text ||
-                                    (() => {
-                                        if (!replyingTo) return 'Message';
-                                        const replyRef = getMessageSharedRef(replyingTo);
-                                        const replyPost = replyRef
-                                            ? sharedPosts[sharedPostRefKey(replyRef)]
-                                            : null;
-                                        const replyThumbUrl =
-                                            replyingTo.imageUrl ||
-                                            replyPost?.mediaUrl ||
-                                            replyPost?.mediaItems?.[0]?.url;
-                                        if (replyThumbUrl) {
-                                            const isVideoReply =
-                                                replyPost?.mediaType === 'video' ||
-                                                replyPost?.mediaItems?.[0]?.type === 'video' ||
-                                                isLikelyVideoUrl(replyThumbUrl);
-                                            return isVideoReply ? 'Video' : 'Photo';
-                                        }
-                                        return replyingTo.text || 'Message';
-                                    })()}
-                            </Text>
-                        </View>
+                        {editingMessage ? (
+                            <View style={styles.composerEditingBody}>
+                                <Text style={styles.composerContextTitle}>Editing message</Text>
+                                <Text style={styles.composerContextText} numberOfLines={1}>
+                                    {editingMessage.text || 'Message'}
+                                </Text>
+                            </View>
+                        ) : replyingTo ? (
+                            <DmQuotedReply
+                                variant="composer"
+                                preview={previewFromMessage(replyingTo, sharedPosts)}
+                            />
+                        ) : null}
                         <TouchableOpacity
                             onPress={() => {
                                 setReplyingTo(null);
@@ -3596,32 +3663,7 @@ const styles = StyleSheet.create({
         borderTopColor: 'rgba(255, 255, 255, 0.1)',
         backgroundColor: '#000000',
     },
-    composerContextBar: {
-        width: 2,
-        height: ox(44),
-        borderRadius: ox(2),
-        backgroundColor: 'rgba(255,255,255,0.25)',
-    },
-    composerContextThumbWrap: {
-        width: ox(48),
-        height: ox(48),
-        borderRadius: ox(8),
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
-        backgroundColor: '#09090b',
-    },
-    composerContextThumb: {
-        width: '100%',
-        height: '100%',
-    },
-    composerContextThumbFallback: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#111827',
-    },
-    composerContextBody: {
+    composerEditingBody: {
         flex: 1,
         minWidth: 0,
     },
@@ -3849,50 +3891,70 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-end',
         marginTop: ox(2),
     },
-    replyPreviewWrap: {
+    quotedReply: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: ox(8),
-    },
-    replyPreviewBar: {
-        width: 2,
         alignSelf: 'stretch',
-        backgroundColor: 'rgba(255,255,255,0.35)',
-        borderRadius: ox(2),
-        marginRight: 8,
+        borderRadius: ox(10),
+        backgroundColor: 'rgba(0,0,0,0.30)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.14)',
+        paddingVertical: ox(6),
+        paddingLeft: ox(12),
+        paddingRight: ox(8),
+        overflow: 'hidden',
     },
-    replyPreviewThumb: {
-        width: ox(36),
-        height: ox(36),
-        borderRadius: ox(8),
+    quotedReplyBubble: {
+        marginBottom: ox(6),
+    },
+    quotedReplyComposer: {
+        flex: 1,
+        minWidth: 0,
+        paddingVertical: ox(8),
+    },
+    quotedReplyAccent: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 3,
+        backgroundColor: 'rgba(255,255,255,0.55)',
+    },
+    quotedReplyThumb: {
+        width: ox(34),
+        height: ox(34),
+        borderRadius: ox(6),
         overflow: 'hidden',
         backgroundColor: '#000000',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
-        marginRight: 8,
+        marginRight: ox(8),
     },
-    replyPreviewImage: {
+    quotedReplyThumbComposer: {
+        width: ox(44),
+        height: ox(44),
+        borderRadius: ox(8),
+    },
+    quotedReplyThumbImage: {
         width: '100%',
         height: '100%',
     },
-    replyPreviewVideoBadge: {
+    quotedReplyVideoBadge: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#111827',
     },
-    replyPreviewTextWrap: {
+    quotedReplyBody: {
         flex: 1,
         minWidth: 0,
     },
-    replyPreviewSender: {
-        color: 'rgba(255,255,255,0.75)',
+    quotedReplySender: {
+        color: 'rgba(255,255,255,0.88)',
         fontSize: ox(11),
-        marginBottom: ox(2),
-        fontWeight: '600',
+        fontWeight: '700',
+        marginBottom: ox(1),
     },
-    replyPreviewText: {
-        color: 'rgba(255,255,255,0.65)',
+    quotedReplyText: {
+        color: 'rgba(255,255,255,0.62)',
         fontSize: ox(12),
     },
     swipeReplyCue: {
