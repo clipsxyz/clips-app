@@ -30,7 +30,10 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import Reanimated, {
     cancelAnimation,
+    Easing,
+    FadeIn,
     interpolate,
+    ReduceMotion,
     useAnimatedStyle,
     useReducedMotion,
     useSharedValue,
@@ -430,6 +433,8 @@ function PillTabs({
     const [showFeedSwitchCue, setShowFeedSwitchCue] = useState(false);
     const feedSwitchBadgeAnim = useRef(new Animated.Value(0)).current;
     const locationPulse = useSharedValue(1);
+    const pillPulse = useSharedValue(1);
+    const pillRipple = useSharedValue(0);
     const pillIsFocused = useIsFocused();
     const reducedMotionEnabled = useReducedMotion();
     const [appState, setAppState] = useState(AppState.currentState);
@@ -464,6 +469,31 @@ function PillTabs({
     const locationDotAnimatedStyle = useAnimatedStyle(() => ({
         transform: [{ scale: locationPulse.value }],
         opacity: interpolate(locationPulse.value, [1, 1.35], [1, 0.5]),
+    }));
+
+    // One-shot scale pulse + soft glow/ripple each time the active location changes.
+    const locationKey = `${active}|${customFilterType ?? ''}|${customLocationPlaceId ?? ''}|${
+        customLocationLabel ?? customLocation ?? ''
+    }`;
+    const prevLocationKeyRef = useRef(locationKey);
+    useEffect(() => {
+        if (prevLocationKeyRef.current === locationKey) return;
+        prevLocationKeyRef.current = locationKey;
+        if (reducedMotionEnabled) return;
+        pillPulse.value = 1;
+        pillPulse.value = withSequence(
+            withTiming(1.08, { duration: 140, easing: Easing.out(Easing.ease) }),
+            withTiming(1, { duration: 160, easing: Easing.out(Easing.ease) })
+        );
+        pillRipple.value = 0;
+        pillRipple.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.ease) });
+    }, [locationKey, reducedMotionEnabled, pillPulse, pillRipple]);
+    const pillPulseStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: pillPulse.value }],
+    }));
+    const pillRippleStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(pillRipple.value, [0, 0.2, 1], [0, 0.55, 0]),
+        transform: [{ scale: interpolate(pillRipple.value, [0, 1], [1, 1.35]) }],
     }));
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
     const sheetInsets = useSafeAreaInsets();
@@ -794,7 +824,11 @@ function PillTabs({
                                 <View style={styles.feedSwitchBadgeCaret} />
                             </Animated.View>
                         ) : null}
-                        <View style={styles.feedSwitchPillBorder}>
+                        <Reanimated.View
+                            pointerEvents="none"
+                            style={[styles.feedSwitchPillRipple, pillRippleStyle]}
+                        />
+                        <Reanimated.View style={[styles.feedSwitchPillBorder, pillPulseStyle]}>
                             <TouchableOpacity
                                 onPress={() => setMenuOpen((prev) => !prev)}
                                 style={FEED_HEADER_LOCATION_PILL}
@@ -816,7 +850,7 @@ function PillTabs({
                                 </Text>
                                 <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={Math.round(FEED_UI.icon.headerLocation * 0.9)} color="rgba(255,255,255,0.9)" />
                             </TouchableOpacity>
-                        </View>
+                        </Reanimated.View>
                     </View>
 
                     <Modal
@@ -3330,6 +3364,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
     }, [buildFeedFetchParams, cursor, end, initialLoading, loadingMore]);
 
+    // Mask the previous scope the instant the location/scope changes: clear the cards and
+    // show the pulsing skeleton until the new page lands. The list is keyed by
+    // `feedScopeListKey`, so this never leaves stale posts under the new location pill.
+    const prevFeedScopeRef = useRef(feedFetchFilter);
+    useEffect(() => {
+        if (prevFeedScopeRef.current === feedFetchFilter) return;
+        prevFeedScopeRef.current = feedFetchFilter;
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+        setInitialLoading(true);
+    }, [feedFetchFilter]);
+
     useEffect(() => {
         const t = setTimeout(() => {
             void reloadFeedFromStartRef.current();
@@ -4089,8 +4137,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             const prevKind = flatForRenderRef.current[index - 1]?.kind;
             const afterStoriesDivider = prevKind === 'stories24_divider';
             const wrapRow = (row: React.ReactElement, extraStyle?: object) => (
-                <View
+                <Reanimated.View
                     collapsable={false}
+                    entering={FadeIn.duration(220).reduceMotion(ReduceMotion.System)}
                     style={[
                         styles.feedListRow,
                         item.kind === 'stories24' ? styles.feedListRowStories : null,
@@ -4100,7 +4149,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ]}
                 >
                     {row}
-                </View>
+                </Reanimated.View>
             );
             if (item.kind === 'suggested_follower') {
                 const sug = item.suggestion;
@@ -5737,6 +5786,17 @@ const styles = StyleSheet.create({
         maxWidth: '100%',
         zIndex: 50,
         overflow: 'visible',
+    },
+    feedSwitchPillRipple: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        borderRadius: 10,
+        borderWidth: 2,
+        borderColor: 'rgba(139, 92, 246, 0.9)',
+        backgroundColor: 'rgba(139, 92, 246, 0.18)',
     },
 feedSwitchPillBorder: {
           borderRadius: 10,
