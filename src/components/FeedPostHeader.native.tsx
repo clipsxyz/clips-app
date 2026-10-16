@@ -18,17 +18,17 @@ import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 
 /** Outer ring on newsfeed cards. Smaller than the 38px header so the photo doesn't dominate the row. */
-const FEED_HEADER_AVATAR_SIZE = 30;
+const FEED_HEADER_AVATAR_SIZE = 25;
 /** Same 2px ring thickness as the Inbox story avatars. */
 const FEED_HEADER_AVATAR_RING_PAD = 2;
 const FEED_HEADER_AVATAR_INNER = FEED_HEADER_AVATAR_SIZE - FEED_HEADER_AVATAR_RING_PAD * 2;
 /** Rounded square, not a circle. Corners stay concentric inside the gradient ring. */
-const FEED_HEADER_AVATAR_RADIUS = 6;
+const FEED_HEADER_AVATAR_RADIUS = 5;
 /** Inbox Notifications story ring: teal → sky → fuchsia, bottom-left to top-right. */
 const FEED_HEADER_STORY_RING_COLORS = ['#2DD4BF', '#0EA5E9', '#D946EF'] as const;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
-const FEED_HEADER_BADGE_SIZE = 12;
-const FEED_HEADER_BADGE_ICON = 7;
+const FEED_HEADER_BADGE_SIZE = 10;
+const FEED_HEADER_BADGE_ICON = 6;
 
 export type FeedPostHeaderProps = {
     post: Post;
