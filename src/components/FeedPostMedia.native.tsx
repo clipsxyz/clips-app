@@ -41,6 +41,7 @@ import {
     intrinsicRatio,
     resolveIntrinsicSize,
 } from '../utils/mediaAspectRatio';
+import { mediaItemsEqual } from '../utils/feedPostCompareNative';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
@@ -174,6 +175,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
             ignoreSilentSwitch="ignore"
             useTextureView
             hideShutterView
+            shutterColor="transparent"
             {...androidListSafeVideoProps()}
             pointerEvents="none"
             onLoadStart={onLoadStart}
@@ -289,6 +291,12 @@ const FeedPostMedia = React.memo(
     const posterOpacity = useRef(new Animated.Value(1)).current;
     const videoOpacity = useRef(new Animated.Value(0)).current;
     const mediaRevealRef = useRef<Animated.CompositeAnimation | null>(null);
+    /** Poster bitmap already decoded for this URI — survives a cover re-show. */
+    const paintedPosterUriRef = useRef<string | null>(null);
+    /** First composited frame for the current hold. Reset when the hold key changes. */
+    const firstFrameReadyRef = useRef(false);
+    /** Opaque poster (or the black mask, when there is no thumbnail) is in this frame. */
+    const posterCoveringRef = useRef(true);
     /** Feed autoplay target from FlatList viewability (store). */
     const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() =>
         getActiveFeedVideoPostId(),
@@ -303,28 +311,20 @@ const FeedPostMedia = React.memo(
         null,
     );
 
-    const resetPosterCover = useCallback(() => {
-        mediaRevealRef.current?.stop();
-        mediaRevealRef.current = null;
-        posterOpacity.setValue(1);
-        videoOpacity.setValue(0);
-        setVideoSurfaceReady(false);
-        setPosterMounted(true);
-    }, [posterOpacity, videoOpacity]);
-
     const fadeOutPosterCover = useCallback(() => {
+        if (!firstFrameReadyRef.current || !posterCoveringRef.current) return;
         setVideoSurfaceReady((prev) => {
             if (prev) return prev;
             mediaRevealRef.current?.stop();
             mediaRevealRef.current = Animated.parallel([
                 Animated.timing(videoOpacity, {
                     toValue: 1,
-                    duration: 200,
+                    duration: 100,
                     useNativeDriver: true,
                 }),
                 Animated.timing(posterOpacity, {
                     toValue: 0,
-                    duration: 200,
+                    duration: 100,
                     useNativeDriver: true,
                 }),
             ]);
@@ -507,13 +507,34 @@ const FeedPostMedia = React.memo(
 
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && activeIsVideo && !!mediaUrl;
-
-    useEffect(() => {
-        if (mode !== 'feed') return;
-        if (isViewable) return;
-        // Inactive cell: drop any leftover TextureView cover state so remount starts clean.
-        resetPosterCover();
-    }, [isViewable, mode, resetPosterCover]);
+    const activePosterUri = resolveFeedVideoPosterUri(
+        activeItem as PostMediaItem | undefined,
+        post,
+    );
+    /**
+     * Identity of the frame that must be masked. Compared during render so the poster
+     * snaps back to opaque in the same commit that mounts the TextureView — an effect
+     * runs after paint and leaves one black frame.
+     */
+    const posterHoldKey = `${post.id}|${mediaUrl ?? ''}|${currentIndex}|${isViewable ? 1 : 0}|${suspendNativeVideo ? 1 : 0}|${playerEpoch}`;
+    const [appliedPosterHoldKey, setAppliedPosterHoldKey] = useState('');
+    const activePosterUriRef = useRef<string | null>(activePosterUri ?? null);
+    activePosterUriRef.current = activePosterUri ?? null;
+    if (video && appliedPosterHoldKey !== posterHoldKey) {
+        const coverAlreadyPainted =
+            posterMounted &&
+            !!activePosterUri &&
+            paintedPosterUriRef.current === activePosterUri;
+        mediaRevealRef.current?.stop();
+        mediaRevealRef.current = null;
+        firstFrameReadyRef.current = false;
+        posterCoveringRef.current = coverAlreadyPainted || !activePosterUri;
+        posterOpacity.setValue(1);
+        videoOpacity.setValue(0);
+        setAppliedPosterHoldKey(posterHoldKey);
+        setVideoSurfaceReady(false);
+        setPosterMounted(true);
+    }
 
     useEffect(() => {
         if (suspendNativeVideo) {
@@ -527,10 +548,9 @@ const FeedPostMedia = React.memo(
         if (!needsRemountAfterSuspendRef.current) return;
         needsRemountAfterSuspendRef.current = false;
         setPlayerEpoch((n) => n + 1);
-        resetPosterCover();
         setPaused(false);
         setPlayFailed(false);
-    }, [isFeedAutoplayActive, mode, resetPosterCover, suspendNativeVideo, video]);
+    }, [isFeedAutoplayActive, mode, suspendNativeVideo, video]);
 
     const fireBurstAt = useCallback((x: number, y: number) => {
         setBurstAt({ x, y });
@@ -609,7 +629,6 @@ const FeedPostMedia = React.memo(
             if (!stillThisPost) {
                 pendingSeekRef.current = null;
                 playbackTimeRef.current = 0;
-                resetPosterCover();
                 player?.seek?.(0);
             }
         } catch {
@@ -619,7 +638,6 @@ const FeedPostMedia = React.memo(
         isFeedAutoplayActive,
         mode,
         post.id,
-        resetPosterCover,
         storeActivePostId,
         suspendNativeVideo,
         video,
@@ -638,10 +656,6 @@ const FeedPostMedia = React.memo(
             }
         };
     }, []);
-
-    useEffect(() => {
-        resetPosterCover();
-    }, [mediaUrl, currentIndex, post.id, resetPosterCover]);
 
     useEffect(() => {
         setSoundOn(!muted);
@@ -884,7 +898,9 @@ const FeedPostMedia = React.memo(
         // onLoad (stream prepared) can happen well before the first frame is composited;
         // fading the poster on it exposed a black TextureView until the decoder painted.
         const onFirstFrameReady = () => {
+            if (!slideIsCurrent) return;
             markUrlLoaded(slideRawUrl);
+            firstFrameReadyRef.current = true;
             fadeOutPosterCover();
         };
         const cachedVideoSource = buildFeedVideoSource(slideUrl, slideRawUrl);
@@ -901,7 +917,10 @@ const FeedPostMedia = React.memo(
                             poster until onReadyForDisplay, then fades in as the poster fades
                             out — no orphaned video frame leaks through the thumbnail. */}
                         <Animated.View
-                            style={[styles.videoClip, { opacity: videoOpacity }]}
+                            style={[
+                                styles.videoClip,
+                                { opacity: videoSurfaceReady ? videoOpacity : 0 },
+                            ]}
                             pointerEvents="none"
                             collapsable={false}
                         >
@@ -971,20 +990,39 @@ const FeedPostMedia = React.memo(
                     </View>
                 ) : null}
 
-                {slidePosterUri && showBufferCover ? (
-                    <View style={styles.posterCover} pointerEvents="none">
-                        <Animated.Image
-                            source={{ uri: slidePosterUri, cache: 'force-cache' }}
-                            style={[StyleSheet.absoluteFill, { opacity: slideMountVideo ? posterOpacity : 1 }]}
-                            resizeMode="cover"
-                            resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                            fadeDuration={0}
-                            onLoad={() => markUrlLoaded(slideRawUrl)}
-                            onError={() => markUrlLoaded(slideRawUrl)}
-                        />
+                {showBufferCover ? (
+                    <View
+                        style={[styles.posterCover, !slidePosterUri ? styles.posterCoverMask : null]}
+                        pointerEvents="none"
+                        collapsable={false}
+                    >
+                        {slidePosterUri ? (
+                            <Animated.Image
+                                source={{ uri: slidePosterUri, cache: 'force-cache' }}
+                                style={[
+                                    StyleSheet.absoluteFill,
+                                    { opacity: slideMountVideo ? posterOpacity : 1 },
+                                ]}
+                                resizeMode="cover"
+                                resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                                fadeDuration={0}
+                                onLoad={() => {
+                                    if (!slideIsCurrent) return;
+                                    if (slidePosterUri !== activePosterUriRef.current) return;
+                                    paintedPosterUriRef.current = slidePosterUri;
+                                    posterCoveringRef.current = true;
+                                    markUrlLoaded(slideRawUrl);
+                                    fadeOutPosterCover();
+                                }}
+                                onError={() => {
+                                    if (!slideIsCurrent) return;
+                                    posterCoveringRef.current = true;
+                                    markUrlLoaded(slideRawUrl);
+                                    fadeOutPosterCover();
+                                }}
+                            />
+                        ) : null}
                     </View>
-                ) : !slideMountVideo ? (
-                    <View style={styles.posterPlaceholder} pointerEvents="none" />
                 ) : null}
 
                 {renderFeedTapOverlay()}
@@ -1114,7 +1152,7 @@ const FeedPostMedia = React.memo(
             prev.carouselIndex === next.carouselIndex &&
             prev.onSingleTap === next.onSingleTap &&
             prev.onDoubleLike === next.onDoubleLike &&
-            JSON.stringify(a.mediaItems) === JSON.stringify(b.mediaItems)
+            mediaItemsEqual(a.mediaItems, b.mediaItems)
         );
     },
 );
@@ -1158,10 +1196,8 @@ const styles = StyleSheet.create({
         height: '100%',
         zIndex: 2,
         elevation: Platform.OS === 'android' ? 2 : 0,
-        backgroundColor: '#000000',
     },
-    posterPlaceholder: {
-        ...StyleSheet.absoluteFill,
+    posterCoverMask: {
         backgroundColor: '#000000',
     },
     loadingOverlay: {
