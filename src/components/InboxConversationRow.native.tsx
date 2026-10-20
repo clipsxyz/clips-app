@@ -1,11 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Pressable } from 'react-native';
-import { Swipeable, TouchableOpacity } from 'react-native-gesture-handler';
-import Icon from 'react-native-vector-icons/Ionicons';
+import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { Swipeable, TouchableOpacity as SwipeActionButton } from 'react-native-gesture-handler';
+import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
 import { timeAgo } from '../utils/timeAgo';
 import type { ConversationSummary } from '../api/messages';
-import { ox } from '../constants/nativeOpticalScale';
 
 function sameDmHandle(a?: string | null, b?: string | null): boolean {
     return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
@@ -14,6 +13,29 @@ function sameDmHandle(a?: string | null, b?: string | null): boolean {
 export function inboxConversationRowId(conv: ConversationSummary): string {
     if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
     return conv.otherHandle;
+}
+
+/** Instagram-style compact relative time: "27m", "3h", "2d". */
+export function compactInboxTime(timestamp?: number): string {
+    if (!timestamp) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 60) return 'now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 5) return `${weeks}w`;
+    return timeAgo(timestamp);
+}
+
+function displayHandle(handle: string): string {
+    const raw = (handle || '').trim();
+    if (!raw) return 'User';
+    const name = raw.split('@')[0]?.trim();
+    return name || raw;
 }
 
 export function conversationPreviewText(conv: ConversationSummary, viewerHandle?: string | null): string {
@@ -37,16 +59,26 @@ export function conversationPreviewText(conv: ConversationSummary, viewerHandle?
         if (last.storyContextText?.trim()) {
             const ctx = last.storyContextText.trim();
             if (fromMe && /your story/i.test(ctx)) {
-                return ctx.replace(/your story/i, 'their story').replace(/^Reacted/, 'You reacted').replace(/^Replied/, 'You replied');
+                return ctx
+                    .replace(/your story/i, 'their story')
+                    .replace(/^Reacted/, 'You reacted')
+                    .replace(/^Replied/, 'You replied');
             }
             return ctx;
         }
         return fromMe ? 'You replied to their story' : 'Replied to your story';
     }
-    if (last.text?.trim()) return last.text;
+    if (last.text?.trim()) {
+        const body = last.text.replace(/\s+/g, ' ').trim();
+        if (/^liked (your|a) post/i.test(body)) return body;
+        if (fromMe) {
+            return body.startsWith('You: ') ? body : `You: ${body}`;
+        }
+        return body;
+    }
     if (last.commentText?.trim()) return `Commented: ${last.commentText}`;
-    if (last.imageUrl) return 'Photo';
-    if (last.audioUrl) return 'Audio';
+    if (last.imageUrl) return fromMe ? 'You: Photo' : 'Photo';
+    if (last.audioUrl) return fromMe ? 'You: Voice message' : 'Voice message';
     return conv.kind === 'group' ? 'Open group' : 'Open conversation';
 }
 
@@ -84,9 +116,11 @@ export default function InboxConversationRow({
     const swipeRef = useRef<Swipeable | null>(null);
     const rowId = inboxConversationRowId(conv);
     const isGroup = conv.kind === 'group';
-    const title = isGroup ? conv.groupName || 'Group chat' : conv.otherHandle;
-    const subtitle = conversationPreviewText(conv, viewerHandle);
+    const name = isGroup ? conv.groupName || 'Group chat' : displayHandle(conv.otherHandle);
+    const lastMessage = conversationPreviewText(conv, viewerHandle);
+    const timestamp = compactInboxTime(conv.lastMessage?.timestamp);
     const unread = conv.unread || 0;
+    const hasStoryRing = !isGroup && !!conv.hasUnviewedStories;
 
     useEffect(() => {
         if (isSwipeOpen) {
@@ -111,7 +145,7 @@ export default function InboxConversationRow({
 
     const renderRightActions = (
         _progress: Animated.AnimatedInterpolation<number>,
-        dragX: Animated.AnimatedInterpolation<number>
+        dragX: Animated.AnimatedInterpolation<number>,
     ) => {
         const opacity = dragX.interpolate({
             inputRange: [-220, -40, 0],
@@ -119,15 +153,10 @@ export default function InboxConversationRow({
             extrapolate: 'clamp',
         });
 
-        const action = (
-            label: string,
-            bg: string,
-            onAction?: () => void,
-            key?: string
-        ) => {
+        const action = (label: string, bg: string, onAction?: () => void, key?: string) => {
             if (!onAction) return null;
             return (
-                <TouchableOpacity
+                <SwipeActionButton
                     key={key || label}
                     style={[styles.swipeAction, { backgroundColor: bg }]}
                     onPress={() => {
@@ -137,7 +166,7 @@ export default function InboxConversationRow({
                     activeOpacity={0.85}
                 >
                     <Text style={styles.swipeActionText}>{label}</Text>
-                </TouchableOpacity>
+                </SwipeActionButton>
             );
         };
 
@@ -148,7 +177,7 @@ export default function InboxConversationRow({
                     unread > 0 ? 'Read' : 'Unread',
                     'rgba(255,255,255,0.25)',
                     unread > 0 ? onMarkRead : onMarkUnread,
-                    'read'
+                    'read',
                 )}
                 {action(conv.isMuted ? 'Unmute' : 'Mute', 'rgba(255,255,255,0.15)', onToggleMute, 'mute')}
                 {action(isGroup ? 'Leave' : 'Delete', 'rgba(220,38,38,0.9)', onDelete, 'delete')}
@@ -157,175 +186,146 @@ export default function InboxConversationRow({
     };
 
     return (
-        <View style={styles.wrap}>
-            <Swipeable
-                ref={swipeRef}
-                friction={2}
-                rightThreshold={36}
-                overshootRight={false}
-                onSwipeableWillOpen={() => onSwipeOpenChange?.(rowId)}
-                onSwipeableClose={() => {
-                    if (isSwipeOpen) onSwipeOpenChange?.(null);
-                }}
-                renderRightActions={renderRightActions}
+        <Swipeable
+            ref={swipeRef}
+            friction={2}
+            rightThreshold={36}
+            overshootRight={false}
+            containerStyle={styles.swipeHost}
+            onSwipeableWillOpen={() => onSwipeOpenChange?.(rowId)}
+            onSwipeableClose={() => {
+                if (isSwipeOpen) onSwipeOpenChange?.(null);
+            }}
+            renderRightActions={renderRightActions}
+        >
+            <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={handleOpen}
+                onLongPress={onOpenChatInfo}
+                delayLongPress={280}
+                style={styles.rowContainer}
             >
-                <View style={[styles.row, unread > 0 && styles.rowUnread]}>
+                <View style={styles.avatarWrapper}>
                     <TouchableOpacity
-                        onPress={onAvatarPress || handleOpen}
                         activeOpacity={0.85}
-                        style={styles.avatarWrap}
+                        onPress={onAvatarPress || handleOpen}
                     >
-                        <Avatar
-                            src={avatarSrc}
-                            name={title}
-                            size={ox(44)}
-                            cornerRadius={ox(12)}
-                            hasStory={!isGroup && !!conv.hasUnviewedStories}
-                        />
-                    </TouchableOpacity>
-                    <Pressable
-                        onPress={handleOpen}
-                        onLongPress={onOpenChatInfo}
-                        delayLongPress={280}
-                        style={styles.content}
-                    >
-                        <View style={styles.titleRow}>
-                            <Text style={styles.title} numberOfLines={1}>
-                                {title}
-                            </Text>
-                            {!!conv.isPinned && <Icon name="bookmark" size={ox(12)} color="#FFFFFF" />}
-                        </View>
-                        <Text style={styles.subtitle} numberOfLines={1}>
-                            {subtitle}
-                        </Text>
-                        {!isGroup && conv.isRequest ? (
-                            <Text style={styles.requestBadge}>Message request</Text>
-                        ) : null}
-                    </Pressable>
-                    <Pressable
-                        onPress={handleOpen}
-                        onLongPress={onOpenChatInfo}
-                        delayLongPress={280}
-                        style={styles.meta}
-                    >
-                        <Text style={styles.time}>
-                            {conv.lastMessage?.timestamp ? timeAgo(conv.lastMessage.timestamp) : ''}
-                        </Text>
-                        {unread > 0 ? (
-                            <View style={styles.unreadBadge}>
-                                <Text style={styles.unreadBadgeText}>{unread > 9 ? '9+' : unread}</Text>
-                            </View>
-                        ) : null}
-                    </Pressable>
-                    <TouchableOpacity
-                        style={styles.moreBtn}
-                        onPress={() => {
-                            closeSwipe();
-                            onOpenChatInfo();
-                        }}
-                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    >
-                        <Icon name="ellipsis-horizontal" size={ox(16)} color="#9CA3AF" />
+                        {hasStoryRing ? (
+                            <LinearGradient
+                                colors={['#2DD4BF', '#0EA5E9', '#D946EF']}
+                                start={{ x: 0, y: 1 }}
+                                end={{ x: 1, y: 0 }}
+                                style={styles.storyRing}
+                            >
+                                <View style={styles.storyRingInner}>
+                                    <Avatar
+                                        src={avatarSrc}
+                                        name={name}
+                                        size={48}
+                                        hideBorder
+                                    />
+                                </View>
+                            </LinearGradient>
+                        ) : (
+                            <Avatar src={avatarSrc} name={name} size={52} hideBorder />
+                        )}
                     </TouchableOpacity>
                 </View>
-            </Swipeable>
-        </View>
+
+                <View style={styles.contentContainer}>
+                    <View style={styles.topRow}>
+                        <Text numberOfLines={1} style={styles.nameText}>
+                            {name}
+                        </Text>
+                        <Text style={styles.timeText}>{timestamp}</Text>
+                    </View>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.previewText}>
+                        {lastMessage}
+                    </Text>
+                </View>
+            </TouchableOpacity>
+        </Swipeable>
     );
 }
 
 const styles = StyleSheet.create({
-    wrap: {
-        overflow: 'hidden',
-        marginHorizontal: ox(8),
-        marginBottom: ox(6),
-        borderRadius: ox(12),
+    swipeHost: {
+        width: '100%',
+        alignSelf: 'stretch',
     },
-    row: {
+    rowContainer: {
+        width: '100%',
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(10),
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.12)',
-        gap: ox(10),
-        borderRadius: ox(12),
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+        backgroundColor: 'transparent',
     },
-    rowUnread: {
-        backgroundColor: 'rgba(255,255,255,0.08)',
+    avatarWrapper: {
+        marginRight: 14,
+        width: 56,
+        height: 56,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    avatarWrap: {
-        flexShrink: 0,
+    storyRing: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        padding: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    content: {
+    storyRingInner: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#000',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    contentContainer: {
         flex: 1,
         minWidth: 0,
+        justifyContent: 'center',
     },
-    titleRow: {
+    topRow: {
         flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        gap: ox(6),
-        minWidth: 0,
+        marginBottom: 4,
     },
-    title: {
-        fontSize: ox(13),
+    nameText: {
+        fontSize: 16,
         fontWeight: '600',
         color: '#FFFFFF',
-        flexShrink: 1,
+        flex: 1,
+        minWidth: 0,
+        marginRight: 8,
     },
-    subtitle: {
-        fontSize: ox(11),
-        color: '#9CA3AF',
-        marginTop: 1,
+    timeText: {
+        fontSize: 13,
+        color: '#8E8E93',
     },
-    requestBadge: {
-        marginTop: ox(4),
-        color: '#F8D26A',
-        fontSize: ox(11),
-        fontWeight: '700',
-    },
-    meta: {
-        alignItems: 'flex-end',
-        gap: ox(4),
-        flexShrink: 0,
-        paddingVertical: ox(4),
-    },
-    time: {
-        fontSize: ox(10),
-        color: '#9CA3AF',
-    },
-    unreadBadge: {
-        backgroundColor: 'rgba(16, 185, 129, 0.20)',
-        borderWidth: 1,
-        borderColor: 'rgba(16, 185, 129, 0.45)',
-        borderRadius: ox(12),
-        minWidth: ox(18),
-        height: ox(18),
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: ox(6),
-    },
-    unreadBadgeText: {
-        color: '#34D399',
-        fontSize: ox(10),
-        fontWeight: '700',
-    },
-    moreBtn: {
-        padding: ox(8),
-        zIndex: 2,
+    previewText: {
+        fontSize: 14,
+        color: '#8E8E93',
     },
     swipeActions: {
         flexDirection: 'row',
         alignItems: 'stretch',
     },
     swipeAction: {
-        width: ox(56),
+        width: 56,
         justifyContent: 'center',
         alignItems: 'center',
     },
     swipeActionText: {
         color: '#FFFFFF',
-        fontSize: ox(11),
+        fontSize: 11,
         fontWeight: '600',
     },
 });

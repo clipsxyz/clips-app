@@ -769,20 +769,17 @@ export default function InboxScreen({ navigation, route }: any) {
         if (messageFilter === 'unread') return list.filter((c) => (c.unread || 0) > 0);
         if (messageFilter === 'requests') return list.filter((c) => c.kind !== 'group' && !!c.isRequest);
         if (messageFilter === 'pinned') return list.filter((c) => !!c.isPinned);
-        return list;
+        // Main inbox hides requests — they live behind the header "Requests" affordance.
+        return list.filter((c) => !(c.kind !== 'group' && c.isRequest));
     };
 
     const queriedItems = sortedConversations;
-    const queriedGroupItems = queriedItems.filter((c) => c.kind === 'group');
-    const queriedUnreadItems = queriedItems.filter((c) => (c.unread || 0) > 0);
     const queriedRequestItems = queriedItems.filter((c) => c.kind !== 'group' && !!c.isRequest);
-    const queriedPinnedItems = queriedItems.filter((c) => !!c.isPinned);
 
     const messagesTabItems = filterConversationList(sortedConversations);
 
     const pinnedSection = messagesTabItems.filter((c) => !!c.isPinned && !c.isRequest);
-    const requestSection = messagesTabItems.filter((c) => c.kind !== 'group' && !!c.isRequest);
-    const regularSection = messagesTabItems.filter((c) => !c.isPinned && !(c.kind !== 'group' && c.isRequest));
+    const regularSection = messagesTabItems.filter((c) => !c.isPinned);
     const showMessageSections = activeTab === 'messages' && messageFilter === 'all';
 
     const updateConversationRow = (target: ConversationSummary, updater: (row: ConversationSummary) => ConversationSummary) => {
@@ -925,7 +922,7 @@ export default function InboxScreen({ navigation, route }: any) {
         return (
             <GazetteerScreenShell ambient={false} style={styles.pageShell} contentStyle={styles.loadingShell}>
                 <View style={styles.header}>
-                    <Text style={styles.headerTitle}>Notifications</Text>
+                    <Text style={styles.headerTitle}>Messages</Text>
                 </View>
                 <InboxLoadingSkeleton />
             </GazetteerScreenShell>
@@ -935,7 +932,36 @@ export default function InboxScreen({ navigation, route }: any) {
     return (
         <GazetteerScreenShell ambient={false} style={styles.pageShell}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Notifications</Text>
+                <Text style={styles.headerTitle}>
+                    {activeTab === 'messages' && messageFilter === 'requests'
+                        ? 'Requests'
+                        : activeTab === 'notifications'
+                          ? 'Notifications'
+                          : activeTab === 'insights'
+                            ? 'Insights'
+                            : 'Messages'}
+                </Text>
+                {activeTab === 'messages' && queriedRequestItems.length > 0 ? (
+                    <TouchableOpacity
+                        onPress={() =>
+                            setMessageFilter((prev) => (prev === 'requests' ? 'all' : 'requests'))
+                        }
+                        hitSlop={8}
+                    >
+                        <Text
+                            style={[
+                                styles.headerRequests,
+                                messageFilter === 'requests' && styles.headerRequestsActive,
+                            ]}
+                        >
+                            {messageFilter === 'requests'
+                                ? 'Chats'
+                                : queriedRequestItems.length > 0
+                                  ? `Requests (${queriedRequestItems.length})`
+                                  : 'Requests'}
+                        </Text>
+                    </TouchableOpacity>
+                ) : null}
             </View>
 
             {/* Web order: stories → tabs → content */}
@@ -1320,40 +1346,11 @@ export default function InboxScreen({ navigation, route }: any) {
                 />
             ) : (
                 <>
-                {queriedItems.length > 0 ? (
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.messageFiltersScroll}
-                        contentContainerStyle={styles.messageFiltersRow}
-                    >
-                        {[
-                            { id: 'all' as const, label: `All (${queriedItems.length})` },
-                            { id: 'groups' as const, label: `Groups (${queriedGroupItems.length})` },
-                            { id: 'unread' as const, label: `Unread (${queriedUnreadItems.length})` },
-                            { id: 'requests' as const, label: `Requests (${queriedRequestItems.length})` },
-                            { id: 'pinned' as const, label: `Pinned (${queriedPinnedItems.length})` },
-                        ].map((item) => {
-                            const active = messageFilter === item.id;
-                            return (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    onPress={() => setMessageFilter(item.id)}
-                                    style={[styles.messageFilterChip, active && styles.messageFilterChipActive]}
-                                >
-                                    <Text style={[styles.messageFilterChipText, active && styles.messageFilterChipTextActive]}>
-                                        {item.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </ScrollView>
-                ) : null}
                 <FlatList
                     key={`messages-${messageFilter}`}
                     data={
                         showMessageSections
-                            ? [...pinnedSection, ...requestSection, ...regularSection]
+                            ? [...pinnedSection, ...regularSection]
                             : messagesTabItems
                     }
                     keyExtractor={(item, idx) => inboxConversationRowId(item) || String(idx)}
@@ -1367,23 +1364,18 @@ export default function InboxScreen({ navigation, route }: any) {
                     renderItem={({ item, index }) => {
                         const showPinnedHeader =
                             showMessageSections && index === 0 && pinnedSection.length > 0 && item.isPinned;
-                        const showRequestsHeader =
-                            showMessageSections &&
-                            pinnedSection.length === index &&
-                            requestSection.length > 0 &&
-                            !!item.isRequest;
                         const showRegularHeader =
                             showMessageSections &&
-                            pinnedSection.length + requestSection.length === index &&
+                            pinnedSection.length === index &&
                             regularSection.length > 0 &&
-                            !item.isPinned &&
-                            !item.isRequest;
+                            !item.isPinned;
 
                         return (
-                            <View>
+                            <View style={{ width: '100%' }}>
                                 {showPinnedHeader ? <Text style={styles.sectionHeader}>Pinned</Text> : null}
-                                {showRequestsHeader ? <Text style={styles.sectionHeader}>Message Requests</Text> : null}
-                                {showRegularHeader ? <Text style={styles.sectionHeader}>Messages</Text> : null}
+                                {showRegularHeader && pinnedSection.length > 0 ? (
+                                    <Text style={styles.sectionHeader}>Messages</Text>
+                                ) : null}
                                 {renderConversationRow(item)}
                             </View>
                         );
@@ -1489,15 +1481,24 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-start',
     },
     header: {
-        paddingHorizontal: ox(12),
+        paddingHorizontal: ox(16),
         paddingTop: ox(8),
-        paddingBottom: ox(12),
+        paddingBottom: ox(10),
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
     },
     headerTitle: {
-        fontSize: ox(20),
+        fontSize: ox(22),
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    headerRequests: {
+        color: 'rgba(255, 255, 255, 0.62)',
+        fontSize: ox(15),
         fontWeight: '600',
+    },
+    headerRequestsActive: {
         color: '#FFFFFF',
     },
     headerActionText: {
