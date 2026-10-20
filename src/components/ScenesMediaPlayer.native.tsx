@@ -5,6 +5,7 @@ import {
     StyleSheet,
     ScrollView,
     Dimensions,
+    Animated,
     NativeScrollEvent,
     NativeSyntheticEvent,
     type GestureResponderEvent,
@@ -21,6 +22,7 @@ import {
     resolveScenesVideoUrl,
     scenesVideoSource,
 } from '../utils/scenesMediaNative';
+import { fitContainBox, intrinsicRatio } from '../utils/mediaAspectRatio';
 
 type Props = {
     post: Post;
@@ -75,11 +77,121 @@ export default function ScenesMediaPlayer({
     const hasCarousel = slides.length > 1;
     const [slideIndex, setSlideIndex] = useState(0);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+    /** Runtime-measured dimensions per slide (`postId|index`), for slides whose
+     * payload carried none. Lets an unmeasured landscape clip re-fit on `onLoad`
+     * instead of staying cropped in the portrait stage. */
+    const [measuredBySlide, setMeasuredBySlide] = useState<
+        Record<string, { width: number; height: number }>
+    >({});
+
+    /** Intrinsic size of a slide: payload dimensions first, then the runtime measurement. */
+    const slideDims = useCallback(
+        (slide: (typeof slides)[number], index: number) => {
+            if (intrinsicRatio(slide.width, slide.height) != null) {
+                return { width: Number(slide.width), height: Number(slide.height) };
+            }
+            return measuredBySlide[`${post.id}|${index}`] ?? null;
+        },
+        [measuredBySlide, post.id, slides],
+    );
+
+    /** Aspect-correct frame for a slide inside the full-screen stage. */
+    const slideFrame = useCallback(
+        (slide: (typeof slides)[number], index: number) => {
+            const dims = slideDims(slide, index);
+            return fitContainBox(width, height, dims?.width, dims?.height);
+        },
+        [height, slideDims, width],
+    );
+
+    const recordMeasuredForSlide = useCallback(
+        (index: number) =>
+            (size: { width: number; height: number }) => {
+                const key = `${post.id}|${index}`;
+                setMeasuredBySlide((prev) =>
+                    prev[key]?.width === size.width && prev[key]?.height === size.height
+                        ? prev
+                        : { ...prev, [key]: size },
+                );
+            },
+        [post.id],
+    );
+
+    /** Landscape (and unknown) frames letterbox; known portrait fills its fitted frame. */
+    const slideResizeMode = useCallback(
+        (slide: (typeof slides)[number], index: number): 'cover' | 'contain' => {
+            const dims = slideDims(slide, index);
+            if (!dims) return 'contain';
+            return dims.width > dims.height ? 'contain' : 'cover';
+        },
+        [slideDims],
+    );
     const internalVideoRef = useRef<VideoRef>(null);
     const videoRef = externalVideoRef ?? internalVideoRef;
     const scrollRef = useRef<ScrollView>(null);
 
     const safeIndex = Math.min(slideIndex, Math.max(0, slides.length - 1));
+
+    /**
+     * First composited frame for the ACTIVE slide, plus the poster-cover crossfade state.
+     * Full-screen carousels used to mount the TextureView raw, so every swipe showed a
+     * black rectangle until ExoPlayer painted. We now hold a poster over the player and
+     * only fade it out once `onReadyForDisplay` confirms pixels are on the surface — the
+     * exact gate the feed already uses, so there is never a black flash on a page turn.
+     */
+    const [videoSurfaceReady, setVideoSurfaceReady] = useState(false);
+    const [appliedSurfaceKey, setAppliedSurfaceKey] = useState('');
+    const posterOpacity = useRef(new Animated.Value(1)).current;
+    const videoOpacity = useRef(new Animated.Value(0)).current;
+    const mediaRevealRef = useRef<Animated.CompositeAnimation | null>(null);
+    const firstFrameReadyRef = useRef(false);
+    /** Opaque poster (or the black mask, when there is no thumbnail) covers the frame. */
+    const posterCoveringRef = useRef(true);
+
+    // Identity of the frame that must be masked. Compared during render so the poster
+    // snaps back to opaque in the SAME commit that mounts the new TextureView — an effect
+    // runs after paint and would leak one black frame on the freshly-swiped slide.
+    const activeSurfaceKey = `${post.id}|${safeIndex}|${canPlayVideo ? 1 : 0}|${
+        suspendPlayback ? 1 : 0
+    }`;
+    if (appliedSurfaceKey !== activeSurfaceKey) {
+        mediaRevealRef.current?.stop();
+        mediaRevealRef.current = null;
+        firstFrameReadyRef.current = false;
+        posterCoveringRef.current = true;
+        posterOpacity.setValue(1);
+        videoOpacity.setValue(0);
+        setVideoSurfaceReady(false);
+        setAppliedSurfaceKey(activeSurfaceKey);
+    }
+
+    const fadeOutPosterCover = useCallback(() => {
+        if (!firstFrameReadyRef.current || !posterCoveringRef.current) return;
+        setVideoSurfaceReady((prev) => {
+            if (prev) return prev;
+            mediaRevealRef.current?.stop();
+            mediaRevealRef.current = Animated.parallel([
+                Animated.timing(videoOpacity, {
+                    toValue: 1,
+                    duration: 120,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(posterOpacity, {
+                    toValue: 0,
+                    duration: 120,
+                    useNativeDriver: true,
+                }),
+            ]);
+            mediaRevealRef.current.start();
+            return true;
+        });
+    }, [posterOpacity, videoOpacity]);
+
+    const onSurfaceReady = useCallback(() => {
+        firstFrameReadyRef.current = true;
+        fadeOutPosterCover();
+    }, [fadeOutPosterCover]);
+
     useEffect(() => {
         setSlideIndex(0);
         scrollRef.current?.scrollTo({ x: 0, animated: false });
@@ -127,6 +239,90 @@ export default function ScenesMediaPlayer({
             />
         ) : null;
 
+    const handleProgress = useCallback(
+        (e: OnProgressData) => {
+            onVideoProgress?.(e);
+            if (e.seekableDuration > 0) {
+                onSlideProgress?.(e.currentTime / e.seekableDuration);
+            }
+        },
+        [onSlideProgress, onVideoProgress],
+    );
+
+    /**
+     * The active native player, fenced behind a poster cover and an opacity gate.
+     *
+     * The player is invisible (and muted) until `onReadyForDisplay` confirms a frame has
+     * composited; only then does the poster fade out and the video fade in. This is the
+     * feed's proven pattern, lifted here so a full-screen page turn never shows the black
+     * TextureView that ExoPlayer exposes between mount and first paint.
+     */
+    const renderCoveredVideo = (
+        source: object,
+        posterUri: string | undefined,
+        refProp?: React.RefObject<VideoRef | null>,
+        onProgressOverride?: (e: OnProgressData) => void,
+        frameResizeMode: 'cover' | 'contain' = 'cover',
+        onLoadMeta?: (meta: { width: number; height: number }) => void,
+    ) => (
+        <>
+            <Animated.View
+                style={[StyleSheet.absoluteFill, { opacity: videoSurfaceReady ? videoOpacity : 0 }]}
+                pointerEvents="none"
+                collapsable={false}
+            >
+                <Video
+                    ref={refProp}
+                    source={source}
+                    style={videoFillStyle}
+                    resizeMode={frameResizeMode}
+                    repeat
+                    paused={paused}
+                    muted={muted || outputVolume <= 0 || !videoSurfaceReady}
+                    volume={outputVolume}
+                    poster={undefined}
+                    posterResizeMode={frameResizeMode}
+                    playInBackground={false}
+                    playWhenInactive={false}
+                    ignoreSilentSwitch="ignore"
+                    useTextureView
+                    {...androidListSafeVideoProps()}
+                    pointerEvents="none"
+                    onLoad={(meta) => {
+                        onVideoLoad?.();
+                        const ns = meta?.naturalSize;
+                        if (ns && intrinsicRatio(Number(ns.width), Number(ns.height)) != null) {
+                            onLoadMeta?.({
+                                width: Number(ns.width),
+                                height: Number(ns.height),
+                            });
+                        }
+                    }}
+                    onReadyForDisplay={() => {
+                        onVideoLoad?.();
+                        onSurfaceReady();
+                    }}
+                    onProgress={onProgressOverride ?? handleProgress}
+                />
+            </Animated.View>
+            <Animated.View
+                style={[StyleSheet.absoluteFill, { opacity: posterOpacity }]}
+                pointerEvents="none"
+                collapsable={false}
+            >
+                {posterUri ? (
+                    <Image
+                        source={{ uri: posterUri }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode={frameResizeMode}
+                    />
+                ) : (
+                    <View style={styles.fallback} />
+                )}
+            </Animated.View>
+        </>
+    );
+
     const renderSlide = (slide: (typeof slides)[number], index: number) => {
         const slideActive = isActive && index === safeIndex;
         const rawUrl = slide.url;
@@ -145,71 +341,57 @@ export default function ScenesMediaPlayer({
             );
         }
 
+        // Aspect-correct frame, centred in the full-screen stage: a landscape clip
+        // gets a widescreen box (letterboxed top/bottom on the black stage) instead
+        // of being stretched/cropped into the portrait window. The page itself stays
+        // full-size so paging geometry and tap capture are unchanged.
+        const frame = slideFrame(slide, index);
+        const frameResizeMode = slideResizeMode(slide, index);
+        const recordMeasured = recordMeasuredForSlide(index);
+
         return (
-            <View key={`${post.id}-${index}-${rawUrl}`} style={[styles.slide, { width, height }]}>
-                {slide.type === 'video' ? (
-                    slideActive && canPlayVideo && playableSource(rawUrl) ? (
-                        <Video
-                            ref={slideActive ? videoRef : undefined}
-                            source={playableSource(rawUrl) as object}
-                            style={videoFillStyle}
-                            pointerEvents="none"
-                            resizeMode="cover"
-                            repeat
-                            paused={paused}
-                            muted={muted || outputVolume <= 0}
-                            volume={outputVolume}
-                            poster={undefined}
-                            posterResizeMode="cover"
-                            playInBackground={false}
-                            playWhenInactive={false}
-                            ignoreSilentSwitch="ignore"
-                            useTextureView
-                            {...androidListSafeVideoProps()}
-                            onLoad={onVideoLoad}
-                            onReadyForDisplay={onVideoLoad}
-                            onProgress={(e) => {
-                                onVideoProgress?.(e);
-                                if (e.seekableDuration > 0) {
-                                    onSlideProgress?.(e.currentTime / e.seekableDuration);
-                                }
-                            }}
-                        />
-                    ) : poster ? (
-                        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <View
+                key={`${post.id}-${index}-${rawUrl}`}
+                style={[styles.slide, styles.slideCenter, { width, height }]}
+            >
+                <View style={{ width: frame.width, height: frame.height }} collapsable={false}>
+                    {slide.type === 'video' ? (
+                        slideActive && canPlayVideo && playableSource(rawUrl) ? (
+                            renderCoveredVideo(
+                                playableSource(rawUrl) as object,
+                                poster,
+                                slideActive ? videoRef : undefined,
+                                (e) => {
+                                    onVideoProgress?.(e);
+                                    if (e.seekableDuration > 0) {
+                                        onSlideProgress?.(e.currentTime / e.seekableDuration);
+                                    }
+                                },
+                                frameResizeMode,
+                                recordMeasured,
+                            )
+                        ) : poster ? (
                             <Image
                                 source={{ uri: poster }}
                                 style={StyleSheet.absoluteFill}
-                                resizeMode="cover"
+                                resizeMode={frameResizeMode}
                             />
-                        </View>
-                    ) : (
-                        <View style={styles.fallback} />
-                    )
-                ) : playbackUrl ? (
-                    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                        ) : (
+                            <View style={styles.fallback} />
+                        )
+                    ) : playbackUrl ? (
                         <Image
                             source={{ uri: playbackUrl }}
                             style={StyleSheet.absoluteFill}
                             resizeMode="contain"
                         />
-                    </View>
-                ) : (
-                    <View style={styles.fallback} />
-                )}
+                    ) : (
+                        <View style={styles.fallback} />
+                    )}
+                </View>
             </View>
         );
     };
-
-    const handleProgress = useCallback(
-        (e: OnProgressData) => {
-            onVideoProgress?.(e);
-            if (e.seekableDuration > 0) {
-                onSlideProgress?.(e.currentTime / e.seekableDuration);
-            }
-        },
-        [onSlideProgress, onVideoProgress],
-    );
 
     return (
         <View
@@ -242,28 +424,23 @@ export default function ScenesMediaPlayer({
                                         {slideActive ? renderTapCapture(true) : null}
                                     </>
                                 ) : slide.type === 'video' && slideActive && canPlayVideo && playableSource(slide.url) ? (
-                                    <View style={[styles.slide, { width, height }]}>
-                                        <Video
-                                            ref={videoRef}
-                                            source={playableSource(slide.url) as object}
-                                            style={videoFillStyle}
-                                            resizeMode="cover"
-                                            repeat
-                                            paused={paused}
-                                            muted={muted || outputVolume <= 0}
-                                            volume={outputVolume}
-                                            poster={undefined}
-                                            posterResizeMode="cover"
-                                            playInBackground={false}
-                                            playWhenInactive={false}
-                                            ignoreSilentSwitch="ignore"
-                                            useTextureView
-                                            {...androidListSafeVideoProps()}
-                                            pointerEvents="none"
-                                            onLoad={onVideoLoad}
-                                            onReadyForDisplay={onVideoLoad}
-                                            onProgress={handleProgress}
-                                        />
+                                    <View style={[styles.slide, styles.slideCenter, { width, height }]}>
+                                        <View
+                                            style={{
+                                                width: slideFrame(slide, i).width,
+                                                height: slideFrame(slide, i).height,
+                                            }}
+                                            collapsable={false}
+                                        >
+                                            {renderCoveredVideo(
+                                                playableSource(slide.url) as object,
+                                                slide.posterUrl || post.videoPosterUrl,
+                                                videoRef,
+                                                undefined,
+                                                slideResizeMode(slide, i),
+                                                recordMeasuredForSlide(i),
+                                            )}
+                                        </View>
                                         {renderTapCapture(true)}
                                     </View>
                                 ) : (
@@ -280,28 +457,23 @@ export default function ScenesMediaPlayer({
                 slides[0].type === 'text' ? (
                     renderSlide(slides[0], 0)
                 ) : slides[0].type === 'video' && canPlayVideo && playableSource(slides[0].url) ? (
-                    <View style={[styles.slide, { width, height }]}>
-                        <Video
-                            ref={videoRef}
-                            source={playableSource(slides[0].url) as object}
-                            style={videoFillStyle}
-                            resizeMode="cover"
-                            repeat
-                            paused={paused}
-                            muted={muted || outputVolume <= 0}
-                            volume={outputVolume}
-                            poster={undefined}
-                            posterResizeMode="cover"
-                            playInBackground={false}
-                            playWhenInactive={false}
-                            ignoreSilentSwitch="ignore"
-                            useTextureView
-                            {...androidListSafeVideoProps()}
-                            pointerEvents="none"
-                            onLoad={onVideoLoad}
-                            onReadyForDisplay={onVideoLoad}
-                            onProgress={handleProgress}
-                        />
+                    <View style={[styles.slide, styles.slideCenter, { width, height }]}>
+                        <View
+                            style={{
+                                width: slideFrame(slides[0], 0).width,
+                                height: slideFrame(slides[0], 0).height,
+                            }}
+                            collapsable={false}
+                        >
+                            {renderCoveredVideo(
+                                playableSource(slides[0].url) as object,
+                                slides[0].posterUrl || post.videoPosterUrl,
+                                videoRef,
+                                undefined,
+                                slideResizeMode(slides[0], 0),
+                                recordMeasuredForSlide(0),
+                            )}
+                        </View>
                     </View>
                 ) : (
                     renderSlide(slides[0], 0)
@@ -390,6 +562,11 @@ const styles = StyleSheet.create({
     },
     slide: {
         backgroundColor: '#000',
+    },
+    /** Centres the aspect-fitted frame inside the full-screen page. */
+    slideCenter: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     fallback: {
         ...StyleSheet.absoluteFill,

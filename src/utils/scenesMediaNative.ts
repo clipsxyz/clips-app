@@ -8,6 +8,10 @@ export type ScenesMediaSlide = {
     posterUrl?: string;
     text?: string;
     textStyle?: PostMediaItem['textStyle'];
+    /** Intrinsic pixel dimensions of THIS slide, preserved so the fullscreen player
+     * can fit landscape content instead of forcing it into a portrait frame. */
+    width?: number;
+    height?: number;
 };
 
 export function getScenesMediaSlides(post: Post): ScenesMediaSlide[] {
@@ -24,6 +28,8 @@ export function getScenesMediaSlides(post: Post): ScenesMediaSlide[] {
                     ? decodeScenesTextSlideContent(item) || post.text || post.caption || ''
                     : undefined,
             textStyle: item.textStyle,
+            width: item.width,
+            height: item.height,
         }));
     }
     if (post.mediaUrl) {
@@ -31,7 +37,7 @@ export function getScenesMediaSlides(post: Post): ScenesMediaSlide[] {
             post.mediaType === 'video' || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(post.mediaUrl)
                 ? 'video'
                 : 'image';
-        return [{ url: post.mediaUrl, type }];
+        return [{ url: post.mediaUrl, type, width: post.width, height: post.height }];
     }
     return [];
 }

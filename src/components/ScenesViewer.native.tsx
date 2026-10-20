@@ -8,6 +8,7 @@ import {
     Platform,
     Alert,
     Modal,
+    useWindowDimensions,
     type GestureResponderEvent,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -35,7 +36,6 @@ import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import FeedShareModal from './FeedShareModal';
 import PostCommentsSheet from './PostCommentsSheet';
 import PostOverflowMenuModal from './PostOverflowMenuModal';
-import FeedHeartDrop from './FeedHeartDrop.native';
 import FeedDoubleTapLikeBurst from './FeedDoubleTapLikeBurst.native';
 import SavePostModal from './SavePostModal.native';
 import ScenesFooterBar from './ScenesFooterBar.native';
@@ -46,6 +46,7 @@ import EditPostModal from './EditPostModal.native';
 import CreateGroupModal from './CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal.native';
 import ScenesMediaPlayer, { ScenesMediaProgressBar } from './ScenesMediaPlayer.native';
+import { fitContainBox, intrinsicRatio } from '../utils/mediaAspectRatio';
 import { getCollectionsForPost } from '../api/collections';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
@@ -142,9 +143,12 @@ export default function ScenesViewer({
     onBoost,
 }: ScenesViewerProps) {
     const insets = useSafeAreaInsets();
-    const windowHeight = Dimensions.get('window').height;
-    const windowWidth = Dimensions.get('window').width;
+    // Reactive (not Dimensions.get) so the media viewport tracks rotation/resize.
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const mediaHeightSv = useSharedValue(windowHeight);
+    /** Fitted media height for the active slide, kept in a ref so effects declared
+     * before the slide memo can restore to it (see the comments-close effect). */
+    const activeFittedHeightRef = useRef(windowHeight);
 
     // Keep handle→avatar map warm so own + other chrome can resolve the photo.
     useEffect(() => {
@@ -171,8 +175,9 @@ export default function ScenesViewer({
     const [progress, setProgress] = useState(0);
     const [commentsOpen, setCommentsOpen] = useState(false);
     const [sharePost, setSharePost] = useState<Post | null>(null);
-    const [heartDrop, setHeartDrop] = useState<{ x: number; y: number } | null>(null);
     const [burstAt, setBurstAt] = useState<{ x: number; y: number } | null>(null);
+    const [burstKey, setBurstKey] = useState(0);
+    const burstClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [topMetaVisible, setTopMetaVisible] = useState(true);
     const [metadataIndex, setMetadataIndex] = useState(0);
     const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -187,14 +192,12 @@ export default function ScenesViewer({
     const [editPost, setEditPost] = useState<Post | null>(null);
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [inviteGroupHandle, setInviteGroupHandle] = useState<string | null>(null);
-    const [lastTapDebug, setLastTapDebug] = useState<string | null>(null);
     const postsRef = useRef(posts);
     const activeIndexRef = useRef(activeIndex);
     activeIndexRef.current = activeIndex;
     postsRef.current = posts;
     const videoRef = useRef<VideoRef>(null);
     const topMetaHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const likeButtonRef = useRef<View>(null);
     const currentTimeRef = useRef(0);
     const timesByPostId = useRef<Map<string, number>>(new Map());
     const didSeekInitialRef = useRef(false);
@@ -295,7 +298,10 @@ export default function ScenesViewer({
             // Stay paused while comments are open — do not force play (avoids audio races).
             return;
         }
-        mediaHeightSv.value = withTiming(windowHeight, {
+        // Restore to the ACTIVE slide's fitted height (below), not blindly to the
+        // full window: a landscape post must not re-expand into a portrait viewport
+        // when the comments sheet closes.
+        mediaHeightSv.value = withTiming(activeFittedHeightRef.current, {
             duration: COMMENTS_MEDIA_MS,
             easing: COMMENTS_MEDIA_EASE,
         });
@@ -318,12 +324,41 @@ export default function ScenesViewer({
 
     const mediaLayerAnimStyle = useAnimatedStyle(() => ({
         height: mediaHeightSv.value,
+        // Centre the fitted media layer vertically on the black stage: a landscape
+        // frame is short, and anchoring it to the top would strand it under the
+        // progress bar instead of presenting it as the fullscreen picture.
+        top: Math.max(0, (windowHeight - mediaHeightSv.value) / 2),
     }));
 
     const activeMediaSlides = useMemo(
         () => (activePost ? getScenesMediaSlides(activePost) : []),
         [activePost],
     );
+
+    /**
+     * Dynamic viewport adaptation: the media layer's height is the ACTIVE slide's
+     * aspect-fitted height, recomputed whenever the user pages to a post (or slide)
+     * with a different orientation. Portrait 9:16 gets a tall frame, landscape 16:9
+     * a short widescreen frame, unknown dimensions keep the full window (the player
+     * letterboxes internally with `contain` once `naturalSize` lands).
+     */
+    const activeSlideForFit =
+        activeMediaSlides[mediaSlideIndex] ?? activeMediaSlides[0] ?? null;
+    const activeFittedHeight = useMemo(() => {
+        const w = activeSlideForFit?.width;
+        const h = activeSlideForFit?.height;
+        if (intrinsicRatio(w, h) == null) return windowHeight;
+        return Math.max(1, Math.round(fitContainBox(windowWidth, windowHeight, w, h).height));
+    }, [activeSlideForFit?.width, activeSlideForFit?.height, windowWidth, windowHeight]);
+    activeFittedHeightRef.current = activeFittedHeight;
+
+    useEffect(() => {
+        if (commentsOpen) return;
+        mediaHeightSv.value = withTiming(activeFittedHeight, {
+            duration: COMMENTS_MEDIA_MS,
+            easing: COMMENTS_MEDIA_EASE,
+        });
+    }, [activeFittedHeight, commentsOpen, mediaHeightSv]);
 
     useEffect(() => {
         if (metadataItems.length <= 1) return;
@@ -687,7 +722,14 @@ export default function ScenesViewer({
             if (isTextOnlyPost) return;
             setTopMetaVisible(true);
             setBurstAt({ x: pageX, y: pageY });
-            setHeartDrop({ x: pageX, y: pageY });
+            setBurstKey((k) => k + 1);
+            // Play once: clear on a timer (feed parity) instead of an inline onDone
+            // callback whose identity changes every render and restarts the animation.
+            if (burstClearTimerRef.current) clearTimeout(burstClearTimerRef.current);
+            burstClearTimerRef.current = setTimeout(() => {
+                setBurstAt(null);
+                burstClearTimerRef.current = null;
+            }, 700);
             if (!activePost?.userLiked) {
                 void handleLike();
             }
@@ -699,7 +741,6 @@ export default function ScenesViewer({
         (event?: GestureResponderEvent) => {
             if (isTextOnlyPost) return;
             setTopMetaVisible(true);
-            setLastTapDebug(`tap @ ${new Date().toLocaleTimeString()}`);
 
             const now = Date.now();
             if (now - lastMediaTapRef.current <= SCENES_DOUBLE_TAP_MS) {
@@ -734,6 +775,9 @@ export default function ScenesViewer({
             }
             if (topMetaHideTimerRef.current) {
                 clearTimeout(topMetaHideTimerRef.current);
+            }
+            if (burstClearTimerRef.current) {
+                clearTimeout(burstClearTimerRef.current);
             }
         };
     }, []);
@@ -886,12 +930,6 @@ export default function ScenesViewer({
                         </GestureDetector>
                     </Animated.View>
 
-            {lastTapDebug && (
-                <View style={styles.tapDebug}>
-                    <Text style={styles.tapDebugText}>{lastTapDebug}</Text>
-                </View>
-            )}
-
             <View style={[styles.progressTrack, { top: insets.top }]} pointerEvents="none">
                 {showSegmentedProgress ? (
                     <ScenesMediaProgressBar
@@ -944,7 +982,7 @@ export default function ScenesViewer({
             {!commentsOpen ? (
             <View style={[styles.actionRail, { bottom: insets.bottom + 96 }]}>
                 <View style={styles.actionCol}>
-                    <View ref={likeButtonRef} collapsable={false}>
+                    <View collapsable={false}>
                         <Pressable
                             style={styles.actionBtn}
                             onPress={() => void handleLike()}
@@ -1103,19 +1141,11 @@ export default function ScenesViewer({
             <View style={styles.fxLayer} pointerEvents="none">
                 {burstAt ? (
                     <FeedDoubleTapLikeBurst
+                        key={burstKey}
                         x={burstAt.x}
                         y={burstAt.y}
-                        onDone={() => setBurstAt(null)}
                     />
                 ) : null}
-
-                <FeedHeartDrop
-                    visible={heartDrop != null}
-                    startX={heartDrop?.x ?? 0}
-                    startY={heartDrop?.y ?? 0}
-                    targetRef={likeButtonRef}
-                    onComplete={() => setHeartDrop(null)}
-                />
             </View>
 
             {/* Modal (same as feed) — absolute Reels dock + adjustResize was crushing
@@ -1382,20 +1412,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#121212',
         zIndex: 4,
         elevation: Platform.OS === 'android' ? 4 : 0,
-    },
-    tapDebug: {
-        position: 'absolute',
-        top: 64,
-        left: 12,
-        zIndex: 200,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-    },
-    tapDebugText: {
-        color: '#FDE68A',
-        fontSize: 11,
     },
     fxLayer: {
         ...StyleSheet.absoluteFill,
