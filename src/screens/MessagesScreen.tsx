@@ -15,6 +15,7 @@ import {
     Linking,
     PermissionsAndroid,
     ScrollView,
+    DeviceEventEmitter,
     type ViewToken,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -46,6 +47,7 @@ import {
     type ChatMessage,
 } from '../api/messages';
 import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
+import { connectSocket, joinGroupChat, leaveGroupChat } from '../services/socketio';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
 import { getAvatarForHandle } from '../api/users';
@@ -1271,6 +1273,75 @@ export default function MessagesScreen({ route, navigation }: any) {
         shouldAutoScrollRef.current = true;
         loadMessages(true);
     }, [handle, chatGroupId]);
+
+    // Real-time DM delivery: register this user on the Socket.IO relay and
+    // append incoming messages for THIS thread in place. No refetch — the
+    // payload is deduped by server message ID against current state (which
+    // also absorbs the relay's echo of our own optimistic sends, already
+    // reconciled to that same ID).
+    useEffect(() => {
+        if (!user?.handle) return;
+        const socket = connectSocket(user.handle);
+        if (isGroupThread && chatGroupId) {
+            joinGroupChat(String(chatGroupId));
+        }
+
+        const onRealtime = (data: any) => {
+            const rawMsg = data?.message ?? (data?.id ? data : null);
+            if (!rawMsg || typeof rawMsg !== 'object') return; // metadata-only update (pin/mute/…)
+
+            if (isGroupThread) {
+                const gid = data?.chat_group_id ?? data?.chatGroupId ?? rawMsg.chatGroupId;
+                if (!gid || String(gid) !== String(chatGroupId)) return;
+            } else {
+                const participants: string[] =
+                    data?.participants ||
+                    (rawMsg.senderHandle ? [rawMsg.senderHandle, user.handle] : []);
+                if (!participants.includes(user.handle)) return;
+                if (handle && rawMsg.senderHandle !== user.handle && !participants.includes(handle)) return;
+                if (handle && rawMsg.senderHandle !== user.handle && rawMsg.senderHandle !== handle) return;
+            }
+
+            const incoming: ChatMessage = {
+                id: String(rawMsg.id),
+                senderHandle: String(rawMsg.senderHandle ?? rawMsg.sender_handle ?? ''),
+                text: rawMsg.text ?? undefined,
+                imageUrl: rawMsg.imageUrl ?? rawMsg.image_url ?? undefined,
+                audioUrl: rawMsg.audioUrl ?? rawMsg.audio_url ?? undefined,
+                timestamp:
+                    typeof rawMsg.timestamp === 'number'
+                        ? rawMsg.timestamp
+                        : rawMsg.created_at
+                          ? new Date(rawMsg.created_at).getTime()
+                          : Date.now(),
+                replyTo: rawMsg.replyTo ?? rawMsg.reply_to ?? undefined,
+                sourcePostId: rawMsg.sourcePostId ?? rawMsg.source_post_id ?? undefined,
+            };
+            if (!incoming.id || !incoming.senderHandle) return;
+
+            setMessages((prev) => {
+                if (prev.some((m) => m.id === incoming.id)) return prev;
+                return [...prev, incoming].sort((a, b) => a.timestamp - b.timestamp);
+            });
+            if (incoming.senderHandle !== user.handle) {
+                shouldAutoScrollRef.current = true;
+            }
+        };
+
+        socket?.on('conversationUpdated', onRealtime);
+        socket?.on('newMessage', onRealtime);
+        // Same-device fallback bus (socket disabled / mock mode).
+        const busSub = DeviceEventEmitter.addListener('conversationUpdated', onRealtime);
+
+        return () => {
+            socket?.off('conversationUpdated', onRealtime);
+            socket?.off('newMessage', onRealtime);
+            busSub.remove();
+            if (isGroupThread && chatGroupId) {
+                leaveGroupChat(String(chatGroupId));
+            }
+        };
+    }, [user?.handle, handle, chatGroupId, isGroupThread]);
 
     useEffect(() => {
         if (!inviteOpen) return;

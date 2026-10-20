@@ -8,6 +8,7 @@ import {
     RefreshControl,
     Image,
     ScrollView,
+    DeviceEventEmitter,
 } from 'react-native';
 import { FlatList } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
@@ -49,6 +50,7 @@ import {
     type ConversationSummary,
 } from '../api/messages';
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+import { connectSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
 import { ox } from '../constants/nativeOpticalScale';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
@@ -107,6 +109,11 @@ export default function InboxScreen({ navigation, route }: any) {
     const [openSwipeHandle, setOpenSwipeHandle] = useState<string | null>(null);
     const [inboxChatInfo, setInboxChatInfo] = useState<ConversationSummary | null>(null);
     const avatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
+    /** The mount effect below already runs the first load; skip the focus effect's first
+     *  pass so mounting never fires loadData twice. */
+    const inboxFirstFocusRef = React.useRef(true);
+    /** Latest loadData for socket handlers (subscribed once per user, never stale). */
+    const loadDataRef = React.useRef<((opts?: { silent?: boolean }) => Promise<void>) | null>(null);
     const resolveInsightAvatar = React.useCallback((handle?: string): string => {
         const raw = (handle || '').trim();
         if (!raw) return '';
@@ -196,9 +203,43 @@ export default function InboxScreen({ navigation, route }: any) {
     useFocusEffect(
         useCallback(() => {
             if (!user?.handle) return;
+            // Skip the first focus: the mount effect above already performed the initial
+            // load, so this only refreshes on subsequent returns to the tab.
+            if (inboxFirstFocusRef.current) {
+                inboxFirstFocusRef.current = false;
+                return;
+            }
             void loadData({ silent: true });
         }, [user?.handle])
     );
+
+    // Real-time inbox sync: new messages / unread changes refresh the
+    // conversation list silently (rows stay mounted, badges recompute from
+    // the fresh summaries). Listeners are removed on unmount/user change.
+    useEffect(() => {
+        if (!user?.handle) return;
+        const socket = connectSocket(user.handle);
+
+        const onRealtime = () => {
+            void loadDataRef.current?.({ silent: true });
+        };
+
+        socket?.on('conversationUpdated', onRealtime);
+        socket?.on('inboxUnreadChanged', onRealtime);
+        socket?.on('newMessage', onRealtime);
+        // Same-device fallback bus (socket disabled / mock mode).
+        const busSubs = [
+            DeviceEventEmitter.addListener('conversationUpdated', onRealtime),
+            DeviceEventEmitter.addListener('inboxUnreadChanged', onRealtime),
+        ];
+
+        return () => {
+            socket?.off('conversationUpdated', onRealtime);
+            socket?.off('inboxUnreadChanged', onRealtime);
+            socket?.off('newMessage', onRealtime);
+            busSubs.forEach((sub) => sub.remove());
+        };
+    }, [user?.handle]);
 
     useEffect(() => {
         const requestedTab = route?.params?.initialTab;
@@ -361,6 +402,7 @@ export default function InboxScreen({ navigation, route }: any) {
             setLoading(false);
         }
     };
+    loadDataRef.current = loadData;
 
     const refreshData = async () => {
         setRefreshing(true);

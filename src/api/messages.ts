@@ -395,7 +395,17 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
                 source_post_id: message.sourcePostId ?? undefined,
                 reply_to_message_id: message.replyTo?.messageId ?? undefined,
             });
-            return laravelMsgToChatMessage(raw);
+            const chatMsg = laravelMsgToChatMessage(raw);
+            // Real-time fan-out for native/web listeners. The Laravel branch
+            // returns before the mock path's emit below, so without this the
+            // socket relay never hears about API-backed sends.
+            try {
+                const { emitMessage } = await import('../services/socketio');
+                emitMessage(from, to, chatMsg);
+            } catch {
+                // Socket is optional — delivery already persisted server-side.
+            }
+            return chatMsg;
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             // Rethrow so caller (e.g. direct share) can show error and put link in input; don't fall through to mock
@@ -710,7 +720,14 @@ export async function appendGroupChatMessage(
                 is_system_message: message.isSystemMessage ?? false,
                 reply_to_message_id: message.replyTo?.messageId ?? undefined,
             });
-            return laravelMsgToChatMessage(raw);
+            const chatMsg = laravelMsgToChatMessage(raw);
+            try {
+                const { emitGroupMessage } = await import('../services/socketio');
+                emitGroupMessage(groupId, _fromHandle, chatMsg);
+            } catch {
+                // Socket is optional — delivery already persisted server-side.
+            }
+            return chatMsg;
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             throw e;
@@ -737,6 +754,12 @@ export async function appendGroupChatMessage(
         chatGroupId: groupId,
         message: msg,
     });
+    try {
+        const { emitGroupMessage } = await import('../services/socketio');
+        emitGroupMessage(groupId, _fromHandle, msg, meta.memberHandles);
+    } catch {
+        // Optional realtime channel.
+    }
     return msg;
 }
 

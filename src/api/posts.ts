@@ -3688,6 +3688,42 @@ export async function deleteCommentById(commentId: string): Promise<boolean> {
   return deleteHiddenComment(commentId);
 }
 
+function collectFeedBroadcastRooms(input: {
+  placeId?: string;
+  location?: string;
+  userLocal?: string;
+  userRegional?: string;
+  userNational?: string;
+}): string[] {
+  const rooms = new Set<string>();
+  const place = (input.placeId || '').trim().toLowerCase();
+  if (place) rooms.add(`place:${place}`);
+  [input.location, input.userLocal, input.userRegional, input.userNational].forEach((value) => {
+    const loc = (value || '').trim().toLowerCase();
+    if (loc) rooms.add(`loc:${loc}`);
+  });
+  return Array.from(rooms);
+}
+
+function broadcastNewFeedPost(
+  post: Post,
+  rooms: {
+    placeId?: string;
+    location?: string;
+    userLocal?: string;
+    userRegional?: string;
+    userNational?: string;
+  },
+): void {
+  void import('../services/socketio')
+    .then(({ emitNewFeedPost }) => {
+      emitNewFeedPost(post, collectFeedBroadcastRooms(rooms));
+    })
+    .catch(() => {
+      // Optional realtime channel.
+    });
+}
+
 export async function createPost(
   userId: string,
   userHandle: string,
@@ -3841,6 +3877,14 @@ export async function createPost(
       void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
         notifySubscribersOfCreatorPost(userHandle, transformed.id),
       );
+
+      void broadcastNewFeedPost(transformed, {
+        placeId,
+        location,
+        userLocal: userLocal ?? transformed.userLocal,
+        userRegional: userRegional ?? transformed.userRegional,
+        userNational: userNational ?? transformed.userNational,
+      });
 
       return transformed;
     } catch (error: any) {
@@ -4129,7 +4173,15 @@ export async function createPost(
     void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
         notifySubscribersOfCreatorPost(userHandle, newPost.id),
     );
-    return decorateForUser(userId, newPost);
+    const decorated = decorateForUser(userId, newPost);
+    broadcastNewFeedPost(decorated, {
+      placeId,
+      location,
+      userLocal: userLocal ?? locationData?.userLocal,
+      userRegional: userRegional ?? locationData?.userRegional,
+      userNational: userNational ?? locationData?.userNational,
+    });
+    return decorated;
   }
 }
 

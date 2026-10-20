@@ -10,6 +10,7 @@ import {
     Keyboard,
     Platform,
     KeyboardAvoidingView,
+    DeviceEventEmitter,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +27,7 @@ import {
     writePendingLocationFeed,
 } from '../utils/pendingLocationNative';
 import { ox } from '../constants/nativeOpticalScale';
+import { connectSocket, joinLocationFeed, leaveLocationFeed } from '../services/socketio';
 
 const POPULAR = [
     'Dublin', 'Cork', 'London', 'Paris', 'Berlin', 'New York', 'Tokyo', 'Sydney',
@@ -51,6 +53,7 @@ export default function DiscoverScreen({ navigation }: any) {
     const [hideSuggestions, setHideSuggestions] = useState(false);
     const [placeholderCityIndex, setPlaceholderCityIndex] = useState(0);
     const [keyboardOpen, setKeyboardOpen] = useState(false);
+    const [liveDropCount, setLiveDropCount] = useState(0);
     const inputRef = useRef<TextInput>(null);
 
     const popularResults = useMemo(
@@ -120,6 +123,31 @@ export default function DiscoverScreen({ navigation }: any) {
             ctrl.abort();
         };
     }, [query]);
+
+    useEffect(() => {
+        if (!user?.handle) return;
+        const rooms = [user.local, user.regional, user.national]
+            .map((loc) => (typeof loc === 'string' ? loc.trim() : ''))
+            .filter((loc, i, all) => loc.length > 0 && all.indexOf(loc) === i)
+            .map((location) => ({ location }));
+        if (rooms.length === 0) return;
+        const socket = connectSocket(user.handle);
+        rooms.forEach((room) => joinLocationFeed(room));
+        const seen = new Set<string>();
+        const onNewFeedPost = (data: { post?: { id?: string } }) => {
+            const id = data?.post?.id;
+            if (!id || seen.has(String(id))) return;
+            seen.add(String(id));
+            setLiveDropCount((n) => n + 1);
+        };
+        socket?.on('newFeedPost', onNewFeedPost);
+        const busSub = DeviceEventEmitter.addListener('newFeedPost', onNewFeedPost);
+        return () => {
+            socket?.off('newFeedPost', onNewFeedPost);
+            busSub.remove();
+            rooms.forEach((room) => leaveLocationFeed(room));
+        };
+    }, [user?.handle, user?.local, user?.regional, user?.national]);
 
     const openFeedSelection = (selection: PlaceFeedSelection) => {
         if (typeof writePendingLocationFeed === 'function') {
@@ -366,6 +394,24 @@ export default function DiscoverScreen({ navigation }: any) {
                     </View>
                 )}
 
+                {liveDropCount > 0 ? (
+                    <TouchableOpacity
+                        style={styles.liveDropBadge}
+                        onPress={() => {
+                            setLiveDropCount(0);
+                            goLocalFeed();
+                        }}
+                        activeOpacity={0.88}
+                        accessibilityLabel={`${liveDropCount} new drops nearby`}
+                    >
+                        <Icon name="sparkles-outline" size={ox(14)} color="#04110f" />
+                        <Text style={styles.liveDropBadgeText}>
+                            {liveDropCount === 1
+                                ? '1 new drop nearby'
+                                : `${liveDropCount} new drops nearby`}
+                        </Text>
+                    </TouchableOpacity>
+                ) : null}
                 <View style={styles.searchPill}>
                     <Icon name="add" size={ox(22)} color="#E5E7EB" style={styles.searchIcon} />
                     <TextInput
@@ -549,6 +595,22 @@ const styles = StyleSheet.create({
     resultCopy: { flex: 1, minWidth: 0 },
     resultPrimary: { color: '#F3F4F6', fontSize: ox(14), fontWeight: '500' },
     resultSecondary: { color: '#6B7280', fontSize: ox(11), marginTop: ox(2) },
+    liveDropBadge: {
+        alignSelf: 'center',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(6),
+        marginBottom: ox(12),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(8),
+        borderRadius: ox(999),
+        backgroundColor: '#3D9B8F',
+    },
+    liveDropBadgeText: {
+        color: '#04110f',
+        fontSize: ox(13),
+        fontWeight: '700',
+    },
     searchPill: {
         flexDirection: 'row',
         alignItems: 'center',

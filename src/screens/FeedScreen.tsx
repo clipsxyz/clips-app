@@ -74,6 +74,12 @@ import {
 import { isMockMode } from '../api/apiMode';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getUnreadTotal } from '../api/messages';
+import {
+    connectSocket,
+    joinLocationFeed,
+    leaveLocationFeed,
+    locationFeedRoomKey,
+} from '../services/socketio';
 import { blockUser } from '../api/messages';
 import { isUserBlocked } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
@@ -2089,6 +2095,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
     const [stories24CollapsePayload, setStories24CollapsePayload] =
         React.useState<Stories24RailReturnPayload | null>(null);
+    /** Incoming live drops that arrived while the list was scrolled away from top. */
+    const [liveDropBadge, setLiveDropBadge] = useState(0);
     const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
     const flatListRef = useRef<FlatList<FeedListRow>>(null);
     const feedScrollYRef = useRef(0);
@@ -3288,6 +3296,86 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         route?.params?.locationScope,
         route?.params?.placeId,
         route?.params?.resetHomeFeedAt,
+    ]);
+
+    const pendingLivePostsRef = useRef<Post[]>([]);
+
+    const flushLiveDrops = useCallback(() => {
+        const incoming = pendingLivePostsRef.current;
+        if (incoming.length === 0) {
+            setLiveDropBadge(0);
+            return;
+        }
+        pendingLivePostsRef.current = [];
+        setLiveDropBadge(0);
+        setPages((prev) => {
+            const seen = new Set(prev.flat().map((p) => String(p.id)));
+            const fresh = incoming.filter((p) => !seen.has(String(p.id)));
+            if (fresh.length === 0) return prev;
+            if (prev.length === 0) return [fresh];
+            const [first, ...rest] = prev;
+            return [[...fresh, ...first], ...rest];
+        });
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }, []);
+
+    useEffect(() => {
+        pendingLivePostsRef.current = [];
+        setLiveDropBadge(0);
+    }, [customLocation, customLocationPlaceId, active, showFollowingFeed]);
+
+    useEffect(() => {
+        if (!user?.handle || showFollowingFeed) return;
+        const room = customLocationPlaceId
+            ? { placeId: customLocationPlaceId }
+            : { location: customLocation || active };
+        if (!locationFeedRoomKey(room)) return;
+        const socket = connectSocket(user.handle);
+        joinLocationFeed(room);
+
+        const onNewFeedPost = (data: any) => {
+            const raw = data?.post;
+            if (!raw || typeof raw !== 'object' || !raw.id) return;
+            const post = decorateForUser(userId, raw);
+            const feedTab = String(customLocation || active || '').trim();
+            if (feedTab && feedTab.toLowerCase() !== 'discover') {
+                const placeMatch =
+                    customLocationPlaceId &&
+                    String(post.placeId || '').trim() === String(customLocationPlaceId).trim();
+                if (!placeMatch && !postMatchesLocationTab(post, feedTab)) return;
+            }
+            const alreadyVisible = pagesRef.current
+                .flat()
+                .some((p) => String(p.id) === String(post.id));
+            if (alreadyVisible) return;
+            if (pendingLivePostsRef.current.some((p) => String(p.id) === String(post.id))) return;
+            if (feedScrollYRef.current < 80) {
+                setPages((prev) => {
+                    if (prev.flat().some((p) => String(p.id) === String(post.id))) return prev;
+                    if (prev.length === 0) return [[post]];
+                    const [first, ...rest] = prev;
+                    return [[post, ...first], ...rest];
+                });
+                return;
+            }
+            pendingLivePostsRef.current = [post, ...pendingLivePostsRef.current];
+            setLiveDropBadge(pendingLivePostsRef.current.length);
+        };
+
+        socket?.on('newFeedPost', onNewFeedPost);
+        const busSub = DeviceEventEmitter.addListener('newFeedPost', onNewFeedPost);
+        return () => {
+            socket?.off('newFeedPost', onNewFeedPost);
+            busSub.remove();
+            leaveLocationFeed(room);
+        };
+    }, [
+        user?.handle,
+        userId,
+        showFollowingFeed,
+        customLocation,
+        customLocationPlaceId,
+        active,
     ]);
 
     useEffect(() => {
@@ -5308,6 +5396,19 @@ onVisitProfile={() =>
                 }
             >
 <View style={[styles.feedListShell, { paddingBottom: TAB_BAR_CLEARANCE + insets.bottom }]}>
+              {liveDropBadge > 0 ? (
+                <TouchableOpacity
+                    style={styles.liveDropBadge}
+                    onPress={flushLiveDrops}
+                    activeOpacity={0.88}
+                    accessibilityLabel={`${liveDropBadge} new drops`}
+                >
+                    <Icon name="arrow-up" size={14} color="#04110f" />
+                    <Text style={styles.liveDropBadgeText}>
+                        {liveDropBadge === 1 ? '1 new drop' : `${liveDropBadge} new drops`}
+                    </Text>
+                </TouchableOpacity>
+              ) : null}
               <FlatList
                 // Remount per feed scope so switching tabs always lands on post #1.
                 key={feedScopeListKey}
@@ -6172,6 +6273,24 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
         position: 'relative',
         overflow: 'hidden',
+    },
+    liveDropBadge: {
+        position: 'absolute',
+        top: 10,
+        alignSelf: 'center',
+        zIndex: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: '#3D9B8F',
+    },
+    liveDropBadgeText: {
+        color: '#04110f',
+        fontSize: 13,
+        fontWeight: '700',
     },
     feedList: {
         flex: 1,
