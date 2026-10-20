@@ -62,6 +62,18 @@ export const RATIO_FEED_MAX_PORTRAIT = 4 / 5; // 0.8
  */
 export const RATIO_FALLBACK = RATIO_FEED_MAX_PORTRAIT;
 
+/**
+ * Neutral box for a FEED CARD whose dimensions are not known yet.
+ *
+ * This is deliberately different from {@link RATIO_FALLBACK}. The generic ratio helpers
+ * keep the portrait-biased 4:5 fallback, but a feed card that later turns out to be a
+ * widescreen clip must not first paint in a tall 488pt portrait frame and then collapse
+ * to ~219pt when `naturalSize` arrives. Seeding unknown feed cards at 16:9 means the
+ * common legacy/unmeasured widescreen clip lands on its final height on frame 0, and a
+ * portrait clip (clamped to 4:5) is the shape that re-measures instead.
+ */
+export const RATIO_FEED_UNKNOWN = RATIO_LANDSCAPE_16_9;
+
 /** Guard rails so malformed metadata cannot produce a 0px or infinite box. */
 const MIN_SANE_RATIO = 0.1; // ~1:10, absurdly tall
 const MAX_SANE_RATIO = 4; // 4:1, absurdly wide
@@ -186,6 +198,32 @@ export function feedAspectRatio(
     return Math.max(ratio, floor);
 }
 
+/**
+ * The aspect ratio a FEED CARD renders at when landscape content must fit, not fill.
+ *
+ * Portrait and square follow {@link feedAspectRatio} exactly (4:5 floor / 1:1).
+ * Landscape is NOT capped at 16:9: a wider-than-16:9 clip keeps its true ratio so the
+ * card box matches the frame and `contain`/`cover` have nothing to side-crop. Unknown
+ * dimensions fall back to the neutral 16:9 feed box ({@link RATIO_FEED_UNKNOWN}), never
+ * to the tall portrait fallback.
+ */
+export function feedCardAspectRatio(
+    width?: number | null,
+    height?: number | null,
+): number {
+    const ratio = intrinsicRatio(width, height);
+
+    if (ratio == null) {
+        return RATIO_FEED_UNKNOWN;
+    }
+
+    if (ratio >= RATIO_SQUARE) {
+        return ratio;
+    }
+
+    return feedAspectRatio(width, height);
+}
+
 /** True 9:16, for a full-bleed vertical player that should not clamp. */
 export const RATIO_FULLSCREEN_PORTRAIT = RATIO_PORTRAIT_9_16;
 
@@ -199,11 +237,55 @@ export function feedMediaHeight(
     width: number,
     intrinsicWidth?: number | null,
     intrinsicHeight?: number | null,
-    options?: { fullscreenPortrait?: boolean },
+    options?: { fullscreenPortrait?: boolean; fitLandscape?: boolean },
 ): number {
     const safeWidth = Number.isFinite(width) && width > 0 ? width : 360;
 
+    if (options?.fitLandscape) {
+        return safeWidth / feedCardAspectRatio(intrinsicWidth, intrinsicHeight);
+    }
+
     return safeWidth / feedAspectRatio(intrinsicWidth, intrinsicHeight, options);
+}
+
+/**
+ * Largest box with the media's intrinsic ratio that fits inside a container
+ * (letterbox/pillarbox geometry for fullscreen and other `contain` surfaces).
+ *
+ * Unknown dimensions fill the container, unless `fallbackRatio` is given, in which case
+ * the box is fitted by width at that ratio so an unmeasured frame matches the neutral
+ * feed box instead of stretching to the whole screen.
+ */
+export function fitContainBox(
+    containerWidth: number,
+    containerHeight: number,
+    width?: number | null,
+    height?: number | null,
+    fallbackRatio?: number,
+): { width: number; height: number } {
+    const safeContainerWidth =
+        Number.isFinite(containerWidth) && containerWidth > 0 ? containerWidth : 360;
+    const safeContainerHeight =
+        Number.isFinite(containerHeight) && containerHeight > 0 ? containerHeight : 640;
+
+    const ratio = intrinsicRatio(width, height);
+
+    if (ratio == null) {
+        if (fallbackRatio != null && Number.isFinite(fallbackRatio) && fallbackRatio > 0) {
+            return {
+                width: safeContainerWidth,
+                height: safeContainerWidth / fallbackRatio,
+            };
+        }
+        return { width: safeContainerWidth, height: safeContainerHeight };
+    }
+
+    const scale = Math.min(safeContainerWidth / Number(width), safeContainerHeight / Number(height));
+
+    return {
+        width: Number(width) * scale,
+        height: Number(height) * scale,
+    };
 }
 
 /**

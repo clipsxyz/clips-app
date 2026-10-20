@@ -44,6 +44,7 @@ import {
 import { resolvePostPlaybackUri } from '../utils/postMedia';
 import {
     feedAspectRatio,
+    feedCardAspectRatio,
     intrinsicRatio,
     resolveIntrinsicSize,
 } from '../utils/mediaAspectRatio';
@@ -147,6 +148,8 @@ type FeedNativeVideoProps = {
     soundOn: boolean;
     repeat: boolean;
     mode: 'feed' | 'detail';
+    /** Landscape frames use `contain` (letterboxed, never side-cropped); portrait uses `cover`. */
+    resizeMode?: 'cover' | 'contain';
     isViewable: boolean;
     videoRef: React.Ref<VideoRef>;
     onLoadStart: React.ComponentProps<typeof Video>['onLoadStart'];
@@ -180,6 +183,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
     soundOn,
     repeat,
     mode,
+    resizeMode = 'cover',
     videoRef,
     onLoadStart,
     onReadyForDisplay,
@@ -228,7 +232,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
             ref={videoRef}
             source={source}
             style={styles.videoFill}
-            resizeMode="cover"
+            resizeMode={resizeMode}
             controls={false}
             paused={paused || (mode === 'feed' && scrollPaused)}
             muted={muted}
@@ -261,6 +265,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
     prev.soundOn === next.soundOn &&
     prev.repeat === next.repeat &&
     prev.mode === next.mode &&
+    prev.resizeMode === next.resizeMode &&
     prev.isViewable === next.isViewable,
 );
 
@@ -430,9 +435,11 @@ const FeedPostMedia = React.memo(
      * `isLandscapeMedia` boolean: that flag could only choose between 4:5 and 16:9, so
      * a 9:16 clip and a 4:3 clip were indistinguishable and both got the wrong box.
      */
-    const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number } | null>(
-        null,
-    );
+    const [measuredSize, setMeasuredSize] = useState<{
+        slideIndex: number;
+        width: number;
+        height: number;
+    } | null>(null);
 
     const fadeOutPosterCover = useCallback(() => {
         if (!firstFrameReadyRef.current || !posterCoveringRef.current) return;
@@ -568,7 +575,10 @@ const FeedPostMedia = React.memo(
      */
     const effectiveSize = resolveIntrinsicSize({
         api: apiSize,
-        measured: measuredSize,
+        // Only a measurement taken for THIS slide may size this slide: a recycled
+        // carousel page must never inherit the previous slide's dimensions.
+        measured:
+            measuredSize && measuredSize.slideIndex === currentIndex ? measuredSize : null,
         measuredForId: post.id,
         postId: post.id,
     });
@@ -583,11 +593,11 @@ const FeedPostMedia = React.memo(
     /**
      * Report a runtime-measured size (RNV `naturalSize`, image `source`).
      *
-     * When this card owns an external, wrapper-frozen box (feed mode with a supplied
-     * `height`) there is nothing to reflow: hand the measurement straight to the wrapper for
-     * its module cache and skip local state, so the onLoad frame triggers no re-render and no
-     * layout. Everywhere else (detail/ad, or a feed card with no external height) the local
-     * size still drives the box, so keep storing it.
+     * In feed mode the wrapper owns the box, so hand the measurement straight to it:
+     * the wrapper now adopts it immediately (live state, not a frozen snapshot) and
+     * re-renders this card at the corrected height in the same commit. Everywhere else
+     * (detail/ad, or a feed card with no external height) the local size drives the box,
+     * tagged with the slide it was measured on.
      */
     const reportMeasuredSize = useCallback(
         (size: { width: number; height: number }) => {
@@ -596,9 +606,9 @@ const FeedPostMedia = React.memo(
                 onIntrinsicSize?.(size);
                 return;
             }
-            setMeasuredSize(size);
+            setMeasuredSize({ slideIndex: currentIndex, ...size });
         },
-        [mode, height, onIntrinsicSize],
+        [mode, height, onIntrinsicSize, currentIndex],
     );
 
     /**
@@ -1134,7 +1144,13 @@ const FeedPostMedia = React.memo(
      */
     const intrinsicWidth = effectiveSize?.width;
     const intrinsicHeight = effectiveSize?.height;
-    const targetRatio = feedAspectRatio(intrinsicWidth, intrinsicHeight);
+    // Feed cards use the card ratio (true landscape, neutral 16:9 unknown) so this
+    // frame's own math agrees with the wrapper's `fitLandscape` height; other modes
+    // keep the shared 16:9-capped clamp.
+    const targetRatio =
+        mode === 'feed'
+            ? feedCardAspectRatio(intrinsicWidth, intrinsicHeight)
+            : feedAspectRatio(intrinsicWidth, intrinsicHeight);
     const contentHeight =
         width > 0 ? Math.round(width / targetRatio) : height > 0 ? height : 0;
     // In feed mode the WRAPPER owns the height. It resolves the intrinsic size (payload
@@ -1185,6 +1201,22 @@ const FeedPostMedia = React.memo(
         const slidePosterUri = slidePosterRaw;
 
         const slideIsCurrent = slideIndex === currentIndex;
+        // Per-slide scaling: landscape frames letterbox (`contain`) so a widescreen
+        // clip is never side-cropped when the box and the frame disagree (viewport
+        // cap, late measurement); portrait/square fill (`cover`) per feed policy.
+        // The current slide may use the measured size; sibling slides use their own
+        // payload dimensions so a neighbour's orientation never leaks across pages.
+        const slideSize =
+            slideIsCurrent && effectiveSize
+                ? effectiveSize
+                : (() => {
+                      const w = Number(item?.width ?? post.width);
+                      const h = Number(item?.height ?? post.height);
+                      return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
+                  })();
+        const slideRatio = intrinsicRatio(slideSize?.width, slideSize?.height);
+        const slideResizeMode: 'cover' | 'contain' =
+            slideRatio != null && slideRatio > 1 ? 'contain' : 'cover';
         // Hold ONLY the slide the horizontal drag started on so the outgoing clip's audio
         // cuts the instant the finger swipes, while the target (a different slideIndex) is
         // never held.
@@ -1210,7 +1242,7 @@ const FeedPostMedia = React.memo(
                     <CachedImage
                         source={{ uri: slideUrl }}
                         style={styles.stillImage}
-                        resizeMode="cover"
+                        resizeMode={slideResizeMode}
                         resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                         progressiveRenderingEnabled={false}
                         pointerEvents={mediaPointerEvents}
@@ -1262,7 +1294,7 @@ const FeedPostMedia = React.memo(
                         <Animated.Image
                             source={{ uri: slidePosterUri, cache: 'force-cache' }}
                             style={StyleSheet.absoluteFill}
-                            resizeMode="cover"
+                            resizeMode={slideResizeMode}
                             resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
                             fadeDuration={0}
                             onLoad={() => {
@@ -1323,6 +1355,7 @@ const FeedPostMedia = React.memo(
                             soundOn={soundOn}
                             repeat={mode === 'feed'}
                             mode={mode}
+                            resizeMode={slideResizeMode}
                             isViewable={feedSurfaceMounted}
                             videoRef={feedVideoRef}
                             onLoadStart={() => {
@@ -1353,9 +1386,10 @@ const FeedPostMedia = React.memo(
                                 // recorded at 1920x1080 then rotated to portrait reports
                                 // width < height, which is exactly what we want to size to.
                                 //
-                                // In feed mode this is handed UP for the module cache only
-                                // (see `reportMeasuredSize`) — the mounted card's box is
-                                // frozen, so a late `naturalSize` cannot resize it.
+                                // In feed mode this is handed UP to the wrapper (see
+                                // `reportMeasuredSize`), which adopts it immediately and
+                                // re-renders this card at the corrected height — no
+                                // waiting for the cell to be recycled.
                                 const ns = meta?.naturalSize;
                                 if (ns) {
                                     reportMeasuredSize({

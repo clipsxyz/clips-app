@@ -1197,106 +1197,123 @@ const FeedCard = React.memo(function FeedCard({
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
 
     /**
-     * Intrinsic size of the current slide.
+     * Intrinsic size of the ACTIVE carousel slide.
      *
      * `apiMedia` is derived (not stored) so it can never go stale or be wiped -- the
-     * dimensions come from the payload on every render. `measuredMedia` holds only what
-     * FeedPostMedia reported at runtime, tagged with the post id it was measured for.
-     *
-     * This previously used a single state seeded from the API plus a
-     * `useEffect([post.id])` that nulled it on recycling. That effect ALSO fired on mount,
-     * so it erased the API dimensions before the first paint: the wrapper fell back to a
-     * 1:1 square while FeedPostMedia -- reading `post.width/height` straight from props --
-     * correctly drew the video at 16:9. The 171pt difference rendered as a black box under
-     * every landscape video. Deriving instead of storing removes the failure mode; the
-     * post-id tag removes the need for the reset entirely.
+     * dimensions come from the payload on every render, preferring the active slide's
+     * own width/height over the primary post's. A mixed-orientation carousel therefore
+     * re-sizes the card when the slide index changes instead of forcing every slide
+     * into the primary item's box.
      */
+    const activeMediaItem = React.useMemo(
+        () =>
+            (post.mediaItems || []).filter(
+                (item) => item?.type === 'image' || item?.type === 'video',
+            )[carouselIndex] ?? null,
+        [post.mediaItems, carouselIndex],
+    );
+
     const apiMedia = React.useMemo(() => {
-        const w = Number(post.width);
-        const h = Number(post.height);
+        const w = Number(activeMediaItem?.width ?? post.width);
+        const h = Number(activeMediaItem?.height ?? post.height);
 
         return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
-    }, [post.width, post.height]);
+    }, [activeMediaItem?.width, activeMediaItem?.height, post.width, post.height]);
+
+    /**
+     * Live measured size, tagged by post AND slide.
+     *
+     * When ExoPlayer `naturalSize` / Image `onLoad` reports the true dimensions, the
+     * card adopts them IMMEDIATELY (state update -> re-render -> new height) instead of
+     * freezing the first — often fallback — box for the life of the post and only
+     * correcting it after the cell is recycled. The post+slide tag means a recycled
+     * cell can never apply a neighbour's (or a sibling slide's) measurement: a stale
+     * tag simply does not match, and the module cache below is keyed the same way so a
+     * remount of the same slide paints at its measured height from frame 0.
+     */
+    const [measuredMedia, setMeasuredMedia] = React.useState<{
+        postId: string;
+        slideIndex: number;
+        width: number;
+        height: number;
+    } | null>(null);
+
+    const measuredCacheKey = `${String(post.id)}:${carouselIndex}`;
 
     const handleIntrinsicMedia = React.useCallback(
         (size: { width: number; height: number }) => {
-            // CACHE ONLY -- never reflow the mounted card.
-            //
-            // The card's aspect box is frozen on the render that first mounts it (see
-            // `frozenIntrinsicRef` below). A runtime measurement arriving after mount
-            // therefore cannot change the live layout; it only lets the NEXT mount of this
-            // post paint at its final height from frame 0. No state and no re-render, so the
-            // ExoPlayer mount frame stays free of the size churn that used to pop the card.
-            const prev = measuredMediaSizeByPostId.get(post.id);
-            if (prev && prev.width === size.width && prev.height === size.height) return;
-            // Hoisted to module scope so the size survives cell recycling (see above).
-            measuredMediaSizeByPostId.set(post.id, size);
+            if (intrinsicRatio(size.width, size.height) == null) return;
+            const key = `${String(post.id)}:${carouselIndex}`;
+            const prev = measuredMediaSizeByPostId.get(key);
+            if (!prev || prev.width !== size.width || prev.height !== size.height) {
+                // Hoisted to module scope so the size survives cell recycling.
+                measuredMediaSizeByPostId.set(key, size);
+            }
+            setMeasuredMedia((prevState) =>
+                prevState &&
+                prevState.postId === String(post.id) &&
+                prevState.slideIndex === carouselIndex &&
+                prevState.width === size.width &&
+                prevState.height === size.height
+                    ? prevState
+                    : {
+                          postId: String(post.id),
+                          slideIndex: carouselIndex,
+                          width: size.width,
+                          height: size.height,
+                      },
+            );
         },
-        [post.id],
+        [post.id, carouselIndex],
     );
+
+    const measuredForActiveSlide =
+        measuredMedia &&
+        measuredMedia.postId === String(post.id) &&
+        measuredMedia.slideIndex === carouselIndex
+            ? measuredMedia
+            : (measuredMediaSizeByPostId.get(measuredCacheKey) ?? null);
 
     const intrinsicMedia = resolveIntrinsicSize({
         api: apiMedia,
-        measured: measuredMediaSizeByPostId.get(post.id) ?? null,
+        measured: measuredForActiveSlide,
         measuredForId: post.id,
         postId: post.id,
     });
 
     /**
-     * The aspect box is IMMUTABLE for the life of this post.
-     *
-     * Snapshot the intrinsic size on the render that first mounts the card -- payload
-     * dimensions when present, otherwise a measurement cached from a previous view,
-     * otherwise the shared fallback -- and never let a later `onLoad` / `naturalSize`
-     * change it. This is what removes the mount snap: the wrapper, the engagement row and
-     * the FlatList row height are all decided before the ExoPlayer exists and hold steady
-     * while it initialises.
-     *
-     * Keyed by post id, so it only re-snapshots when the cell is recycled to a different
-     * post. Writing the ref during render is idempotent for a given post, so a redundant
-     * render (StrictMode) is a no-op.
-     *
-     * Carousels share one immutable box too: every slide renders into the same `frameStyle`
-     * (cover-cropped), so a mixed-orientation swipe no longer resizes the card mid-gesture.
-     */
-    const frozenIntrinsicRef = React.useRef<{
-        id: string;
-        width?: number;
-        height?: number;
-    } | null>(null);
-    if (!frozenIntrinsicRef.current || frozenIntrinsicRef.current.id !== String(post.id)) {
-        frozenIntrinsicRef.current = {
-            id: String(post.id),
-            width: intrinsicMedia?.width,
-            height: intrinsicMedia?.height,
-        };
-    }
-    const frozenIntrinsic = frozenIntrinsicRef.current;
-
-    /**
-     * Height derived from the CONTENT, not a fixed token.
+     * Height derived from the CONTENT, not a fixed token — and LIVE, not frozen.
      *
      * This is the letterbox fix. The wrapper used to be pinned to `feedCardMediaHeight()`
      * with both `height` AND `maxHeight` while the inner video independently shrank to the
      * real 16:9 size -- so on a 390x844 device a landscape clip sat in a ~487pt box filling
      * only ~219pt of it, and the rest was black. Now the box is sized from the intrinsic
-     * ratio resolved by {@link resolveIntrinsicSize}, clamped by feedAspectRatio, and only
-     * then capped to the viewport so a tall post cannot push the engagement row off screen.
+     * ratio resolved by {@link resolveIntrinsicSize} (landscape at its TRUE ratio via
+     * `feedCardAspectRatio`, portrait clamped to 4:5), and only then capped to the viewport
+     * so a tall post cannot push the engagement row off screen.
      *
-     * It reads the FROZEN snapshot, so it recomputes only when the post changes or the
-     * viewport does -- never when a measurement lands after mount.
+     * It recomputes whenever the resolved size changes: an API dimension arriving, the
+     * active carousel slide changing, or a runtime measurement landing all update the
+     * mounted card in the same commit instead of waiting for a recycle/remount. Unknown
+     * media seeds at the neutral 16:9 feed box via `fitLandscape`, so an unmeasured
+     * widescreen clip never starts life in a tall portrait frame.
      */
     const mediaFrameHeight = React.useMemo(() => {
         const contentHeight = feedMediaHeight(
             cardMediaWidth,
-            frozenIntrinsic.width,
-            frozenIntrinsic.height,
+            intrinsicMedia?.width,
+            intrinsicMedia?.height,
+            // Landscapes take their TRUE intrinsic ratio (no 16:9 cap) so an ultra-wide
+            // clip renders as a clean widescreen rectangle instead of being side-cropped
+            // to fill a taller 16:9 box. Portrait keeps the 4:5 feed cap. Unknown media
+            // takes the neutral 16:9 box (RATIO_FEED_UNKNOWN).
+            { fitLandscape: true },
         );
         const viewportCap =
             safePositiveLayoutNumber(windowHeight, 720) * FEED_UI.media.maxViewportFraction;
 
         return Math.round(Math.min(contentHeight, viewportCap));
-    }, [cardMediaWidth, frozenIntrinsic.width, frozenIntrinsic.height, windowHeight]);
+    }, [cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height, windowHeight]);
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
     const isClientUploadFailed = post.clientUploadStatus === 'failed';
@@ -1783,6 +1800,14 @@ onBlock={onBlockUser}
         a.stats.shares === b.stats.shares &&
         a.mediaUrl === b.mediaUrl &&
         a.mediaType === b.mediaType &&
+        // Dimension-only updates MUST break the memo: a width/height/aspectRatio
+        // arriving for the same post (or for the active carousel slide, via
+        // mediaItemsEqual below) changes the card's height even when every
+        // engagement field is identical. Without these, `extraData` could signal
+        // the change and the comparator would still skip the re-render.
+        a.width === b.width &&
+        a.height === b.height &&
+        a.aspectRatio === b.aspectRatio &&
         a.videoPosterUrl === b.videoPosterUrl &&
         a.templateId === b.templateId &&
         a.text === b.text &&
@@ -1815,10 +1840,13 @@ export { FeedCard };
  * local state. When it remounts, the media box previously fell back to RATIO_FALLBACK, the
  * video re-measured on `onLoad`, and the card resized at the exact moment playback began —
  * pushing every row below it and snapping the scroll offset by whole posts. Hoisting the
- * measurement keyed by post.id means a recycled cell remounts at the SAME height it had
- * when it unloaded, so no row below ever moves. API dimensions still win on first render;
- * this cache only fills the gap for posts that predate the dimensions columns or for
- * local/demo uploads.
+ * measurement keyed by `postId:slideIndex` means a recycled cell remounts at the SAME
+ * height it had when it unloaded, so no row below ever moves, and a mixed-orientation
+ * carousel never inherits a sibling slide's size. API dimensions still win on first
+ * render; this cache only fills the gap for posts that predate the dimensions columns
+ * or for local/demo uploads. The live card additionally adopts a measurement the moment
+ * it lands (see `measuredMedia` in FeedCard) — the cache is the remount seed, not the
+ * only path to the correct height.
  */
 const measuredMediaSizeByPostId = new Map<string, { width: number; height: number }>();
 
@@ -4075,6 +4103,31 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         previewSuggestedPlaces,
     ]);
 
+    /**
+     * FlatList `extraData` signature: row ids PLUS every post's intrinsic dims.
+     *
+     * `extraData` is the list's "the data didn't change identity but the cells must
+     * re-render anyway" signal. Encoding each post's width/height (and per-slide
+     * dims) means a dimension arriving or changing for one post re-renders its cell
+     * with the correct aspect box instead of letting a recycled landscape height
+     * bleed onto the following portrait rows. Keys stay per-post (`post:<id>` in
+     * keyExtractor), and there is deliberately NO getItemLayout: card heights are
+     * content-driven/dynamic, so a fixed layout map would snap offsets.
+     */
+    const feedExtraData = React.useMemo(() => {
+        const dims = flatForRender
+            .map((row) =>
+                row.kind === 'post'
+                    ? `${row.post.id}:${row.post.width ?? ''}x${row.post.height ?? ''}:` +
+                      (row.post.mediaItems ?? [])
+                          .map((i) => `${i.width ?? ''}x${i.height ?? ''}`)
+                          .join(',')
+                    : row.kind,
+            )
+            .join('|');
+        return `${pendingUploadTick}-${refreshing}-${isFeedFocused}-${commentsModalOpen}-${dims}`;
+    }, [flatForRender, pendingUploadTick, refreshing, isFeedFocused, commentsModalOpen]);
+
     flatForRenderRef.current = flatForRender;
 
     // Track the LIVE audio focus so the silent preload can be anchored to whatever card the
@@ -5287,7 +5340,7 @@ onVisitProfile={() =>
                     }
                     return 'feed-row';
                 }}
-                extraData={`${pendingUploadTick}-${refreshing}-${isFeedFocused}-${commentsModalOpen}`}
+                extraData={feedExtraData}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 // Keep the render window tight for max FPS while flinging.
                 initialNumToRender={2}
