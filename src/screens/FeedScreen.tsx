@@ -24,6 +24,7 @@ import {
     useWindowDimensions,
     Animated,
     DeviceEventEmitter,
+    InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -85,7 +86,7 @@ import FeedPostMedia, {
     resolveFeedVideoPosterUri,
 } from '../components/FeedPostMedia.native';
 import FeedDoubleTapLikeBurst from '../components/FeedDoubleTapLikeBurst.native';
-import ImageFullscreenModal, {
+import {
     type ImageFullscreenOrigin,
 } from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
@@ -104,7 +105,7 @@ import {
     subscribeFeedAutoplayPref,
     type FeedAutoplayPref,
 } from '../utils/feedAutoplayPrefNative';
-import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
+import { setActiveFeedVideoPostId, forceActiveFeedVideoPostId, setFeedAudioFocusPostId, setFeedPreloadPostIds, subscribeActiveFeedVideo, subscribeFeedAudioFocusPostId } from '../utils/feedActiveVideoNative';
 import { setFeedScrollBusy } from '../utils/feedScrollBusyNative';
 import { peekFeedVideoHandoff, peekScenesReturnHandoff } from '../utils/feedScenesHandoffNative';
 import { setScenesLaunchPayload } from '../utils/scenesLaunchNative';
@@ -191,7 +192,11 @@ import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.nativ
 import FeedNewsTicker from '../components/FeedNewsTicker.native';
 import FeedPostNewsTicker from '../components/FeedPostNewsTicker.native';
 import { fullscreenSlideIndexForCarousel } from '../utils/feedImageFullscreen';
-import { setImageFullscreenLaunch } from '../utils/imageFullscreenLaunchNative';
+import {
+    setImageFullscreenLaunch,
+    updateImageFullscreenPost,
+    type ImageFullscreenHandlers,
+} from '../utils/imageFullscreenLaunchNative';
 import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
 import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
@@ -1114,6 +1119,7 @@ const FeedCard = React.memo(function FeedCard({
     isVideoActive,
     feedVideoMuted,
     suspendNativeVideo,
+    holdNativeVideo,
     viewerHandle,
     viewerUserId,
     onOpenDM,
@@ -1152,6 +1158,8 @@ const FeedCard = React.memo(function FeedCard({
     isVideoActive?: boolean;
     feedVideoMuted?: boolean;
     suspendNativeVideo?: boolean;
+    /** Feed: keep this card's native Video mounted (paused) under a viewer route. */
+    holdNativeVideo?: boolean;
     viewerHandle?: string | null;
     viewerUserId?: string;
     onOpenDM?: (handle: string, postId: string) => void;
@@ -1184,7 +1192,6 @@ const FeedCard = React.memo(function FeedCard({
     const [boostMetricsActive, setBoostMetricsActive] = React.useState(Boolean(post.isBoosted));
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
-    const mediaWrapRef = React.useRef<View>(null);
     const postViewRecordedRef = React.useRef(false);
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const cardMediaWidth = safePositiveLayoutNumber(windowWidth, 360);
@@ -1211,15 +1218,19 @@ const FeedCard = React.memo(function FeedCard({
         return intrinsicRatio(w, h) != null ? { width: w, height: h } : null;
     }, [post.width, post.height]);
 
-    const [, setMeasuredTick] = React.useState(0);
-
     const handleIntrinsicMedia = React.useCallback(
         (size: { width: number; height: number }) => {
+            // CACHE ONLY -- never reflow the mounted card.
+            //
+            // The card's aspect box is frozen on the render that first mounts it (see
+            // `frozenIntrinsicRef` below). A runtime measurement arriving after mount
+            // therefore cannot change the live layout; it only lets the NEXT mount of this
+            // post paint at its final height from frame 0. No state and no re-render, so the
+            // ExoPlayer mount frame stays free of the size churn that used to pop the card.
             const prev = measuredMediaSizeByPostId.get(post.id);
             if (prev && prev.width === size.width && prev.height === size.height) return;
             // Hoisted to module scope so the size survives cell recycling (see above).
             measuredMediaSizeByPostId.set(post.id, size);
-            setMeasuredTick((t) => t + 1);
         },
         [post.id],
     );
@@ -1232,6 +1243,37 @@ const FeedCard = React.memo(function FeedCard({
     });
 
     /**
+     * The aspect box is IMMUTABLE for the life of this post.
+     *
+     * Snapshot the intrinsic size on the render that first mounts the card -- payload
+     * dimensions when present, otherwise a measurement cached from a previous view,
+     * otherwise the shared fallback -- and never let a later `onLoad` / `naturalSize`
+     * change it. This is what removes the mount snap: the wrapper, the engagement row and
+     * the FlatList row height are all decided before the ExoPlayer exists and hold steady
+     * while it initialises.
+     *
+     * Keyed by post id, so it only re-snapshots when the cell is recycled to a different
+     * post. Writing the ref during render is idempotent for a given post, so a redundant
+     * render (StrictMode) is a no-op.
+     *
+     * Carousels share one immutable box too: every slide renders into the same `frameStyle`
+     * (cover-cropped), so a mixed-orientation swipe no longer resizes the card mid-gesture.
+     */
+    const frozenIntrinsicRef = React.useRef<{
+        id: string;
+        width?: number;
+        height?: number;
+    } | null>(null);
+    if (!frozenIntrinsicRef.current || frozenIntrinsicRef.current.id !== String(post.id)) {
+        frozenIntrinsicRef.current = {
+            id: String(post.id),
+            width: intrinsicMedia?.width,
+            height: intrinsicMedia?.height,
+        };
+    }
+    const frozenIntrinsic = frozenIntrinsicRef.current;
+
+    /**
      * Height derived from the CONTENT, not a fixed token.
      *
      * This is the letterbox fix. The wrapper used to be pinned to `feedCardMediaHeight()`
@@ -1240,14 +1282,21 @@ const FeedCard = React.memo(function FeedCard({
      * only ~219pt of it, and the rest was black. Now the box is sized from the intrinsic
      * ratio resolved by {@link resolveIntrinsicSize}, clamped by feedAspectRatio, and only
      * then capped to the viewport so a tall post cannot push the engagement row off screen.
+     *
+     * It reads the FROZEN snapshot, so it recomputes only when the post changes or the
+     * viewport does -- never when a measurement lands after mount.
      */
     const mediaFrameHeight = React.useMemo(() => {
-        const contentHeight = feedMediaHeight(cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height);
+        const contentHeight = feedMediaHeight(
+            cardMediaWidth,
+            frozenIntrinsic.width,
+            frozenIntrinsic.height,
+        );
         const viewportCap =
             safePositiveLayoutNumber(windowHeight, 720) * FEED_UI.media.maxViewportFraction;
 
         return Math.round(Math.min(contentHeight, viewportCap));
-    }, [cardMediaWidth, intrinsicMedia?.width, intrinsicMedia?.height, windowHeight]);
+    }, [cardMediaWidth, frozenIntrinsic.width, frozenIntrinsic.height, windowHeight]);
     // Auto-detect image dimensions if not provided
     const isClientUploading = post.clientUploadStatus === 'uploading';
     const isClientUploadFailed = post.clientUploadStatus === 'failed';
@@ -1396,24 +1445,13 @@ const FeedCard = React.memo(function FeedCard({
 
     const openStillFullscreen = React.useCallback(() => {
         // Slide-aware, not image-only: a mixed carousel must open the slide that was tapped.
+        // No measureInWindow: the native route ignores the origin rect (the store takes no
+        // origin and the fade needs none), so the async native round-trip was dead work on
+        // the tap frame.
         const startIndex = fullscreenSlideIndexForCarousel(post, carouselIndex);
-        const open = (origin?: ImageFullscreenOrigin | null) => {
-            onOpenImageFullscreen?.(startIndex, origin ?? null, {
-                liked: effectiveLiked,
-                count: effectiveLikes,
-            });
-        };
-        const node = mediaWrapRef.current;
-        if (!node?.measureInWindow) {
-            open(null);
-            return;
-        }
-        node.measureInWindow((x, y, width, height) => {
-            if (width > 8 && height > 8) {
-                open({ x, y, width, height });
-            } else {
-                open(null);
-            }
+        onOpenImageFullscreen?.(startIndex, null, {
+            liked: effectiveLiked,
+            count: effectiveLikes,
         });
     }, [carouselIndex, effectiveLiked, effectiveLikes, onOpenImageFullscreen, post]);
 
@@ -1520,7 +1558,6 @@ const FeedCard = React.memo(function FeedCard({
                                     maxHeight: mediaFrameHeight,
                                 },
                             ]}
-                            ref={mediaWrapRef}
                             collapsable={false}
                         >
                             <FeedPostMedia
@@ -1538,6 +1575,7 @@ const FeedCard = React.memo(function FeedCard({
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
                                 suspendNativeVideo={suspendNativeVideo}
+                                holdNativeVideo={holdNativeVideo}
                                 muted={feedVideoMuted}
                             />
                             {isClientUploading ? (
@@ -1755,6 +1793,7 @@ onBlock={onBlockUser}
         prev.isVideoActive === next.isVideoActive &&
         prev.feedVideoMuted === next.feedVideoMuted &&
         prev.suspendNativeVideo === next.suspendNativeVideo &&
+        prev.holdNativeVideo === next.holdNativeVideo &&
         prev.viewerHandle === next.viewerHandle &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
@@ -1793,6 +1832,27 @@ type FeedListRow =
     | { kind: 'stories_promo'; id: string }
     | { kind: 'interests'; id: string }
     | { kind: 'suggested_follower'; suggestion: SuggestedFollowerSuggestion };
+
+/**
+ * Closest upcoming video post AFTER `primaryPostId` in the flattened feed rows.
+ *
+ * Strict cap of ONE neighbor: the silent preload mounts at most a single extra ExoPlayer,
+ * so we never fan out codecs. Returns [] when the primary is unknown or nothing video follows.
+ */
+function nextPreloadNeighborIds(rows: FeedListRow[], primaryPostId: string | null): string[] {
+    if (!primaryPostId) return [];
+    const idx = rows.findIndex(
+        (row) => row.kind === 'post' && String(row.post.id) === String(primaryPostId),
+    );
+    if (idx < 0) return [];
+    for (let i = idx + 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.kind !== 'post') continue;
+        if (!postHasVideoMedia(row.post)) continue;
+        return [String(row.post.id)];
+    }
+    return [];
+}
 
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
@@ -1922,15 +1982,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
     const [imageFullscreenStartIndex, setImageFullscreenStartIndex] = useState(0);
-    const [imageFullscreenOrigin, setImageFullscreenOrigin] = useState<ImageFullscreenOrigin | null>(
-        null,
-    );
+    /**
+     * Feed card whose native Video surface is kept mounted (paused) while a full-screen
+     * viewer route (Scenes / ImageFullscreen) covers the feed. Without this the ExoPlayer
+     * is torn down on open and reallocated on return, so the MP4 restarted from 0. Set on
+     * open, cleared when Feed regains focus.
+     */
+    const [heldVideoPostId, setHeldVideoPostId] = useState<string | null>(null);
     /** Feed under Scenes / image fullscreen / comments — kill ExoPlayer so audio cannot leak. */
     const feedNativeVideoSuspended =
         commentsModalOpen ||
-        !isFeedFocused ||
-        scenesViewerActive ||
-        Boolean(imageFullscreenPost);
+        ((!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost)) &&
+            !heldVideoPostId);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
@@ -2075,6 +2138,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     /** Gate was released at rest; ignore throttled trailing onScroll at the same offset. */
     const feedScrollRestingRef = useRef(false);
     const feedScrollRestOffsetRef = useRef(0);
+    /** Offset at touch-down and whether the finger has actually displaced the list. */
+    const feedScrollDragOriginRef = useRef(0);
+    const feedScrollDragMovedRef = useRef(false);
     const lastViewableVideoPostIdRef = useRef<string | null>(null);
     /** Video that was playing (or the video card under the overlay) — restore on overlay close. */
     const overlayResumeVideoPostIdRef = useRef<string | null>(null);
@@ -2246,6 +2312,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const imageFullscreenOpenRef = useRef(Boolean(imageFullscreenPost));
     imageFullscreenOpenRef.current = Boolean(imageFullscreenPost);
 
+    /** Latest open post — the viewer's handlers read this so a fresh handler invocation
+     *  always acts on the current post (the route screen holds them across renders). */
+    const imageFullscreenPostRef = useRef<Post | null>(null);
+    imageFullscreenPostRef.current = imageFullscreenPost;
+
+    /** Id the fullscreen viewer was last opened for — guards deferred decoration work
+     *  from bleeding into a newer open (or a viewer the user already closed). */
+    const imageFullscreenOpenIdRef = useRef<string | null>(null);
+
     const commentsModalOpenRef = useRef(commentsModalOpen);
     commentsModalOpenRef.current = commentsModalOpen;
 
@@ -2271,6 +2346,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, []);
 
     const restoreFeedVideoAfterOverlay = useCallback(() => {
+        // Release any held viewer surface before re-arming, otherwise the card would stay
+        // mounted-but-paused and never resume.
+        setHeldVideoPostId(null);
         const resumeId = overlayResumeVideoPostIdRef.current;
         if (!resumeId || !feedAutoplayAllowedRef.current) {
             if (!feedAutoplayOverlayBlocks()) {
@@ -2381,6 +2459,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
      */
     const FEED_SCROLL_REST_VELOCITY = 0.1;
 
+    /**
+     * Vertical displacement (points) the finger must travel before the list counts as
+     * scrolling. Raw touch-down or light pressure must not gate the active decoder.
+     */
+    const FEED_SCROLL_TOUCH_SLOP = 6;
+
     const releaseFeedScroll = () => {
         if (feedScrollIdleTimerRef.current) {
             clearTimeout(feedScrollIdleTimerRef.current);
@@ -2389,15 +2473,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         feedScrollingRef.current = false;
         feedScrollRestingRef.current = true;
         feedScrollRestOffsetRef.current = feedScrollYRef.current;
+        // Re-baseline the strict displacement guard on every release path (including the
+        // settle fallback for slow drags that never emit a momentum end) so a stale origin
+        // can never make the next touch look like a large displacement.
+        feedScrollDragOriginRef.current = feedScrollYRef.current;
+        feedScrollDragMovedRef.current = false;
         if (feedAutoplayOverlayBlocks()) {
-            requestAnimationFrame(() => setFeedScrollBusy(false));
+            // Release synchronously: a held player must resume on the same tick the gate
+            // clears. Deferring it through a frame handed the resume to whichever work the
+            // UI thread happened to be stuck on (measured ~200ms after a short drag).
+            setFeedScrollBusy(false);
             return;
         }
         scheduleActiveFeedVideoRef.current(
             feedAutoplayAllowedRef.current ? lastViewableVideoPostIdRef.current : null,
             false,
         );
-        requestAnimationFrame(() => setFeedScrollBusy(false));
+        setFeedScrollBusy(false);
     };
 
     /** Fallback for continuous slow drags that never emit a scroll/momentum end. */
@@ -2416,12 +2508,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         if (!scrolling) {
             // Definitive rest (momentum/scroll end): drop the fallback debounce and
-            // release the decoder gate now instead of waiting out the trailing timer.
+            // hand playback to the top-most visible card now instead of waiting out
+            // the trailing timer.
             releaseFeedScroll();
             return;
         }
         feedScrollRestingRef.current = false;
-        if (!feedScrollingRef.current) setFeedScrollBusy(true);
+        // Deliberately do NOT clear the silent preload neighbor here. Trailing settle
+        // scroll events (OPPO emits SCROLL_STATE_SETTLING ~200ms after the finger lifts)
+        // re-enter this path and were dropping the just-warmed neighbor, forcing an
+        // ExoPlayer Release + re-Init on the next settle (measured: an extra decode alloc
+        // and a transient third decoder). The neighbor is anchored to the settled owner
+        // instead (owner effect + releaseFeedScroll) and only changes when the owner
+        // actually changes, so it never churns during a fling.
+        // Deliberately do NOT pause the active card's decoder here. Dragging the list
+        // must not interrupt the playing video; single-card playback is already
+        // enforced by the viewport tracker (`setActiveFeedVideoPostId`), which stays
+        // frozen while `feedScrollingRef` is true and re-picks the active card on
+        // release. `feedScrollingRef` is still raised to suppress mid-drag remounts.
         feedScrollingRef.current = true;
         armFeedScrollSettle();
     };
@@ -2431,6 +2535,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             scheduleActiveFeedVideo(null);
         }
     }, [feedAutoplayAllowed, scheduleActiveFeedVideo]);
+
+    // Silent preload surfaces must not exist while feed video is suspended (comments modal,
+    // Scenes / image fullscreen, blurred feed) or autoplay is off. Clearing the store drops
+    // the neighbor; the `suspendNativeVideo` prop independently gates the mount in FeedPostMedia.
+    useEffect(() => {
+        if (feedNativeVideoSuspended || !feedAutoplayAllowed) {
+            setFeedPreloadPostIds([]);
+        }
+    }, [feedNativeVideoSuspended, feedAutoplayAllowed]);
+
+    // Drop any warm neighbor when the feed unmounts so a later mount cannot inherit a stale id.
+    useEffect(() => {
+        return () => {
+            setFeedPreloadPostIds([]);
+        };
+    }, []);
 
     const onViewableItemsChanged = useRef(
         ({
@@ -2445,6 +2565,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 recordFeedViewRef.current(String(token.item.post.id));
             }
             if (!feedAutoplayAllowedRef.current) {
+                setFeedAudioFocusPostId(null);
+                setFeedPreloadPostIds([]);
                 scheduleActiveFeedVideoRef.current(null);
                 return;
             }
@@ -2476,6 +2598,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
 
             lastViewableVideoPostIdRef.current = nextId;
+            // Publish LIVE audio focus on every pass, including mid-fling. This is a
+            // separate signal from the decoder/mount owner: it lets the outgoing card be
+            // cut the instant it leaves primary focus and the incoming card start promptly,
+            // without churning TextureViews (mount stays on the settle-driven active id).
+            setFeedAudioFocusPostId(nextId);
+            // NOTE: the silent preload neighbor is NOT published here. Viewability only
+            // fires once a card is already ~60% on screen, so warming off it mounts the
+            // neighbor far too late to matter and off the mid-fling candidate rather than
+            // the settled owner. It is owner-anchored instead (see the preload effect near
+            // `flatForRender`) and cleared while the list is in motion (markFeedScrolling).
             // While the finger is down or the list is flinging, only remember the
             // candidate. Mounting here creates and destroys ExoPlayer on every card.
             if (feedScrollingRef.current) return;
@@ -2495,12 +2627,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             // Scroll flags can stick true across navigations on some Android OEMs.
             feedScrollingRef.current = false;
             feedScrollRestingRef.current = false;
+            feedScrollDragMovedRef.current = false;
+            feedScrollDragOriginRef.current = feedScrollYRef.current;
             if (feedScrollIdleTimerRef.current) {
                 clearTimeout(feedScrollIdleTimerRef.current);
                 feedScrollIdleTimerRef.current = null;
             }
             setFeedScrollBusy(false);
             suppressFeedViewabilityRef.current = false;
+            // Feed is frontmost again: release any held (paused) viewer surface so the
+            // restore below can resume playback on this card instead of leaving it paused.
+            setHeldVideoPostId(null);
 
             const scenesReturn = peekScenesReturnHandoff();
             // Prefer the post Scenes just closed on — not sticky pre-Scenes autoplay.
@@ -3940,6 +4077,52 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     flatForRenderRef.current = flatForRender;
 
+    // Track the LIVE audio focus so the silent preload can be anchored to whatever card the
+    // viewport currently considers primary (the same signal that drives playback). The
+    // neighbor is always "the card after the focused one", so it can never disagree with
+    // the playing card and a handoff never has to clear + re-warm the surface.
+    const feedAudioFocusPostIdRef = useRef<string | null>(null);
+
+    // Focus-anchored silent preload: keep exactly ONE upcoming video neighbor's native
+    // surface warming (mounted, prepared, buffered — paused + muted) so settling onto it
+    // plays instantly from frame 0 with no re-create / re-buffer. Anchored to the LIVE
+    // audio focus (the same signal that drives playback), so the warm target always agrees
+    // with the playing card; the neighbor is simply "the next video after the focused one".
+    // It is republished only when focus moves — `setFeedPreloadPostIds` bails on identical
+    // content — so there is no per-frame state thrash.
+    useEffect(() => {
+        if (!feedAutoplayAllowed) return;
+        if (feedNativeVideoSuspended || feedAutoplayOverlayBlocks()) return;
+        const anchor = feedAudioFocusPostIdRef.current;
+        if (!anchor) return;
+        setFeedPreloadPostIds(nextPreloadNeighborIds(flatForRender, anchor));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        activeVideoPostId,
+        flatForRender,
+        feedAutoplayAllowed,
+        feedNativeVideoSuspended,
+        feedAutoplayOverlayBlocks,
+    ]);
+
+    // Re-run the focus-anchored preload whenever the live audio focus changes. During a
+    // fling focus changes every frame; publishing the (often empty) mid-travel neighbor set
+    // churned the warm surface off and on and forced a decoder re-Init on the next settle.
+    // So we only publish a NON-empty neighbor here; an empty result leaves the last warm
+    // target in place until the next real anchor. The set is still cleared explicitly on
+    // suspend / autoplay-off / unmount.
+    useEffect(
+        () =>
+            subscribeFeedAudioFocusPostId((id) => {
+                feedAudioFocusPostIdRef.current = id;
+                if (!feedAutoplayAllowedRef.current) return;
+                const next = nextPreloadNeighborIds(flatForRenderRef.current, id);
+                if (next.length === 0) return;
+                setFeedPreloadPostIds(next);
+            }),
+        [],
+    );
+
     // Recover an empty/errored feed once the connection comes back. NetInfo stays
     // "connected" when only a local port-forward (adb reverse) drops, so we also retry
     // whenever the screen refocuses or the app returns to the foreground with no posts.
@@ -4060,6 +4243,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, [flatForRender]);
 
     const videoPostsForScenes = React.useMemo(() => flat.filter(postHasVideoMedia), [flat]);
+    // id → position in videoPostsForScenes. Lets onOpenScenes patch the tapped post in a
+    // single slice() instead of an O(n) .some()+.map() sweep on the tap frame.
+    const videoPostIndexById = React.useMemo(() => {
+        const index = new Map<string, number>();
+        videoPostsForScenes.forEach((p, i) => index.set(String(p.id), i));
+        return index;
+    }, [videoPostsForScenes]);
 
     const customLocationDisplay = customLocationLabel || customLocation;
 
@@ -4253,6 +4443,123 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         },
         [syncFullscreenPost],
     );
+
+    /**
+     * Host wiring for the fullscreen route. Built once per open and handed to the viewer
+     * through the in-memory bridge; each handler reads `imageFullscreenPostRef` so it always
+     * acts on the current post even though the closure was captured at open time.
+     */
+    const buildFullscreenHandlers = React.useCallback(
+        (): ImageFullscreenHandlers => ({
+            onClose: () => {
+                imageFullscreenOpenRef.current = false;
+                imageFullscreenOpenIdRef.current = null;
+                const y = feedScrollYRef.current;
+                setImageFullscreenPost(null);
+                setImageFullscreenStartIndex(0);
+                restoreFeedVideoAfterOverlay();
+                pinFeedScrollSoon(y);
+            },
+            onLike: async () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p) return;
+                const postId = String(p.id);
+                const prevLiked = p.userLiked === true;
+                const prevLikes = p.stats?.likes ?? 0;
+                const nextLiked = !prevLiked;
+                const nextLikes = Math.max(0, prevLikes + (nextLiked ? 1 : -1));
+                patchFeedPostLike(postId, nextLiked, nextLikes, p);
+                try {
+                    const updated = await toggleLike(userId, p.id, p);
+                    const settledLiked = updated.userLiked ?? nextLiked;
+                    const settledLikes = Math.max(
+                        0,
+                        typeof updated.stats?.likes === 'number' ? updated.stats.likes : nextLikes,
+                    );
+                    patchFeedPostLike(postId, settledLiked, settledLikes, updated);
+                } catch {
+                    patchFeedPostLike(postId, prevLiked, prevLikes, p);
+                }
+            },
+            onComment: () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p) return;
+                captureOverlayVideoResume(p);
+                commentsModalOpenRef.current = true;
+                setSelectedPostId(p.id);
+                setSelectedPostForComments(p);
+                setCommentsModalOpen(true);
+            },
+            onReclip: async () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p) return;
+                await tryReclipPost(p);
+                const refreshed = getLocalPostById(p.id);
+                if (refreshed) syncFullscreenPost(refreshed);
+            },
+            onShare: () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p) return;
+                void openShareForPost(p);
+            },
+            onFollow: async () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p || !user?.handle || p.userHandle === user.handle) return;
+                const updated = await toggleFollowForPost(userId, p.id, p.userHandle, user.handle);
+                const nextFollowing = updated.isFollowing === true;
+                const isFollowRequested = Boolean(
+                    !nextFollowing &&
+                        user.handle &&
+                        isProfilePrivate(p.userHandle) &&
+                        hasPendingFollowRequest(user.handle, p.userHandle),
+                );
+                patchFollowForHandle(p.userHandle, nextFollowing, {
+                    isFollowRequested,
+                } as Partial<Post>);
+                syncFullscreenPost({
+                    ...p,
+                    ...updated,
+                    isFollowing: nextFollowing,
+                    isFollowRequested,
+                } as Post);
+            },
+            onVisitProfile: () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p) return;
+                const handle = p.userHandle;
+                const sourcePostId = p.id;
+                const isFollowing = p.isFollowing === true;
+                navigation.goBack();
+                navigation.navigate('ViewProfile', { handle, sourcePostId, isFollowing });
+            },
+            onMenu: () => {
+                const p = imageFullscreenPostRef.current;
+                if (!p) return;
+                setOverflowPost(p);
+                setOverflowVisible(true);
+            },
+        }),
+        [
+            captureOverlayVideoResume,
+            navigation,
+            openShareForPost,
+            patchFeedPostLike,
+            patchFollowForHandle,
+            pinFeedScrollSoon,
+            restoreFeedVideoAfterOverlay,
+            syncFullscreenPost,
+            tryReclipPost,
+            userId,
+            user?.handle,
+        ],
+    );
+
+    // Mirror live post mutations into the bridge so an open viewer re-renders (like/follow/reclip).
+    React.useEffect(() => {
+        if (imageFullscreenPost) {
+            updateImageFullscreenPost(imageFullscreenPost);
+        }
+    }, [imageFullscreenPost]);
 
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
@@ -4479,6 +4786,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     post={mergedPost}
                     feedVideoMuted={feedVideoMuted}
                     suspendNativeVideo={feedNativeVideoSuspended}
+                    holdNativeVideo={
+                        heldVideoPostId != null &&
+                        String(mergedPost.id) === heldVideoPostId
+                    }
                     onLike={async () => {
                         if (isPendingUpload) return;
                         const postId = String(mergedPost.id);
@@ -4686,29 +4997,54 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             : mergedPost;
                         captureOverlayVideoResume(opened);
                         imageFullscreenOpenRef.current = true;
+                        imageFullscreenOpenIdRef.current = String(opened.id);
+                        imageFullscreenPostRef.current = opened;
                         activeVideoPostIdRef.current = null;
                         setActiveFeedVideoPostId(null);
+                        // Hold this card's player only when it actually has video media (a
+                        // mixed carousel can reach a video slide); image-only posts let every
+                        // feed surface suspend as before.
+                        setHeldVideoPostId(
+                            postHasVideoMedia(opened) ? String(opened.id) : null,
+                        );
                         setImageFullscreenStartIndex(startIndex);
-                        setImageFullscreenOrigin(origin);
-                        // Card like wins over a stale store snapshot so the modal opens on
-                        // the same heart and count the feed row is showing.
-                        const live = getLocalPostById(opened.id);
-                        const latest = live
-                            ? {
-                                  ...opened,
-                                  ...live,
-                                  stats: { ...opened.stats, ...live.stats, likes: opened.stats.likes },
-                                  userLiked: opened.userLiked,
-                              }
-                            : opened;
-                        const snapshot = decorateForUser(userId, latest);
-                        const aligned: Post = {
-                            ...snapshot,
-                            userLiked: opened.userLiked === true,
-                            stats: { ...snapshot.stats, likes: opened.stats.likes },
-                        };
-                        setImageFullscreenLaunch({ post: aligned, startIndex });
-                        setImageFullscreenPost(aligned);
+                        // Seed the bridge with the lightweight card post on THIS frame so the
+                        // tap feels instant, then push the native transparentModal route. The
+                        // store merge + decorateForUser below is real synchronous JS; running
+                        // it here blocked the open.
+                        setImageFullscreenLaunch({
+                            post: opened,
+                            startIndex,
+                            handlers: buildFullscreenHandlers(),
+                        });
+                        setImageFullscreenPost(opened);
+                        navigation.navigate('ImageFullscreenModal', { postId: String(opened.id) });
+                        // Defer the heavy decoration off the interaction/tap path. Guarded by
+                        // the open-token so a viewer the user already closed (or reopened for a
+                        // different post) is never clobbered by stale work.
+                        InteractionManager.runAfterInteractions(() => {
+                            if (!imageFullscreenOpenRef.current) return;
+                            if (imageFullscreenOpenIdRef.current !== String(opened.id)) return;
+                            // Card like wins over a stale store snapshot so the modal opens on
+                            // the same heart and count the feed row is showing.
+                            const live = getLocalPostById(opened.id);
+                            const latest = live
+                                ? {
+                                      ...opened,
+                                      ...live,
+                                      stats: { ...opened.stats, ...live.stats, likes: opened.stats.likes },
+                                      userLiked: opened.userLiked,
+                                  }
+                                : opened;
+                            const snapshot = decorateForUser(userId, latest);
+                            const aligned: Post = {
+                                ...snapshot,
+                                userLiked: opened.userLiked === true,
+                                stats: { ...snapshot.stats, likes: opened.stats.likes },
+                            };
+                            setImageFullscreenLaunch({ post: aligned, startIndex });
+                            setImageFullscreenPost(aligned);
+                        });
                     }}
                     onOpenScenes={(engagement) => {
                         if (isPendingUpload) return;
@@ -4724,18 +5060,38 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         // under fullScreenModal and would otherwise re-arm ExoPlayer.
                         setScenesViewerActive(true);
                         setScenesViewerActiveState(true);
+                        // Keep this card's ExoPlayer mounted (paused) under the Scenes route
+                        // so returning resumes in place instead of re-allocating/restarting.
+                        setHeldVideoPostId(String(opened.id));
                         activeVideoPostIdRef.current = null;
                         setActiveFeedVideoPostId(null);
                         const handoff = peekFeedVideoHandoff(opened.id);
                         const scenesFeedLabel = showFollowingFeed
                             ? 'Following'
                             : String(active || user?.national || 'Ireland');
-                        const scenesPosts = (
-                            videoPostsForScenes.some((p) => String(p.id) === String(opened.id))
-                                ? videoPostsForScenes
-                                : [opened, ...videoPostsForScenes]
-                        ).map((p) => (String(p.id) === String(opened.id) ? { ...p, ...opened, stats: { ...p.stats, ...opened.stats } } : p));
-                        upsertLocalPost(opened);
+                        // NOTE: the `scenesPosts` rebuild must stay synchronous — the Scenes
+                        // screen resolves its initial posts from this launch payload at mount
+                        // (ScenesScreen.tsx:59-64), which runs after the current task, so
+                        // deferring it would mount the viewer with an empty/incomplete list.
+                        // Single slice() + index write instead of a full .some()+.map() sweep.
+                        const openedIndex = videoPostIndexById.get(String(opened.id));
+                        const scenesPosts = (() => {
+                            if (openedIndex == null) return [opened, ...videoPostsForScenes];
+                            const next = videoPostsForScenes.slice();
+                            const base = videoPostsForScenes[openedIndex];
+                            next[openedIndex] = {
+                                ...base,
+                                ...opened,
+                                stats: { ...base.stats, ...opened.stats },
+                            };
+                            return next;
+                        })();
+                        // `upsertLocalPost` is an O(n) store scan and is not needed for the
+                        // Scenes mount (the payload already carries `scenesPosts`), so run it
+                        // after the navigation transition instead of blocking the open frame.
+                        InteractionManager.runAfterInteractions(() => {
+                            upsertLocalPost(opened);
+                        });
                         setScenesLaunchPayload({
                             initialPostId: opened.id,
                             posts: scenesPosts,
@@ -4838,8 +5194,10 @@ onVisitProfile={() =>
             commentsModalOpen,
             scenesViewerActive,
             feedNativeVideoSuspended,
+            heldVideoPostId,
             pendingUploadTick,
             videoPostsForScenes,
+            videoPostIndexById,
             interestsDraft,
             interestsSaving,
             saveInterests,
@@ -4933,11 +5291,15 @@ onVisitProfile={() =>
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
                 // Keep the render window tight for max FPS while flinging.
                 initialNumToRender={2}
-                maxToRenderPerBatch={3}
+                // One row ahead of the tightened default so the silent preload neighbor's
+                // cell is actually mounted (a cell that is not rendered cannot hold the
+                // warmed TextureView sold as "instant" playback).
+                maxToRenderPerBatch={4}
                 // Widened so recycled cells stay mounted long enough to reuse their measured
                 // height; an unmount/remount cycle during video play was collapsing the
                 // VirtualizedList frame map and snapping the native offset by whole posts.
-                windowSize={7}
+                // Also keeps the one-ahead preload neighbor's cell alive.
+                windowSize={9}
                 updateCellsBatchingPeriod={50}
                 // Android-only clipping freed off-screen cell memory while flinging, but with
                 // content-driven heights (no getItemLayout) clipped cells remount at the wrong
@@ -4945,30 +5307,65 @@ onVisitProfile={() =>
                 // list holds its frames; the measured-size cache keeps recycled cells stable.
                 removeClippedSubviews={false}
                 onScrollBeginDrag={() => {
-                    markFeedScrolling();
+                    // Raw touch-down: arm the displacement guard only. Nothing pauses here —
+                    // the playing card keeps running while the list is dragged.
+                    feedScrollDragOriginRef.current = feedScrollYRef.current;
+                    feedScrollDragMovedRef.current = false;
                 }}
-                onMomentumScrollBegin={() => {
+                onMomentumScrollBegin={(e) => {
+                    const y = e.nativeEvent.contentOffset.y;
+                    feedScrollYRef.current = y;
+                    // Momentum can begin from a settle / page-align even when the list never
+                    // really moved (Android emits SCROLL_STATE_SETTLING after a near-stationary
+                    // touch). Only treat it as a real scroll when the list travelled past the
+                    // touch slop from the touch-down origin; a resting finger must not freeze
+                    // the active-id (which would block the settle handoff).
+                    if (
+                        Math.abs(y - feedScrollDragOriginRef.current) <
+                        FEED_SCROLL_TOUCH_SLOP
+                    ) {
+                        feedScrollDragMovedRef.current = false;
+                        return;
+                    }
+                    feedScrollDragMovedRef.current = true;
                     markFeedScrolling();
                 }}
                 onMomentumScrollEnd={(e) => {
-                    // Momentum has stopped — release the gate immediately rather than
-                    // waiting out the trailing debounce.
+                    // Momentum has stopped — release the scroll freeze immediately rather
+                    // than waiting out the trailing debounce. Re-baseline the drag origin
+                    // and clear the moved flag so the next touch-down starts clean.
                     feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+                    feedScrollDragOriginRef.current = feedScrollYRef.current;
+                    feedScrollDragMovedRef.current = false;
                     markFeedScrolling(false);
                 }}
                 onScrollEndDrag={(e) => {
-                    feedScrollYRef.current = e.nativeEvent.contentOffset.y;
+                    const y = e.nativeEvent.contentOffset.y;
+                    feedScrollYRef.current = y;
+                    // Force-clear the moved flag on every release. Keeping it sticky across
+                    // gestures was bypassing the displacement guard and letting a resting
+                    // finger look like a real scroll on the next touch.
+                    const moved = feedScrollDragMovedRef.current;
+                    feedScrollDragMovedRef.current = false;
+                    feedScrollDragOriginRef.current = y;
+                    if (!moved) {
+                        // Finger lifted without displacing the list — no scroll ever happened,
+                        // so stay silent instead of re-running release/autoplay.
+                        return;
+                    }
                     // Gate on release velocity: if the finger lifted at rest (vy ~ 0),
-                    // start playback instantly. If it still had velocity, treat as a fling —
-                    // keep the gate so onMomentumScrollEnd releases it when momentum actually
-                    // stops (the 60ms settle stays as fallback if momentum never starts).
+                    // hand the active slot to the top-most visible card instantly. If it
+                    // still had velocity, treat as a fling — keep the freeze so
+                    // onMomentumScrollEnd lands the handoff when momentum actually stops
+                    // (the 60ms settle stays as fallback if momentum never starts).
                     const vy = e.nativeEvent.velocity?.y;
                     const isFlinging =
                         vy === undefined || Math.abs(vy) >= FEED_SCROLL_REST_VELOCITY;
                     markFeedScrolling(isFlinging);
                 }}
-                // Scroll performance. Every offset change holds the decoder gate;
-                // armFeedScrollSettle is the only place that releases it.
+                // Scroll performance. Every real offset change freezes the active-video
+                // handoff (never pauses playback); armFeedScrollSettle / momentum-end
+                // release it.
                 onScroll={(e) => {
                     const y = e.nativeEvent.contentOffset.y;
                     feedScrollYRef.current = y;
@@ -4981,6 +5378,18 @@ onVisitProfile={() =>
                     ) {
                         return;
                     }
+                    // Strict displacement guard (applies on every event, not just before the
+                    // first move): the active-video handoff is frozen only once the list has
+                    // actually travelled past the touch slop from the touch-down origin. A
+                    // resting or pressing finger emits sub-slop offset churn that must never
+                    // be treated as a scroll.
+                    if (
+                        Math.abs(y - feedScrollDragOriginRef.current) <
+                        FEED_SCROLL_TOUCH_SLOP
+                    ) {
+                        return;
+                    }
+                    feedScrollDragMovedRef.current = true;
                     markFeedScrolling();
                 }}
                 scrollEventThrottle={32}
@@ -5166,133 +5575,6 @@ onVisitProfile={() =>
             />
             </View>
             </FeedPageLayout>
-
-            <ImageFullscreenModal
-                post={imageFullscreenPost}
-                visible={Boolean(imageFullscreenPost)}
-                initialIndex={imageFullscreenStartIndex}
-                originRect={imageFullscreenOrigin}
-                onClose={() => {
-                    imageFullscreenOpenRef.current = false;
-                    const y = feedScrollYRef.current;
-                    setImageFullscreenPost(null);
-                    setImageFullscreenStartIndex(0);
-                    setImageFullscreenOrigin(null);
-                    restoreFeedVideoAfterOverlay();
-                    pinFeedScrollSoon(y);
-                }}
-                onLike={
-                    imageFullscreenPost
-                        ? async () => {
-                              const postId = String(imageFullscreenPost.id);
-                              const prevLiked = imageFullscreenPost.userLiked === true;
-                              const prevLikes = imageFullscreenPost.stats?.likes ?? 0;
-                              const nextLiked = !prevLiked;
-                              const nextLikes = Math.max(0, prevLikes + (nextLiked ? 1 : -1));
-                              patchFeedPostLike(postId, nextLiked, nextLikes, imageFullscreenPost);
-                              try {
-                                  const updated = await toggleLike(
-                                      userId,
-                                      imageFullscreenPost.id,
-                                      imageFullscreenPost,
-                                  );
-                                  const settledLiked = updated.userLiked ?? nextLiked;
-                                  const settledLikes = Math.max(
-                                      0,
-                                      typeof updated.stats?.likes === 'number'
-                                          ? updated.stats.likes
-                                          : nextLikes,
-                                  );
-                                  patchFeedPostLike(postId, settledLiked, settledLikes, updated);
-                              } catch {
-                                  patchFeedPostLike(postId, prevLiked, prevLikes, imageFullscreenPost);
-                              }
-                          }
-                        : undefined
-                }
-                onComment={
-                    imageFullscreenPost
-                        ? () => {
-                              captureOverlayVideoResume(imageFullscreenPost);
-                              commentsModalOpenRef.current = true;
-                              setSelectedPostId(imageFullscreenPost.id);
-                              setSelectedPostForComments(imageFullscreenPost);
-                              setCommentsModalOpen(true);
-                          }
-                        : undefined
-                }
-                onReclip={
-                    imageFullscreenPost
-                        ? async () => {
-                              await tryReclipPost(imageFullscreenPost);
-                              const refreshed = flat.find((p) => p.id === imageFullscreenPost.id);
-                              if (refreshed) syncFullscreenPost(refreshed);
-                          }
-                        : undefined
-                }
-                onShare={
-                    imageFullscreenPost
-                        ? () => {
-                              void openShareForPost(imageFullscreenPost);
-                          }
-                        : undefined
-                }
-                onFollow={
-                    imageFullscreenPost &&
-                    user?.handle &&
-                    imageFullscreenPost.userHandle !== user.handle
-                        ? async () => {
-                              const updated = await toggleFollowForPost(
-                                  userId,
-                                  imageFullscreenPost.id,
-                                  imageFullscreenPost.userHandle,
-                                  user.handle,
-                              );
-                              const nextFollowing = updated.isFollowing === true;
-                              const isFollowRequested = Boolean(
-                                  !nextFollowing &&
-                                      user.handle &&
-                                      isProfilePrivate(imageFullscreenPost.userHandle) &&
-                                      hasPendingFollowRequest(user.handle, imageFullscreenPost.userHandle),
-                              );
-                              patchFollowForHandle(imageFullscreenPost.userHandle, nextFollowing, {
-                                  isFollowRequested,
-                              } as Partial<Post>);
-                              syncFullscreenPost({
-                                  ...imageFullscreenPost,
-                                  ...updated,
-                                  isFollowing: nextFollowing,
-                                  isFollowRequested,
-                              } as Post);
-                          }
-                        : undefined
-                }
-onVisitProfile={
-                      imageFullscreenPost
-                          ? () => {
-                                const handle = imageFullscreenPost.userHandle;
-                                const sourcePostId = imageFullscreenPost.id;
-                                const isFollowing = imageFullscreenPost.isFollowing === true;
-                                setImageFullscreenPost(null);
-                                setImageFullscreenStartIndex(0);
-                                setImageFullscreenOrigin(null);
-                                navigation.navigate('ViewProfile', {
-                                    handle,
-                                    sourcePostId,
-                                    isFollowing,
-                                });
-                            }
-                          : undefined
-                  }
-                onMenu={
-                    imageFullscreenPost
-                        ? () => {
-                              setOverflowPost(imageFullscreenPost);
-                              setOverflowVisible(true);
-                          }
-                        : undefined
-                }
-            />
 
             <Modal
                 visible={commentsModalOpen && Boolean(selectedPostId)}

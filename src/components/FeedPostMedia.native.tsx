@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Animated,
     Image,
     NativeScrollEvent,
@@ -22,8 +23,13 @@ import CachedImage from './CachedImage.native';
 import Video, { type VideoRef } from 'react-native-video';
 import {
     getActiveFeedVideoPostId,
+    getFeedAudioFocusPostId,
+    getFeedPreloadPostIds,
     subscribeActiveFeedVideo,
+    subscribeFeedAudioFocusPostId,
+    subscribeFeedPreloadPostIds,
 } from '../utils/feedActiveVideoNative';
+import { getFeedScrollPauseTarget, subscribeFeedScrollPauseTarget } from '../utils/feedScrollBusyNative';
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
 import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
@@ -42,6 +48,7 @@ import {
     resolveIntrinsicSize,
 } from '../utils/mediaAspectRatio';
 import { mediaItemsEqual } from '../utils/feedPostCompareNative';
+import { normalizeHex } from '../utils/feedAmbientPalette';
 import {
     MOCK_FEED_VIDEO_REMOTE_FALLBACK,
     isMockDemoVideoPath,
@@ -109,11 +116,32 @@ export function resolveFeedVideoPosterUri(
     );
 }
 
+/**
+ * Horizontal displacement (points) a finger must actually travel before a carousel drag
+ * counts as a swipe. Raw touch-down / pressure must not pause the playing clip.
+ */
+const CAROUSEL_DRAG_SLOP = 8;
+
+/**
+ * Warm stand-in painted behind a poster-less slide so a missing thumbnail cover reads as a
+ * soft media surface instead of a hard black rectangle while the video warms up.
+ */
+const POSTER_FALLBACK_COLOR = '#241F1B';
+
+/**
+ * Neutral surface tint used when a post carries no usable `dominantColor` (or the bytes are
+ * still in flight). Deliberately a lifted charcoal, not the `#241F1B` void: an un-warmed
+ * card should read as "media is coming", not as a dead black hole.
+ */
+const MEDIA_PLACEHOLDER_NEUTRAL = '#2E3138';
+
 type FeedNativeVideoProps = {
     /** Full remount key: identity + slide + epoch. A change here MUST rebuild the player. */
     videoKey: string;
     postId: string;
     source: object;
+    /** Base playback gate from the card (viewability / carousel hold / overlay hold). The
+     *  feed drag gate is folded in inside the component so only this leaf re-renders for it. */
     paused: boolean;
     muted: boolean;
     soundOn: boolean;
@@ -145,6 +173,7 @@ type FeedNativeVideoProps = {
  */
 const FeedNativeVideo = React.memo(function FeedNativeVideo({
     videoKey,
+    postId,
     source,
     paused,
     muted,
@@ -158,6 +187,41 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
     onProgress,
     onError,
 }: FeedNativeVideoProps) {
+    /**
+     * Feed drag gate. It lives HERE rather than in `FeedPostMedia` because it only feeds
+     * `paused`; subscribing in the parent made every mounted card re-render (carousel
+     * memos, scrims, overlays, tap layer) on the exact frame the finger starts moving — a
+     * dropped frame that read as a micro-pause at drag start.
+     *
+     * The gate is scoped, not global: the store publishes the post id of the one card the
+     * feed is currently playing, so this subscriber is the ONLY one that sees a change.
+     * Every other mounted leaf is handed a foreign id and keeps `false`, which is a
+     * same-value setState React bails out of — no render, no native prop write.
+     *
+     * Kept out of `isViewable` on purpose — that flag also drives `slideMountVideo`, so
+     * folding scroll state into it would tear the TextureView down every gesture.
+     */
+    const [scrollPaused, setScrollPaused] = useState<boolean>(
+        () => mode === 'feed' && getFeedScrollPauseTarget() === postId,
+    );
+    useEffect(() => {
+        if (mode !== 'feed') return undefined;
+        return subscribeFeedScrollPauseTarget((targetPostId) => {
+            setScrollPaused(targetPostId !== null && targetPostId === postId);
+        });
+    }, [mode, postId]);
+
+    /**
+     * The hold is applied in the same tick as the list event — no animation-frame deferral.
+     *
+     * The gate can only trip once the list has already travelled past the touch slop, so by
+     * then the native pan has long since won its frame and there is nothing left to yield.
+     * Deferring the hold bought nothing there, but it made the RELEASE late: the resume was
+     * queued behind a frame that a saturated UI thread can block for ~200ms (measured), so
+     * a short drag left the player held for a full second after the finger had lifted.
+     * Both directions are synchronous now; the scoped subscription keeps the work to a
+     * single leaf, which is what made that affordable.
+     */
     return (
         <Video
             key={videoKey}
@@ -166,7 +230,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
             style={styles.videoFill}
             resizeMode="cover"
             controls={false}
-            paused={paused}
+            paused={paused || (mode === 'feed' && scrollPaused)}
             muted={muted}
             volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
             repeat={repeat}
@@ -176,6 +240,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
             useTextureView
             hideShutterView
             shutterColor="transparent"
+            progressUpdateInterval={100}
             {...androidListSafeVideoProps()}
             pointerEvents="none"
             onLoadStart={onLoadStart}
@@ -241,6 +306,12 @@ type Props = {
      * Paused TextureViews still punch through Modals on some OEMs.
      */
     suspendNativeVideo?: boolean;
+    /**
+     * Feed only: keep the native Video surface mounted but paused while a full-screen
+     * viewer route (Scenes / ImageFullscreen) covers the feed. Prevents the ExoPlayer
+     * teardown+realloc that would otherwise cause the MP4 to restart from 0 on return.
+     */
+    holdNativeVideo?: boolean;
     /** Feed autoplay is muted by default (global mute pref). */
     muted?: boolean;
     style?: StyleProp<ViewStyle>;
@@ -263,6 +334,7 @@ const FeedPostMedia = React.memo(
         mode = 'feed',
         isActive: _isActive = false,
         suspendNativeVideo = false,
+        holdNativeVideo = false,
         muted = true,
         style,
     },
@@ -287,19 +359,70 @@ const FeedPostMedia = React.memo(
     const [burstKey, setBurstKey] = useState(0);
     /** First decoded frame ready — crossfade video in / poster out. */
     const [videoSurfaceReady, setVideoSurfaceReady] = useState(false);
-    const [posterMounted, setPosterMounted] = useState(true);
     const posterOpacity = useRef(new Animated.Value(1)).current;
     const videoOpacity = useRef(new Animated.Value(0)).current;
     const mediaRevealRef = useRef<Animated.CompositeAnimation | null>(null);
-    /** Poster bitmap already decoded for this URI — survives a cover re-show. */
-    const paintedPosterUriRef = useRef<string | null>(null);
-    /** First composited frame for the current hold. Reset when the hold key changes. */
+    /**
+     * Every poster bitmap that has already painted, by URI. A per-URI SET (not a single
+     * ref) so a slide that decoded its poster while it was still non-current is remembered
+     * the moment it becomes current — a single "last painted" ref lost that and left the
+     * cover opaque over items 2+ of a carousel.
+     */
+    const paintedPosterUrisRef = useRef<Set<string>>(new Set());
+    /**
+     * Whether the CURRENT slide's poster bitmap is already on screen. Drives the pending
+     * overlay only — never layout. Seeded from `paintedPosterUrisRef` on every hold-key
+     * change so a warm card (or a re-swiped carousel page) never flashes the spinner.
+     */
+    const [posterPaintedForSlide, setPosterPaintedForSlide] = useState(false);
+    /**
+     * Placeholder tint for an un-warmed card. `dominantColor` is sampled server-side from the
+     * poster/first still (`api/posts.ts`) and validated here by `normalizeHex`. When the post
+     * carries none, a lifted neutral surface stands in so the card never reads as a black void.
+     */
+    const placeholderColor = useMemo(
+        () => normalizeHex(post.dominantColor) ?? MEDIA_PLACEHOLDER_NEUTRAL,
+        [post.dominantColor],
+    );
+    /** onReadyForDisplay fired for the current hold. Reset when the hold key changes. */
     const firstFrameReadyRef = useRef(false);
+    /**
+     * Android only: playback position has actually advanced since this hold began.
+     *
+     * `onReadyForDisplay` maps to ExoPlayer `STATE_READY` (buffers loaded), which can fire a
+     * few frames BEFORE the first frame is composited onto the TextureView. Fading the poster
+     * on it therefore exposed the unpainted surface as a black flash. The progress handler is
+     * only restarted in STATE_READY and cleared in STATE_BUFFERING, so a tick with a non-zero
+     * position proves the decoder is rendering. iOS `onReadyForDisplay` is
+     * `AVPlayerLayer.isReadyForDisplay` (first frame present), so it needs no extra gate.
+     */
+    const progressReadyRef = useRef(false);
     /** Opaque poster (or the black mask, when there is no thumbnail) is in this frame. */
     const posterCoveringRef = useRef(true);
+    /**
+     * Whether THIS card is allowed to reveal its video over the poster — i.e. it owns the
+     * decoder or the live audio focus. A silent preload neighbor keeps the poster 100% opaque
+     * even once its surface is warm, so pre-warming can never show a frozen first frame.
+     */
+    const posterRevealAllowedRef = useRef(false);
     /** Feed autoplay target from FlatList viewability (store). */
     const [storeActivePostId, setStoreActivePostId] = useState<string | null>(() =>
         getActiveFeedVideoPostId(),
+    );
+    /**
+     * Live audio/playback focus (top-most video in the viewport). Updated on every
+     * viewability pass, including mid-fling — unlike `storeActivePostId` which only moves
+     * at settle. Drives pause/mute so the outgoing card is cut instantly.
+     */
+    const [storeAudioFocusPostId, setStoreAudioFocusPostId] = useState<string | null>(() =>
+        getFeedAudioFocusPostId(),
+    );
+    /**
+     * Adjacent cards the feed is silently pre-warming (next neighbor only). A preload id may
+     * only MOUNT a paused, muted surface — it never claims audio focus or the decoder owner.
+     */
+    const [storePreloadPostIds, setStorePreloadPostIds] = useState<string[]>(() =>
+        getFeedPreloadPostIds(),
     );
     /**
      * Intrinsic width/height measured at runtime, from RNV `naturalSize` (video) or
@@ -313,39 +436,101 @@ const FeedPostMedia = React.memo(
 
     const fadeOutPosterCover = useCallback(() => {
         if (!firstFrameReadyRef.current || !posterCoveringRef.current) return;
+        // A silent preload neighbor keeps its poster opaque until it becomes the primary
+        // player, so warming the surface never shows a frozen first frame.
+        if (!posterRevealAllowedRef.current) return;
+        // Android: wait for playback to actually advance before lifting the cover — STATE_READY
+        // can precede the first composited frame (see progressReadyRef).
+        if (Platform.OS === 'android' && !progressReadyRef.current) return;
         setVideoSurfaceReady((prev) => {
             if (prev) return prev;
             mediaRevealRef.current?.stop();
-            mediaRevealRef.current = Animated.parallel([
-                Animated.timing(videoOpacity, {
-                    toValue: 1,
-                    duration: 100,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(posterOpacity, {
-                    toValue: 0,
-                    duration: 100,
-                    useNativeDriver: true,
-                }),
-            ]);
-            mediaRevealRef.current.start(({ finished }) => {
-                if (finished) setPosterMounted(false);
+            // Only the video top layer animates in. The poster stays fully opaque as the
+            // base layer, and the video surface is transparent until ExoPlayer paints its
+            // first frame — so even a fade that starts before the first composited frame
+            // reveals nothing but the poster underneath (no void flash).
+            mediaRevealRef.current = Animated.timing(videoOpacity, {
+                toValue: 1,
+                duration: 100,
+                useNativeDriver: true,
+            });
+            mediaRevealRef.current.start(() => {
                 mediaRevealRef.current = null;
             });
             return true;
         });
-    }, [posterOpacity, videoOpacity]);
+    }, [videoOpacity]);
 
     useEffect(() => {
         if (mode !== 'feed') return;
         return subscribeActiveFeedVideo(setStoreActivePostId);
     }, [mode]);
 
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedAudioFocusPostId(setStoreAudioFocusPostId);
+    }, [mode]);
+
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedPreloadPostIds(setStorePreloadPostIds);
+    }, [mode]);
+
+    /** Settled decoder owner — drives surface MOUNT/teardown, frozen during a fling. */
     const isViewable =
         mode === 'feed' &&
         !suspendNativeVideo &&
         String(storeActivePostId) === String(post.id);
-    const isFeedAutoplayActive = isViewable;
+    /** Live playback owner — drives pause/mute so audio focus follows the viewport. */
+    const isAudioPrimary =
+        mode === 'feed' &&
+        !suspendNativeVideo &&
+        storeAudioFocusPostId != null &&
+        String(storeAudioFocusPostId) === String(post.id);
+    // Only the audio-primary card actually plays.
+    const isFeedAutoplayActive = isAudioPrimary;
+    // Feed-only: hold the native surface mounted (paused) while a viewer route covers us.
+    const feedVideoHeld = mode === 'feed' && holdNativeVideo;
+    /**
+     * Whether this card's native surface should exist. UNION of the settled decoder owner
+     * and the live audio focus: the audio signal can only MOUNT the incoming card early, it
+     * never removes the settled card (`isViewable`) mid-fling — so no premature TextureView
+     * teardown. Exactly one card is `isAudioPrimary`, so at most one ever plays.
+     */
+    const feedSurfaceMounted = isViewable || isAudioPrimary;
+    /**
+     * Silent preload neighbor: mount a paused, muted surface EARLY so the codec alloc,
+     * container parse and first-segment fetch happen off-primary and settling on this card
+     * plays instantly. Mount-only — it never claims audio focus (see `paused`/`muted` below).
+     */
+    const isPreloadNeighbor =
+        mode === 'feed' &&
+        !suspendNativeVideo &&
+        !feedSurfaceMounted &&
+        storePreloadPostIds.includes(String(post.id));
+    /**
+     * Whether the native surface should exist at all: the settled decoder owner, the live
+     * audio focus, or a silent preload neighbor. The first two may PLAY; the third only warms.
+     */
+    const feedVideoMounted = feedSurfaceMounted || isPreloadNeighbor;
+    /**
+     * The poster may only be lifted for the card that is actually the player. A silent
+     * preload keeps its poster 100% opaque even after its surface is warm — the reveal is
+     * gated on `isAudioPrimary` alone (not `isViewable`), so a warmed-but-not-yet-primary
+     * neighbor can never show a frozen first frame.
+     */
+    posterRevealAllowedRef.current = isAudioPrimary;
+
+    // Reveal the warmed poster -> video swap the instant this card becomes the player.
+    // A preload neighbor's surface is already prepared, so unmuting + lifting the poster
+    // happen together with no re-create / re-buffer and no frozen frame (readiness is still
+    // gated inside `fadeOutPosterCover`: the poster stays opaque until the video is
+    // advancing).
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        if (!isAudioPrimary) return;
+        fadeOutPosterCover();
+    }, [isAudioPrimary, mode, fadeOutPosterCover]);
 
     // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
     const [playerEpoch, setPlayerEpoch] = useState(0);
@@ -396,6 +581,27 @@ const FeedPostMedia = React.memo(
     );
 
     /**
+     * Report a runtime-measured size (RNV `naturalSize`, image `source`).
+     *
+     * When this card owns an external, wrapper-frozen box (feed mode with a supplied
+     * `height`) there is nothing to reflow: hand the measurement straight to the wrapper for
+     * its module cache and skip local state, so the onLoad frame triggers no re-render and no
+     * layout. Everywhere else (detail/ad, or a feed card with no external height) the local
+     * size still drives the box, so keep storing it.
+     */
+    const reportMeasuredSize = useCallback(
+        (size: { width: number; height: number }) => {
+            if (intrinsicRatio(size.width, size.height) == null) return;
+            if (mode === 'feed' && height > 0) {
+                onIntrinsicSize?.(size);
+                return;
+            }
+            setMeasuredSize(size);
+        },
+        [mode, height, onIntrinsicSize],
+    );
+
+    /**
      * Once we know what the media is, tell the wrapper. An effect rather than firing
      * from the load handler directly so the API dimensions also reach the parent on the
      * very first render -- that is the whole point of storing them, and it removes the
@@ -430,17 +636,84 @@ const FeedPostMedia = React.memo(
         setLoadingByUrl((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
     }, []);
 
-    const onCarouselScrollEnd = useCallback(
-        (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    /**
+     * Mirror of `currentIndex` so high-frequency onScroll events read a stable value
+     * instead of a closure that lags a render behind (which would re-fire the
+     * setState/parent emit).
+     */
+    const currentIndexRef = useRef(currentIndex);
+    currentIndexRef.current = currentIndex;
+    /**
+     * Horizontal carousel drag in progress. Only the slide we STARTED on is held paused
+     * (see `carouselDragFromIndexRef`) so the outgoing clip's audio cuts, while the target
+     * slide — mounted the moment the index crosses — still decodes and plays. The hold is
+     * armed only after the finger travels past `CAROUSEL_DRAG_SLOP`, so resting a finger or
+     * light pressure never pauses the playing clip.
+     */
+    const [isCarouselDragging, setIsCarouselDragging] = useState(false);
+    const carouselDragFromIndexRef = useRef<number | null>(null);
+    const carouselDragOriginXRef = useRef<number | null>(null);
+    const carouselDragMovedRef = useRef(false);
+
+    /**
+     * Sync the paging index from a raw horizontal offset. Runs on EVERY onScroll (throttled
+     * to 16ms) as well as momentum-end, so the target slide's <Video> mounts and begins
+     * decoding as soon as the gesture crosses the page midpoint — no trailing timer, no
+     * waiting for the fling to fully settle. The ref guard makes it fire once per crossing.
+     */
+    const applyCarouselIndex = useCallback(
+        (offsetX: number) => {
             if (!hasCarousel || !width) return;
-            const next = Math.round(e.nativeEvent.contentOffset.x / width);
+            const next = Math.round(offsetX / width);
             const clamped = Math.max(0, Math.min(next, maxCarouselIndex));
-            if (clamped === currentIndex) return;
+            if (clamped === currentIndexRef.current) return;
+            currentIndexRef.current = clamped;
             lastEmittedIndexRef.current = clamped;
             setCurrentIndex(clamped);
+            // Outgoing slide is unmounting — release the drag-hold so the target isn't paused.
+            setIsCarouselDragging(false);
             requestAnimationFrame(() => onCarouselIndexChange?.(clamped));
         },
-        [currentIndex, hasCarousel, maxCarouselIndex, onCarouselIndexChange, width],
+        [hasCarousel, maxCarouselIndex, onCarouselIndexChange, width],
+    );
+
+    const onCarouselScroll = useCallback(
+        (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const offsetX = e.nativeEvent.contentOffset.x;
+            const origin = carouselDragOriginXRef.current;
+            if (!carouselDragMovedRef.current && origin != null && Math.abs(offsetX - origin) >= CAROUSEL_DRAG_SLOP) {
+                // The finger has actually swiped — now (and only now) hold the from-slide.
+                carouselDragMovedRef.current = true;
+                if (carouselDragFromIndexRef.current != null) {
+                    setIsCarouselDragging(true);
+                }
+            }
+            applyCarouselIndex(offsetX);
+        },
+        [applyCarouselIndex],
+    );
+
+    const onCarouselScrollBeginDrag = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        carouselDragFromIndexRef.current = currentIndexRef.current;
+        carouselDragOriginXRef.current = e.nativeEvent.contentOffset.x;
+        carouselDragMovedRef.current = false;
+    }, []);
+
+    const onCarouselScrollEndDrag = useCallback(
+        (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const moved = carouselDragMovedRef.current;
+            carouselDragOriginXRef.current = null;
+            carouselDragMovedRef.current = false;
+            if (!moved) {
+                setIsCarouselDragging(false);
+                return;
+            }
+            // No momentum follows (vx ~ 0) — release now so a snap-back resumes playback.
+            // A fling keeps the hold until momentum-end or the index crossing clears it.
+            const vx = e.nativeEvent.velocity?.x;
+            if (vx === undefined || Math.abs(vx) < 0.1) setIsCarouselDragging(false);
+        },
+        [],
     );
 
     useEffect(() => {
@@ -516,24 +789,31 @@ const FeedPostMedia = React.memo(
      * snaps back to opaque in the same commit that mounts the TextureView — an effect
      * runs after paint and leaves one black frame.
      */
-    const posterHoldKey = `${post.id}|${mediaUrl ?? ''}|${currentIndex}|${isViewable ? 1 : 0}|${suspendNativeVideo ? 1 : 0}|${playerEpoch}`;
+    // Keyed on the UNION of mount owners (`feedVideoMounted`), not `isViewable` alone: since
+    // the live audio focus OR a silent preload can mount this card early, the mask identity
+    // must already be "mounted" so the later settle (isViewable 0→1) and the preload→primary
+    // flip do NOT change the key and re-cover an already-painted/warmed first frame.
+    const posterHoldKey = `${post.id}|${mediaUrl ?? ''}|${currentIndex}|${feedVideoMounted ? 1 : 0}|${suspendNativeVideo ? 1 : 0}|${playerEpoch}`;
     const [appliedPosterHoldKey, setAppliedPosterHoldKey] = useState('');
     const activePosterUriRef = useRef<string | null>(activePosterUri ?? null);
     activePosterUriRef.current = activePosterUri ?? null;
     if (video && appliedPosterHoldKey !== posterHoldKey) {
-        const coverAlreadyPainted =
-            posterMounted &&
-            !!activePosterUri &&
-            paintedPosterUriRef.current === activePosterUri;
+        // "Cover already painted" is decided purely by whether THIS slide's poster URI has
+        // ever decoded. The cover element now stays mounted for the life of the card, so a
+        // previously decoded slide keeps its bitmap resident and a re-swipe reuses it.
+        const coverAlreadyPainted = !!activePosterUri && paintedPosterUrisRef.current.has(activePosterUri);
         mediaRevealRef.current?.stop();
         mediaRevealRef.current = null;
         firstFrameReadyRef.current = false;
+        progressReadyRef.current = false;
         posterCoveringRef.current = coverAlreadyPainted || !activePosterUri;
         posterOpacity.setValue(1);
         videoOpacity.setValue(0);
         setAppliedPosterHoldKey(posterHoldKey);
         setVideoSurfaceReady(false);
-        setPosterMounted(true);
+        // Seed the pending-overlay flag from the resident bitmaps: a poster that already
+        // decoded keeps suppressing the spinner across the re-mount / re-swipe.
+        setPosterPaintedForSlide(coverAlreadyPainted);
     }
 
     useEffect(() => {
@@ -703,10 +983,17 @@ const FeedPostMedia = React.memo(
     );
 
     const mediaTapGesture = useMemo(() => {
+        // `maxDistance` is essential for scroll pass-through: RNGH's native tap default is an
+        // unlimited max distance, so a finger that holds still for a beat then drags keeps the
+        // tap in BEGAN (no fail on movement) and the parent list pan waits for it to resolve.
+        // Failing fast once the finger travels past the touch slop hands the gesture straight to
+        // the feed's vertical pan with no perceptible lag. Both taps need it — the composition is
+        // Simultaneous, so the touch stays held while *either* recognizer is still BEGAN.
         const doubleTap = Gesture.Tap()
             .numberOfTaps(2)
             .maxDuration(400)
             .maxDelay(300)
+            .maxDistance(10)
             .onEnd((e, success) => {
                 'worklet';
                 if (!success) return;
@@ -715,17 +1002,25 @@ const FeedPostMedia = React.memo(
         const singleTap = Gesture.Tap()
             .numberOfTaps(1)
             .maxDuration(250)
+            .maxDistance(10)
             .onEnd((_e, success) => {
                 'worklet';
                 if (!success) return;
                 runOnJS(handleFullscreen)();
             });
-        singleTap.requireExternalGestureToFail(doubleTap);
-        const exclusive = Gesture.Exclusive(doubleTap, singleTap);
+        // `Gesture.Exclusive` is implemented as singleTap.requireExternalGestureToFail(doubleTap)
+        // (gestureComposition.ts:98-118), so the single tap was gated behind the double tap's
+        // ~300ms maxDelay — the full-screen open felt laggy. Simultaneous() drops that
+        // dependency: the single tap resolves on release at 0ms, which is the priority.
+        // Deliberate trade-off: a double tap's FIRST tap opens the viewer, so the feed never
+        // sees the second tap — the double-tap like therefore lives on the opened viewer
+        // (Scenes for video; the still viewer now has the same parity). Do not reintroduce
+        // Exclusive here: it is exactly the delay we removed.
+        const combined = Gesture.Simultaneous(doubleTap, singleTap);
         if (hasCarousel) {
-            return Gesture.Simultaneous(Gesture.Native(), exclusive);
+            return Gesture.Simultaneous(Gesture.Native(), combined);
         }
-        return exclusive;
+        return combined;
     }, [handleFullscreen, handleLikeAt, hasCarousel]);
 
     useEffect(
@@ -740,16 +1035,27 @@ const FeedPostMedia = React.memo(
     const renderFeedTapOverlay = () => {
         // Non-carousel: dedicated tap surface (Image/Video steal touches on Android).
         // Carousel: GestureDetector wraps the ScrollView instead (see return).
+        //
+        // Rendered EXACTLY ONCE per card, as a sibling of `mediaBody` at the end of the card
+        // root (not inside the media frame). Nesting a second copy inside `renderSlide` made
+        // two GestureDetectors wrap the same `mediaTapGesture`; the RNGH orchestrator collects
+        // handlers from every view under the pointer, so touch-down ran `begin()` (→ STATE_BEGAN)
+        // and dispatched a state-change event for FOUR tap handlers instead of two — pure
+        // native overhead on the exact frame the list needs to start tracking the pan, with the
+        // topmost (root) copy already receiving the touch. Keep this to one call site.
         if (!feedTapCapture || hasCarousel) return null;
         return (
             <GestureDetector gesture={mediaTapGesture}>
-                <Pressable
+                {/* Plain View, not Pressable: a Pressable claims the JS responder on touch-down
+                    (setJSResponder + blockNativeResponder), which makes the UI thread hold the
+                    touch for a JS round-trip and delays the feed's native pan. The View is still a
+                    reliable native hit target for the detector (the 1% background keeps Android
+                    from skipping it), but leaves the touch stream to the list scroll. */}
+                <View
                     style={FEED_CARD_MEDIA_TAP_LAYER}
                     collapsable={false}
                     accessibilityRole="button"
                     accessibilityLabel="Tap for fullscreen, double tap to like"
-                    // Single/double discrimination is handled by mediaTapGesture (Exclusive).
-                    // Pressable provides a reliable native hit target under the detector.
                 />
             </GestureDetector>
         );
@@ -806,29 +1112,55 @@ const FeedPostMedia = React.memo(
     const showVideoPlayFailed = video && playFailed && mode === 'feed';
 
     /**
+     * Subtle "media is coming" overlay. Shown only when the video surface is actually mounted
+     * for this card AND neither layer can paint yet: the poster bitmap has not arrived and the
+     * video has not reached its first frame. It never participates in layout (absolute fill)
+     * and never renders for a warm card, because `posterPaintedForSlide` is seeded from the
+     * resident bitmaps on every hold-key change.
+     */
+    const videoSurfaceMounted =
+        video &&
+        !playFailed &&
+        (mode === 'detail' ||
+            (mode === 'feed' && !suspendNativeVideo && (feedSurfaceMounted || feedVideoHeld)));
+    const showMediaPendingOverlay =
+        videoSurfaceMounted && !videoSurfaceReady && !posterPaintedForSlide;
+
+    /**
      * The ratio we actually render at: content-first, clamped only at the policy
-     * extremes. `height` is now a MAXIMUM rather than a fixed box -- the wrapper may have
-     * measured a different (content-derived) height and passes that down, but a caller
-     * that still passes a token height gets a sane clamp instead of an unstretched box.
-     */    const intrinsicWidth = effectiveSize?.width;
+     * extremes. In feed mode the wrapper has already turned this into a concrete box and
+     * passed it down, so the frame adopts it verbatim; other callers may pass a token
+     * height and still get a sane clamp instead of an unstretched box.
+     */
+    const intrinsicWidth = effectiveSize?.width;
     const intrinsicHeight = effectiveSize?.height;
     const targetRatio = feedAspectRatio(intrinsicWidth, intrinsicHeight);
     const contentHeight =
         width > 0 ? Math.round(width / targetRatio) : height > 0 ? height : 0;
-    // Clamp to the height the wrapper actually allocated so the video can never overflow the
-    // card. This can never open a gap: when the wrapper was capped below the content height,
-    // `height` IS the wrapper's height, so the frame lands exactly on it and the engagement
-    // row stays flush. The visible effect of capping is extra cropping via resizeMode="cover",
-    // which is the intended trade for a very tall clip on a short viewport.
+    // In feed mode the WRAPPER owns the height. It resolves the intrinsic size (payload
+    // dims first, then the module-scope measurement cache) and passes the final height
+    // down. The frame fills exactly that box so the inner poster/video surface and the
+    // outer container are sized from a single value and therefore can never disagree.
     //
-    // Deliberately NOT also clamped to `width`: any portrait ratio is below 1, so
-    // width/ratio exceeds width, and bounding by width would shrink the frame below the
-    // wrapper and reintroduce the very black gap this clamp is meant to prevent.
-    const frameHeight = height > 0 ? Math.min(contentHeight, height) : contentHeight;
+    // This is what removes the mount pop: previously the inner frame independently
+    // shrank to `min(contentHeight, height)` the instant ExoPlayer reported `naturalSize`
+    // — one render BEFORE the wrapper learned the same measurement through an effect. For
+    // that frame the media sat in a shorter box than the wrapper, leaving a black gap,
+    // and the wrapper then caught up and reflowed. Tying the frame to the wrapper means
+    // both change in the same commit, so there is no gap and no post-mount correction.
+    //
+    // Other modes (detail/ad) keep the clamp: their caller passes a fixed box and a
+    // landscape clip must not overflow it.
+    const frameHeight =
+        mode === 'feed' && height > 0
+            ? height
+            : height > 0
+              ? Math.min(contentHeight, height)
+              : contentHeight;
     const frameStyle = {
         width,
         height: frameHeight,
-        backgroundColor: '#000000',
+        backgroundColor: placeholderColor,
         overflow: 'hidden' as const,
         borderRadius: 20,
     };
@@ -853,15 +1185,24 @@ const FeedPostMedia = React.memo(
         const slidePosterUri = slidePosterRaw;
 
         const slideIsCurrent = slideIndex === currentIndex;
-        // Feed: mount TextureView only while this card is the viewability target.
-        // Keeping paused players on recycled/neighbouring cells punches through the
-        // action-bar overlay on Android.
+        // Hold ONLY the slide the horizontal drag started on so the outgoing clip's audio
+        // cuts the instant the finger swipes, while the target (a different slideIndex) is
+        // never held.
+        const slideDragHeld = isCarouselDragging && slideIndex === carouselDragFromIndexRef.current;
+        // Mount the native TextureView for the ACTIVE slide only. Pre-mounting every slide's
+        // surface made Android composite a neighbouring TextureView into the active page
+        // (two slides visible side-by-side). One surface at a time keeps the card clean.
+        // Mount for the settled owner OR the live audio focus (so the incoming card can
+        // start playing during a fling) OR a silent preload neighbor (warmed ahead of time)
+        // OR while held for a viewer. The audio-focus / preload terms are additive only —
+        // they can mount the incoming card early but never unmount the settled card, which
+        // stays until `isViewable` clears at settle.
         const slideMountVideo =
             slideVideo &&
             slideIsCurrent &&
             !playFailed &&
             (mode === 'detail' ||
-                (mode === 'feed' && !suspendNativeVideo && isViewable));
+                (mode === 'feed' && !suspendNativeVideo && (feedVideoMounted || feedVideoHeld)));
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
             return (
@@ -878,8 +1219,8 @@ const FeedPostMedia = React.memo(
                             markUrlLoaded(slideRawUrl);
                             if (!slideIsCurrent) return;
                             const src = e.nativeEvent.source;
-                            if (src && intrinsicRatio(src.width, src.height) != null) {
-                                setMeasuredSize({
+                            if (src) {
+                                reportMeasuredSize({
                                     width: Number(src.width),
                                     height: Number(src.height),
                                 });
@@ -887,13 +1228,10 @@ const FeedPostMedia = React.memo(
                         }}
                         onError={() => markUrlLoaded(slideRawUrl)}
                     />
-                    {renderFeedTapOverlay()}
                 </View>
             );
         }
 
-        // Poster covers the frame until the active player paints its first frame.
-        const showBufferCover = !slideMountVideo || posterMounted || !videoSurfaceReady;
         // OnReadyForDisplay is the ONLY signal that pixels are actually on the surface.
         // onLoad (stream prepared) can happen well before the first frame is composited;
         // fading the poster on it exposed a black TextureView until the decoder painted.
@@ -907,15 +1245,63 @@ const FeedPostMedia = React.memo(
 
         return (
             <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
+                <Animated.View
+                    style={[
+                        styles.posterCover,
+                        // Base layer. Opaque tint (not transparent) so the cover holds a
+                        // surface colour while the poster bytes decode and when there is no
+                        // poster at all. The video top layer fades in above it, so this never
+                        // has to be lifted mid-mount.
+                        { backgroundColor: placeholderColor },
+                        { opacity: slideMountVideo ? posterOpacity : 1 },
+                    ]}
+                    pointerEvents="none"
+                    collapsable={false}
+                >
+                    {slidePosterUri ? (
+                        <Animated.Image
+                            source={{ uri: slidePosterUri, cache: 'force-cache' }}
+                            style={StyleSheet.absoluteFill}
+                            resizeMode="cover"
+                            resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                            fadeDuration={0}
+                            onLoad={() => {
+                                // Record the paint for EVERY slide, including non-current
+                                // ones. A neighbouring slide's poster decodes while the
+                                // carousel is still on another page; if we skipped it here
+                                // the per-URI set stayed empty and the cover never lifted
+                                // once that page became current.
+                                paintedPosterUrisRef.current.add(slidePosterUri);
+                                if (!slideIsCurrent) return;
+                                if (slidePosterUri !== activePosterUriRef.current) return;
+                                posterCoveringRef.current = true;
+                                // Poster bytes are on screen — drop the pending spinner
+                                // immediately, independent of ExoPlayer readiness.
+                                setPosterPaintedForSlide(true);
+                                markUrlLoaded(slideRawUrl);
+                                fadeOutPosterCover();
+                            }}
+                            onError={() => {
+                                paintedPosterUrisRef.current.add(slidePosterUri);
+                                if (!slideIsCurrent) return;
+                                posterCoveringRef.current = true;
+                                setPosterPaintedForSlide(true);
+                                markUrlLoaded(slideRawUrl);
+                                fadeOutPosterCover();
+                            }}
+                        />
+                    ) : null}
+                </Animated.View>
+
                 {slideMountVideo ? (
                     <View
-                        style={styles.videoClip}
+                        style={[styles.videoClip, styles.videoTopLayer]}
                         pointerEvents={mediaPointerEvents}
                         collapsable={false}
                     >
-                        {/* True crossfade layer: the video stays at opacity 0 under the
-                            poster until onReadyForDisplay, then fades in as the poster fades
-                            out — no orphaned video frame leaks through the thumbnail. */}
+                        {/* Top layer, ABOVE the opaque poster base. Transparent until the
+                            first composited frame, then faded in (0 -> 1) — the poster below
+                            is never lifted, so no void can show through mid-mount. */}
                         <Animated.View
                             style={[
                                 styles.videoClip,
@@ -928,12 +1314,16 @@ const FeedPostMedia = React.memo(
                             videoKey={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
                             postId={String(post.id)}
                             source={cachedVideoSource as object}
-                            paused={mode === 'detail' ? paused : !isViewable}
-                            muted={mode === 'feed' ? !soundOn : false}
+                            paused={
+                                mode === 'detail'
+                                    ? paused
+                                    : !isAudioPrimary || slideDragHeld || feedVideoHeld
+                            }
+                            muted={mode === 'feed' ? !soundOn || !videoSurfaceReady : false}
                             soundOn={soundOn}
                             repeat={mode === 'feed'}
                             mode={mode}
-                            isViewable={isViewable}
+                            isViewable={feedSurfaceMounted}
                             videoRef={feedVideoRef}
                             onLoadStart={() => {
                                 beginUrlLoad(slideRawUrl);
@@ -962,9 +1352,13 @@ const FeedPostMedia = React.memo(
                                 // metadata. `naturalSize` is the pre-rotation size; a clip
                                 // recorded at 1920x1080 then rotated to portrait reports
                                 // width < height, which is exactly what we want to size to.
+                                //
+                                // In feed mode this is handed UP for the module cache only
+                                // (see `reportMeasuredSize`) — the mounted card's box is
+                                // frozen, so a late `naturalSize` cannot resize it.
                                 const ns = meta?.naturalSize;
-                                if (ns && intrinsicRatio(ns.width, ns.height) != null) {
-                                    setMeasuredSize({
+                                if (ns) {
+                                    reportMeasuredSize({
                                         width: Number(ns.width),
                                         height: Number(ns.height),
                                     });
@@ -974,6 +1368,13 @@ const FeedPostMedia = React.memo(
                                 const t = e?.currentTime;
                                 if (typeof t === 'number' && Number.isFinite(t)) {
                                     playbackTimeRef.current = t;
+                                    // Android first-frame gate: the immediate tick at
+                                    // STATE_READY reports ~0s (frame not composited yet); a
+                                    // later, non-zero tick proves the decoder is rendering.
+                                    if (!progressReadyRef.current && t > 0.05) {
+                                        progressReadyRef.current = true;
+                                        fadeOutPosterCover();
+                                    }
                                 }
                                 if (mode !== 'feed' || !isFeedAutoplayActive) return;
                                 if (typeof t === 'number' && Number.isFinite(t)) {
@@ -989,43 +1390,6 @@ const FeedPostMedia = React.memo(
                         </Animated.View>
                     </View>
                 ) : null}
-
-                {showBufferCover ? (
-                    <View
-                        style={[styles.posterCover, !slidePosterUri ? styles.posterCoverMask : null]}
-                        pointerEvents="none"
-                        collapsable={false}
-                    >
-                        {slidePosterUri ? (
-                            <Animated.Image
-                                source={{ uri: slidePosterUri, cache: 'force-cache' }}
-                                style={[
-                                    StyleSheet.absoluteFill,
-                                    { opacity: slideMountVideo ? posterOpacity : 1 },
-                                ]}
-                                resizeMode="cover"
-                                resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                                fadeDuration={0}
-                                onLoad={() => {
-                                    if (!slideIsCurrent) return;
-                                    if (slidePosterUri !== activePosterUriRef.current) return;
-                                    paintedPosterUriRef.current = slidePosterUri;
-                                    posterCoveringRef.current = true;
-                                    markUrlLoaded(slideRawUrl);
-                                    fadeOutPosterCover();
-                                }}
-                                onError={() => {
-                                    if (!slideIsCurrent) return;
-                                    posterCoveringRef.current = true;
-                                    markUrlLoaded(slideRawUrl);
-                                    fadeOutPosterCover();
-                                }}
-                            />
-                        ) : null}
-                    </View>
-                ) : null}
-
-                {renderFeedTapOverlay()}
             </View>
         );
     };
@@ -1053,13 +1417,21 @@ const FeedPostMedia = React.memo(
                     showsHorizontalScrollIndicator={false}
                     decelerationRate="fast"
                     scrollEventThrottle={16}
-                    onMomentumScrollEnd={onCarouselScrollEnd}
+                    onScrollBeginDrag={onCarouselScrollBeginDrag}
+                    onScroll={onCarouselScroll}
+                    onScrollEndDrag={onCarouselScrollEndDrag}
+                    onMomentumScrollEnd={onCarouselScroll}
                     style={frameStyle}
                 >
                     {carouselItems.map((item, index) => (
                         <View
                             key={`${post.id}-carousel-${index}-${item.url}`}
-                            style={[styles.mediaFrame, frameStyle]}
+                            // Explicit layout box: fixed frame size (frameStyle), relative
+                            // positioning and hard overflow clipping so a slide can never
+                            // paint past its own page bounds. Inactive pages are inert to
+                            // touch; only the active slide mounts a native surface.
+                            style={[styles.mediaFrame, styles.carouselSlide, frameStyle]}
+                            pointerEvents={index === currentIndex ? 'auto' : 'none'}
                         >
                             {renderSlide(item, index)}
                         </View>
@@ -1094,6 +1466,11 @@ const FeedPostMedia = React.memo(
             ) : (
                 mediaBody
             )}
+            {showMediaPendingOverlay ? (
+                <View style={styles.loadingOverlay} pointerEvents="none">
+                    <ActivityIndicator size="small" color="rgba(255,255,255,0.85)" />
+                </View>
+            ) : null}
             {video ? <FeedVideoCaptionOverlay post={post} /> : null}
             {imageText ? (
                 <View style={styles.imageTextOverlay} pointerEvents="none">
@@ -1149,6 +1526,7 @@ const FeedPostMedia = React.memo(
             prev.mode === next.mode &&
             prev.muted === next.muted &&
             prev.suspendNativeVideo === next.suspendNativeVideo &&
+            prev.holdNativeVideo === next.holdNativeVideo &&
             prev.carouselIndex === next.carouselIndex &&
             prev.onSingleTap === next.onSingleTap &&
             prev.onDoubleLike === next.onDoubleLike &&
@@ -1163,11 +1541,16 @@ const styles = StyleSheet.create({
     wrap: {
         position: 'relative',
         overflow: 'hidden',
-        backgroundColor: '#000000',
+        backgroundColor: POSTER_FALLBACK_COLOR,
+    },
+    /** Strict per-slide layout box: clips every slide to its own frame. */
+    carouselSlide: {
+        overflow: 'hidden',
+        position: 'relative',
     },
     mediaFrame: {
         overflow: 'hidden',
-        backgroundColor: '#000000',
+        backgroundColor: POSTER_FALLBACK_COLOR,
         position: 'relative',
         borderRadius: 20,
     },
@@ -1175,7 +1558,11 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFill,
         overflow: 'hidden',
         borderRadius: 20,
-        backgroundColor: '#000000',
+    },
+    /** Top layer, above the poster base. Transparent until ExoPlayer paints a frame. */
+    videoTopLayer: {
+        zIndex: 2,
+        elevation: Platform.OS === 'android' ? 2 : 0,
     },
     stillImage: {
         ...StyleSheet.absoluteFill,
@@ -1189,16 +1576,13 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
-    /** Sits above Video until first frame, then faded/unmounted. */
+    /** Opaque base layer under the video top layer; stays opaque for the whole mount. */
     posterCover: {
         ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
-        zIndex: 2,
-        elevation: Platform.OS === 'android' ? 2 : 0,
-    },
-    posterCoverMask: {
-        backgroundColor: '#000000',
+        zIndex: 1,
+        elevation: Platform.OS === 'android' ? 1 : 0,
     },
     loadingOverlay: {
         ...StyleSheet.absoluteFill,
