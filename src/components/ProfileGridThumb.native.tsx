@@ -13,6 +13,12 @@ import {
 import { resolvePostThumbnail } from '../api/collections';
 import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
 import { resolvePostPlaybackUri } from '../utils/postMedia';
+import {
+    FEED_GRID_TILE_BG,
+    FEED_GRID_TILE_BORDER_COLOR,
+    FEED_GRID_TILE_BORDER_WIDTH,
+    FEED_GRID_TILE_RADIUS,
+} from './FeedPageLayout.native';
 
 type Props = {
     post: Post;
@@ -155,12 +161,12 @@ const styles = StyleSheet.create({
         flex: 1,
         width: '100%',
         height: '100%',
-        backgroundColor: '#111827',
+        backgroundColor: FEED_GRID_TILE_BG,
         overflow: 'hidden',
-        borderRadius: 8,
+        borderRadius: FEED_GRID_TILE_RADIUS,
         position: 'relative',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderWidth: FEED_GRID_TILE_BORDER_WIDTH,
+        borderColor: FEED_GRID_TILE_BORDER_COLOR,
     },
     placeholder: {
         alignItems: 'center',

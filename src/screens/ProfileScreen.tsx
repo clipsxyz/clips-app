@@ -58,7 +58,6 @@ import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
-import FeedPostMeta from '../components/FeedPostMeta';
 import { FeedCard } from './FeedScreen';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
 import SavePostModal from '../components/SavePostModal.native';

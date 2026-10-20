@@ -130,16 +130,35 @@ export const FEED_POST_CARD_STYLE = {
 };
 
 /**
+ * Card shell geometry, shared so the feed card and every profile card surface cannot
+ * drift apart. `FEED_CARD_FLOAT_WRAP` and `FEED_CARD_MEDIA_WRAP` must stay in lockstep
+ * with these (radius + hairline).
+ */
+export const FEED_CARD_RADIUS = 20;
+export const FEED_CARD_SHELL_BORDER_WIDTH = 1;
+export const FEED_CARD_SHELL_BORDER_COLOR = 'rgba(255, 255, 255, 0.08)';
+
+/**
+ * Grid-tile chrome (profile posts grid). Deliberately smaller radius than the feed card
+ * shell — a grid cell is a compact square, not a timeline card — but the fill and hairline
+ * are shared tokens so the palette never drifts between surfaces.
+ */
+export const FEED_GRID_TILE_RADIUS = 8;
+export const FEED_GRID_TILE_BG = '#111827';
+export const FEED_GRID_TILE_BORDER_WIDTH = 1;
+export const FEED_GRID_TILE_BORDER_COLOR = 'rgba(255, 255, 255, 0.1)';
+
+/**
  * NOW TV-style floating card shell — transparent so ambient shows in the gap;
  * media corners clip via overflow + radius.
  */
 export const FEED_CARD_FLOAT_WRAP = {
     marginHorizontal: 16,
     marginVertical: 8,
-    borderRadius: 20,
+    borderRadius: FEED_CARD_RADIUS,
     overflow: 'hidden' as const,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: FEED_CARD_SHELL_BORDER_WIDTH,
+    borderColor: FEED_CARD_SHELL_BORDER_COLOR,
     backgroundColor: 'transparent',
     position: 'relative' as const,
 } as const;
@@ -221,7 +240,7 @@ export const FEED_CARD_MEDIA_WRAP = {
     position: 'relative' as const,
     overflow: 'hidden' as const,
     // Radius + overflow clips Android TextureView so recycled / stacked surfaces cannot bleed.
-    borderRadius: 20,
+    borderRadius: FEED_CARD_RADIUS,
 } as const;
 
 /** Double-tap like burst overlay (YouTube Shorts thumbs-up at tap point). */

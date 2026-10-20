@@ -42,6 +42,7 @@ import {
 import { MOCK_FOLLOWING_GRAPH, computeMockGraphFollowCounts } from '../api/mockFollowGraph';
 import { isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
 import { FEED_UI } from '../constants/feedUiTokens';
+import { FEED_GRID_TILE_RADIUS } from '../components/FeedPageLayout.native';
 import type { Post } from '../types';
 import Flag from '../components/Flag.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
@@ -1353,7 +1354,7 @@ const result = await followOrRequest({
                                         width: '33.33%',
                                         height: 120,
                                         overflow: 'hidden',
-                                        borderRadius: 8,
+                                        borderRadius: FEED_GRID_TILE_RADIUS,
                                         position: 'relative',
                                         padding: FEED_UI.spacing.hairlineGap,
                                     }}
@@ -1362,7 +1363,7 @@ const result = await followOrRequest({
                                         style={{
                                             flex: 1,
                                             overflow: 'hidden',
-                                            borderRadius: 8,
+                                            borderRadius: FEED_GRID_TILE_RADIUS,
                                             position: 'relative',
                                         }}
                                         pointerEvents="none"

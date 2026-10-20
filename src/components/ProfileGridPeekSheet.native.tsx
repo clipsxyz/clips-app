@@ -22,6 +22,10 @@ import {
 } from '../utils/effectiveTextPostStyleNative';
 import { getEffectiveTextStyleForPost } from '../utils/effectiveTextPostStyle';
 import { formatProfileDisplayHandle } from '../utils/profileShareUrl';
+import { FEED_CARD_MEDIA_BG } from './FeedPageLayout.native';
+
+/** Compact press-preview card radius (smaller than the feed card shell — it is a modal peek). */
+const PEEK_SHEET_RADIUS = 14;
 
 type PeekAction = {
     id: string;
@@ -258,11 +262,11 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
     },
     previewCard: {
-        borderRadius: 14,
+        borderRadius: PEEK_SHEET_RADIUS,
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
-        backgroundColor: '#000000',
+        backgroundColor: FEED_CARD_MEDIA_BG,
     },
     previewHeader: {
         flexDirection: 'row',
@@ -280,7 +284,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     previewMedia: {
-        backgroundColor: '#000000',
+        backgroundColor: FEED_CARD_MEDIA_BG,
         justifyContent: 'center',
         alignItems: 'center',
         overflow: 'hidden',
@@ -330,11 +334,11 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     actionsCard: {
-        borderRadius: 14,
+        borderRadius: PEEK_SHEET_RADIUS,
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.25)',
-        backgroundColor: '#000000',
+        backgroundColor: FEED_CARD_MEDIA_BG,
     },
     actionRow: {
         flexDirection: 'row',
