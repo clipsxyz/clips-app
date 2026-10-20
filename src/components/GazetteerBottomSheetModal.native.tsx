@@ -7,18 +7,25 @@ import {
     type BottomSheetModalProps,
 } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DISCOVER_SHEET_BASE, DISCOVER_SHEET_BORDER } from '../utils/discoverAmbientPalette';
 
-export const GAZETTEER_SHEET_DARK = {
+/** Discover Canvas sheet preset — solid base of the sheet gradient
+ * (gorhom backgroundStyle can't paint a gradient; inner content that needs
+ * the full wash should render DiscoverSheetCanvas). All dark presets are
+ * standardized to this single shape; LIGHT stays light for the Scenes DM
+ * composer whose content is dark-on-light by design. */
+export const GAZETTEER_SHEET_DISCOVER = {
     background: {
-        backgroundColor: '#030712',
+        backgroundColor: DISCOVER_SHEET_BASE,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.05)',
+        borderBottomWidth: 0,
+        borderColor: DISCOVER_SHEET_BORDER,
     } as ViewStyle,
     handle: {
         width: 40,
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(255,255,255,0.28)',
     } as ViewStyle,
 };
 
@@ -34,147 +41,17 @@ export const GAZETTEER_SHEET_LIGHT = {
     } as ViewStyle,
 };
 
-/** Profile / tagged-people sheets (#0b1220). */
-export const GAZETTEER_SHEET_NAVY = {
-    background: {
-        backgroundColor: '#0b1220',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: '#4B5563',
-    } as ViewStyle,
-};
-
-/** Share profile glass card (#1a1524 + glassPanel applied in sheet). */
-export const GAZETTEER_SHEET_PROFILE = {
-    background: {
-        backgroundColor: '#1a1524',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-    } as ViewStyle,
-};
-
-/** Story share / insights, DM-adjacent charcoal. */
-export const GAZETTEER_SHEET_CHARCOAL = {
-    background: {
-        backgroundColor: '#111827',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-    } as ViewStyle,
-    handle: {
-        width: 48,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-    } as ViewStyle,
-};
-
-export const GAZETTEER_SHEET_DM = {
-    background: {
-        backgroundColor: '#000000',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.15)',
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-    } as ViewStyle,
-};
-
-/** Boost insights (#0a0a0a). */
-export const GAZETTEER_SHEET_BOOST = {
-    background: {
-        backgroundColor: '#0a0a0a',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-    } as ViewStyle,
-};
-
-/** Save post / collections (#1f2937). */
-export const GAZETTEER_SHEET_SAVE = {
-    background: {
-        backgroundColor: '#1f2937',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: '#4B5563',
-    } as ViewStyle,
-};
-
-/** View Profile night-atlas canvas (comments / pull-up cards). */
-export const GAZETTEER_SHEET_PASSPORT = {
-    background: {
-        backgroundColor: '#060d16',
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: 'rgba(255,255,255,0.28)',
-    } as ViewStyle,
-};
-
-/** Sticker picker (#120a1c). */
-export const GAZETTEER_SHEET_STICKER = {
-    background: {
-        backgroundColor: '#120a1c',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: '#4B5563',
-    } as ViewStyle,
-};
-
-/** Edit post / notify menu (#1a1a1a). */
-export const GAZETTEER_SHEET_SLATE = {
-    background: {
-        backgroundColor: '#1a1a1a',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: 'rgba(255,255,255,0.3)',
-    } as ViewStyle,
-};
-
-/** Invite-to-group list (#111). */
-export const GAZETTEER_SHEET_GROUP = {
-    background: {
-        backgroundColor: '#111111',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-    } as ViewStyle,
-    handle: {
-        width: 40,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-    } as ViewStyle,
-};
+export const GAZETTEER_SHEET_DARK = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_NAVY = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_PROFILE = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_CHARCOAL = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_DM = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_BOOST = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_SAVE = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_PASSPORT = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_STICKER = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_SLATE = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_GROUP = GAZETTEER_SHEET_DISCOVER;
 
 type Props = {
     visible: boolean;
@@ -253,8 +130,8 @@ export default function GazetteerBottomSheetModal({
             enablePanDownToClose={enablePanDownToClose}
             onDismiss={onDismiss}
             backdropComponent={renderBackdrop}
-            backgroundStyle={backgroundStyle}
-            handleIndicatorStyle={handleIndicatorStyle}
+            backgroundStyle={backgroundStyle ?? GAZETTEER_SHEET_DISCOVER.background}
+            handleIndicatorStyle={handleIndicatorStyle ?? GAZETTEER_SHEET_DISCOVER.handle}
             footerComponent={footerComponent}
             keyboardBehavior={keyboardBehavior}
             keyboardBlurBehavior={keyboardBlurBehavior}

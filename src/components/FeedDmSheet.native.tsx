@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
     footerInner: {
         paddingHorizontal: 16,
         paddingTop: 12,
-        backgroundColor: '#000000',
+        backgroundColor: 'transparent',
     },
     composerRow: {
         flexDirection: 'row',
@@ -162,10 +162,10 @@ const styles = StyleSheet.create({
         flex: 1,
         minHeight: 44,
         maxHeight: 120,
-        borderRadius: 16,
+        borderRadius: 999,
         borderWidth: 1,
-        borderColor: '#FFFFFF',
-        backgroundColor: '#0a0a0a',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
         color: '#FFFFFF',
         fontSize: 15,
         lineHeight: 20,

@@ -31,6 +31,7 @@ class Message extends Model
         'image_url',
         'is_system_message',
         'reply_to_message_id',
+        'source_post_id',
         'read_at',
     ];
 
@@ -63,6 +64,12 @@ class Message extends Model
     public function replyToMessage()
     {
         return $this->belongsTo(Message::class, 'reply_to_message_id');
+    }
+
+    /** Post this message shares/anchors to, when sent from a share sheet. */
+    public function sourcePost()
+    {
+        return $this->belongsTo(Post::class, 'source_post_id');
     }
 
     public function isGroupMessage(): bool

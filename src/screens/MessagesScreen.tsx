@@ -95,6 +95,9 @@ function sameDmHandle(a?: string | null, b?: string | null): boolean {
 
 /** Derive a shareable post reference from a DM message (explicit id or share URL). */
 function getMessageSharedRef(msg: ChatMessage): SharedPostRef | null {
+    // Structured linkage first (persisted source_post_id): the message text may be
+    // a user caption with no parseable link in it at all.
+    if (msg.sourcePostId) return { postId: msg.sourcePostId };
     if (msg.postId) return { postId: msg.postId };
     if (msg.text) return extractSharedPostRef(msg.text);
     return null;
@@ -104,34 +107,106 @@ function getMessageSharedRef(msg: ChatMessage): SharedPostRef | null {
 type DmReplyPreview = {
     senderHandle: string;
     text: string;
+    /** Canonical thumbnail/poster URI (kept in sync with `imageUrl`). */
     thumbUrl?: string;
+    imageUrl?: string;
     isVideo: boolean;
 };
 
-/** Resolve a shared-post thumbnail for a parent message (plain media or embedded post ref). */
+/** First non-empty string in a candidate list, or undefined. */
+function firstThumbCandidate(...values: Array<string | null | undefined>): string | undefined {
+    for (const v of values) {
+        if (typeof v === 'string' && v.trim().length > 0) return v;
+    }
+    return undefined;
+}
+
+/**
+ * Resolve a thumbnail/poster for a parent message, checking EVERY source:
+ * the message's own media fields (camel + snake/loose variants), then the
+ * shared post's poster/thumbnail/media fields and its first slide.
+ * A video file URL is never returned as the image URI — for videos the
+ * poster/thumbnail wins, and `isVideo` tells the card to overlay a badge.
+ */
 function resolveReplyThumb(
     msg: ChatMessage | undefined,
     sharedPosts: Record<string, Post>,
-): { thumbUrl?: string; isVideo: boolean } {
+): { thumbUrl?: string; imageUrl?: string; isVideo: boolean } {
     if (!msg) return { thumbUrl: undefined, isVideo: false };
-    if (msg.imageUrl) {
-        return { thumbUrl: msg.imageUrl, isVideo: isVideoUrlString(msg.imageUrl) };
-    }
+    const loose = msg as unknown as Record<string, unknown>;
     const ref = getMessageSharedRef(msg);
     const post = ref ? sharedPosts[sharedPostRefKey(ref)] : undefined;
+    const loosePost = post as unknown as Record<string, any> | undefined;
+    const item = post?.mediaItems?.[0];
+    const slide = loosePost?.slides?.[0];
+
+    const candidates = [
+        msg.imageUrl,
+        loose.thumbUrl as string | undefined,
+        loose.thumbnailUrl as string | undefined,
+        loose.thumbnail_url as string | undefined,
+        post?.videoPosterUrl,
+        post?.thumbnailUrl,
+        loosePost?.thumbnail_url as string | undefined,
+        loosePost?.thumbnailUrl as string | undefined,
+        item?.posterUrl,
+        item?.thumbnailUrl,
+        item?.thumbnail_url,
+        slide?.posterUrl as string | undefined,
+        slide?.thumbnailUrl as string | undefined,
+        slide?.thumbnail_url as string | undefined,
+        // Media URLs are usable only when they point at an image (checked below).
+        msg.imageUrl,
+        loose.mediaUrl as string | undefined,
+        loose.media_url as string | undefined,
+        post?.mediaUrl,
+        loosePost?.media_url as string | undefined,
+        item?.url,
+        slide?.url as string | undefined,
+    ];
+    const isVideo =
+        post?.mediaType === 'video' ||
+        item?.type === 'video' ||
+        slide?.type === 'video' ||
+        candidates.some((c) => isVideoUrlString(c ?? undefined));
+
+    // Prefer the first candidate that can actually render in an <Image>;
+    // video URLs are skipped so a poster further down the list can win.
+    const thumbUrl = candidates
+        .map((c) => firstThumbCandidate(c))
+        .find((c): c is string => !!c && !isVideoUrlString(c));
+    return { thumbUrl, imageUrl: thumbUrl, isVideo };
+}
+
+/** Thumbnail/poster for a resolved shared post (poster → thumbnail → first slide). */
+function thumbFromPost(post: Post | undefined): { thumbUrl?: string; isVideo: boolean } {
     if (!post) return { thumbUrl: undefined, isVideo: false };
+    const loosePost = post as unknown as Record<string, any>;
     const item = post.mediaItems?.[0];
-    const thumbUrl =
-        post.videoPosterUrl ||
-        post.thumbnailUrl ||
-        post.mediaUrl ||
-        item?.posterUrl ||
-        item?.thumbnailUrl ||
-        item?.url;
+    const slide = loosePost.slides?.[0];
+    const candidates = [
+        post.videoPosterUrl,
+        post.thumbnailUrl,
+        loosePost.thumbnail_url as string | undefined,
+        item?.posterUrl,
+        item?.thumbnailUrl,
+        item?.thumbnail_url,
+        slide?.posterUrl as string | undefined,
+        slide?.thumbnailUrl as string | undefined,
+        slide?.thumbnail_url as string | undefined,
+        post.mediaUrl,
+        loosePost.media_url as string | undefined,
+        item?.url,
+        slide?.url as string | undefined,
+    ];
     const isVideo =
         post.mediaType === 'video' ||
         item?.type === 'video' ||
-        isVideoUrlString(thumbUrl);
+        slide?.type === 'video' ||
+        candidates.some((c) => isVideoUrlString(c ?? undefined));
+    const thumbUrl = candidates.find(
+        (c): c is string => typeof c === 'string' && c.trim().length > 0 && !isVideoUrlString(c),
+    );
     return { thumbUrl, isVideo };
 }
 
@@ -163,24 +238,46 @@ function resolveReplyPreview(
     if (!replyTo && !rawReplyId) return null;
     const parent = rawReplyId ? messagesById.get(rawReplyId) : undefined;
     const fromParent = resolveReplyThumb(parent, sharedPosts);
-    const thumbUrl = replyTo?.imageUrl || fromParent.thumbUrl;
+    // The stored payload may carry the media URL under either key; a raw video
+    // URL there is not renderable, so fall through to the parent's poster.
+    const payloadThumb = firstThumbCandidate(replyTo?.imageUrl, replyTo?.thumbUrl);
+    // Last resort: the parent row may be outside the loaded page, but the
+    // server-rehydrated quote text for a shared-post parent IS the share URL —
+    // resolve the post from it directly.
+    const refFromQuoteText =
+        !payloadThumb && !fromParent.thumbUrl && replyTo?.text
+            ? extractSharedPostRef(replyTo.text)
+            : null;
+    const fromQuotePost = thumbFromPost(
+        refFromQuoteText ? sharedPosts[sharedPostRefKey(refFromQuoteText)] : undefined,
+    );
+    const thumbUrl =
+        payloadThumb && !isVideoUrlString(payloadThumb)
+            ? payloadThumb
+            : (fromParent.thumbUrl ?? fromQuotePost.thumbUrl);
     const isVideo =
-        replyTo?.mediaType === 'video' || fromParent.isVideo || isVideoUrlString(thumbUrl);
+        replyTo?.mediaType === 'video' ||
+        fromParent.isVideo ||
+        fromQuotePost.isVideo ||
+        isVideoUrlString(payloadThumb) ||
+        isVideoUrlString(thumbUrl);
     return {
         senderHandle: replyTo?.senderHandle || parent?.senderHandle || '',
         text: replySnippetLabel(replyTo?.text || parent?.text || '', thumbUrl, isVideo),
         thumbUrl,
+        imageUrl: thumbUrl,
         isVideo,
     };
 }
 
 /** Build the quoted preview for a message being replied to from the composer. */
 function previewFromMessage(msg: ChatMessage, sharedPosts: Record<string, Post>): DmReplyPreview {
-    const { thumbUrl, isVideo } = resolveReplyThumb(msg, sharedPosts);
+    const { thumbUrl, imageUrl, isVideo } = resolveReplyThumb(msg, sharedPosts);
     return {
         senderHandle: msg.senderHandle || '',
         text: replySnippetLabel(msg.text || '', thumbUrl, isVideo),
         thumbUrl,
+        imageUrl,
         isVideo,
     };
 }
@@ -207,17 +304,41 @@ function DmQuotedReply({
             testID="dm-quoted-reply"
         >
             <View style={styles.quotedReplyAccent} />
-            {preview.thumbUrl ? (
-                <View style={[styles.quotedReplyThumb, isComposer && styles.quotedReplyThumbComposer]}>
-                    {preview.isVideo ? (
-                        <View style={styles.quotedReplyVideoBadge}>
-                            <Icon name="videocam" size={ox(isComposer ? 16 : 12)} color="#FFFFFF" />
-                        </View>
-                    ) : (
-                        <Image source={{ uri: preview.thumbUrl }} style={styles.quotedReplyThumbImage} />
-                    )}
-                </View>
-            ) : null}
+            {(() => {
+                const uri = preview.imageUrl || preview.thumbUrl;
+                const showImage =
+                    typeof uri === 'string' && uri.trim().length > 0 && !isVideoUrlString(uri);
+                if (!showImage && !preview.isVideo) return null;
+                return (
+                    <View
+                        style={[
+                            styles.quotedReplyThumb,
+                            isComposer && styles.quotedReplyThumbComposer,
+                        ]}
+                    >
+                        {showImage ? (
+                            <Image
+                                source={{ uri }}
+                                style={styles.quotedReplyThumbImage}
+                                resizeMode="cover"
+                            />
+                        ) : (
+                            <View style={styles.quotedReplyVideoBadge}>
+                                <Icon
+                                    name="videocam"
+                                    size={ox(isComposer ? 16 : 12)}
+                                    color="#FFFFFF"
+                                />
+                            </View>
+                        )}
+                        {showImage && preview.isVideo ? (
+                            <View style={styles.quotedReplyVideoBadgeOverlay}>
+                                <Icon name="videocam" size={ox(9)} color="#FFFFFF" />
+                            </View>
+                        ) : null}
+                    </View>
+                );
+            })()}
             <View style={styles.quotedReplyBody}>
                 <Text style={styles.quotedReplySender} numberOfLines={1}>
                     {senderLabel}
@@ -335,7 +456,6 @@ const DmMessageRow = React.memo(function DmMessageRow({
         onStartShouldSetPanResponder: () => false,
         // Higher threshold so a soft hold (with tiny jitter) isn't stolen as a swipe.
         onMoveShouldSetPanResponder: (_evt, gestureState) =>
-            !isFromMe &&
             gestureState.dx > 28 &&
             Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.35,
         onPanResponderGrant: () => {
@@ -345,7 +465,6 @@ const DmMessageRow = React.memo(function DmMessageRow({
             setSwipingMessageId(item.id);
         },
         onPanResponderMove: (_evt, gestureState) => {
-            if (isFromMe) return;
             const dx = Math.max(0, Math.min(gestureState.dx, 84));
             const dy = Math.abs(gestureState.dy);
             if (dx > dy * 0.6) {
@@ -353,7 +472,9 @@ const DmMessageRow = React.memo(function DmMessageRow({
             }
         },
         onPanResponderRelease: (_evt, gestureState) => {
-            const shouldReply = !isFromMe && gestureState.dx > 48;
+            // Swipe-to-reply binds the same way long-press does, for own and
+            // incoming messages alike.
+            const shouldReply = gestureState.dx > 48;
             Animated.spring(swipeAnim, {
                 toValue: 0,
                 friction: 7,
@@ -533,6 +654,17 @@ const DmMessageRow = React.memo(function DmMessageRow({
                         <DmMessagePressable onLongPress={() => ctx.openMessageActions(item)} onDoubleTap={onDoubleTap} suppressTapRef={suppressTapRef}>
                             {sharedCard}
                         </DmMessagePressable>
+                        {item.text?.trim() && !/^https?:\/\/\S+$/.test(item.text.trim()) ? (
+                            <Text
+                                style={[
+                                    styles.messageText,
+                                    styles.sharedPostCaption,
+                                    isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
+                                ]}
+                            >
+                                {item.text.trim()}
+                            </Text>
+                        ) : null}
                         {renderReactionPills()}
                         <View
                             style={[
@@ -775,6 +907,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [threadHasMore, setThreadHasMore] = useState(false);
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+    const composerInputRef = useRef<TextInput>(null);
     const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
     const [createGroupOpen, setCreateGroupOpen] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
@@ -840,6 +973,12 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [leaveGroupBusy, setLeaveGroupBusy] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
+    /** True from thread open until the initial bottom anchor has settled. While
+     * pending, maintainVisibleContentPosition stays OFF (it would anchor the old
+     * position against scrollToEnd) and late-measuring rows re-trigger the scroll. */
+    const initialScrollPendingRef = useRef(true);
+    const [mvcpEnabled, setMvcpEnabled] = useState(false);
+    const initialScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
     const isScreenFocused = useIsFocused();
     // Message ids currently inside the active viewport — drives inline video auto-pause.
     const [activeMessageIds, setActiveMessageIds] = useState<Set<string>>(() => new Set());
@@ -892,6 +1031,150 @@ export default function MessagesScreen({ route, navigation }: any) {
     const showMenu = useCallback((opts: SheetMenuState) => {
         setSheetMenu(opts);
     }, []);
+
+    // --- Consolidated hooks (relocated from the handler section below) ---
+    // Every hook in this component lives in this top block or in the initial
+    // state/ref declarations above it. Nothing below this point calls a hook
+    // except the two voice-mic refs, which are unconditional top-level calls
+    // placed next to the handlers they capture.
+
+    /** Measure the reaction pill so the fly overlay can land on it. */
+    const measureReactionFlyTarget = useCallback(() => {
+        if (!reactionFly) return;
+        const key = `${reactionFly.messageId}::${reactionFly.emoji}`;
+        const node = reactionPillRefs.current[key];
+        if (!node || typeof (node as any).measureInWindow !== 'function') {
+            // Pill may not have laid out yet — retry once next frame
+            requestAnimationFrame(() => {
+                const retry = reactionPillRefs.current[key];
+                if (retry && typeof (retry as any).measureInWindow === 'function') {
+                    (retry as View).measureInWindow((x, y, w, h) => {
+                        setReactionFly((prev) =>
+                            prev && prev.messageId === reactionFly.messageId && prev.emoji === reactionFly.emoji
+                                ? { ...prev, target: { x: x + w / 2, y: y + h / 2 } }
+                                : prev,
+                        );
+                    });
+                } else {
+                    setReactionFly(null);
+                }
+            });
+            return;
+        }
+        (node as View).measureInWindow((x, y, w, h) => {
+            setReactionFly((prev) =>
+                prev && prev.messageId === reactionFly.messageId && prev.emoji === reactionFly.emoji
+                    ? { ...prev, target: { x: x + w / 2, y: y + h / 2 } }
+                    : prev,
+            );
+        });
+    }, [reactionFly]);
+
+    useEffect(() => {
+        if (!replyingTo && !editingMessage) {
+            replyBarAnim.setValue(0);
+            return;
+        }
+        replyBarAnim.setValue(0);
+        Animated.spring(replyBarAnim, {
+            toValue: 1,
+            friction: 8,
+            tension: 120,
+            useNativeDriver: true,
+        }).start();
+    }, [replyingTo?.id, editingMessage?.id, replyBarAnim]);
+
+    // Reply selection (long-press or swipe) focuses the composer so the quote
+    // strip anchored above the input is immediately actionable.
+    useEffect(() => {
+        if (!replyingTo) return;
+        const t = setTimeout(() => composerInputRef.current?.focus(), 60);
+        return () => clearTimeout(t);
+    }, [replyingTo?.id]);
+
+    // Voice recorder/player teardown on unmount.
+    useEffect(() => {
+        return () => {
+            voiceDraftPlayingRef.current = false;
+            void audioRecorderRef.current.stopRecorder().catch(() => {});
+            audioRecorderRef.current.removeRecordBackListener();
+            void audioRecorderRef.current.stopPlayer().catch(() => {});
+            audioRecorderRef.current.removePlayBackListener();
+            recorderSessionActiveRef.current = false;
+        };
+    }, []);
+
+    /**
+     * Voice-mic gesture surface. The actions ref starts as no-ops and is
+     * re-pointed at the real handlers on every render (assignment below, next
+     * to their definitions), so this hook can live in the top block without a
+     * TDZ reference to handler consts declared later.
+     */
+    const voiceMicActionsRef = useRef<{
+        startVoiceRecording: (appendSegment?: boolean) => Promise<unknown>;
+        pauseVoiceRecordingForPreview: () => Promise<unknown>;
+        cancelVoiceRecording: () => Promise<unknown>;
+    }>({
+        startVoiceRecording: async () => false,
+        pauseVoiceRecordingForPreview: async () => undefined,
+        cancelVoiceRecording: async () => undefined,
+    });
+
+    const voiceMicPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => !voiceDraftRef.current,
+            onMoveShouldSetPanResponder: () => isRecordingVoiceRef.current,
+            onPanResponderGrant: (evt) => {
+                if (voiceDraftRef.current) return;
+                const wasRecording = isRecordingVoiceRef.current;
+                micGestureStartRef.current = {
+                    x: evt.nativeEvent.pageX,
+                    y: evt.nativeEvent.pageY,
+                    at: Date.now(),
+                    wasRecording,
+                };
+                setRecordingGestureHint('none');
+                if (!wasRecording) {
+                    void voiceMicActionsRef.current.startVoiceRecording();
+                }
+            },
+            onPanResponderMove: (evt) => {
+                if (!isRecordingVoiceRef.current) return;
+                const dx = evt.nativeEvent.pageX - micGestureStartRef.current.x;
+                if (dx < -72) {
+                    setRecordingGestureHint('cancel');
+                } else {
+                    setRecordingGestureHint('none');
+                }
+            },
+            onPanResponderRelease: () => {
+                const { at, wasRecording } = micGestureStartRef.current;
+                const heldMs = Date.now() - at;
+                const hint = recordingGestureHintRef.current;
+                if (hint === 'cancel') {
+                    void voiceMicActionsRef.current.cancelVoiceRecording();
+                    setRecordingGestureHint('none');
+                    return;
+                }
+                if (!isRecordingVoiceRef.current) {
+                    setRecordingGestureHint('none');
+                    return;
+                }
+                if (heldMs >= 400) {
+                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
+                } else if (wasRecording) {
+                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
+                }
+                setRecordingGestureHint('none');
+            },
+            onPanResponderTerminate: () => {
+                if (isRecordingVoiceRef.current && micGestureStartRef.current.wasRecording) {
+                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
+                }
+                setRecordingGestureHint('none');
+            },
+        }),
+    ).current;
 
     useEffect(() => {
         if (!communityCreated || communityCreatedHandledRef.current) return;
@@ -976,6 +1259,16 @@ export default function MessagesScreen({ route, navigation }: any) {
         if (!isGroupThread) {
             setGroupAvatarUrl(undefined);
         }
+        // Flush the previous thread completely on open/switch: stale rows (and the
+        // FlatList's retained native offset) must never leak into the new thread.
+        setMessages([]);
+        setReplyingTo(null);
+        setEditingMessage(null);
+        setThreadCursor(null);
+        setThreadHasMore(false);
+        initialScrollPendingRef.current = true;
+        setMvcpEnabled(false);
+        shouldAutoScrollRef.current = true;
         loadMessages(true);
     }, [handle, chatGroupId]);
 
@@ -1154,6 +1447,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         for (const msg of messages) {
             const ref = getMessageSharedRef(msg);
             if (ref) refs.set(sharedPostRefKey(ref), ref);
+            // Quoted parents may sit outside this page; their quote text (a
+            // share URL for post parents) still lets us resolve the poster.
+            if (msg.replyTo?.text) {
+                const quoteRef = extractSharedPostRef(msg.replyTo.text);
+                if (quoteRef) refs.set(sharedPostRefKey(quoteRef), quoteRef);
+            }
         }
         const missing = Array.from(refs.entries()).filter(([key]) => !sharedPosts[key]);
         if (missing.length === 0) return;
@@ -1353,10 +1652,37 @@ export default function MessagesScreen({ route, navigation }: any) {
         });
     };
 
+    /**
+     * The single initial-scroll authority. After the first page loads, anchor to
+     * the bottom repeatedly while async rows (images, shared-post cards) finish
+     * measuring, then hand control back: clear the pending flag and enable
+     * maintainVisibleContentPosition for older-message prepends.
+     */
     useEffect(() => {
-        if (loading || messages.length === 0) return;
-        scrollMessagesToBottom(false);
+        if (loading || messages.length === 0 || !initialScrollPendingRef.current) return;
+        for (const t of initialScrollTimersRef.current) clearTimeout(t);
+        const delays = [0, 120, 350, 700];
+        initialScrollTimersRef.current = delays.map((delay, i) =>
+            setTimeout(() => {
+                scrollMessagesToBottom(false);
+                if (i === delays.length - 1) {
+                    initialScrollPendingRef.current = false;
+                    setMvcpEnabled(true);
+                }
+            }, delay),
+        );
+        return () => {
+            for (const t of initialScrollTimersRef.current) clearTimeout(t);
+            initialScrollTimersRef.current = [];
+        };
     }, [loading, messages.length, scrollMessagesToBottom]);
+
+    // Shared-post cards arrive (and grow) after the message rows: while the
+    // initial anchor is still pending, each resolution re-asserts the bottom.
+    useEffect(() => {
+        if (!initialScrollPendingRef.current || messages.length === 0) return;
+        scrollMessagesToBottom(false);
+    }, [sharedPosts, messages.length, scrollMessagesToBottom]);
 
     const loadMessages = async (reset: boolean = false) => {
         if (!user?.handle) return;
@@ -1379,6 +1705,22 @@ export default function MessagesScreen({ route, navigation }: any) {
                 });
             }
             setMessages(page.items);
+            // Re-bind an armed reply target across the reload: if the user tapped
+            // Reply on an optimistic/locally-rendered message, its temporary ID
+            // no longer exists once server rows land. Swap in the matching server
+            // message (same sender + text, close timestamp) so the outgoing
+            // mutation carries the real parent ID.
+            setReplyingTo((prev) => {
+                if (!prev) return prev;
+                if (page.items.some((m) => m.id === prev.id)) return prev;
+                const match = page.items.find(
+                    (m) =>
+                        m.senderHandle === prev.senderHandle &&
+                        (m.text ?? '') === (prev.text ?? '') &&
+                        Math.abs(m.timestamp - prev.timestamp) < 15000,
+                );
+                return match ?? prev;
+            });
             if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
                 setGroupName(page.groupName);
                 setGroupAvatarUrl((page as any).groupAvatarUrl || undefined);
@@ -1428,6 +1770,60 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
     };
 
+    /** Quote context for whichever send fires next (text, image, sticker, voice). */
+    const buildReplyToPayload = (): ChatMessage['replyTo'] => {
+        if (!replyingTo) return undefined;
+        // Resolve the target against the CURRENT message list at send time, not
+        // the object captured when Reply was tapped: an optimistic parent will
+        // have been reloaded under its server UUID by now, and that is the ID
+        // that must reach the mutation.
+        const target = messagesById.get(replyingTo.id) ?? replyingTo;
+        const preview = previewFromMessage(target, sharedPosts);
+        return {
+            messageId: target.id,
+            text: preview.text,
+            senderHandle: target.senderHandle,
+            imageUrl: preview.imageUrl || preview.thumbUrl,
+            thumbUrl: preview.thumbUrl || preview.imageUrl,
+            // Carry the media type even when the poster hasn't resolved yet
+            // (sharedPosts may still be loading) so the quote is never
+            // downgraded to a plain text reply on other clients / reload.
+            ...(preview.thumbUrl || preview.isVideo
+                ? { mediaType: (preview.isVideo ? 'video' : 'image') as 'image' | 'video' }
+                : {}),
+        };
+    };
+
+    /**
+     * Swap an optimistic row for its server-persisted row IN PLACE.
+     * Never refetch the thread on send: a full reload rebuilds every row,
+     * remounting adjacent media (the "Video unavailable" flash) and jumping
+     * scroll. The local `replyTo` payload is kept as a fallback so the quoted
+     * preview survives even if the server serialization comes back thin;
+     * every other row keeps its object identity, so memoized rows don't move.
+     */
+    const reconcileSentMessage = (optimistic: ChatMessage, serverMsg: ChatMessage | undefined) => {
+        if (!serverMsg) return;
+        setMessages((prev) => {
+            const merged: ChatMessage = {
+                ...serverMsg,
+                replyTo: serverMsg.replyTo ?? optimistic.replyTo,
+                imageUrl: serverMsg.imageUrl ?? optimistic.imageUrl,
+                audioUrl: serverMsg.audioUrl ?? optimistic.audioUrl,
+                text: serverMsg.text ?? optimistic.text,
+            };
+            let swapped = false;
+            const next = prev
+                .filter((m) => m.id !== serverMsg.id || m.id === optimistic.id)
+                .map((m) => {
+                    if (m.id !== optimistic.id) return m;
+                    swapped = true;
+                    return merged;
+                });
+            return swapped ? next : [...next, merged];
+        });
+    };
+
     const handleSend = async () => {
         if (!messageText.trim() || !user?.handle) return;
 
@@ -1458,18 +1854,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             return;
         }
 
-        const replyToPayload = replyingTo
-            ? (() => {
-                const preview = previewFromMessage(replyingTo, sharedPosts);
-                return {
-                    messageId: replyingTo.id,
-                    text: preview.text,
-                    senderHandle: replyingTo.senderHandle,
-                    imageUrl: preview.thumbUrl,
-                    mediaType: (preview.isVideo ? 'video' : 'image') as 'image' | 'video',
-                };
-            })()
-            : undefined;
+        const replyToPayload = buildReplyToPayload();
 
         const newMessage: ChatMessage = {
             id: Date.now().toString(),
@@ -1485,16 +1870,17 @@ export default function MessagesScreen({ route, navigation }: any) {
         scrollMessagesToBottom(true);
 
         try {
-            if (isGroupThread && chatGroupId) {
-                await appendGroupChatMessage(user.handle, chatGroupId, { text: newMessage.text, replyTo: replyToPayload });
-            } else {
-                await appendMessage(user.handle, handle, { text: newMessage.text, replyTo: replyToPayload });
-            }
-            await loadMessages(true); // Reload latest page to get server ids/timestamps
+            const serverMsg =
+                isGroupThread && chatGroupId
+                    ? await appendGroupChatMessage(user.handle, chatGroupId, { text: newMessage.text, replyTo: replyToPayload })
+                    : await appendMessage(user.handle, handle, { text: newMessage.text, replyTo: replyToPayload });
+            // Optimistic row is safely in the list with its quote intact —
+            // swap in the server row (real UUID/timestamp) and only then
+            // consume the reply state.
+            reconcileSentMessage(newMessage, serverMsg);
+            setReplyingTo(null);
         } catch (error) {
             console.error('Error sending message:', error);
-        } finally {
-            setReplyingTo(null);
         }
     };
 
@@ -1773,51 +2159,6 @@ export default function MessagesScreen({ route, navigation }: any) {
         setReactionFly({ messageId, emoji, target: null });
     };
 
-    const measureReactionFlyTarget = useCallback(() => {
-        if (!reactionFly) return;
-        const key = `${reactionFly.messageId}::${reactionFly.emoji}`;
-        const node = reactionPillRefs.current[key];
-        if (!node || typeof (node as any).measureInWindow !== 'function') {
-            // Pill may not have laid out yet — retry once next frame
-            requestAnimationFrame(() => {
-                const retry = reactionPillRefs.current[key];
-                if (retry && typeof (retry as any).measureInWindow === 'function') {
-                    (retry as View).measureInWindow((x, y, w, h) => {
-                        setReactionFly((prev) =>
-                            prev && prev.messageId === reactionFly.messageId && prev.emoji === reactionFly.emoji
-                                ? { ...prev, target: { x: x + w / 2, y: y + h / 2 } }
-                                : prev,
-                        );
-                    });
-                } else {
-                    setReactionFly(null);
-                }
-            });
-            return;
-        }
-        (node as View).measureInWindow((x, y, w, h) => {
-            setReactionFly((prev) =>
-                prev && prev.messageId === reactionFly.messageId && prev.emoji === reactionFly.emoji
-                    ? { ...prev, target: { x: x + w / 2, y: y + h / 2 } }
-                    : prev,
-            );
-        });
-    }, [reactionFly]);
-
-    useEffect(() => {
-        if (!replyingTo && !editingMessage) {
-            replyBarAnim.setValue(0);
-            return;
-        }
-        replyBarAnim.setValue(0);
-        Animated.spring(replyBarAnim, {
-            toValue: 1,
-            friction: 8,
-            tension: 120,
-            useNativeDriver: true,
-        }).start();
-    }, [replyingTo?.id, editingMessage?.id, replyBarAnim]);
-
     const pickGroupAvatar = () => {
         launchImageLibrary(
             {
@@ -2022,23 +2363,24 @@ export default function MessagesScreen({ route, navigation }: any) {
     const handleSendImageWithCaption = async () => {
         if (!imageCompose || !user?.handle) return;
         const trimmedCaption = imageCompose.caption.trim();
+        const replyToPayload = buildReplyToPayload();
         const optimistic: ChatMessage = {
             id: `${Date.now()}-img`,
             senderHandle: user.handle,
             imageUrl: imageCompose.imageUrl,
             text: trimmedCaption || undefined,
             timestamp: Date.now(),
+            replyTo: replyToPayload,
         };
         setImageCompose(null);
         shouldAutoScrollRef.current = true;
         setMessages((prev) => [...prev, optimistic]);
         try {
-            if (isGroupThread && chatGroupId) {
-                await appendGroupChatMessage(user.handle, chatGroupId, { imageUrl: optimistic.imageUrl, text: optimistic.text });
-            } else {
-                await appendMessage(user.handle, handle, { imageUrl: optimistic.imageUrl, text: optimistic.text });
-            }
-            await loadMessages(true);
+            const serverMsg =
+                isGroupThread && chatGroupId
+                    ? await appendGroupChatMessage(user.handle, chatGroupId, { imageUrl: optimistic.imageUrl, text: optimistic.text, replyTo: replyToPayload })
+                    : await appendMessage(user.handle, handle, { imageUrl: optimistic.imageUrl, text: optimistic.text, replyTo: replyToPayload });
+            reconcileSentMessage(optimistic, serverMsg);
         } catch (error) {
             console.error('Error sending image message:', error);
             showAlert({
@@ -2047,6 +2389,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                 icon: 'alert',
                 confirmButtonText: 'OK',
             });
+        } finally {
+            // Quote is consumed by this send — never carry it into the next message.
+            setReplyingTo(null);
         }
     };
 
@@ -2058,22 +2403,23 @@ export default function MessagesScreen({ route, navigation }: any) {
             setShowStickerPicker(false);
             return;
         }
+        const replyToPayload = buildReplyToPayload();
         const optimistic: ChatMessage = {
             id: `${Date.now()}-sticker`,
             senderHandle: user.handle,
             text: emoji,
             timestamp: Date.now(),
+            replyTo: replyToPayload,
         };
         setShowStickerPicker(false);
         shouldAutoScrollRef.current = true;
         setMessages((prev) => [...prev, optimistic]);
         try {
-            if (isGroupThread && chatGroupId) {
-                await appendGroupChatMessage(user.handle, chatGroupId, { text: emoji });
-            } else {
-                await appendMessage(user.handle, handle, { text: emoji });
-            }
-            await loadMessages(true);
+            const serverMsg =
+                isGroupThread && chatGroupId
+                    ? await appendGroupChatMessage(user.handle, chatGroupId, { text: emoji, replyTo: replyToPayload })
+                    : await appendMessage(user.handle, handle, { text: emoji, replyTo: replyToPayload });
+            reconcileSentMessage(optimistic, serverMsg);
         } catch (error) {
             console.error('Error sending sticker:', error);
             showAlert({
@@ -2082,6 +2428,8 @@ export default function MessagesScreen({ route, navigation }: any) {
                 icon: 'alert',
                 confirmButtonText: 'OK',
             });
+        } finally {
+            setReplyingTo(null);
         }
     };
 
@@ -2312,20 +2660,22 @@ export default function MessagesScreen({ route, navigation }: any) {
                 });
                 return;
             }
+            const replyToPayload = buildReplyToPayload();
             const optimistic: ChatMessage = {
                 id: `${Date.now()}-audio`,
                 senderHandle: user.handle,
                 audioUrl,
                 timestamp: Date.now(),
+                replyTo: replyToPayload,
             };
             shouldAutoScrollRef.current = true;
             setMessages((prev) => [...prev, optimistic]);
-            if (isGroupThread && chatGroupId) {
-                await appendGroupChatMessage(user.handle, chatGroupId, { audioUrl });
-            } else {
-                await appendMessage(user.handle, handle, { audioUrl });
-            }
-            await loadMessages(true);
+            const serverMsg =
+                isGroupThread && chatGroupId
+                    ? await appendGroupChatMessage(user.handle, chatGroupId, { audioUrl, replyTo: replyToPayload })
+                    : await appendMessage(user.handle, handle, { audioUrl, replyTo: replyToPayload });
+            reconcileSentMessage(optimistic, serverMsg);
+            setReplyingTo(null);
             clearVoiceSegments();
             setVoiceDraft(null);
             setVoiceDraftPlaySeconds(0);
@@ -2436,72 +2786,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
     };
 
-    const voiceMicActionsRef = useRef({
-        startVoiceRecording,
-        pauseVoiceRecordingForPreview,
-        cancelVoiceRecording,
-    });
+    // Re-point the top-block actions ref at the real handlers (not a hook).
     voiceMicActionsRef.current = {
         startVoiceRecording,
         pauseVoiceRecordingForPreview,
         cancelVoiceRecording,
     };
-
-    const voiceMicPanResponder = useRef(
-        PanResponder.create({
-            onStartShouldSetPanResponder: () => !voiceDraftRef.current,
-            onMoveShouldSetPanResponder: () => isRecordingVoiceRef.current,
-            onPanResponderGrant: (evt) => {
-                if (voiceDraftRef.current) return;
-                const wasRecording = isRecordingVoiceRef.current;
-                micGestureStartRef.current = {
-                    x: evt.nativeEvent.pageX,
-                    y: evt.nativeEvent.pageY,
-                    at: Date.now(),
-                    wasRecording,
-                };
-                setRecordingGestureHint('none');
-                if (!wasRecording) {
-                    void voiceMicActionsRef.current.startVoiceRecording();
-                }
-            },
-            onPanResponderMove: (evt) => {
-                if (!isRecordingVoiceRef.current) return;
-                const dx = evt.nativeEvent.pageX - micGestureStartRef.current.x;
-                if (dx < -72) {
-                    setRecordingGestureHint('cancel');
-                } else {
-                    setRecordingGestureHint('none');
-                }
-            },
-            onPanResponderRelease: () => {
-                const { at, wasRecording } = micGestureStartRef.current;
-                const heldMs = Date.now() - at;
-                const hint = recordingGestureHintRef.current;
-                if (hint === 'cancel') {
-                    void voiceMicActionsRef.current.cancelVoiceRecording();
-                    setRecordingGestureHint('none');
-                    return;
-                }
-                if (!isRecordingVoiceRef.current) {
-                    setRecordingGestureHint('none');
-                    return;
-                }
-                if (heldMs >= 400) {
-                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
-                } else if (wasRecording) {
-                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
-                }
-                setRecordingGestureHint('none');
-            },
-            onPanResponderTerminate: () => {
-                if (isRecordingVoiceRef.current && micGestureStartRef.current.wasRecording) {
-                    void voiceMicActionsRef.current.pauseVoiceRecordingForPreview();
-                }
-                setRecordingGestureHint('none');
-            },
-        }),
-    ).current;
 
     const handlePlayAudioMessage = async (audioUrl?: string) => {
         if (!audioUrl) return;
@@ -2540,17 +2830,6 @@ export default function MessagesScreen({ route, navigation }: any) {
             }
         }
     };
-
-    useEffect(() => {
-        return () => {
-            voiceDraftPlayingRef.current = false;
-            void audioRecorderRef.current.stopRecorder().catch(() => {});
-            audioRecorderRef.current.removeRecordBackListener();
-            void audioRecorderRef.current.stopPlayer().catch(() => {});
-            audioRecorderRef.current.removePlayBackListener();
-            recorderSessionActiveRef.current = false;
-        };
-    }, []);
 
     const renderMessage = ({ item }: { item: ChatMessage }) => {
         const sharedRef = getMessageSharedRef(item);
@@ -2731,11 +3010,18 @@ export default function MessagesScreen({ route, navigation }: any) {
                         styles.messagesContent,
                         messages.length === 0 ? styles.messagesContentEmpty : null,
                     ]}
-                    maintainVisibleContentPosition={{
-                        minIndexForVisible: 0,
-                        autoscrollToTopThreshold: 12,
-                    }}
+                    maintainVisibleContentPosition={
+                        mvcpEnabled
+                            ? {
+                                  minIndexForVisible: 0,
+                                  autoscrollToTopThreshold: 12,
+                              }
+                            : undefined
+                    }
                     onContentSizeChange={() => {
+                        // Never spend the auto-scroll flag on the empty/loading
+                        // layout pass — only on real message content.
+                        if (messages.length === 0) return;
                         if (shouldAutoScrollRef.current) {
                             scrollMessagesToBottom(true);
                             shouldAutoScrollRef.current = false;
@@ -2942,6 +3228,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                                 />
                                 <View style={styles.inputShell}>
                                     <TextInput
+                                        ref={composerInputRef}
                                         value={messageText}
                                         onChangeText={setMessageText}
                                         placeholder={composerPlaceholder}
@@ -3477,6 +3764,14 @@ const styles = StyleSheet.create({
     sharedPostColumn: {
         maxWidth: '88%',
     },
+    sharedPostCaption: {
+        marginTop: ox(6),
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(7),
+        borderRadius: ox(14),
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        overflow: 'hidden',
+    },
     messageMetaRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -3942,6 +4237,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#111827',
+    },
+    quotedReplyVideoBadgeOverlay: {
+        position: 'absolute',
+        right: ox(2),
+        bottom: ox(2),
+        width: ox(16),
+        height: ox(16),
+        borderRadius: ox(8),
+        backgroundColor: 'rgba(0, 0, 0, 0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     quotedReplyBody: {
         flex: 1,

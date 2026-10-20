@@ -20,7 +20,7 @@ import { getAvatarForHandle } from '../api/users';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { getScenesMediaSlides, resolveScenesVideoUrl } from '../utils/scenesMediaNative';
 import { postHasVideoMedia } from '../utils/postMedia';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_LIGHT } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DISCOVER } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -67,7 +67,7 @@ export default function ScenesDmComposerSheet({
                             value={message}
                             onChangeText={onChangeMessage}
                             placeholder="Write a message..."
-                            placeholderTextColor="#6B7280"
+                            placeholderTextColor="rgba(255, 255, 255, 0.4)"
                             style={styles.input}
                             multiline
                         />
@@ -94,8 +94,8 @@ export default function ScenesDmComposerSheet({
             onDismiss={onClose}
             enableDynamicSizing
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_LIGHT.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_LIGHT.handle}
+            backgroundStyle={GAZETTEER_SHEET_DISCOVER.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_DISCOVER.handle}
             backdropOpacity={0.55}
             footerComponent={renderFooter}
             keyboardBehavior="interactive"
@@ -149,14 +149,14 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
         marginBottom: 12,
     },
     previewCard: {
         borderRadius: 12,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: '#E5E7EB',
-        backgroundColor: '#F9FAFB',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
         overflow: 'hidden',
         marginBottom: 8,
     },
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     thumbWrap: {
         width: '100%',
@@ -194,13 +194,13 @@ const styles = StyleSheet.create({
     previewCaption: {
         padding: 12,
         fontSize: 13,
-        color: '#374151',
+        color: 'rgba(255, 255, 255, 0.6)',
         lineHeight: 18,
     },
     footerInner: {
         paddingHorizontal: 16,
         paddingTop: 12,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'transparent',
     },
     composerRow: {
         flexDirection: 'row',
@@ -213,18 +213,18 @@ const styles = StyleSheet.create({
         maxHeight: 120,
         borderRadius: 22,
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
         paddingHorizontal: 14,
         paddingVertical: 10,
         fontSize: 15,
-        color: '#111827',
-        backgroundColor: '#FFFFFF',
+        color: '#FFFFFF',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
     },
     sendBtn: {
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: '#155bd6',
+        backgroundColor: '#3D9B8F',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
         paddingBottom: 4,
     },
     openChatText: {
-        color: '#155bd6',
+        color: '#3D9B8F',
         fontSize: 14,
         fontWeight: '600',
     },

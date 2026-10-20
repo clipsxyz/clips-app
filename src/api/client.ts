@@ -1132,7 +1132,11 @@ function normalizeReplyToMessageId(value: string | null | undefined): string | n
     if (typeof value !== 'string') return null;
     const trimmed = value.trim();
     if (!trimmed) return null;
-    return isProfileUuid(trimmed) ? trimmed : null;
+    // Pass optimistic/local parent IDs through instead of silently dropping the
+    // reply linkage at the client. The server remains the integrity authority:
+    // it persists the linkage only when the target is a real message in the same
+    // conversation (foreign-key safe), and ignores unknown local IDs.
+    return trimmed;
 }
 
 async function laravelUsersGet(pathAndQuery: string): Promise<any> {

@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     },
     confirmBtn: {
         borderRadius: 999,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#3D9B8F',
         paddingVertical: 14,
         alignItems: 'center',
         marginBottom: 8,
@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     confirmBtnText: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     cancelBtn: {
         borderRadius: 999,

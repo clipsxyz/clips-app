@@ -16,7 +16,8 @@ export interface ChatMessage {
     storyId?: string; // For story-reply notifications/context
     storyContextText?: string; // Story text snippet for notification context
     storyContextOwner?: string; // Original story/post owner for attribution
-    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; mediaType?: 'image' | 'video' }; // Reply to another message; imageUrl = thumbnail/media URL, mediaType for video screenshot
+    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; thumbUrl?: string; mediaType?: 'image' | 'video' }; // Reply to another message; imageUrl/thumbUrl = thumbnail (or poster for video)
+    sourcePostId?: string; // Post shared/anchored by this message (persisted server-side)
 }
 
 type ConversationId = string; // sorted `${a}|${b}`
@@ -29,6 +30,8 @@ type LaravelReplyPayload = {
     sender_handle?: string;
     imageUrl?: string | null;
     image_url?: string | null;
+    thumbUrl?: string | null;
+    thumb_url?: string | null;
     mediaType?: 'image' | 'video' | null;
     media_type?: 'image' | 'video' | null;
 };
@@ -43,13 +46,14 @@ function mapLaravelReplyTo(m: {
     if (raw && typeof raw === 'object') {
         const messageId = String(raw.messageId ?? raw.message_id ?? m.reply_to_message_id ?? '');
         if (!messageId) return undefined;
-        const imageUrl = raw.imageUrl ?? raw.image_url ?? undefined;
+        const imageUrl = raw.imageUrl ?? raw.image_url ?? raw.thumbUrl ?? raw.thumb_url ?? undefined;
         const mediaType = raw.mediaType ?? raw.media_type ?? undefined;
         return {
             messageId,
             text: typeof raw.text === 'string' ? raw.text : '',
             senderHandle: String(raw.senderHandle ?? raw.sender_handle ?? ''),
             imageUrl: imageUrl ?? undefined,
+            thumbUrl: imageUrl ?? undefined,
             mediaType: mediaType ?? undefined,
         };
     }
@@ -70,6 +74,7 @@ function laravelMsgToChatMessage(m: {
     reply_to?: LaravelReplyPayload | null;
     replyTo?: LaravelReplyPayload | null;
     reply_to_message_id?: string | null;
+    source_post_id?: string | null;
 }): ChatMessage {
     return {
         id: m.id,
@@ -79,6 +84,7 @@ function laravelMsgToChatMessage(m: {
         timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         isSystemMessage: !!m.is_system_message,
         replyTo: mapLaravelReplyTo(m),
+        sourcePostId: m.source_post_id ?? undefined,
     };
 }
 
@@ -407,6 +413,7 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
         isSystemMessage: message.isSystemMessage,
         timestamp: message.timestamp ?? Date.now(),
         postId: message.postId, // Preserve postId for comment notifications
+        sourcePostId: message.sourcePostId, // Preserve shared/anchor post linkage
         commentId: message.commentId, // Preserve commentId for comment notifications
         commentText: message.commentText, // Preserve commentText for comment notifications
         storyId: message.storyId, // Preserve story context for notifications

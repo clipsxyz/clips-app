@@ -455,6 +455,18 @@ class MessageController extends Controller
         return $available;
     }
 
+    /** Whether the messages table supports the shared-post linkage column. */
+    private function sourcePostColumnAvailable(): bool
+    {
+        static $available = null;
+
+        if ($available === null) {
+            $available = Schema::hasColumn('messages', 'source_post_id');
+        }
+
+        return $available;
+    }
+
     /**
      * Coerce a client-supplied reply target into a safe message UUID (or null).
      * Malformed / optimistic ids are ignored rather than failing the whole send.
@@ -533,6 +545,12 @@ class MessageController extends Controller
             ];
             if ($replyToId) {
                 $attributes['reply_to_message_id'] = $replyToId;
+            }
+            // Persist the shared/anchor post on the message row itself so the
+            // thread can render the post card from structured data (and keep it
+            // when the message text is a user caption rather than a share link).
+            if ($this->sourcePostColumnAvailable() && $request->filled('source_post_id')) {
+                $attributes['source_post_id'] = $request->input('source_post_id');
             }
 
             $message = Message::create($attributes);

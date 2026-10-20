@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     Alert,
+    Animated,
+    KeyboardAvoidingView,
     Modal,
     Platform,
     ScrollView,
@@ -23,7 +25,7 @@ import * as apiClient from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { ox } from '../constants/nativeOpticalScale';
 import Avatar from './Avatar.native';
-import PassportSheetCanvas from './PassportSheetCanvas.native';
+import DiscoverSheetCanvas from './DiscoverSheetCanvas.native';
 
 type Props = {
     post: Post | null;
@@ -36,10 +38,55 @@ type Props = {
 export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }: Props) {
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
+    const [shareCaption, setShareCaption] = useState('');
     const [followedHandles, setFollowedHandles] = useState<string[]>([]);
     const [loadingFollowed, setLoadingFollowed] = useState(false);
     const [regeneratingToken, setRegeneratingToken] = useState(false);
-    const [sendingTo, setSendingTo] = useState<string | null>(null);
+    /** Instagram-style multi-select: tapping a person toggles selection; the
+     * send happens only from the bottom composer bar's Send button. */
+    const [selectedHandles, setSelectedHandles] = useState<string[]>([]);
+    const [sending, setSending] = useState(false);
+
+    const toggleSelect = (handle: string) => {
+        setSelectedHandles((prev) =>
+            prev.includes(handle) ? prev.filter((h) => h !== handle) : [...prev, handle],
+        );
+    };
+
+    /** Composer elevation: springs up the moment a recipient is selected so the
+     * input feels attached to the selection, and settles back when cleared. */
+    const sendBarAnim = React.useRef(new Animated.Value(0)).current;
+    const hasSelection = selectedHandles.length > 0;
+    useEffect(() => {
+        Animated.spring(sendBarAnim, {
+            toValue: hasSelection ? 1 : 0,
+            friction: 9,
+            tension: 140,
+            useNativeDriver: true,
+        }).start();
+    }, [hasSelection, sendBarAnim]);
+
+    const sendBarStyle = {
+        opacity: sendBarAnim,
+        transform: [
+            {
+                translateY: sendBarAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                }),
+            },
+            {
+                scale: sendBarAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.98, 1],
+                }),
+            },
+        ],
+    };
+
+    const selectedLabel = selectedHandles
+        .map((h) => h.split('@')[0])
+        .join(', ');
 
     const shareUrl = useMemo(() => (post ? buildShareablePostUrl(post) : ''), [post]);
     const shareMessage = useMemo(() => {
@@ -53,6 +100,8 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
     useEffect(() => {
         if (!isOpen) return;
         setSearchQuery('');
+        setShareCaption('');
+        setSelectedHandles([]);
 
         if (!user?.id) {
             setFollowedHandles([]);
@@ -128,27 +177,49 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
         }
     };
 
-    const sendPostToUser = async (recipientHandle: string) => {
-        if (!post?.id || !user?.handle || sendingTo) return;
-        setSendingTo(recipientHandle);
+    /**
+     * Unified dispatch for the selected recipients: every selected user gets the
+     * same message — the custom caption as text plus the structured
+     * `sourcePostId` (persisted server-side, rendered as the post card in the
+     * thread). With no caption, fall back to the share URL as before.
+     */
+    const handleSendSelected = async () => {
+        if (!post?.id || !user?.handle || sending || selectedHandles.length === 0) return;
+        setSending(true);
+        const caption = shareCaption.trim();
+        const recipients = [...selectedHandles];
+        let sentCount = 0;
         try {
-            await appendMessage(user.handle, recipientHandle, {
-                text: shareUrl,
-                sourcePostId: String(post.id),
-            });
+            for (const recipientHandle of recipients) {
+                await appendMessage(user.handle, recipientHandle, {
+                    text: caption || shareUrl,
+                    sourcePostId: String(post.id),
+                });
+                sentCount += 1;
+            }
             await recordShare();
-            const confirmation = `Sent to ${recipientHandle.split('@')[0] || recipientHandle}`;
+            const confirmation =
+                sentCount === 1
+                    ? `Sent to ${recipients[0].split('@')[0] || recipients[0]}`
+                    : `Sent to ${sentCount} people`;
             if (Platform.OS === 'android') {
                 ToastAndroid.show(confirmation, ToastAndroid.SHORT);
             } else {
                 Alert.alert(confirmation);
             }
+            setShareCaption('');
+            setSelectedHandles([]);
             onClose();
         } catch (err) {
             console.error('Send post to DM failed:', err);
-            Alert.alert('Could not send', 'Please try again.');
+            Alert.alert(
+                'Could not send',
+                sentCount > 0
+                    ? `Sent to ${sentCount} of ${recipients.length}. Please try again for the rest.`
+                    : 'Please try again.',
+            );
         } finally {
-            setSendingTo(null);
+            setSending(false);
         }
     };
 
@@ -207,9 +278,13 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
 
     return (
         <Modal visible={isOpen} animationType="slide" transparent onRequestClose={onClose}>
-            <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+                style={styles.modalOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={0}
+            >
                 <View style={styles.shareModalShell}>
-                    <PassportSheetCanvas contentStyle={styles.shareModalContent}>
+                    <DiscoverSheetCanvas contentStyle={styles.shareModalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Share</Text>
                         <TouchableOpacity onPress={onClose}>
@@ -236,27 +311,80 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                         ) : filteredHandles.length === 0 ? (
                             <Text style={styles.emptyText}>No people you follow yet</Text>
                         ) : (
-                            filteredHandles.map((handle) => (
+                            filteredHandles.map((handle) => {
+                                const selected = selectedHandles.includes(handle);
+                                return (
                                 <TouchableOpacity
                                     key={handle}
-                                    style={[styles.followRow, sendingTo === handle && styles.followRowSending]}
+                                    style={[styles.followRow, selected && styles.followRowSelected]}
                                     activeOpacity={0.85}
-                                    disabled={sendingTo !== null}
-                                    onPress={() => void sendPostToUser(handle)}
+                                    disabled={sending}
+                                    onPress={() => toggleSelect(handle)}
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: selected }}
+                                    accessibilityLabel={`Send to ${handle}`}
                                 >
-                                    <Avatar
-                                        src={undefined}
-                                        name={handle.split('@')[0] || 'User'}
-                                        size="sm"
-                                        cornerRadius={ox(12)}
-                                    />
+                                    <View style={styles.avatarWrap}>
+                                        <Avatar
+                                            src={undefined}
+                                            name={handle.split('@')[0] || 'User'}
+                                            size="sm"
+                                            cornerRadius={ox(12)}
+                                        />
+                                        {selected ? (
+                                            <View style={styles.selectedBadge}>
+                                                <Icon name="checkmark" size={ox(11)} color="#FFFFFF" />
+                                            </View>
+                                        ) : null}
+                                    </View>
                                     <Text style={styles.followHandle} numberOfLines={1}>
                                         {handle}
                                     </Text>
+                                    {selected ? (
+                                        <Icon name="checkmark-circle" size={ox(20)} color="#3D9B8F" />
+                                    ) : (
+                                        <Icon name="ellipse-outline" size={ox(20)} color="#6B7280" />
+                                    )}
                                 </TouchableOpacity>
-                            ))
+                                );
+                            })
                         )}
                     </View>
+
+                    {hasSelection ? (
+                        <Animated.View style={[styles.sendBar, sendBarStyle]}>
+                            <Text style={styles.sendBarLabel} numberOfLines={1}>
+                                To: {selectedLabel}
+                            </Text>
+                            <View style={styles.composerRow}>
+                                <TextInput
+                                    value={shareCaption}
+                                    onChangeText={setShareCaption}
+                                    placeholder="Include message..."
+                                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                                    style={styles.captionInput}
+                                    multiline
+                                    maxLength={1000}
+                                    autoCorrect
+                                />
+                                <TouchableOpacity
+                                    style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                                    onPress={() => void handleSendSelected()}
+                                    disabled={sending}
+                                    activeOpacity={0.85}
+                                    accessibilityLabel={`Send to ${selectedHandles.length} selected`}
+                                >
+                                    <Text style={styles.sendButtonText}>
+                                        {sending
+                                            ? 'Sending…'
+                                            : selectedHandles.length === 1
+                                              ? 'Send'
+                                              : `Send to ${selectedHandles.length}`}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </Animated.View>
+                    ) : null}
 
                     <View style={styles.shareToHeader}>
                         <Text style={styles.shareToTitle}>SHARE TO</Text>
@@ -345,9 +473,9 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                         <Icon name="link" size={22} color="#FFFFFF" />
                         <Text style={styles.shareOptionText}>Copy link</Text>
                     </TouchableOpacity>
-                    </PassportSheetCanvas>
+                    </DiscoverSheetCanvas>
                 </View>
-            </View>
+            </KeyboardAvoidingView>
         </Modal>
     );
 }
@@ -364,7 +492,7 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 12,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255, 255, 255, 0.12)',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
         overflow: 'hidden',
         maxHeight: '85%',
     },
@@ -378,7 +506,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingBottom: 16,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
     modalTitle: {
         fontSize: 18,
@@ -393,16 +521,80 @@ const styles = StyleSheet.create({
         gap: 10,
         paddingHorizontal: 14,
         paddingVertical: 10,
-        borderRadius: 12,
+        borderRadius: 999,
         backgroundColor: 'rgba(255, 255, 255, 0.05)',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.12)',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
     },
     searchInput: {
         flex: 1,
         color: '#FFFFFF',
         fontSize: 15,
         paddingVertical: 0,
+    },
+    sendBar: {
+        marginTop: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        gap: 8,
+        borderRadius: 16,
+        backgroundColor: 'rgba(61, 155, 143, 0.10)',
+        borderWidth: 1,
+        borderColor: 'rgba(61, 155, 143, 0.35)',
+    },
+    sendBarLabel: {
+        color: '#8FD8CB',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    composerRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 10,
+    },
+    captionInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 15,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        maxHeight: 96,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.14)',
+    },
+    sendButton: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 18,
+        paddingVertical: 11,
+        borderRadius: 20,
+        backgroundColor: '#3D9B8F',
+    },
+    sendButtonDisabled: {
+        opacity: 0.55,
+    },
+    sendButtonText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    avatarWrap: {
+        position: 'relative',
+    },
+    selectedBadge: {
+        position: 'absolute',
+        right: -3,
+        bottom: -3,
+        width: ox(16),
+        height: ox(16),
+        borderRadius: ox(8),
+        backgroundColor: '#3D9B8F',
+        borderWidth: 1.5,
+        borderColor: '#111827',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     followListWrap: {
         minHeight: 92,
@@ -429,10 +621,11 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         backgroundColor: 'rgba(255, 255, 255, 0.05)',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.12)',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
     },
-    followRowSending: {
-        opacity: 0.6,
+    followRowSelected: {
+        borderColor: '#3D9B8F',
+        backgroundColor: 'rgba(61, 155, 143, 0.14)',
     },
     followHandle: {
         flex: 1,
@@ -454,7 +647,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     resetLink: {
-        color: '#60A5FA',
+        color: '#3D9B8F',
         fontSize: 13,
         fontWeight: '600',
     },
@@ -509,7 +702,7 @@ const styles = StyleSheet.create({
         padding: 16,
         gap: 12,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
     shareOptionText: {
         fontSize: 16,
