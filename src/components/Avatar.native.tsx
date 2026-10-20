@@ -16,6 +16,12 @@ import { getAvatarInitials, resolveAvatarDimensions } from './avatarProps';
 export const AVATAR_STORY_BORDER_WIDTH = 2;
 export const AVATAR_STORY_BORDER_COLOR = '#FFFFFF';
 export const AVATAR_IDLE_BORDER_COLOR = 'rgba(255, 255, 255, 0.15)';
+/**
+ * Default color of the gap band between the avatar photo and the ring. Matches the
+ * feed card surface so the ring stands off cleanly (Instagram parity). Callers on a
+ * different surface should pass `gapColor` to match their background.
+ */
+export const DEFAULT_AVATAR_GAP_COLOR = '#030712';
 export function avatarBorderColor(hasStory: boolean): string {
     return hasStory ? AVATAR_STORY_BORDER_COLOR : AVATAR_IDLE_BORDER_COLOR;
 }
@@ -27,6 +33,9 @@ export default function Avatar({
     hasStory = false,
     hideBorder = false,
     cornerRadius,
+    ringGap = 0,
+    gapColor = DEFAULT_AVATAR_GAP_COLOR,
+    ringColor,
     onClick,
 }: AvatarProps) {
     const { dim, fontSize } = resolveAvatarDimensions(size);
@@ -41,12 +50,19 @@ export default function Avatar({
     // Full circle by default; an explicit `cornerRadius` opts into the squircle
     // shape used by the feed header / top-bar buttons.
     const outerRadius = cornerRadius != null ? cornerRadius : dim / 2;
-    // Outer circle/square is always `dim` so every avatar shares identical
-    // dimensions; the 2px outline + 2px inner padding are uniform in both
-    // story states and the inner radius stays concentric with the outer ring.
+    // Three concentric layers: Outer Ring (border) -> Gap (background colored) ->
+    // Avatar image. The outer box stays exactly `dim` so every avatar shares the
+    // same footprint; the border and the gap are both drawn INSIDE it, and each
+    // inner radius recedes by exactly the inset it sits under — so the rounded
+    // corners stay concentric at every layer with no distortion.
     const borderWidth = hideBorder ? 0 : AVATAR_STORY_BORDER_WIDTH;
-    const innerDim = Math.max(0, dim - borderWidth * 2);
-    const innerRadius = Math.max(0, outerRadius - borderWidth);
+    const gap = hideBorder ? 0 : Math.max(0, ringGap);
+    const inset = borderWidth + gap;
+    const innerDim = Math.max(0, dim - inset * 2);
+    const innerRadius = Math.max(0, outerRadius - inset);
+    // The gap band sits between the border and the image. Its radius recedes only
+    // by the border width (it is still under the border, not under the gap).
+    const gapRadius = Math.max(0, outerRadius - borderWidth);
 
     const inner = (
         <View
@@ -84,11 +100,28 @@ export default function Avatar({
                     height: dim,
                     borderRadius: outerRadius,
                     borderWidth,
-                    borderColor: hideBorder ? 'transparent' : avatarBorderColor(hasStory),
+                    borderColor: hideBorder ? 'transparent' : ringColor ?? avatarBorderColor(hasStory),
                 },
             ]}
         >
-            {inner}
+            {gap > 0 ? (
+                <View
+                    style={[
+                        styles.gap,
+                        {
+                            width: dim - borderWidth * 2,
+                            height: dim - borderWidth * 2,
+                            borderRadius: gapRadius,
+                            padding: gap,
+                            backgroundColor: gapColor,
+                        },
+                    ]}
+                >
+                    {inner}
+                </View>
+            ) : (
+                inner
+            )}
         </View>
     );
 
@@ -117,6 +150,10 @@ const styles = StyleSheet.create({
         opacity: 0.85,
     },
     ring: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    gap: {
         alignItems: 'center',
         justifyContent: 'center',
     },

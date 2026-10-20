@@ -8,23 +8,38 @@ import {
     hasCustomProfileCover,
     resolveProfileCoverSource,
 } from '../utils/profileCoverNative';
+import {
+    storyRingColor,
+    storyRingVisible,
+    type StoryRingState,
+} from '../utils/storyRingNative';
 
 type Props = {
     coverUrl?: string | null;
     avatarUrl?: string;
     name?: string;
     hasStory?: boolean;
+    /**
+     * Three-state story ring (unseen white / seen grey / none). When provided it drives
+     * the ring color; otherwise the ring falls back to `hasStory`.
+     */
+    storyRingState?: StoryRingState;
     onAvatarPress?: () => void;
     showChangeCover?: boolean;
     onPressChangeCover?: () => void;
     children?: React.ReactNode;
 };
 
+/** Background-colored standoff between the profile photo and its story ring. */
+const PROFILE_AVATAR_RING_GAP = 3;
+const PROFILE_AVATAR_GAP_COLOR = '#030712';
+
 export default function ProfileCoverHero({
     coverUrl,
     avatarUrl,
     name,
     hasStory,
+    storyRingState,
     onAvatarPress,
     showChangeCover,
     onPressChangeCover,
@@ -41,6 +56,24 @@ export default function ProfileCoverHero({
     }, [coverUrl]);
 
     const showMuted = !customCover || coverFailed;
+
+    // Prefer the explicit three-state ring; fall back to the legacy boolean when the
+    // caller only knows "has any story".
+    const ringVisible = storyRingState
+        ? storyRingVisible(storyRingState)
+        : !!hasStory;
+    const ringColor = storyRingState ? storyRingColor(storyRingState) : undefined;
+    const ringGap = ringVisible ? PROFILE_AVATAR_RING_GAP : 0;
+    const avatarProps = {
+        src: avatarUrl,
+        name: name || 'User',
+        size: 88 as const,
+        hasStory,
+        ringGap,
+        gapColor: PROFILE_AVATAR_GAP_COLOR,
+        ringColor,
+        hideBorder: !ringVisible,
+    };
 
     return (
         <View style={styles.wrap}>
@@ -67,10 +100,10 @@ export default function ProfileCoverHero({
                 <View style={styles.identityStack}>
                     {onAvatarPress ? (
                         <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
-                            <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
+                            <Avatar {...avatarProps} />
                         </TouchableOpacity>
                     ) : (
-                        <Avatar src={avatarUrl} name={name || 'User'} size={88} hasStory={hasStory} />
+                        <Avatar {...avatarProps} />
                     )}
                     {children}
                 </View>

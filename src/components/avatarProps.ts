@@ -23,6 +23,23 @@ export type AvatarProps = {
      * (`dim / 2`) so existing circular avatars are unaffected.
      */
     cornerRadius?: number;
+    /**
+     * Background colored gap (in px) between the avatar photo and the outline/ring,
+     * so the ring stands off cleanly from the image (Instagram parity). The gap is
+     * painted with `gapColor`. Defaults to 0 (legacy: image meets the ring).
+     */
+    ringGap?: number;
+    /**
+     * Color of the `ringGap`. Must match the surface the avatar sits on (the feed
+     * card / profile background) so the gap reads as empty space, not a band.
+     */
+    gapColor?: string;
+    /**
+     * Explicit ring/border color. Overrides the `hasStory`-derived color so callers
+     * can express richer states (e.g. white = unseen stories, muted grey = all seen,
+     * faint outline = no stories). Ignored when `hideBorder` is set.
+     */
+    ringColor?: string;
     /** Web: button click event. Native: `onClick()` is called with no argument. */
     onClick?: (e?: ReactMouseEvent<HTMLButtonElement>) => void;
 };

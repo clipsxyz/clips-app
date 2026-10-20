@@ -30,7 +30,9 @@ import { fetchUserProfile, fetchFollowers, fetchFollowing } from '../api/client'
 import { followOrRequest } from '../utils/followOrRequest';
 import { emitFollowStatusChanged } from '../hooks/useFollowState';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
-import { userHasStoriesByHandle } from '../api/stories';
+import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
+import { storyRingState as resolveStoryRingState } from '../utils/storyRingNative';
+import type { StoryRingState } from '../utils/storyRingNative';
 import {
     isProfilePrivate,
     canViewProfile,
@@ -86,6 +88,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [isFollowing, setIsFollowing] = useState<boolean>(
         hasRouteFollowState ? routeIsFollowing === true : false,
     );
+    const [storyRingState, setStoryRingState] = useState<StoryRingState>('none');
     const [hasStory, setHasStory] = useState(false);
     const [canView, setCanView] = useState(true);
     const [hasPendingRequest, setHasPendingRequest] = useState(false);
@@ -368,13 +371,23 @@ if (isLaravelApiEnabled()) {
             paintLocalProfile(profileData);
             if (!cancelled()) setLoading(false);
 
-            void userHasStoriesByHandle(decodedHandle)
-                .then((has) => {
-                    if (!cancelled()) setHasStory(has);
+            const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+            void userHasStoriesByHandle(decodedHandle, viewerId)
+                .then(async (has) => {
+                    if (cancelled()) return;
+                    const unviewed = has
+                        ? await userHasUnviewedStoriesByHandle(decodedHandle, viewerId)
+                        : false;
+                    if (cancelled()) return;
+                    setHasStory(has);
+                    setStoryRingState(resolveStoryRingState({ any: has, unviewed }));
                 })
                 .catch((err) => {
                     console.error('[ViewProfile] stories lookup failed', err);
-                    if (!cancelled()) setHasStory(false);
+                    if (!cancelled()) {
+                        setHasStory(false);
+                        setStoryRingState('none');
+                    }
                 });
         } catch (error) {
             console.error('Error loading profile:', error);
@@ -1080,6 +1093,7 @@ const result = await followOrRequest({
                     avatarUrl={profileUser?.avatarUrl || getAvatarForHandle(decodedHandle)}
                     name={profileDisplayName}
                     hasStory={hasStory}
+                    storyRingState={storyRingState}
                     onAvatarPress={() => {
                         if (hasStory) handleStoryPress();
                         else setShowProfileMenu(true);

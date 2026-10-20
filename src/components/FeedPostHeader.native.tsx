@@ -8,7 +8,7 @@ import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { useMutualFollow } from '../hooks/useMutualFollow';
 import { useFollowState } from '../hooks/useFollowState';
-import { useHasActiveStories } from '../hooks/useHasActiveStories';
+import { useStoryRingState } from '../hooks/useHasActiveStories';
 import Avatar from './Avatar';
 import VerifiedBadge from './VerifiedBadge.native';
 import { getPostSocialSourceLabel, getReclipDisplay } from '../utils/feedPostMeta';
@@ -16,16 +16,14 @@ import { FEED_UI } from '../constants/feedUiTokens';
 import { hasPendingFollowRequest, isProfilePrivate } from '../api/privacy';
 import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
+import { storyRingColor, storyRingVisible } from '../utils/storyRingNative';
 
 /** Outer ring on newsfeed cards. Smaller than the 38px header so the photo doesn't dominate the row. */
 const FEED_HEADER_AVATAR_SIZE = 25;
-/** Same 2px ring thickness as the Inbox story avatars. */
+/** Same 2px ring thickness / gap as the Inbox story avatars. */
 const FEED_HEADER_AVATAR_RING_PAD = 2;
-const FEED_HEADER_AVATAR_INNER = FEED_HEADER_AVATAR_SIZE - FEED_HEADER_AVATAR_RING_PAD * 2;
-/** Rounded square, not a circle. Corners stay concentric inside the gradient ring. */
+/** Rounded square, not a circle. Corners stay concentric inside the ring. */
 const FEED_HEADER_AVATAR_RADIUS = 5;
-/** Inbox Notifications story ring: teal → sky → fuchsia, bottom-left to top-right. */
-const FEED_HEADER_STORY_RING_COLORS = ['#2DD4BF', '#0EA5E9', '#D946EF'] as const;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
 const FEED_HEADER_BADGE_SIZE = 10;
 const FEED_HEADER_BADGE_ICON = 6;
@@ -105,11 +103,14 @@ export default function FeedPostHeader({
     const reclipColor = isOverlaid ? 'rgba(255,255,255,0.9)' : '#9CA3AF';
 
     const viewerId = user?.id != null ? String(user.id) : undefined;
-    const hasStory = useHasActiveStories(safeProfileHandle, {
+    const storyRing = useStoryRingState(safeProfileHandle, {
         viewerId,
         isCurrentUser,
         onHasStoryChange,
     });
+    const hasStory = storyRing.hasStory;
+    const ringColor = storyRingColor(storyRing.state);
+    const showRing = storyRingVisible(storyRing.state);
 
     useEffect(() => {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -148,23 +149,17 @@ export default function FeedPostHeader({
                 accessibilityRole="button"
                 accessibilityLabel={hasStory ? `View ${safeHandle} stories` : `View ${safeHandle} profile`}
             >
-                <LinearGradient
-                    colors={[...FEED_HEADER_STORY_RING_COLORS]}
-                    start={{ x: 0, y: 1 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.storyRing}
-                >
-                    <View style={styles.storyRingInner}>
-                        <Avatar
-                            src={avatarSrc}
-                            name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                            size={FEED_HEADER_AVATAR_INNER}
-                            cornerRadius={FEED_HEADER_AVATAR_RADIUS - FEED_HEADER_AVATAR_RING_PAD}
-                            hideBorder
-                            hasStory={hasStory}
-                        />
-                    </View>
-                </LinearGradient>
+                <Avatar
+                    src={avatarSrc}
+                    name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                    size={FEED_HEADER_AVATAR_SIZE}
+                    cornerRadius={FEED_HEADER_AVATAR_RADIUS}
+                    hasStory={hasStory}
+                    ringGap={showRing ? FEED_HEADER_AVATAR_RING_PAD : 0}
+                    gapColor={FEED_CARD_CHROME_BG}
+                    ringColor={showRing ? ringColor : undefined}
+                    hideBorder={!showRing}
+                />
             </TouchableOpacity>
             {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (
                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
@@ -353,24 +348,6 @@ const styles = StyleSheet.create({
     avatarHit: {
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    storyRing: {
-        width: FEED_HEADER_AVATAR_SIZE,
-        height: FEED_HEADER_AVATAR_SIZE,
-        borderRadius: FEED_HEADER_AVATAR_RADIUS,
-        padding: FEED_HEADER_AVATAR_RING_PAD,
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-    },
-    storyRingInner: {
-        width: '100%',
-        height: '100%',
-        borderRadius: FEED_HEADER_AVATAR_RADIUS - FEED_HEADER_AVATAR_RING_PAD,
-        backgroundColor: '#000',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
     },
     followPlus: {
         position: 'absolute',

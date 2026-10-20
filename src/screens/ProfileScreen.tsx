@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import { useStoryRingState } from '../hooks/useHasActiveStories';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import {
@@ -112,6 +113,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { height: windowHeight } = useWindowDimensions();
     const { user, logout, login } = useAuth();
     const isProfileFocused = useIsFocused();
+    const ownRing = useStoryRingState(user?.handle || '', {
+        viewerId: user?.id != null ? String(user.id) : undefined,
+        isCurrentUser: true,
+    });
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -195,6 +200,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         loadData();
     }, [user?.handle]);
 
+    /** The mount effect above already runs the first load; the focus effect skips its
+     *  first pass and refreshes silently afterwards, so a focus never double-fetches or
+     *  flips the loading skeleton over an already-rendered profile. */
+    const profileFirstFocusRef = React.useRef(true);
+
     const myFeedActiveVideoPostIdRef = useRef<string | null>(null);
     myFeedActiveVideoPostIdRef.current = myFeedActiveVideoPostId;
 
@@ -270,7 +280,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     useFocusEffect(
         React.useCallback(() => {
-            void loadData();
+            // Refresh silently on return. A synchronous setLoading(true) here wiped the
+            // already-rendered profile and blocked the native transition; the mount effect
+            // above already covered the first load, so skip this pass.
+            if (!profileFirstFocusRef.current) {
+                void loadData({ silent: true });
+            }
+            profileFirstFocusRef.current = false;
             // Do not auto-open security phone prompt when entering Passport.
             setSecurityModalOpen(false);
             setSecurityStep('phone');
@@ -335,9 +351,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         setPendingPhoneNumber('');
     }, []);
 
-    const loadData = async () => {
+    const loadData = async (opts?: { silent?: boolean }) => {
         if (!user?.handle && !user?.id) return;
-        setLoading(true);
+        // Silent refresh (focus returns) must not blank out the rendered profile.
+        if (!opts?.silent) {
+            setLoading(true);
+        }
         try {
             const identifier = String(user.handle || user.id);
             const userPosts = await fetchPostsByUser(identifier, 50, user.id, 'all');
@@ -1069,6 +1088,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 coverUrl={user?.profileBackgroundUrl}
                 avatarUrl={user?.avatarUrl}
                 name={user?.name || user?.handle || 'User'}
+                hasStory={ownRing.hasStory}
+                storyRingState={ownRing.state}
                 showChangeCover
                 onPressChangeCover={() => navigation.navigate('ProfileCover')}
                 onAvatarPress={() => setShowProfilePictureModal(true)}

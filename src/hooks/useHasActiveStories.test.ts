@@ -11,7 +11,7 @@ vi.mock('../api/stories', () => ({
     userHasUnviewedStoriesByHandle: userHasUnviewedStoriesByHandleMock,
 }));
 
-import { useHasActiveStories } from './useHasActiveStories';
+import { useHasActiveStories, useStoryRingState } from './useHasActiveStories';
 
 /**
  * The active-story ring feeds the feed header avatar and the quick-menu "View stories"
@@ -84,5 +84,65 @@ describe('useHasActiveStories', () => {
         await waitFor(() => expect(result.current).toBe(true));
         expect(userHasStoriesByHandleMock).toHaveBeenCalledTimes(2);
         expect(onChange).toHaveBeenCalledWith(true);
+    });
+
+    it('keeps the legacy boolean contract: current user rings on any story, others on unviewed', async () => {
+        userHasStoriesByHandleMock.mockResolvedValue(true);
+        userHasUnviewedStoriesByHandleMock.mockResolvedValue(false);
+
+        const { result: own } = renderHook(() =>
+            useHasActiveStories('Alice@Dublin', { viewerId: 'v1', isCurrentUser: true }),
+        );
+        await waitFor(() => expect(own.current).toBe(true));
+
+        const { result: other } = renderHook(() =>
+            useHasActiveStories('Alice@Dublin', { viewerId: 'v1', isCurrentUser: false }),
+        );
+        await waitFor(() => expect(other.current).toBe(false));
+    });
+});
+
+describe('useStoryRingState', () => {
+    beforeEach(() => {
+        userHasStoriesByHandleMock.mockReset();
+        userHasUnviewedStoriesByHandleMock.mockReset();
+        userHasStoriesByHandleMock.mockResolvedValue(false);
+        userHasUnviewedStoriesByHandleMock.mockResolvedValue(false);
+    });
+
+    it('reports the unseen (white) ring when stories are unviewed', async () => {
+        userHasStoriesByHandleMock.mockResolvedValue(true);
+        userHasUnviewedStoriesByHandleMock.mockResolvedValue(true);
+
+        const { result } = renderHook(() =>
+            useStoryRingState('Alice@Dublin', { viewerId: 'v1', isCurrentUser: false }),
+        );
+
+        await waitFor(() => expect(result.current.state).toBe('unseen'));
+        expect(result.current.hasStory).toBe(true);
+        expect(result.current.hasUnviewed).toBe(true);
+    });
+
+    it('reports the seen (grey) ring when every story was viewed', async () => {
+        userHasStoriesByHandleMock.mockResolvedValue(true);
+        userHasUnviewedStoriesByHandleMock.mockResolvedValue(false);
+
+        const { result } = renderHook(() =>
+            useStoryRingState('Alice@Dublin', { viewerId: 'v1', isCurrentUser: false }),
+        );
+
+        await waitFor(() => expect(result.current.state).toBe('seen'));
+        expect(result.current.hasStory).toBe(true);
+        expect(result.current.hasUnviewed).toBe(false);
+    });
+
+    it('reports the none ring when there are no active stories', async () => {
+        const { result } = renderHook(() =>
+            useStoryRingState('Alice@Dublin', { viewerId: 'v1', isCurrentUser: false }),
+        );
+
+        await waitFor(() => expect(userHasStoriesByHandleMock).toHaveBeenCalledTimes(1));
+        expect(result.current.state).toBe('none');
+        expect(result.current.hasStory).toBe(false);
     });
 });
