@@ -77,6 +77,21 @@ type Props = {
     onVisitProfile?: () => void;
 };
 
+export type ImageFullscreenViewProps = Omit<Props, 'visible' | 'onClose'> & {
+    /** Called when the viewer has finished its close animation and should be dismissed. */
+    onRequestClose: () => void;
+};
+
+/**
+ * Route-hosted variant of the fullscreen viewer (used by
+ * `ImageFullscreenScreen`, a transparentModal stack route): always visible
+ * while mounted, and dismissal is delegated to the navigator via
+ * `onRequestClose` instead of an internal `visible` flag.
+ */
+export function ImageFullscreenView({ onRequestClose, ...rest }: ImageFullscreenViewProps) {
+    return <ImageFullscreenModal {...rest} visible onClose={onRequestClose} />;
+}
+
 function compactCount(n: number | undefined): string {
     const v = Math.max(0, Number(n) || 0);
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`;
