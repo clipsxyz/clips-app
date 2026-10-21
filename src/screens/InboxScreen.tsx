@@ -372,7 +372,7 @@ export default function InboxScreen({ navigation, route }: any) {
             setNotifications(notifs);
             setInsights(storyInsights);
             const convs = await listConversations(user.handle);
-            setConversations(convs);
+            setConversations(Array.isArray(convs) ? convs : []);
 
             if (user?.id) {
                 try {
@@ -398,6 +398,7 @@ export default function InboxScreen({ navigation, route }: any) {
             }
         } catch (error) {
             console.error('Error loading inbox:', error);
+            setConversations([]);
         } finally {
             setLoading(false);
         }

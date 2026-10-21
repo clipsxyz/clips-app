@@ -1,6 +1,13 @@
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getRuntimeEnv, isLaravelApiEnabled, isMockMode } from '../config/runtimeEnv';
 import { hasAuthTokenAsync } from '../utils/authTokenBridge';
 import { dispatchBrowserEvent } from '../utils/dispatchBrowserEvent';
+
+/** Live inbox/thread fetches — never inject mock users when production/API mode is on. */
+function useLiveInboxApi(): boolean {
+    if (isMockMode()) return false;
+    if (getRuntimeEnv('VITE_USE_LARAVEL_API') === 'false') return false;
+    return true;
+}
 
 export interface ChatMessage {
     id: string;
@@ -326,7 +333,7 @@ export async function fetchConversationMessagesPage(
     cursor: string | null = null,
     limit: number = 50,
 ): Promise<ConversationMessagesPage> {
-    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
+    if (useLiveInboxApi() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const page = await apiClient.fetchConversationPage(b, cursor, limit);
@@ -340,8 +347,12 @@ export async function fetchConversationMessagesPage(
             };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel fetchConversationMessagesPage failed, using full conversation fallback:', e);
+            console.warn('Laravel fetchConversationMessagesPage failed:', e);
+            return { items: [], nextCursor: null, hasMore: false };
         }
+    }
+    if (useLiveInboxApi()) {
+        return { items: [], nextCursor: null, hasMore: false };
     }
 
     const full = await fetchConversation(a, b);
@@ -353,7 +364,7 @@ export async function fetchConversationMessagesPage(
 }
 
 export async function fetchConversation(a: string, b: string): Promise<ChatMessage[]> {
-    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
+    if (useLiveInboxApi() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
@@ -381,8 +392,12 @@ export async function fetchConversation(a: string, b: string): Promise<ChatMessa
             return list.sort((m1, m2) => m1.timestamp - m2.timestamp); // oldest first for chat UI
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel fetchConversation failed, using mock:', e);
+            console.warn('Laravel fetchConversation failed:', e);
+            return [];
         }
+    }
+    if (useLiveInboxApi()) {
+        return [];
     }
     const id = getConversationId(a, b);
     return conversations.get(id)?.slice().sort((m1, m2) => m2.timestamp - m1.timestamp) || [];
@@ -527,7 +542,7 @@ export async function editMessage(messageId: string, newText: string, from: stri
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
-    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
+    if (useLiveInboxApi() && (await hasAuthTokenAsync())) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
@@ -535,9 +550,13 @@ export async function getUnreadTotal(handle: string): Promise<number> {
             return items.reduce((s: number, i: { unread_count?: number }) => s + (Number(i.unread_count) || 0), 0);
         } catch (e: any) {
             if (e?.name === 'ConnectionRefused' || e?.message === 'CONNECTION_REFUSED') throw e;
-            if (e?.status === 401) return unreadByHandle.get(handle) || 0;
-            console.warn('Laravel getUnreadTotal failed, using mock:', e);
+            if (e?.status === 401) return 0;
+            console.warn('Laravel getUnreadTotal failed:', e);
+            return 0;
         }
+    }
+    if (useLiveInboxApi()) {
+        return 0;
     }
     return unreadByHandle.get(handle) || 0;
 }
@@ -786,7 +805,8 @@ export async function markGroupConversationReadById(groupId: string, viewerHandl
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
-    if (isLaravelApiEnabled() && (await hasAuthTokenAsync())) {
+    if (useLiveInboxApi()) {
+        if (!(await hasAuthTokenAsync())) return [];
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
@@ -843,7 +863,8 @@ export async function listConversations(forHandle: string): Promise<Conversation
             });
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
-            console.warn('Laravel listConversations failed, using mock:', e);
+            console.warn('Laravel listConversations failed:', e);
+            return [];
         }
     }
     const summaries = new Map<string, { last?: ChatMessage; unread: number; isRequest?: boolean }>();
@@ -1053,22 +1074,5 @@ async function computeUnreadTotal(handle: string): Promise<number> {
         total += msgs.filter(m => m.senderHandle !== handle && m.timestamp > lastRead && !m.isSystemMessage).length;
     });
     return total;
-}
-
-
-// Dev helper: seed a few mock DMs to a user
-const seededFor = new Set<string>();
-export async function seedMockDMs(forHandle: string): Promise<void> {
-    if (!forHandle || seededFor.has(forHandle)) return;
-    const mocks = [
-        { from: 'Sarah@artane', text: 'Hey Barry! Loved your last clip 👏' },
-        { from: 'Liam@cork', text: 'Up for a collab this week?' },
-        { from: 'Ava@galway', text: 'That sunset shot was unreal 🌅' },
-        { from: 'Noah@london', text: 'DM me when you’re free 👍' },
-    ];
-    for (const m of mocks) {
-        await appendMessage(m.from, forHandle, { text: m.text });
-    }
-    seededFor.add(forHandle);
 }
 

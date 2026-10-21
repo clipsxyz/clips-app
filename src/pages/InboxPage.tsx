@@ -7,7 +7,7 @@ import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
-import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
+import { listConversations, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -1242,18 +1242,6 @@ export default function InboxPage() {
                 <h1 className="text-xl font-semibold">Notifications</h1>
                 <div className="flex-1" />
                 <div className="flex gap-2">
-                    <button
-                        onClick={async () => {
-                            if (!user?.handle) return;
-                            await seedMockDMs(user.handle);
-                            // Reload conversations
-                            const conversations = await listConversations(user.handle);
-                            setItems(conversations);
-                        }}
-                        className="px-3 py-1.5 text-sm rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors"
-                    >
-                        Add mock DMs
-                    </button>
                     <button
                         onClick={async () => {
                             // Seed mock stories for Bob
