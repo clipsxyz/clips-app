@@ -66,25 +66,29 @@ function mapLaravelReplyTo(m: {
 /** Map Laravel API message to frontend ChatMessage */
 function laravelMsgToChatMessage(m: {
     id: string;
-    sender_handle: string;
+    sender_handle?: string;
+    senderHandle?: string;
     text?: string | null;
     image_url?: string | null;
+    imageUrl?: string | null;
     created_at?: string;
     is_system_message?: boolean;
     reply_to?: LaravelReplyPayload | null;
     replyTo?: LaravelReplyPayload | null;
     reply_to_message_id?: string | null;
     source_post_id?: string | null;
+    sourcePostId?: string | null;
 }): ChatMessage {
+    const sourcePostId = m.source_post_id ?? m.sourcePostId;
     return {
         id: m.id,
-        senderHandle: m.sender_handle,
+        senderHandle: String(m.sender_handle ?? m.senderHandle ?? ''),
         text: m.text ?? undefined,
-        imageUrl: m.image_url ?? undefined,
+        imageUrl: m.image_url ?? m.imageUrl ?? undefined,
         timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         isSystemMessage: !!m.is_system_message,
         replyTo: mapLaravelReplyTo(m),
-        sourcePostId: m.source_post_id ?? undefined,
+        sourcePostId: sourcePostId ? String(sourcePostId) : undefined,
     };
 }
 

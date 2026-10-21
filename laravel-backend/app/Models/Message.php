@@ -45,6 +45,20 @@ class Message extends Model
     /** Serialized quote preview so DM clients can render the reply context after reload. */
     protected $appends = ['reply_to'];
 
+    /**
+     * Always emit both casings so share-with-caption DMs still attach the post
+     * card after send, socket fan-out, and conversation history fetch.
+     */
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        $sourcePostId = $this->attributes['source_post_id'] ?? null;
+        $array['source_post_id'] = $sourcePostId;
+        $array['sourcePostId'] = $sourcePostId;
+
+        return $array;
+    }
+
     // Relationships
     public function sender()
     {

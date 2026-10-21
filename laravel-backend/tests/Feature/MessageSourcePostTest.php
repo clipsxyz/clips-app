@@ -31,6 +31,31 @@ class MessageSourcePostTest extends TestCase
             'source_post_id' => $post->id,
             'text' => 'Thought you would like this',
         ]);
+
+        $response->assertJsonPath('sourcePostId', $post->id);
+
+        $history = $this->actingAs($sender, 'sanctum')
+            ->getJson('/api/messages/conversation/' . rawurlencode($recipient->handle));
+        $history->assertOk();
+        $this->assertSame($post->id, $history->json('0.source_post_id'));
+        $this->assertSame($post->id, $history->json('0.sourcePostId'));
+    }
+
+    public function test_camel_case_source_post_id_is_persisted_with_caption(): void
+    {
+        $sender = User::factory()->create();
+        $recipient = User::factory()->create();
+        $post = Post::factory()->create();
+
+        $response = $this->actingAs($sender, 'sanctum')->postJson('/api/messages/send', [
+            'recipient_handle' => $recipient->handle,
+            'text' => 'Check this out',
+            'sourcePostId' => $post->id,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('source_post_id', $post->id)
+            ->assertJsonPath('sourcePostId', $post->id);
     }
 
     public function test_message_without_source_post_still_sends(): void

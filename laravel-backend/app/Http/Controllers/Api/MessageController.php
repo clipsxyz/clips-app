@@ -483,6 +483,24 @@ class MessageController extends Controller
     }
 
     /**
+     * Shared-post id from either snake_case or camelCase body keys.
+     * Caption text must not drop this — the DM card is keyed off the column, not the URL.
+     */
+    private function resolveSourcePostId(Request $request): ?string
+    {
+        if (! $this->sourcePostColumnAvailable()) {
+            return null;
+        }
+
+        $raw = $request->input('source_post_id') ?? $request->input('sourcePostId');
+        if (! is_string($raw)) {
+            return null;
+        }
+
+        return $this->normalizeReplyTarget($raw);
+    }
+
+    /**
      * Send a message
      */
     public function sendMessage(Request $request): JsonResponse
@@ -497,6 +515,7 @@ class MessageController extends Controller
             'image_url' => 'nullable|url|max:500',
             'is_system_message' => 'boolean',
             'source_post_id' => 'nullable|uuid|exists:posts,id',
+            'sourcePostId' => 'nullable|uuid|exists:posts,id',
             'reply_to_message_id' => 'nullable|string|max:64',
         ]);
 
@@ -549,8 +568,9 @@ class MessageController extends Controller
             // Persist the shared/anchor post on the message row itself so the
             // thread can render the post card from structured data (and keep it
             // when the message text is a user caption rather than a share link).
-            if ($this->sourcePostColumnAvailable() && $request->filled('source_post_id')) {
-                $attributes['source_post_id'] = $request->input('source_post_id');
+            $sourcePostId = $this->resolveSourcePostId($request);
+            if ($sourcePostId) {
+                $attributes['source_post_id'] = $sourcePostId;
             }
 
             $message = Message::create($attributes);
@@ -561,14 +581,18 @@ class MessageController extends Controller
                 BoostAnalyticsService::recordMessageStartForConversation(
                     $user->handle,
                     $recipientHandle,
-                    $request->input('source_post_id')
+                    $sourcePostId
                 );
             }
 
             return $message;
         });
 
-        return response()->json($message, 201);
+        $payload = $message->toArray();
+        $payload['source_post_id'] = $message->source_post_id;
+        $payload['sourcePostId'] = $message->source_post_id;
+
+        return response()->json($payload, 201);
     }
 
     protected function sendGroupMessage(Request $request): JsonResponse

@@ -1368,7 +1368,8 @@ export async function fetchConversationPage(otherHandle: string, cursor: string 
     return apiRequest(`/messages/conversation/${encoded}/paged?${params}`);
 }
 
-export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string; reply_to_message_id?: string }) {
+export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string; sourcePostId?: string; reply_to_message_id?: string }) {
+    const sourcePostId = payload.source_post_id ?? payload.sourcePostId ?? null;
     return apiRequest('/messages/send', {
         method: 'POST',
         body: JSON.stringify({
@@ -1376,7 +1377,8 @@ export async function sendMessage(recipientHandle: string, payload: { text?: str
             text: payload.text ?? null,
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
-            source_post_id: payload.source_post_id ?? null,
+            source_post_id: sourcePostId,
+            sourcePostId,
             reply_to_message_id: normalizeReplyToMessageId(payload.reply_to_message_id),
         }),
     });
