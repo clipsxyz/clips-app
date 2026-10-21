@@ -293,7 +293,10 @@ import type { FeedScope } from '../utils/placeFeedLevels';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import {
+    closeFeedCommentsOverlay,
+    closeFeedShareOverlay,
     getFeedOverlayBlocksPlayback,
+    getFeedOverlaySnapshot,
     openFeedCommentsOverlay,
     openFeedDmThread,
     openFeedLocationPicker,
@@ -2985,12 +2988,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 .map((page) => page.filter((p) => String(p.userHandle || '').trim().toLowerCase() !== normalized))
                 .filter((page) => page.length > 0)
         );
-        setSelectedPostForComments((prev) =>
-            prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
-        );
-        setSelectedPostForShare((prev) =>
-            prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
-        );
+        const overlay = getFeedOverlaySnapshot();
+        if (
+            overlay.commentsPost &&
+            String(overlay.commentsPost.userHandle || '').trim().toLowerCase() === normalized
+        ) {
+            closeFeedCommentsOverlay();
+        }
+        if (
+            overlay.sharePost &&
+            String(overlay.sharePost.userHandle || '').trim().toLowerCase() === normalized
+        ) {
+            closeFeedShareOverlay();
+        }
         setOverflowPost((prev) =>
             prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
         );
@@ -4480,9 +4490,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setImageFullscreenPost((prev) =>
             prev && String(prev.id) === updatedId ? { ...prev, ...updated } : prev,
         );
-        setSelectedPostForComments((prev) =>
-            prev && String(prev.id) === updatedId ? { ...prev, ...updated } : prev,
-        );
+        const overlay = getFeedOverlaySnapshot();
+        if (overlay.commentsPost && String(overlay.commentsPost.id) === updatedId) {
+            openFeedCommentsOverlay({ ...overlay.commentsPost, ...updated });
+        }
+        if (overlay.sharePost && String(overlay.sharePost.id) === updatedId) {
+            openFeedShareOverlay({ ...overlay.sharePost, ...updated });
+        }
     }, []);
 
     /** Write a like through the feed rows, the open modal, and the in-memory store. */
