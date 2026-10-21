@@ -7,6 +7,40 @@ export type SearchSections = {
     posts?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
 };
 
+export type SearchUser = {
+    handle: string;
+    displayName?: string;
+    avatarUrl?: string;
+    username?: string;
+};
+
+/** Flatten Laravel `/search` user payloads into a stable client list. */
+export function parseSearchUsers(result: unknown): SearchUser[] {
+    const root = result && typeof result === 'object' ? (result as Record<string, any>) : {};
+    const nested = root.sections?.users?.items
+        ?? root.data?.sections?.users?.items
+        ?? root.users?.items
+        ?? root.data?.users
+        ?? root.items
+        ?? root.users;
+    const list = Array.isArray(nested) ? nested : Array.isArray(root) ? root : [];
+    return list
+        .map((u: any) => {
+            const row = u?.user && typeof u.user === 'object' ? u.user : u;
+            const handle = String(row?.handle || row?.userHandle || '').trim();
+            const displayName = String(
+                row?.display_name || row?.displayName || row?.name || handle,
+            ).trim();
+            return {
+                handle,
+                displayName: displayName || undefined,
+                avatarUrl: row?.avatar_url || row?.avatarUrl || undefined,
+                username: row?.username ? String(row.username) : undefined,
+            };
+        })
+        .filter((u: SearchUser) => !!u.handle);
+}
+
 function useLiveSearchApi(): boolean {
     if (isMockMode()) return false;
     if (getRuntimeEnv('VITE_USE_LARAVEL_API') === 'false') return false;

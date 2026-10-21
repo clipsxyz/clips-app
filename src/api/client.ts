@@ -24,6 +24,7 @@ const LIVE_API_REQUEST_PATHS = new Set<string>([
     '/locations/search',
     '/locations/geocode',
     '/locations/details',
+    '/search',
     '/search/places',
     '/search/places/details',
     '/search/places/summary',

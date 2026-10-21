@@ -9,7 +9,7 @@ import {
     View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { unifiedSearch } from '../api/search';
+import { parseSearchUsers, unifiedSearch } from '../api/search';
 import Avatar from './Avatar.native';
 import StoryModalShell from './StoryModalShell.native';
 
@@ -43,6 +43,7 @@ export default function UserTaggingModalNative({
         const q = searchQuery.trim().replace(/^@/, '');
         if (!q) {
             setUsers([]);
+            setIsLoading(false);
             return;
         }
         let cancelled = false;
@@ -50,22 +51,7 @@ export default function UserTaggingModalNative({
             setIsLoading(true);
             try {
                 const result = await unifiedSearch({ q, types: 'users', usersLimit: 20 });
-                const items = ((result as any)?.sections?.users?.items || []) as any[];
-                const queryLower = q.toLowerCase();
-                const mapped = items
-                    .map((u) => ({
-                        handle: String(u?.handle || '').trim(),
-                        displayName:
-                            String(u?.display_name || u?.displayName || u?.handle || '').trim() ||
-                            undefined,
-                        avatarUrl: u?.avatar_url || u?.avatarUrl,
-                    }))
-                    .filter((u) => u.handle)
-                    .filter((u) => {
-                        const h = u.handle.toLowerCase();
-                        const n = (u.displayName || '').toLowerCase();
-                        return h.includes(queryLower) || n.includes(queryLower);
-                    });
+                const mapped = parseSearchUsers(result);
                 if (!cancelled) setUsers(mapped);
             } catch {
                 if (!cancelled) setUsers([]);

@@ -31,5 +31,7 @@ describe('isMigratedApiRequestPath stories', () => {
         expect(isMigratedApiRequestPath('/posts')).toBe(true);
         expect(isMigratedApiRequestPath('/collections')).toBe(true);
         expect(isMigratedApiRequestPath('/chat-groups')).toBe(true);
+        expect(isMigratedApiRequestPath('/search')).toBe(true);
+        expect(isMigratedApiRequestPath('/search?q=Stevie&types=users')).toBe(true);
     });
 });

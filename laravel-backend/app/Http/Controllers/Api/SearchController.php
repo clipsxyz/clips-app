@@ -10,6 +10,7 @@ use App\Services\PlaceSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 
 class SearchController extends Controller
 {
@@ -225,18 +226,18 @@ class SearchController extends Controller
             'postsLimit' => 'nullable|integer|min:1|max:50',
         ]);
 
-        $qRaw = trim($request->query('q', ''));
+        $qRaw = trim((string) $request->input('q', ''));
         $q = strtolower($qRaw);
-        $typesStr = $request->query('types', 'users,locations,posts');
+        $typesStr = (string) $request->input('types', 'users,locations,posts');
         $types = array_filter(array_map('trim', explode(',', $typesStr)));
 
-        $usersCursor = (int) $request->query('usersCursor', 0);
-        $locationsCursor = (int) $request->query('locationsCursor', 0);
-        $postsCursor = (int) $request->query('postsCursor', 0);
+        $usersCursor = (int) $request->input('usersCursor', 0);
+        $locationsCursor = (int) $request->input('locationsCursor', 0);
+        $postsCursor = (int) $request->input('postsCursor', 0);
 
-        $usersLimit = min((int) $request->query('usersLimit', 10), 50);
-        $locationsLimit = min((int) $request->query('locationsLimit', 10), 50);
-        $postsLimit = min((int) $request->query('postsLimit', 10), 50);
+        $usersLimit = min((int) $request->input('usersLimit', 10), 50);
+        $locationsLimit = min((int) $request->input('locationsLimit', 10), 50);
+        $postsLimit = min((int) $request->input('postsLimit', 10), 50);
 
         $sections = [];
 
@@ -294,9 +295,13 @@ class SearchController extends Controller
             $offset = $usersCursor * $usersLimit;
             $users = User::query()
                 ->where(function ($query) use ($q) {
-                    $query->whereRaw('LOWER(handle) LIKE ?', ["%$q%"])
-                        ->orWhereRaw('LOWER(display_name) LIKE ?', ["%$q%"])
-                        ->orWhereRaw('LOWER(username) LIKE ?', ["%$q%"]);
+                    $like = "%{$q}%";
+                    $query->whereRaw('LOWER(handle) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(display_name) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(username) LIKE ?', [$like]);
+                    if (Schema::hasColumn('users', 'name')) {
+                        $query->orWhereRaw('LOWER(name) LIKE ?', [$like]);
+                    }
                 })
                 ->select('id', 'username', 'display_name', 'handle', 'avatar_url')
                 ->orderByRaw(
