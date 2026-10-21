@@ -69,6 +69,7 @@ import { updatePost as apiUpdatePost } from '../api/client';
 import { toggleFollowForPost } from '../api/posts';
 import { flushScenesPostUpdates, setScenesPostUpdate } from '../utils/scenesPostSyncNative';
 import { ox } from '../constants/nativeOpticalScale';
+import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 
 export default function PostDetailScreen({ route, navigation }: any) {
     const { postId, openComments, fromCollection, initialPost } = route.params || {};
@@ -117,11 +118,20 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     useFocusEffect(
         useCallback(() => {
+            const current = postRef.current;
+            if (current && isVideoPost(current)) {
+                setActiveFeedVideoPostId(String(current.id));
+            }
             return () => {
                 flushScenesPostUpdates();
             };
         }, []),
     );
+
+    useEffect(() => {
+        if (!post || !isVideoPost(post)) return;
+        setActiveFeedVideoPostId(String(post.id));
+    }, [post]);
 
     const syncPostOut = useCallback((next: Post | null | undefined) => {
         if (next?.id) setScenesPostUpdate(next);

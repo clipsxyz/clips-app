@@ -341,7 +341,7 @@ const FeedPostMedia = React.memo(
         stickers,
         onMediaLoad,
         mode = 'feed',
-        isActive: _isActive = false,
+        isActive = false,
         suspendNativeVideo = false,
         holdNativeVideo = false,
         muted = true,
@@ -498,17 +498,25 @@ const FeedPostMedia = React.memo(
     // FeedScreen setState / extraData — this cell subscribes directly.
     const videoSuspended = suspendNativeVideo || overlayBlocksPlayback;
 
+    /**
+     * Profile / peek / post-detail viewers pass `isActive` because they are not the
+     * feed FlatList. Honor it so the TextureView mounts and the poster cover can lift
+     * even when the feed store still points at a different card.
+     */
+    const propIsActive = Boolean(isActive) && !videoSuspended;
     /** Settled decoder owner — drives surface MOUNT/teardown, frozen during a fling. */
     const isViewable =
         mode === 'feed' &&
         !videoSuspended &&
-        String(storeActivePostId) === String(post.id);
+        (String(storeActivePostId) === String(post.id) || propIsActive);
     /** Live playback owner — drives pause/mute so audio focus follows the viewport. */
     const isAudioPrimary =
-        mode === 'feed' &&
         !videoSuspended &&
-        storeAudioFocusPostId != null &&
-        String(storeAudioFocusPostId) === String(post.id);
+        (mode === 'detail' ||
+            (mode === 'feed' &&
+                ((storeAudioFocusPostId != null &&
+                    String(storeAudioFocusPostId) === String(post.id)) ||
+                    propIsActive)));
     // Only the audio-primary card actually plays.
     const isFeedAutoplayActive = isAudioPrimary;
     // Feed-only: hold the native surface mounted (paused) while a viewer route covers us.
@@ -547,12 +555,12 @@ const FeedPostMedia = React.memo(
     // A preload neighbor's surface is already prepared, so unmuting + lifting the poster
     // happen together with no re-create / re-buffer and no frozen frame (readiness is still
     // gated inside `fadeOutPosterCover`: the poster stays opaque until the video is
-    // advancing).
+    // advancing). Detail / profile viewers use the same path so audio cannot run under
+    // an opaque cover.
     useEffect(() => {
-        if (mode !== 'feed') return;
         if (!isAudioPrimary) return;
         fadeOutPosterCover();
-    }, [isAudioPrimary, mode, fadeOutPosterCover]);
+    }, [isAudioPrimary, fadeOutPosterCover]);
 
     // Bumped when overlay suspend ends while this card is active — forces TextureView remount.
     const [playerEpoch, setPlayerEpoch] = useState(0);
@@ -1368,7 +1376,7 @@ const FeedPostMedia = React.memo(
                             }
                             muted={mode === 'feed' ? !soundOn || !videoSurfaceReady : false}
                             soundOn={soundOn}
-                            repeat={mode === 'feed'}
+                            repeat
                             mode={mode}
                             resizeMode={slideResizeMode}
                             isViewable={feedSurfaceMounted}
@@ -1574,6 +1582,7 @@ const FeedPostMedia = React.memo(
             prev.height === next.height &&
             prev.mode === next.mode &&
             prev.muted === next.muted &&
+            prev.isActive === next.isActive &&
             prev.suspendNativeVideo === next.suspendNativeVideo &&
             prev.holdNativeVideo === next.holdNativeVideo &&
             prev.carouselIndex === next.carouselIndex &&

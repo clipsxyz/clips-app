@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
     FlatList,
     Image,
@@ -76,19 +76,23 @@ export default function ViewProfilePostsSheet({
         }
     }, [activateVideo, visible]);
 
-    useEffect(() => {
-        if (!visible || feedPosts.length === 0) return;
-        if (activeVideoPostIdRef.current) return;
+    useLayoutEffect(() => {
+        if (!visible) return;
+        const source = posts.length > 0 ? posts : feedPosts;
+        if (source.length === 0) return;
         const tapped = initialPostId
-            ? feedPosts.find((p) => String(p.id) === String(initialPostId))
-            : feedPosts[0];
+            ? source.find((p) => String(p.id) === String(initialPostId))
+            : source[0];
         if (tapped && postHasVideoMedia(tapped)) {
             activateVideo(String(tapped.id));
             return;
         }
-        const firstVideo = feedPosts.find((p) => postHasVideoMedia(p));
+        const firstVideo = source.find((p) => postHasVideoMedia(p));
         activateVideo(firstVideo ? String(firstVideo.id) : null);
-    }, [activateVideo, visible, initialPostId, feedPosts]);
+        // Intentionally not depending on posts/feedPosts: like updates must not
+        // snap playback back to the originally tapped tile.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activateVideo, visible, initialPostId]);
 
     useEffect(() => {
         if (!visible || !initialPostId || feedPosts.length === 0) return;
