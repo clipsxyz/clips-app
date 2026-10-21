@@ -5407,6 +5407,11 @@ onVisitProfile={() =>
         pinFeedScrollSoon(y);
     }, [restoreFeedVideoAfterOverlay, pinFeedScrollSoon]);
 
+    // Sibling overlay (not ListEmptyComponent) so the first loading commit paints
+    // skeleton cards immediately — VirtualizedList can leave one empty layout frame
+    // before ListEmptyComponent mounts.
+    const showFeedSkeleton = initialLoading && flatForRender.length === 0 && !error;
+
     return (
         <View style={styles.container}>
             <FeedPageLayout
@@ -5487,17 +5492,15 @@ onVisitProfile={() =>
                 }}
                 extraData={feedExtraData}
                 viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
-                // Keep the render window tight for max FPS while flinging.
-                initialNumToRender={2}
-                // One row ahead of the tightened default so the silent preload neighbor's
-                // cell is actually mounted (a cell that is not rendered cannot hold the
-                // warmed TextureView sold as "instant" playback).
-                maxToRenderPerBatch={4}
-                // Widened so recycled cells stay mounted long enough to reuse their measured
-                // height; an unmount/remount cycle during video play was collapsing the
-                // VirtualizedList frame map and snapping the native offset by whole posts.
-                // Also keeps the one-ahead preload neighbor's cell alive.
-                windowSize={9}
+                // Fill the first viewport on cold start (2 left a blank strip under post #2).
+                // 3 cards cover a 16:9 + peek of the next; 4:5 portrait already fills the screen.
+                initialNumToRender={3}
+                // Keep batch size in lockstep with the first paint so lower-end Android
+                // does not mount extra TextureViews in the same JS frame as the first 3.
+                maxToRenderPerBatch={3}
+                // Tight window: enough for the playing card + one-ahead silent preload
+                // without keeping ~9 viewports of decoders alive on mid-range phones.
+                windowSize={5}
                 updateCellsBatchingPeriod={50}
                 // Android-only clipping freed off-screen cell memory while flinging, but with
                 // content-driven heights (no getItemLayout) clipped cells remount at the wrong
@@ -5630,8 +5633,8 @@ onVisitProfile={() =>
                                 <Text style={styles.emptyFeedSecondaryBtnText}>Try again</Text>
                             </TouchableOpacity>
                         </View>
-                    ) : flatForRender.length === 0 && (initialLoading || !end) ? (
-                        <FeedPostSkeleton count={2} />
+                    ) : showFeedSkeleton ? null : flatForRender.length === 0 && !end ? (
+                        <FeedPostSkeleton count={3} />
                     ) : end && flatForRender.length === 0 ? (
                         <View style={styles.emptyContainer}>
                             {customLocation ? (
@@ -5772,6 +5775,17 @@ onVisitProfile={() =>
                     },
                 ]}
             />
+            {showFeedSkeleton ? (
+                <View
+                    pointerEvents="none"
+                    style={[
+                        styles.feedSkeletonOverlay,
+                        { paddingTop: insets.top + FEED_PINNED_CHROME_CONTENT_HEIGHT },
+                    ]}
+                >
+                    <FeedPostSkeleton count={3} />
+                </View>
+            ) : null}
             </View>
             </FeedPageLayout>
 
@@ -6333,6 +6347,11 @@ const styles = StyleSheet.create({
         color: '#04110f',
         fontSize: 13,
         fontWeight: '700',
+    },
+    feedSkeletonOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 2,
+        backgroundColor: 'transparent',
     },
     feedList: {
         flex: 1,
