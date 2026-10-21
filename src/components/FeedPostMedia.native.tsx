@@ -29,6 +29,10 @@ import {
     subscribeFeedAudioFocusPostId,
     subscribeFeedPreloadPostIds,
 } from '../utils/feedActiveVideoNative';
+import {
+    getFeedOverlayBlocksPlayback,
+    subscribeFeedOverlayBlocksPlayback,
+} from '../utils/feedOverlayStoreNative';
 import { getFeedScrollPauseTarget, subscribeFeedScrollPauseTarget } from '../utils/feedScrollBusyNative';
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
@@ -483,15 +487,26 @@ const FeedPostMedia = React.memo(
         return subscribeFeedPreloadPostIds(setStorePreloadPostIds);
     }, [mode]);
 
+    const [overlayBlocksPlayback, setOverlayBlocksPlayback] = useState(() =>
+        mode === 'feed' ? getFeedOverlayBlocksPlayback() : false,
+    );
+    useEffect(() => {
+        if (mode !== 'feed') return;
+        return subscribeFeedOverlayBlocksPlayback(setOverlayBlocksPlayback);
+    }, [mode]);
+    // Comments sheet (and other overlay-store blocks) must unmount TextureViews without
+    // FeedScreen setState / extraData — this cell subscribes directly.
+    const videoSuspended = suspendNativeVideo || overlayBlocksPlayback;
+
     /** Settled decoder owner — drives surface MOUNT/teardown, frozen during a fling. */
     const isViewable =
         mode === 'feed' &&
-        !suspendNativeVideo &&
+        !videoSuspended &&
         String(storeActivePostId) === String(post.id);
     /** Live playback owner — drives pause/mute so audio focus follows the viewport. */
     const isAudioPrimary =
         mode === 'feed' &&
-        !suspendNativeVideo &&
+        !videoSuspended &&
         storeAudioFocusPostId != null &&
         String(storeAudioFocusPostId) === String(post.id);
     // Only the audio-primary card actually plays.
@@ -512,7 +527,7 @@ const FeedPostMedia = React.memo(
      */
     const isPreloadNeighbor =
         mode === 'feed' &&
-        !suspendNativeVideo &&
+        !videoSuspended &&
         !feedSurfaceMounted &&
         storePreloadPostIds.includes(String(post.id));
     /**
@@ -803,7 +818,7 @@ const FeedPostMedia = React.memo(
     // the live audio focus OR a silent preload can mount this card early, the mask identity
     // must already be "mounted" so the later settle (isViewable 0→1) and the preload→primary
     // flip do NOT change the key and re-cover an already-painted/warmed first frame.
-    const posterHoldKey = `${post.id}|${mediaUrl ?? ''}|${currentIndex}|${feedVideoMounted ? 1 : 0}|${suspendNativeVideo ? 1 : 0}|${playerEpoch}`;
+    const posterHoldKey = `${post.id}|${mediaUrl ?? ''}|${currentIndex}|${feedVideoMounted ? 1 : 0}|${videoSuspended ? 1 : 0}|${playerEpoch}`;
     const [appliedPosterHoldKey, setAppliedPosterHoldKey] = useState('');
     const activePosterUriRef = useRef<string | null>(activePosterUri ?? null);
     activePosterUriRef.current = activePosterUri ?? null;
@@ -827,20 +842,20 @@ const FeedPostMedia = React.memo(
     }
 
     useEffect(() => {
-        if (suspendNativeVideo) {
+        if (videoSuspended) {
             needsRemountAfterSuspendRef.current = true;
         }
-    }, [suspendNativeVideo]);
+    }, [videoSuspended]);
 
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
-        if (!isFeedAutoplayActive || suspendNativeVideo) return;
+        if (!isFeedAutoplayActive || videoSuspended) return;
         if (!needsRemountAfterSuspendRef.current) return;
         needsRemountAfterSuspendRef.current = false;
         setPlayerEpoch((n) => n + 1);
         setPaused(false);
         setPlayFailed(false);
-    }, [isFeedAutoplayActive, mode, suspendNativeVideo, video]);
+    }, [isFeedAutoplayActive, mode, videoSuspended, video]);
 
     const fireBurstAt = useCallback((x: number, y: number) => {
         setBurstAt({ x, y });
@@ -890,7 +905,7 @@ const FeedPostMedia = React.memo(
 
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
-        if (isFeedAutoplayActive && !suspendNativeVideo) {
+        if (isFeedAutoplayActive && !videoSuspended) {
             // Resume in place — do not cover/seek to 0 (double-tap like re-renders the card).
             setPaused(false);
             setPlayFailed(false);
@@ -929,7 +944,7 @@ const FeedPostMedia = React.memo(
         mode,
         post.id,
         storeActivePostId,
-        suspendNativeVideo,
+        videoSuspended,
         video,
     ]);
 
@@ -1132,7 +1147,7 @@ const FeedPostMedia = React.memo(
         video &&
         !playFailed &&
         (mode === 'detail' ||
-            (mode === 'feed' && !suspendNativeVideo && (feedSurfaceMounted || feedVideoHeld)));
+            (mode === 'feed' && !videoSuspended && (feedSurfaceMounted || feedVideoHeld)));
     const showMediaPendingOverlay =
         videoSurfaceMounted && !videoSurfaceReady && !posterPaintedForSlide;
 
@@ -1234,7 +1249,7 @@ const FeedPostMedia = React.memo(
             slideIsCurrent &&
             !playFailed &&
             (mode === 'detail' ||
-                (mode === 'feed' && !suspendNativeVideo && (feedVideoMounted || feedVideoHeld)));
+                (mode === 'feed' && !videoSuspended && (feedVideoMounted || feedVideoHeld)));
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
             return (

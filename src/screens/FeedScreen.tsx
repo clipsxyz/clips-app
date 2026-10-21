@@ -58,7 +58,6 @@ import {
     deletePost,
     setReclipState,
     addComment,
-    fetchComments,
     incrementShares,
     toggleCommentLike,
     toggleReplyLike,
@@ -74,7 +73,7 @@ import {
 } from '../api/posts';
 import { isMockMode } from '../api/apiMode';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
-import { appendMessage, getUnreadTotal } from '../api/messages';
+import { getUnreadTotal } from '../api/messages';
 import {
     connectSocket,
     joinLocationFeed,
@@ -208,7 +207,7 @@ import FeedLikesSheet from '../components/FeedLikesSheet.native';
 import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
 import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
-import FeedShareModal from '../components/FeedShareModal';
+import FeedOverlayHost from '../components/FeedOverlayHost.native';
 import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
@@ -249,7 +248,6 @@ import QRCodeModal from '../components/QRCodeModal.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
 import { updatePost as apiUpdatePost } from '../api/client';
-import PostCommentsSheet from '../components/PostCommentsSheet';
 import {
     getCollectionsForPost,
     savePostToDefaultCollection,
@@ -285,7 +283,6 @@ import {
     resolvePlaceFeedSelection,
     type PlaceFeedSelection,
 } from '../utils/pickPlaceFeedScope';
-import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { clearPendingLocationFeed, readPendingLocationFeed } from '../utils/pendingLocationNative';
 import {
     filterPostsForLocationFeed,
@@ -295,7 +292,13 @@ import {
 import type { FeedScope } from '../utils/placeFeedLevels';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
-import FeedDmSheet, { type FeedDmSheetHandle } from '../components/FeedDmSheet.native';
+import {
+    getFeedOverlayBlocksPlayback,
+    openFeedCommentsOverlay,
+    openFeedDmThread,
+    openFeedLocationPicker,
+    openFeedShareOverlay,
+} from '../utils/feedOverlayStoreNative';
 import {
     loadLocationNotifyPrefs,
     locationNotifyKey,
@@ -1891,126 +1894,10 @@ function nextPreloadNeighborIds(rows: FeedListRow[], primaryPostId: string | nul
     return [];
 }
 
-function useFeedDmComposer(viewerHandle: string | undefined) {
-    const dmSheetRef = useRef<FeedDmSheetHandle>(null);
-    const [dmSheetOpen, setDmSheetOpen] = useState(false);
-    const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
-    const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
-    const [dmSheetMessage, setDmSheetMessage] = useState('');
-    const [dmSheetSending, setDmSheetSending] = useState(false);
-    const [pendingDmUser, setPendingDmUser] = useState<string | null>(null);
-    const [pendingDmPostId, setPendingDmPostId] = useState<string | null>(null);
-    const [dmSheetEpoch, setDmSheetEpoch] = useState(0);
-    const dmSessionRef = useRef(0);
-    const suppressDismissRef = useRef(false);
-    const unlockDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const openDmThread = useCallback(
-        (handle: string, postId: string, isMutual?: boolean) => {
-            if (isMutual === false) {
-                Alert.alert(
-                    'Cannot message',
-                    'You must mutually follow each other to send a direct message',
-                );
-                return;
-            }
-            const nextHandle = (handle || '').trim();
-            if (!nextHandle) return;
-            // Stash the recipient now; present() waits until Quick Actions has unmounted.
-            dmSessionRef.current += 1;
-            suppressDismissRef.current = true;
-            setPendingDmUser(nextHandle);
-            setPendingDmPostId(postId ? String(postId) : null);
-            setDmSheetRecipientHandle(nextHandle);
-            setDmSheetAnchorPostId(postId ? String(postId) : null);
-            setDmSheetMessage('');
-            setDmSheetSending(false);
-        },
-        [],
-    );
-
-    useEffect(() => {
-        if (!pendingDmUser) return undefined;
-        const session = dmSessionRef.current;
-        const t = setTimeout(() => {
-            if (session !== dmSessionRef.current) return;
-            setDmSheetOpen(true);
-            setPendingDmUser(null);
-            setPendingDmPostId(null);
-            dmSheetRef.current?.present();
-            if (unlockDismissTimerRef.current) clearTimeout(unlockDismissTimerRef.current);
-            unlockDismissTimerRef.current = setTimeout(() => {
-                if (session === dmSessionRef.current) suppressDismissRef.current = false;
-            }, 400);
-        }, 250);
-        return () => clearTimeout(t);
-    }, [pendingDmUser, pendingDmPostId]);
-
-    const sendDmFromSheet = useCallback(async () => {
-        const text = dmSheetMessage.trim();
-        const recipient = dmSheetRecipientHandle;
-        if (!text || !viewerHandle || !recipient || dmSheetSending) return;
-        setDmSheetSending(true);
-        try {
-            await appendMessage(viewerHandle, recipient, {
-                text,
-                sourcePostId: dmSheetAnchorPostId ?? undefined,
-            });
-            dmSheetRef.current?.dismiss();
-        } catch (err) {
-            Alert.alert(
-                'Could not send',
-                err instanceof Error ? err.message : 'Please try again.',
-            );
-        } finally {
-            setDmSheetSending(false);
-        }
-    }, [dmSheetAnchorPostId, dmSheetMessage, dmSheetRecipientHandle, dmSheetSending, viewerHandle]);
-
-    // Gorhom already tore the sheet down. Calling dismiss() again here leaves
-    // status=DISMISSING, so the next present() never paints.
-    const closeDmSheet = useCallback(() => {
-        if (suppressDismissRef.current) return;
-        setDmSheetOpen(false);
-        setPendingDmUser(null);
-        setPendingDmPostId(null);
-        setDmSheetRecipientHandle(null);
-        setDmSheetAnchorPostId(null);
-        setDmSheetMessage('');
-        setDmSheetSending(false);
-        setTimeout(() => setDmSheetEpoch((n) => n + 1), 0);
-    }, []);
-
-    return {
-        dmSheetRef,
-        dmSheetEpoch,
-        dmSheetOpen,
-        dmSheetRecipientHandle,
-        dmSheetMessage,
-        setDmSheetMessage,
-        dmSheetSending,
-        openDmThread,
-        sendDmFromSheet,
-        closeDmSheet,
-    };
-}
-
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
     const isFeedFocused = useIsFocused();
-    const {
-        dmSheetRef,
-        dmSheetEpoch,
-        dmSheetOpen,
-        dmSheetRecipientHandle,
-        dmSheetMessage,
-        setDmSheetMessage,
-        dmSheetSending,
-        openDmThread,
-        sendDmFromSheet,
-        closeDmSheet,
-    } = useFeedDmComposer(user?.handle);
     const [scenesViewerActive, setScenesViewerActiveState] = useState(() => isScenesViewerActive());
     useEffect(() => {
         // Keep feed ExoPlayer dead for the whole Scenes session (focus blur is unreliable).
@@ -2132,9 +2019,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
     const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
     const [customFeedScope, setCustomFeedScope] = useState<'local' | 'regional' | 'national' | null>(null);
-    const [commentsModalOpen, setCommentsModalOpen] = useState(false);
-    const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
-    const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
     const [imageFullscreenStartIndex, setImageFullscreenStartIndex] = useState(0);
     /**
@@ -2144,13 +2028,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
      * open, cleared when Feed regains focus.
      */
     const [heldVideoPostId, setHeldVideoPostId] = useState<string | null>(null);
-    /** Feed under Scenes / image fullscreen / comments — kill ExoPlayer so audio cannot leak. */
+    /** Feed under Scenes / image fullscreen — kill ExoPlayer so audio cannot leak.
+     *  Comments-sheet suspend is owned by feedOverlayStoreNative (FeedPostMedia subscribes). */
     const feedNativeVideoSuspended =
-        commentsModalOpen ||
-        ((!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost)) &&
-            !heldVideoPostId);
-    const [shareModalOpen, setShareModalOpen] = useState(false);
-    const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
+        (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost)) &&
+        !heldVideoPostId;
     const [shareToStoriesPost, setShareToStoriesPost] = useState<Post | null>(null);
     const [reclipConfirmPost, setReclipConfirmPost] = useState<Post | null>(null);
     const [feedGazetteerAlert, setFeedGazetteerAlert] = useState<{
@@ -2166,10 +2048,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [likesSheetPost, setLikesSheetPost] = useState<Post | null>(null);
     const [taggedSheetPost, setTaggedSheetPost] = useState<Post | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
-    const [headerScopePicker, setHeaderScopePicker] = useState<LocationSuggestion | null>(null);
-    const [headerScopePickerKind, setHeaderScopePickerKind] = useState<'location' | 'venue' | 'landmark'>(
-        'location'
-    );
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
     const savedByPostIdRef = useRef(savedByPostId);
@@ -2474,16 +2352,16 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
      *  from bleeding into a newer open (or a viewer the user already closed). */
     const imageFullscreenOpenIdRef = useRef<string | null>(null);
 
-    const commentsModalOpenRef = useRef(commentsModalOpen);
-    commentsModalOpenRef.current = commentsModalOpen;
-
     /** True after the first viewability pass — list data patches must never invent a player. */
     const feedViewabilitySeenRef = useRef(false);
 
-    const feedAutoplayOverlayBlocks = () =>
-        scenesViewerActiveRef.current ||
-        imageFullscreenOpenRef.current ||
-        commentsModalOpenRef.current;
+    const feedAutoplayOverlayBlocks = useCallback(
+        () =>
+            scenesViewerActiveRef.current ||
+            imageFullscreenOpenRef.current ||
+            getFeedOverlayBlocksPlayback(),
+        [],
+    );
 
     const captureOverlayVideoResume = useCallback((fallbackPost?: Post | null) => {
         const active = activeVideoPostIdRef.current;
@@ -2528,14 +2406,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, []);
 
     useEffect(() => {
-        if (!scenesViewerActive && !imageFullscreenPost && !commentsModalOpen) return;
+        if (!scenesViewerActive && !imageFullscreenPost) return;
         if (autoplayTimerRef.current) {
             clearTimeout(autoplayTimerRef.current);
             autoplayTimerRef.current = null;
         }
         activeVideoPostIdRef.current = null;
         setActiveFeedVideoPostId(null);
-    }, [scenesViewerActive, imageFullscreenPost, commentsModalOpen]);
+    }, [scenesViewerActive, imageFullscreenPost]);
 
     const scheduleActiveFeedVideo = useCallback((postId: string | null, force = false) => {
         if (autoplayTimerRef.current) {
@@ -3213,9 +3091,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     }, [overflowVisible, overflowPost?.id, userId]);
 
     const openShareForPost = React.useCallback(async (p: Post) => {
-        setSelectedPostForShare(p);
-        setShareModalOpen(true);
+        openFeedShareOverlay(p);
     }, []);
+
+    const openCommentsForPost = React.useCallback(
+        (post: Post, pauseFeedVideo = true) => {
+            captureOverlayVideoResume(post);
+            if (pauseFeedVideo) {
+                activeVideoPostIdRef.current = null;
+                setActiveFeedVideoPostId(null);
+            }
+            openFeedCommentsOverlay(post);
+        },
+        [captureOverlayVideoResume],
+    );
 
     const handleShareToStoriesSuccess = React.useCallback(
         (postId: string) => {
@@ -3984,8 +3873,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ? { ...suggestion, type: filterType }
                     : suggestion;
             if (filterType === 'location' && getPlaceFeedPickerOptions(typed)) {
-                setHeaderScopePicker(typed);
-                setHeaderScopePickerKind(filterType);
+                openFeedLocationPicker({ suggestion: typed, kind: filterType });
                 return;
             }
             applyCustomLocationFeed(resolvePlaceFeedSelection(typed), filterType);
@@ -4342,8 +4230,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     : row.kind,
             )
             .join('|');
-        return `${pendingUploadTick}-${refreshing}-${isFeedFocused}-${commentsModalOpen}-${dims}`;
-    }, [flatForRender, pendingUploadTick, refreshing, isFeedFocused, commentsModalOpen]);
+        return `${pendingUploadTick}-${refreshing}-${isFeedFocused}-${dims}`;
+    }, [flatForRender, pendingUploadTick, refreshing, isFeedFocused]);
 
     flatForRenderRef.current = flatForRender;
 
@@ -4467,7 +4355,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // re-runs on every `flatForRender` change (likes, comment counts, pagination).
     }, [flatForRender]);
     React.useEffect(() => {
-        if (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost) || commentsModalOpen) {
+        if (!isFeedFocused || scenesViewerActive || Boolean(imageFullscreenPost) || getFeedOverlayBlocksPlayback()) {
             return;
         }
         if (!feedAutoplayAllowed || !feedHasPosts) return;
@@ -4488,7 +4376,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         isFeedFocused,
         scenesViewerActive,
         imageFullscreenPost,
-        commentsModalOpen,
         feedAutoplayAllowed,
         feedHasPosts,
     ]);
@@ -4676,11 +4563,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             onComment: () => {
                 const p = imageFullscreenPostRef.current;
                 if (!p) return;
-                captureOverlayVideoResume(p);
-                commentsModalOpenRef.current = true;
-                setSelectedPostId(p.id);
-                setSelectedPostForComments(p);
-                setCommentsModalOpen(true);
+                openCommentsForPost(p, false);
             },
             onReclip: async () => {
                 const p = imageFullscreenPostRef.current;
@@ -4734,6 +4617,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [
             captureOverlayVideoResume,
             navigation,
+            openCommentsForPost,
             openShareForPost,
             patchFeedPostLike,
             patchFollowForHandle,
@@ -5138,13 +5022,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onComment={() => {
                         if (isPendingUpload) return;
-                        captureOverlayVideoResume(mergedPost);
-                        commentsModalOpenRef.current = true;
-                        activeVideoPostIdRef.current = null;
-                        setActiveFeedVideoPostId(null);
-                        setSelectedPostId(mergedPost.id);
-                        setSelectedPostForComments(mergedPost);
-                        setCommentsModalOpen(true);
+                        openCommentsForPost(mergedPost);
                     }}
                     onShare={async () => {
                         if (isPendingUpload) return;
@@ -5353,7 +5231,7 @@ onVisitProfile={() =>
                     isCurrentUser={user?.handle === mergedPost.userHandle}
                     viewerHandle={user?.handle}
                     viewerUserId={userId}
-                    onOpenDM={user?.handle ? openDmThread : undefined}
+                    onOpenDM={user?.handle ? openFeedDmThread : undefined}
                     onOpenLikesSheet={() => setLikesSheetPost(mergedPost)}
                     onOpenTaggedSheet={() => setTaggedSheetPost(mergedPost)}
                 />,
@@ -5376,7 +5254,6 @@ onVisitProfile={() =>
             hideUserFromFeed,
             isFeedFocused,
             feedVideoMuted,
-            commentsModalOpen,
             scenesViewerActive,
             feedNativeVideoSuspended,
             heldVideoPostId,
@@ -5394,18 +5271,9 @@ onVisitProfile={() =>
             showFeedLikeBurst,
             syncFullscreenPost,
             captureOverlayVideoResume,
+            openCommentsForPost,
         ]
     );
-
-    const closeCommentsSheet = React.useCallback(() => {
-        commentsModalOpenRef.current = false;
-        const y = feedScrollYRef.current;
-        setCommentsModalOpen(false);
-        setSelectedPostId(null);
-        setSelectedPostForComments(null);
-        restoreFeedVideoAfterOverlay();
-        pinFeedScrollSoon(y);
-    }, [restoreFeedVideoAfterOverlay, pinFeedScrollSoon]);
 
     // Sibling overlay (not ListEmptyComponent) so the first loading commit paints
     // skeleton cards immediately — VirtualizedList can leave one empty layout frame
@@ -5789,48 +5657,15 @@ onVisitProfile={() =>
             </View>
             </FeedPageLayout>
 
-            <Modal
-                visible={commentsModalOpen && Boolean(selectedPostId)}
-                transparent
-                animationType="slide"
-                statusBarTranslucent
-                hardwareAccelerated
-                onRequestClose={closeCommentsSheet}
-                onShow={() => pinFeedScrollSoon()}
-            >
-                    <View style={styles.fullscreenOverlayRoot}>
-                        <Pressable
-                            style={styles.fullscreenOverlayBackdrop}
-                            onPress={closeCommentsSheet}
-                            accessibilityLabel="Dismiss comments"
-                        />
-                        <View style={styles.fullscreenCommentsSheet}>
-                            {selectedPostId ? (
-                            <PostCommentsSheet
-                                variant="scenesEmbed"
-                                postId={selectedPostId}
-                                post={selectedPostForComments}
-                                isOpen={commentsModalOpen}
-                                commentAuthorHandle={user?.handle ?? ''}
-                                currentUserHandle={user?.handle}
-                                onAfterClose={() => {
-                                    const pid = selectedPostId;
-                                    if (!pid) return;
-                                    fetchComments(pid)
-                                        .then((list) =>
-                                            updatePost(pid, (p) => ({
-                                                ...p,
-                                                stats: { ...p.stats, comments: list.length },
-                                            })),
-                                        )
-                                        .catch(() => {});
-                                }}
-                                onClose={closeCommentsSheet}
-                            />
-                            ) : null}
-                        </View>
-                    </View>
-                </Modal>
+            <FeedOverlayHost
+                userHandle={user?.handle}
+                updatePost={updatePost}
+                pinFeedScrollSoon={pinFeedScrollSoon}
+                restoreFeedVideoAfterOverlay={restoreFeedVideoAfterOverlay}
+                applyCustomLocationFeed={applyCustomLocationFeed}
+                onShareSuccess={handleShareToStoriesSuccess}
+                feedScrollYRef={feedScrollYRef}
+            />
 
             {likesSheetPost && likesSheetPost.stats.likes > 0 ? (
                 <FeedLikesSheet
@@ -5858,34 +5693,6 @@ onVisitProfile={() =>
                 />
             ) : null}
 
-            <FeedDmSheet
-                key={dmSheetEpoch}
-                ref={dmSheetRef}
-                open={dmSheetOpen}
-                recipientHandle={dmSheetRecipientHandle}
-                message={dmSheetMessage}
-                onChangeMessage={setDmSheetMessage}
-                onClose={closeDmSheet}
-                onSend={() => {
-                    void sendDmFromSheet();
-                }}
-                sending={dmSheetSending}
-            />
-
-            {shareModalOpen && selectedPostForShare ? (
-                <FeedShareModal
-                    post={selectedPostForShare}
-                    isOpen
-                    onClose={() => {
-                        const y = feedScrollYRef.current;
-                        setShareModalOpen(false);
-                        setSelectedPostForShare(null);
-                        pinFeedScrollSoon(y);
-                    }}
-                    onShareSuccess={handleShareToStoriesSuccess}
-                />
-            ) : null}
-
             <GazetteerAlertSheet
                 visible={reclipConfirmPost != null}
                 title="Reshare this to followers?"
@@ -5910,21 +5717,6 @@ onVisitProfile={() =>
                 onDismiss={() => setFeedGazetteerAlert(null)}
             />
 
-
-            {headerScopePicker ? (
-                <PlaceFeedScopePickerModal
-                    visible
-                    suggestion={headerScopePicker}
-                    onClose={() => setHeaderScopePicker(null)}
-                    onSelectScope={(scope) => {
-                        applyCustomLocationFeed(
-                            resolvePlaceFeedSelection(headerScopePicker, scope),
-                            headerScopePickerKind
-                        );
-                        setHeaderScopePicker(null);
-                    }}
-                />
-            ) : null}
 
             {overflowVisible && overflowPost ? (
             <PostOverflowMenuModal
