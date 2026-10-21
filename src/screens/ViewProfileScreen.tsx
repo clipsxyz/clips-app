@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -7,6 +7,7 @@ import {
     Image,
     TouchableOpacity,
     Pressable,
+    FlatList,
     ActivityIndicator,
     Alert,
     Modal,
@@ -838,19 +839,19 @@ const result = await followOrRequest({
         }
     };
 
-    const onSelectPost = (item: Post) => {
+    const onSelectPost = useCallback((item: Post) => {
         if (suppressGridOpenClickRef.current) {
             suppressGridOpenClickRef.current = false;
             return;
         }
         setSelectedPostId(item.id);
         setShowPostsSheet(true);
-    };
+    }, []);
 
-    const openGridPeek = (post: Post) => {
+    const openGridPeek = useCallback((post: Post) => {
         suppressGridOpenClickRef.current = true;
         setGridPeekPost(post);
-    };
+    }, []);
 
     const closeGridPeek = () => {
         setGridPeekPost(null);
@@ -983,6 +984,24 @@ const result = await followOrRequest({
         setShowTraveledModal(true);
     };
 
+    const renderProfileGridItem = useCallback(
+        ({ item }: { item: Post }) => (
+            <Pressable
+                onPress={() => onSelectPost(item)}
+                onLongPress={() => openGridPeek(item)}
+                delayLongPress={450}
+                style={styles.gridTile}
+            >
+                <View style={styles.gridTileInner} pointerEvents="none">
+                    <ProfileGridThumb post={item} />
+                </View>
+            </Pressable>
+        ),
+        [onSelectPost, openGridPeek],
+    );
+
+    const profileGridKeyExtractor = useCallback((item: Post) => String(item.id), []);
+
     if (loading) {
         return (
             <GazetteerScreenShell ambientVariant="passport">
@@ -1077,11 +1096,19 @@ const result = await followOrRequest({
                 </TouchableOpacity>
             </View>
 
-            <ScrollView
+            <FlatList
+                data={filteredPosts}
+                keyExtractor={profileGridKeyExtractor}
+                numColumns={3}
                 style={styles.content}
-                stickyHeaderIndices={[6]}
                 keyboardShouldPersistTaps="handled"
-            >
+                extraData={`${contentTab}-${profilePostsLoadingMore ? 1 : 0}`}
+                initialNumToRender={12}
+                maxToRenderPerBatch={6}
+                windowSize={5}
+                renderItem={renderProfileGridItem}
+                ListHeaderComponent={
+                    <>
                 <View style={styles.passportTitleBlock}>
                     <Text style={styles.passportTitle}>Passport</Text>
                     <Text style={styles.passportEyebrow}>
@@ -1330,51 +1357,22 @@ const result = await followOrRequest({
                     </View>
                 </View>
 
-                <View style={styles.postsContainer}>
-                    {filteredPosts.length === 0 ? (
-                        <View style={styles.emptyGrid}>
-                            <Text style={styles.emptyGridTitle}>
-                                {contentTab === 'all' ? 'No posts yet' : `No ${contentTab} yet`}
-                            </Text>
-                            <Text style={styles.emptyGridSubtext}>
-                                {contentTab === 'all'
-                                    ? "When this user posts, you'll see them here."
-                                    : 'Switch tabs to view other content.'}
-                            </Text>
-                        </View>
-                    ) : (
-                        <View style={styles.postsGrid}>
-                            {filteredPosts.map((item) => (
-                                <Pressable
-                                    key={item.id}
-                                    onPress={() => onSelectPost(item)}
-                                    onLongPress={() => openGridPeek(item)}
-                                    delayLongPress={450}
-                                    style={{
-                                        width: '33.33%',
-                                        height: 120,
-                                        overflow: 'hidden',
-                                        borderRadius: FEED_GRID_TILE_RADIUS,
-                                        position: 'relative',
-                                        padding: FEED_UI.spacing.hairlineGap,
-                                    }}
-                                >
-                                    <View
-                                        style={{
-                                            flex: 1,
-                                            overflow: 'hidden',
-                                            borderRadius: FEED_GRID_TILE_RADIUS,
-                                            position: 'relative',
-                                        }}
-                                        pointerEvents="none"
-                                    >
-                                        <ProfileGridThumb post={item} />
-                                    </View>
-                                </Pressable>
-                            ))}
-                        </View>
-                    )}
-                    {contentTab === 'all' && (profilePostsHasMore || posts.length >= 20) ? (
+                    </>
+                }
+                ListEmptyComponent={
+                    <View style={styles.emptyGrid}>
+                        <Text style={styles.emptyGridTitle}>
+                            {contentTab === 'all' ? 'No posts yet' : `No ${contentTab} yet`}
+                        </Text>
+                        <Text style={styles.emptyGridSubtext}>
+                            {contentTab === 'all'
+                                ? "When this user posts, you'll see them here."
+                                : 'Switch tabs to view other content.'}
+                        </Text>
+                    </View>
+                }
+                ListFooterComponent={
+                    contentTab === 'all' && (profilePostsHasMore || posts.length >= 20) ? (
                         <TouchableOpacity
                             style={styles.loadMoreGridBtn}
                             onPress={() => void loadMoreProfilePosts()}
@@ -1386,9 +1384,9 @@ const result = await followOrRequest({
                                 <Text style={styles.loadMoreGridBtnText}>Load more posts</Text>
                             )}
                         </TouchableOpacity>
-                    ) : null}
-                </View>
-            </ScrollView>
+                    ) : null
+                }
+            />
 
             {/* Traveled Modal */}
             <Modal
@@ -2009,6 +2007,20 @@ followButton: {
     postsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
+    },
+    gridTile: {
+        width: '33.33%',
+        aspectRatio: 1,
+        overflow: 'hidden',
+        borderRadius: FEED_GRID_TILE_RADIUS,
+        position: 'relative',
+        padding: FEED_UI.spacing.hairlineGap,
+    },
+    gridTileInner: {
+        flex: 1,
+        overflow: 'hidden',
+        borderRadius: FEED_GRID_TILE_RADIUS,
+        position: 'relative',
     },
     emptyGrid: {
         alignItems: 'center',

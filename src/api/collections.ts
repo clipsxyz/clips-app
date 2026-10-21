@@ -204,7 +204,7 @@ function isFakeVideoPosterUrl(url: string | undefined): boolean {
 /**
  * Image URL suitable for `<Image>` thumbs only.
  * Never returns MP4s or the old Unsplash “demo posters” — for videos without a real poster,
- * callers should render a paused Video frame (see ProfileGridThumb).
+ * grid tiles render a static play-badge placeholder (never a native Video surface).
  */
 export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     if (!post) return undefined;

@@ -853,6 +853,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const renderProfileGridItem = useCallback(
+        ({ item }: { item: Post }) => (
+            <TouchableOpacity
+                style={styles.postItem}
+                activeOpacity={0.85}
+                onPress={() =>
+                    navigation.navigate('PostDetail', {
+                        postId: item.id,
+                        initialPost: item,
+                    })
+                }
+            >
+                <ProfileGridThumb post={item} />
+            </TouchableOpacity>
+        ),
+        [navigation],
+    );
+
+    const profileGridKeyExtractor = useCallback((item: Post) => String(item.id), []);
+
     if (loading) {
         return (
             <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.loadingShell}>
@@ -1076,13 +1096,20 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </View>
 
-            <ScrollView
+            <FlatList
+                data={activeTab === 'posts' ? posts : []}
+                keyExtractor={profileGridKeyExtractor}
+                numColumns={3}
                 style={styles.profileScroll}
                 contentContainerStyle={styles.profileScrollContent}
-                nestedScrollEnabled
-                showsVerticalScrollIndicator
                 keyboardShouldPersistTaps="handled"
-            >
+                extraData={activeTab}
+                initialNumToRender={12}
+                maxToRenderPerBatch={6}
+                windowSize={5}
+                renderItem={renderProfileGridItem}
+                ListHeaderComponent={
+                    <>
             <ProfileCoverHero
                 coverUrl={user?.profileBackgroundUrl}
                 avatarUrl={user?.avatarUrl}
@@ -1161,34 +1188,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     </TouchableOpacity>
                 </View>
 
-                {activeTab === 'posts' ? (
-                    posts.length === 0 ? (
+                {activeTab === 'collections' ? (
+                    collections.length === 0 ? (
                         <View style={styles.postsEmptyState}>
-                            <Text style={styles.emptyText}>No posts yet</Text>
+                            <Text style={styles.emptyText}>No collections yet</Text>
                         </View>
                     ) : (
-                        <View style={styles.postsGrid}>
-                            {posts.map((item) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    onPress={() =>
-                                        navigation.navigate('PostDetail', {
-                                            postId: item.id,
-                                            initialPost: item,
-                                        })
-                                    }
-                                    style={styles.postItem}
-                                >
-                                    <ProfileGridThumb post={item} />
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    )
-                ) : collections.length === 0 ? (
-                    <View style={styles.postsEmptyState}>
-                        <Text style={styles.emptyText}>No collections yet</Text>
-                    </View>
-                ) : (
                     <View style={styles.collectionsList}>
                         {collections.map((item) => {
                             const thumbSrc = getCollectionThumbnailUrl(item, posts);
@@ -1240,9 +1245,19 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             );
                         })}
                     </View>
-                )}
+                    )
+                ) : null}
             </View>
-            </ScrollView>
+                    </>
+                }
+                ListEmptyComponent={
+                    activeTab === 'posts' ? (
+                        <View style={styles.postsEmptyState}>
+                            <Text style={styles.emptyText}>No posts yet</Text>
+                        </View>
+                    ) : null
+                }
+            />
 
             <Modal
                 visible={securityModalOpen}

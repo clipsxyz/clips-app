@@ -1,7 +1,6 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import Video from 'react-native-video';
 import type { Post } from '../types';
 import {
     getPostBodyText,
@@ -11,8 +10,8 @@ import {
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
 import { resolvePostThumbnail } from '../api/collections';
-import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
-import { resolvePostPlaybackUri } from '../utils/postMedia';
+import { mediaItemsEqual } from '../utils/feedPostCompareNative';
+import CachedImage from './CachedImage.native';
 import {
     FEED_GRID_TILE_BG,
     FEED_GRID_TILE_BORDER_COLOR,
@@ -69,7 +68,7 @@ function resolveGridImageUri(post: Post): string | undefined {
     return undefined;
 }
 
-export default function ProfileGridThumb({ post }: Props) {
+function ProfileGridThumb({ post }: Props) {
     const locationLabel = getPostLocationLabel(post);
     const locationBadge = locationLabel ? (
         <View style={styles.locationBadge} pointerEvents="none">
@@ -90,45 +89,34 @@ export default function ProfileGridThumb({ post }: Props) {
 
     const bodyText = getPostBodyText(post);
     const imageUri = resolveGridImageUri(post);
+    const videoPost = isVideoPost(post);
 
     if (imageUri) {
         return (
             <View style={styles.cell}>
-                <View style={{ width: '100%', height: '100%' }} pointerEvents="none">
-                    <Image
-                        source={{ uri: imageUri }}
-                        style={StyleSheet.absoluteFill}
-                        resizeMode="cover"
-                    />
-                </View>
+                <CachedImage
+                    source={{ uri: imageUri }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                    pointerEvents="none"
+                />
                 {locationBadge}
-                {isVideoPost(post) ? videoOverlays : null}
+                {videoPost ? videoOverlays : null}
             </View>
         );
     }
 
-    const videoUri = isVideoPost(post) ? resolvePostPlaybackUri(post) : undefined;
-    if (isPlayableVideoUri(videoUri)) {
+    // Never mount react-native-video in a grid cell. Playback lives in the post viewer.
+    if (videoPost) {
         return (
-            <View style={styles.cell}>
-                <Video
-                    source={{ uri: videoUri }}
-                    style={{ width: '100%', height: '100%' }}
-                    paused
-                    muted
-                    repeat={false}
-                    resizeMode="cover"
-                    pointerEvents="none"
-                    poster={post.videoPosterUrl || post.thumbnailUrl}
-                    {...androidListSafeVideoProps()}
-                />
+            <View style={[styles.cell, styles.placeholder]}>
                 {locationBadge}
                 {videoOverlays}
             </View>
         );
     }
 
-    if (isTextOnlyPost(post) || (bodyText && !isVideoPost(post))) {
+    if (isTextOnlyPost(post) || bodyText) {
         return (
             <View style={[styles.cell, { backgroundColor: getTextOnlyBackgroundColor(post) }]}>
                 {locationBadge}
@@ -145,7 +133,7 @@ export default function ProfileGridThumb({ post }: Props) {
     return (
         <View style={[styles.cell, styles.placeholder]}>
             {locationBadge}
-            {isVideoPost(post) ? videoOverlays : bodyText ? (
+            {bodyText ? (
                 <Text style={[styles.textThumb, { color: '#E5E7EB' }]} numberOfLines={4}>
                     {bodyText}
                 </Text>
@@ -155,6 +143,25 @@ export default function ProfileGridThumb({ post }: Props) {
         </View>
     );
 }
+
+function profileGridThumbsEqual(prev: Props, next: Props): boolean {
+    const a = prev.post;
+    const b = next.post;
+    return (
+        a.id === b.id &&
+        a.mediaUrl === b.mediaUrl &&
+        a.mediaType === b.mediaType &&
+        a.videoPosterUrl === b.videoPosterUrl &&
+        a.thumbnailUrl === b.thumbnailUrl &&
+        a.locationLabel === b.locationLabel &&
+        a.venue === b.venue &&
+        a.text === b.text &&
+        a.caption === b.caption &&
+        mediaItemsEqual(a.mediaItems, b.mediaItems)
+    );
+}
+
+export default React.memo(ProfileGridThumb, profileGridThumbsEqual);
 
 const styles = StyleSheet.create({
     cell: {
