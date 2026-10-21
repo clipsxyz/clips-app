@@ -40,6 +40,8 @@ type Props = {
     onBookmarkPress?: () => void;
     onReclipPress?: () => void;
     onShareToStoriesSuccess?: (postId: string) => void;
+    isActive?: boolean;
+    onOverflowPress?: () => void;
 };
 
 export default function MyFeedPostCard({
@@ -51,6 +53,8 @@ export default function MyFeedPostCard({
     onBookmarkPress,
     onReclipPress,
     onShareToStoriesSuccess,
+    isActive = false,
+    onOverflowPress,
 }: Props) {
     const screenWidth = Dimensions.get('window').width;
     const cardWidth = screenWidth - 24;
@@ -91,7 +95,13 @@ export default function MyFeedPostCard({
     };
 
     return (
-        <TouchableOpacity activeOpacity={0.95} style={styles.card} onPress={onPress}>
+        <TouchableOpacity
+            activeOpacity={0.95}
+            style={styles.card}
+            onPress={onPress}
+            onLongPress={onOverflowPress}
+            delayLongPress={280}
+        >
             <FeedPostTagRow tags={postTags} />
 
             {post.isBoosted ? (
@@ -129,7 +139,10 @@ export default function MyFeedPostCard({
                                 stickers={post.stickers}
                                 width={cardMediaWidth}
                                 height={mediaHeight}
-                                mode="feed"
+                                mode={isActive ? 'detail' : 'feed'}
+                                isActive={isActive}
+                                immediateVideoSurface={isActive}
+                                muted={!isActive}
                             />
                         </View>
                     ) : null}

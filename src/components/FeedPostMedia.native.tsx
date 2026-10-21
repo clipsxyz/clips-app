@@ -1216,12 +1216,13 @@ const FeedPostMedia = React.memo(
             : height > 0
               ? Math.min(contentHeight, height)
               : contentHeight;
+    const viewerSurface = mode === 'detail' || immediateVideoSurface;
     const frameStyle = {
         width,
         height: frameHeight,
-        backgroundColor: placeholderColor,
-        overflow: 'hidden' as const,
-        borderRadius: 20,
+        backgroundColor: viewerSurface ? '#000000' : placeholderColor,
+        overflow: (viewerSurface ? 'visible' : 'hidden') as 'visible' | 'hidden',
+        borderRadius: viewerSurface ? 0 : 20,
     };
 
     const renderSlide = (
@@ -1318,8 +1319,13 @@ const FeedPostMedia = React.memo(
         };
         const cachedVideoSource = buildFeedVideoSource(slideUrl, slideRawUrl);
 
+        const viewerSurface = mode === 'detail' || immediateVideoSurface;
+        const slideFrameStyle = viewerSurface
+            ? [styles.viewerFrame, frameStyle]
+            : [styles.mediaFrame, frameStyle];
+
         return (
-            <View style={[styles.mediaFrame, frameStyle]} collapsable={false}>
+            <View style={slideFrameStyle} collapsable={false}>
                 <Animated.View
                     style={[
                         styles.posterCover,
@@ -1370,7 +1376,11 @@ const FeedPostMedia = React.memo(
 
                 {slideMountVideo ? (
                     <View
-                        style={[styles.videoClip, styles.videoTopLayer]}
+                        style={
+                            viewerSurface
+                                ? [styles.viewerVideoClip]
+                                : [styles.videoClip, styles.videoTopLayer]
+                        }
                         pointerEvents={mediaPointerEvents}
                         collapsable={false}
                     >
@@ -1379,10 +1389,10 @@ const FeedPostMedia = React.memo(
                             is never lifted, so no void can show through mid-mount. */}
                         <Animated.View
                             style={[
-                                styles.videoClip,
+                                viewerSurface ? styles.viewerVideoClip : styles.videoClip,
                                 {
                                     opacity:
-                                        mode === 'detail' || immediateVideoSurface
+                                        viewerSurface
                                             ? 1
                                             : videoSurfaceReady
                                               ? videoOpacity
@@ -1532,7 +1542,7 @@ const FeedPostMedia = React.memo(
         <View
             style={[
                 styles.wrap,
-                styles.mediaFrame,
+                mode === 'detail' || immediateVideoSurface ? styles.viewerFrame : styles.mediaFrame,
                 frameStyle,
                 style,
             ]}
@@ -1569,12 +1579,13 @@ const FeedPostMedia = React.memo(
                 />
             ) : null}
             {renderFeedTapOverlay()}
-            {/* Scrim under chrome — mute control stays above it on the bottom edge. */}
+            {mode === 'feed' && !immediateVideoSurface ? (
             <LinearGradient
                 style={styles.mediaScrim}
                 colors={['transparent', 'rgba(11, 14, 20, 0.90)']}
                 pointerEvents="none"
             />
+            ) : null}
             {video && mode === 'detail' && paused ? (
                 <Pressable style={styles.playBadge} onPress={() => setPaused(false)}>
                     <Icon name="play-circle" size={64} color="rgba(255,255,255,0.95)" />
@@ -1640,10 +1651,23 @@ const styles = StyleSheet.create({
         position: 'relative',
         borderRadius: 20,
     },
+    /** Post viewer: no overflow clip / radius — those blank TextureView on Android. */
+    viewerFrame: {
+        overflow: 'visible',
+        backgroundColor: '#000000',
+        position: 'relative',
+        borderRadius: 0,
+    },
     videoClip: {
         ...StyleSheet.absoluteFill,
         overflow: 'hidden',
         borderRadius: 20,
+    },
+    viewerVideoClip: {
+        ...StyleSheet.absoluteFill,
+        overflow: 'visible',
+        width: '100%',
+        height: '100%',
     },
     /** Top layer, above the poster base. Transparent until ExoPlayer paints a frame. */
     videoTopLayer: {

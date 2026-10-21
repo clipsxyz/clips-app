@@ -13,10 +13,9 @@ import {
     type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { FeedCard } from '../screens/FeedScreen';
+import MyFeedPostCard from './MyFeedPostCard.native';
 import PostCommentsSheet from './PostCommentsSheet';
 import FeedShareModal from './FeedShareModal';
 import PostOverflowMenuModal from './PostOverflowMenuModal';
@@ -24,7 +23,7 @@ import SavePostModal from './SavePostModal.native';
 import EditPostModal from './EditPostModal.native';
 import CreateGroupModal from './CreateGroupModal.native';
 import type { Post } from '../types';
-import { incrementViews, toggleLike, deletePost } from '../api/posts';
+import { toggleLike, deletePost } from '../api/posts';
 import { getCollectionsForPost } from '../api/collections';
 import { updatePost as apiUpdatePost } from '../api/client';
 import {
@@ -56,10 +55,10 @@ function MyFeedModal({
 }: Props) {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
-    const isScreenFocused = useIsFocused();
     const topInset = Math.max(
         insets.top,
-        Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 0,
+        Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0,
+        44,
     );
 
     const [feedPosts, setFeedPosts] = useState<Post[]>(posts);
@@ -148,65 +147,45 @@ function MyFeedModal({
     );
 
     const renderItem = useCallback(
-        ({ item }: { item: Post }) => (
-            <FeedCard
-                post={item}
-                isCurrentUser
-                viewerHandle={user?.handle}
-                viewerUserId={user?.id}
-                isVideoActive={
-                    postHasVideoMedia(item) && String(activeVideoPostId) === String(item.id)
-                }
-                immediateVideoSurface={
-                    postHasVideoMedia(item) && String(activeVideoPostId) === String(item.id)
-                }
-                suspendNativeVideo={!visible || !isScreenFocused}
-                onLike={() => handleLike(item)}
-                onView={async () => {
-                    if (!user?.id) return;
-                    await incrementViews(user.id, item.id);
-                }}
-                onComment={() => setCommentsPost(item)}
-                onShare={async () => setSharePost(item)}
-                onReclip={async () => {}}
-                onBookmark={async () => setSavePost(item)}
-                onOverflowPress={() => {
-                    setOverflowPost(item);
-                    setOverflowVisible(true);
-                    void getCollectionsForPost(user?.id || 'anon', item.id).then((cols) =>
-                        setOverflowSaved(cols.length > 0),
-                    );
-                    void hasPostNotificationsPrefMobile(user?.id || 'anon', item.id).then(
-                        setOverflowNotify,
-                    );
-                }}
-                onPostPress={() =>
-                    navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
-                }
-                onShareToStoriesSuccess={(postId) => {
-                    const current = feedPosts.find((p) => p.id === postId);
-                    if (!current) return;
-                    applyLocalPost({
-                        ...current,
-                        stats: {
-                            ...current.stats,
-                            shares: (current.stats?.shares ?? 0) + 1,
-                        },
-                    });
-                }}
-            />
-        ),
-        [
-            activeVideoPostId,
-            applyLocalPost,
-            feedPosts,
-            handleLike,
-            isScreenFocused,
-            navigation,
-            user?.handle,
-            user?.id,
-            visible,
-        ],
+        ({ item }: { item: Post }) => {
+            const active =
+                postHasVideoMedia(item) && String(activeVideoPostId) === String(item.id);
+            return (
+                <MyFeedPostCard
+                    post={item}
+                    user={user}
+                    isActive={active && visible}
+                    onPress={() =>
+                        navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
+                    }
+                    onLikePress={() => void handleLike(item)}
+                    onCommentPress={() => setCommentsPost(item)}
+                    onBookmarkPress={() => setSavePost(item)}
+                    onOverflowPress={() => {
+                        setOverflowPost(item);
+                        setOverflowVisible(true);
+                        void getCollectionsForPost(user?.id || 'anon', item.id).then((cols) =>
+                            setOverflowSaved(cols.length > 0),
+                        );
+                        void hasPostNotificationsPrefMobile(user?.id || 'anon', item.id).then(
+                            setOverflowNotify,
+                        );
+                    }}
+                    onShareToStoriesSuccess={(postId) => {
+                        const current = feedPosts.find((p) => p.id === postId);
+                        if (!current) return;
+                        applyLocalPost({
+                            ...current,
+                            stats: {
+                                ...current.stats,
+                                shares: (current.stats?.shares ?? 0) + 1,
+                            },
+                        });
+                    }}
+                />
+            );
+        },
+        [activeVideoPostId, applyLocalPost, feedPosts, handleLike, navigation, user, visible],
     );
 
     return (

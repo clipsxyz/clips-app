@@ -370,7 +370,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
           : mediaHeight;
 
     return (
-        <GazetteerScreenShell ambientVariant="passport">
+        <GazetteerScreenShell ambient={false} ambientVariant="passport">
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
@@ -392,8 +392,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 ]}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+                removeClippedSubviews={false}
             >
-                <View style={fromCollection ? styles.postStage : undefined}>
+                <View style={fromCollection ? styles.postStage : undefined} collapsable={false}>
                     <View style={styles.postHeader}>
                         <TouchableOpacity
                             onPress={() =>
@@ -438,6 +440,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                     height={detailMediaHeight}
                                     mode="detail"
                                     isActive
+                                    immediateVideoSurface
                                     muted={false}
                                     // Guarded: the fullscreen surface is image+video aware now,
                                     // but a post whose only media is unrenderable (missing file,
@@ -854,6 +857,7 @@ const styles = StyleSheet.create({
     mediaWrap: {
         width: '100%',
         backgroundColor: '#000000',
+        overflow: 'visible',
     },
     mediaWrapCentered: {
         alignItems: 'center',
