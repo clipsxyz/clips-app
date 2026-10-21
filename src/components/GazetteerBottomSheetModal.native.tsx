@@ -1,3 +1,4 @@
+/* @refresh reset */
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, type ViewStyle } from 'react-native';
 import {
@@ -69,10 +70,14 @@ type Props = {
     keyboardBlurBehavior?: BottomSheetModalProps['keyboardBlurBehavior'];
     android_keyboardInputMode?: BottomSheetModalProps['android_keyboardInputMode'];
     enableDynamicSizing?: boolean;
+    /** Delay before present(); raise this when opening after another RN Modal. */
+    presentDelayMs?: number;
 };
 
 /**
  * Shared @gorhom/bottom-sheet modal — drag-to-dismiss, native backdrop, safe-area aware.
+ *
+ * Hook order is fixed: every hook runs on every render, then we may return null.
  */
 export default function GazetteerBottomSheetModal({
     visible,
@@ -89,25 +94,17 @@ export default function GazetteerBottomSheetModal({
     keyboardBlurBehavior,
     android_keyboardInputMode,
     enableDynamicSizing = false,
+    presentDelayMs = 50,
 }: Props) {
-    const ref = useRef<BottomSheetModal>(null);
+    const bottomSheetRef = useRef<BottomSheetModal>(null);
+    const presentStateRef = useRef({ didPresent: false, presentDelayMs });
+    presentStateRef.current.presentDelayMs = presentDelayMs;
     const insets = useSafeAreaInsets();
+
     const snapPoints = useMemo(
         () => (enableDynamicSizing ? undefined : snapPointsProp ?? ['70%']),
         [enableDynamicSizing, snapPointsProp],
     );
-
-    useEffect(() => {
-        if (visible) {
-            // Native-stack pushes often miss an immediate present(); defer one frame.
-            const t = setTimeout(() => {
-                ref.current?.present();
-            }, 50);
-            return () => clearTimeout(t);
-        }
-        ref.current?.dismiss();
-        return undefined;
-    }, [visible]);
 
     const renderBackdrop = useCallback(
         (props: BottomSheetBackdropProps) => (
@@ -122,13 +119,33 @@ export default function GazetteerBottomSheetModal({
         [backdropOpacity],
     );
 
+    useEffect(() => {
+        if (visible) {
+            const t = setTimeout(() => {
+                bottomSheetRef.current?.present();
+                presentStateRef.current.didPresent = true;
+            }, presentStateRef.current.presentDelayMs);
+            return () => clearTimeout(t);
+        }
+        if (presentStateRef.current.didPresent) {
+            bottomSheetRef.current?.dismiss();
+            presentStateRef.current.didPresent = false;
+        }
+        return undefined;
+    }, [visible]);
+
+    if (!visible) return null;
+
     return (
         <BottomSheetModal
-            ref={ref}
+            ref={bottomSheetRef}
             snapPoints={snapPoints}
             enableDynamicSizing={enableDynamicSizing}
             enablePanDownToClose={enablePanDownToClose}
             onDismiss={onDismiss}
+            onChange={(index) => {
+                if (index === -1) presentStateRef.current.didPresent = false;
+            }}
             backdropComponent={renderBackdrop}
             backgroundStyle={backgroundStyle ?? GAZETTEER_SHEET_DISCOVER.background}
             handleIndicatorStyle={handleIndicatorStyle ?? GAZETTEER_SHEET_DISCOVER.handle}

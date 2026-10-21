@@ -1,21 +1,17 @@
-import React, { useCallback, useEffect, useRef } from 'react';
-import {
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-} from 'react-native';
-import {
-    BottomSheetFooter,
-    BottomSheetTextInput,
-    BottomSheetView,
-    type BottomSheetFooterProps,
-} from '@gorhom/bottom-sheet';
+/* @refresh reset */
+import React, { useEffect, useRef } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
 import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DM } from './GazetteerBottomSheetModal.native';
+import DiscoverSheetCanvas from './DiscoverSheetCanvas.native';
+import {
+    DISCOVER_SHEET_TEXT,
+    DISCOVER_SHEET_TEXT_MUTED,
+    PASSPORT_PALETTE,
+} from '../utils/discoverAmbientPalette';
 
 type Props = {
     open: boolean;
@@ -24,7 +20,14 @@ type Props = {
     onChangeMessage: (text: string) => void;
     onClose: () => void;
     onSend: () => void;
+    sending?: boolean;
 };
+
+function displayHandle(handle: string): string {
+    const trimmed = handle.trim();
+    if (!trimmed) return '';
+    return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
+}
 
 export default function FeedDmSheet({
     open,
@@ -33,89 +36,87 @@ export default function FeedDmSheet({
     onChangeMessage,
     onClose,
     onSend,
+    sending = false,
 }: Props) {
-    const insets = useSafeAreaInsets();
     const inputRef = useRef<React.ComponentRef<typeof BottomSheetTextInput>>(null);
-    const sheetOpen = open && !!recipientHandle;
+    const handle = typeof recipientHandle === 'string' ? recipientHandle.trim() : '';
+    const sheetOpen = Boolean(open && handle);
 
     useEffect(() => {
-        if (!sheetOpen) return;
-        const t = setTimeout(() => inputRef.current?.focus(), 200);
+        if (!sheetOpen) return undefined;
+        const t = setTimeout(() => inputRef.current?.focus(), 220);
         return () => clearTimeout(t);
-    }, [sheetOpen, recipientHandle]);
+    }, [sheetOpen, handle]);
 
-    const renderFooter = useCallback(
-        (props: BottomSheetFooterProps) => (
-            <BottomSheetFooter {...props} bottomInset={Math.max(insets.bottom, 12)}>
-                <View style={styles.footerInner}>
-                    <View style={styles.composerRow}>
-                        <BottomSheetTextInput
-                            ref={inputRef}
-                            value={message}
-                            onChangeText={onChangeMessage}
-                            placeholder="Message…"
-                            placeholderTextColor="#737373"
-                            multiline
-                            style={styles.input}
-                            returnKeyType="send"
-                            blurOnSubmit={false}
-                            onSubmitEditing={() => {
-                                if (message.trim()) onSend();
-                            }}
-                        />
-                        <TouchableOpacity
-                            style={[styles.sendBtn, !message.trim() && styles.sendBtnDisabled]}
-                            onPress={onSend}
-                            disabled={!message.trim()}
-                            accessibilityLabel="Send message"
-                        >
-                            <Icon name="send" size={20} color="#000000" />
-                        </TouchableOpacity>
-                    </View>
-                    <Text style={styles.hint}>Return to send · use newline for longer messages</Text>
-                </View>
-            </BottomSheetFooter>
-        ),
-        [insets.bottom, message, onChangeMessage, onSend],
-    );
-
-    if (!recipientHandle) return null;
-
-    const displayName = recipientHandle.split('@')[0] || recipientHandle;
+    const label = displayHandle(handle);
+    const canSend = Boolean(message.trim()) && !sending;
 
     return (
         <GazetteerBottomSheetModal
             visible={sheetOpen}
             onDismiss={onClose}
-            enableDynamicSizing
+            snapPoints={['40%', '70%']}
             horizontalInset={0}
+            presentDelayMs={80}
             backgroundStyle={GAZETTEER_SHEET_DM.background}
             handleIndicatorStyle={GAZETTEER_SHEET_DM.handle}
-            footerComponent={renderFooter}
-            keyboardBehavior="interactive"
+            keyboardBehavior="extend"
             keyboardBlurBehavior="restore"
             android_keyboardInputMode="adjustResize"
-            backdropOpacity={0.55}
         >
             <BottomSheetView style={styles.sheetBody}>
-                <View style={styles.header}>
-                    <Avatar
-                        src={getAvatarForHandle(recipientHandle)}
-                        name={displayName}
-                        size={40}
-                    />
-                    <View style={styles.headerText}>
-                        <Text style={styles.headerTitle} numberOfLines={1}>
-                            {displayName}
-                        </Text>
-                        <Text style={styles.headerSub} numberOfLines={1}>
-                            {recipientHandle}
-                        </Text>
+                <DiscoverSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+                    <View style={styles.header}>
+                        <Avatar
+                            src={getAvatarForHandle(handle)}
+                            name={handle.replace(/^@/, '').split('@')[0] || 'User'}
+                            size={40}
+                            hideBorder
+                        />
+                        <View style={styles.headerCopy}>
+                            <Text style={styles.headerKicker}>Message</Text>
+                            <Text style={styles.headerHandle} numberOfLines={1}>
+                                {label}
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={onClose}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Close message sheet"
+                            style={styles.closeBtn}
+                        >
+                            <Icon name="close" size={20} color={DISCOVER_SHEET_TEXT} />
+                        </TouchableOpacity>
                     </View>
-                    <TouchableOpacity onPress={onClose} hitSlop={12} accessibilityLabel="Close">
-                        <Icon name="close" size={22} color="#D1D5DB" />
+
+                    <BottomSheetTextInput
+                        ref={inputRef}
+                        value={message}
+                        onChangeText={onChangeMessage}
+                        placeholder="Message…"
+                        placeholderTextColor={DISCOVER_SHEET_TEXT_MUTED}
+                        multiline
+                        textAlignVertical="top"
+                        style={styles.input}
+                        returnKeyType="send"
+                        blurOnSubmit={false}
+                        onSubmitEditing={() => {
+                            if (canSend) onSend();
+                        }}
+                    />
+
+                    <TouchableOpacity
+                        style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
+                        onPress={onSend}
+                        disabled={!canSend}
+                        accessibilityRole="button"
+                        accessibilityLabel="Send message"
+                    >
+                        <Icon name="send" size={16} color="#FFFFFF" />
+                        <Text style={styles.sendLabel}>{sending ? 'Sending…' : 'Send'}</Text>
                     </TouchableOpacity>
-                </View>
+                </DiscoverSheetCanvas>
             </BottomSheetView>
         </GazetteerBottomSheetModal>
     );
@@ -123,71 +124,78 @@ export default function FeedDmSheet({
 
 const styles = StyleSheet.create({
     sheetBody: {
+        flex: 1,
+    },
+    canvas: {
+        flex: 1,
+    },
+    canvasContent: {
+        flex: 1,
         paddingHorizontal: 16,
         paddingTop: 4,
+        paddingBottom: 16,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingBottom: 12,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.1)',
+        marginBottom: 16,
+        columnGap: 10,
     },
-    headerText: {
+    headerCopy: {
         flex: 1,
         minWidth: 0,
     },
-    headerTitle: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: '#FFFFFF',
+    headerKicker: {
+        fontSize: 11,
+        fontWeight: '600',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        color: DISCOVER_SHEET_TEXT_MUTED,
+        marginBottom: 2,
     },
-    headerSub: {
-        fontSize: 12,
-        color: '#9CA3AF',
-        marginTop: 2,
+    headerHandle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: DISCOVER_SHEET_TEXT,
     },
-    footerInner: {
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        backgroundColor: 'transparent',
-    },
-    composerRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        gap: 8,
-    },
-    input: {
-        flex: 1,
-        minHeight: 44,
-        maxHeight: 120,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        color: '#FFFFFF',
-        fontSize: 15,
-        lineHeight: 20,
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-    },
-    sendBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#FFFFFF',
+    closeBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    input: {
+        width: '100%',
+        minHeight: 96,
+        maxHeight: 180,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+        backgroundColor: 'rgba(0,0,0,0.28)',
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        fontSize: 16,
+        lineHeight: 22,
+        color: DISCOVER_SHEET_TEXT,
+    },
+    sendBtn: {
+        marginTop: 14,
+        minHeight: 48,
+        borderRadius: 14,
+        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        columnGap: 8,
     },
     sendBtnDisabled: {
-        opacity: 0.4,
+        opacity: 0.45,
     },
-    hint: {
-        marginTop: 8,
-        fontSize: 11,
-        color: '#6B7280',
-        paddingHorizontal: 4,
-        paddingBottom: 4,
+    sendLabel: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });

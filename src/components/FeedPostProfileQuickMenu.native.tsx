@@ -39,7 +39,8 @@ export type FeedPostProfileQuickMenuProps = {
     onVisitProfile: () => void;
     onFollow?: () => Promise<void>;
     onViewStories?: () => void;
-    onMessage?: () => void;
+    /** Opens the in-feed DM composer for this profile handle. */
+    onMessage?: (handle: string) => void;
     onBlock?: () => Promise<void>;
     onReport?: () => Promise<void>;
 };
@@ -150,8 +151,11 @@ export default function FeedPostProfileQuickMenu({
                 <TouchableOpacity
                     style={styles.item}
                     onPress={() => {
+                        const handle = profileHandle.trim();
+                        // Close the RN Modal first; presenting a gorhom sheet while it
+                        // is still up (especially on Android) silently no-ops.
                         onClose();
-                        onMessage();
+                        if (handle) onMessage(handle);
                     }}
                 >
                     <Icon name="chatbubble-outline" size={18} color={PASSPORT_PALETTE.wavePrimary} />

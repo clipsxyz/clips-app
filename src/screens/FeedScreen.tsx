@@ -1,3 +1,4 @@
+/* @refresh reset */
 // @ts-nocheck
 // @ts-ignore
 /* eslint-disable */
@@ -73,7 +74,7 @@ import {
 } from '../api/posts';
 import { isMockMode } from '../api/apiMode';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
-import { getUnreadTotal } from '../api/messages';
+import { appendMessage, getUnreadTotal } from '../api/messages';
 import {
     connectSocket,
     joinLocationFeed,
@@ -295,8 +296,6 @@ import type { FeedScope } from '../utils/placeFeedLevels';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import FeedDmSheet from '../components/FeedDmSheet.native';
-import FeedDmDeliveryFx, { type FeedDmDeliveryFxState } from '../components/FeedDmDeliveryFx.native';
-import { appendMessage } from '../api/messages';
 import {
     loadLocationNotifyPrefs,
     locationNotifyKey,
@@ -1129,7 +1128,6 @@ const FeedCard = React.memo(function FeedCard({
     viewerHandle,
     viewerUserId,
     onOpenDM,
-    onRegisterDmAnchor,
     onOpenImageFullscreen,
     onOpenScenes,
     onOpenLikesSheet,
@@ -1168,8 +1166,7 @@ const FeedCard = React.memo(function FeedCard({
     holdNativeVideo?: boolean;
     viewerHandle?: string | null;
     viewerUserId?: string;
-    onOpenDM?: (handle: string, postId: string) => void;
-    onRegisterDmAnchor?: (key: string, ref: View | null) => void;
+    onOpenDM?: (handle: string, postId: string, isMutual?: boolean) => void;
     onOpenLikesSheet?: () => void;
     onOpenTaggedSheet?: () => void;
     /** Window coords — parent keeps one Modal so Android doesn't jump the FlatList. */
@@ -1525,7 +1522,6 @@ const FeedCard = React.memo(function FeedCard({
                     onDoubleLike={() => {
                         void onLike();
                     }}
-                    onRegisterDmAnchor={onRegisterDmAnchor}
                     onShowTaggedUsers={() => onOpenTaggedSheet?.()}
                     menuAnchorRef={profileMenuAnchorRef}
                 />
@@ -1642,7 +1638,6 @@ const FeedCard = React.memo(function FeedCard({
                                     }}
                                     onHasStoryChange={setHeaderHasStory}
                                     onOverflowPress={onOverflowPress}
-                                    onRegisterDmAnchor={onRegisterDmAnchor}
                                     menuAnchorRef={profileMenuAnchorRef}
                                 />
                             </View>
@@ -1781,7 +1776,18 @@ const FeedCard = React.memo(function FeedCard({
                 onFollow={onFollow}
                 onViewStories={onViewStories ? () => onViewStories() : undefined}
                 onMessage={
-                    onOpenDM ? () => onOpenDM(post.userHandle, post.id) : undefined
+                    onOpenDM
+                        ? (handle) => {
+                              const target = (handle || profileHandle || post.userHandle || '').trim();
+                              closeProfileMenu();
+                              if (!target) return;
+                              // Wait until the Quick Actions RN Modal has unmounted.
+                              // Presenting FeedDmSheet in the same frame is a no-op on Android.
+                              InteractionManager.runAfterInteractions(() => {
+                                  onOpenDM(target, String(post.id), true);
+                              });
+                          }
+                        : undefined
                 }
 onBlock={onBlockUser}
                   onReport={onReportUser}
@@ -1826,6 +1832,7 @@ onBlock={onBlockUser}
         prev.suspendNativeVideo === next.suspendNativeVideo &&
         prev.holdNativeVideo === next.holdNativeVideo &&
         prev.viewerHandle === next.viewerHandle &&
+        Boolean(prev.onOpenDM) === Boolean(next.onOpenDM) &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
         a.clientLocalMediaUri === b.clientLocalMediaUri &&
@@ -1888,10 +1895,91 @@ function nextPreloadNeighborIds(rows: FeedListRow[], primaryPostId: string | nul
     return [];
 }
 
+function useFeedDmComposer(viewerHandle: string | undefined) {
+    const [dmSheetOpen, setDmSheetOpen] = useState(false);
+    const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
+    const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
+    const [dmSheetMessage, setDmSheetMessage] = useState('');
+    const [dmSheetSending, setDmSheetSending] = useState(false);
+
+    const openDmThread = useCallback(
+        (handle: string, postId: string, isMutual?: boolean) => {
+            if (isMutual === false) {
+                Alert.alert(
+                    'Cannot message',
+                    'You must mutually follow each other to send a direct message',
+                );
+                return;
+            }
+            const nextHandle = (handle || '').trim();
+            if (!nextHandle) return;
+            setDmSheetRecipientHandle(nextHandle);
+            setDmSheetAnchorPostId(postId ? String(postId) : null);
+            setDmSheetMessage('');
+            setDmSheetSending(false);
+            setDmSheetOpen(true);
+        },
+        [],
+    );
+
+    const sendDmFromSheet = useCallback(async () => {
+        const text = dmSheetMessage.trim();
+        const recipient = dmSheetRecipientHandle;
+        if (!text || !viewerHandle || !recipient || dmSheetSending) return;
+        setDmSheetSending(true);
+        try {
+            await appendMessage(viewerHandle, recipient, {
+                text,
+                sourcePostId: dmSheetAnchorPostId ?? undefined,
+            });
+            setDmSheetMessage('');
+            setDmSheetOpen(false);
+            setDmSheetRecipientHandle(null);
+            setDmSheetAnchorPostId(null);
+        } catch (err) {
+            Alert.alert(
+                'Could not send',
+                err instanceof Error ? err.message : 'Please try again.',
+            );
+        } finally {
+            setDmSheetSending(false);
+        }
+    }, [dmSheetAnchorPostId, dmSheetMessage, dmSheetRecipientHandle, dmSheetSending, viewerHandle]);
+
+    const closeDmSheet = useCallback(() => {
+        setDmSheetOpen(false);
+        setDmSheetRecipientHandle(null);
+        setDmSheetAnchorPostId(null);
+        setDmSheetMessage('');
+        setDmSheetSending(false);
+    }, []);
+
+    return {
+        dmSheetOpen,
+        dmSheetRecipientHandle,
+        dmSheetMessage,
+        setDmSheetMessage,
+        dmSheetSending,
+        openDmThread,
+        sendDmFromSheet,
+        closeDmSheet,
+    };
+}
+
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
     const isFeedFocused = useIsFocused();
+    const {
+        dmSheetOpen,
+        dmSheetRecipientHandle,
+        dmSheetMessage,
+        setDmSheetMessage,
+        dmSheetSending,
+        openDmThread,
+        sendDmFromSheet,
+        closeDmSheet,
+    } = useFeedDmComposer(user?.handle);
     const [scenesViewerActive, setScenesViewerActiveState] = useState(() => isScenesViewerActive());
     useEffect(() => {
         // Keep feed ExoPlayer dead for the whole Scenes session (focus blur is unreliable).
@@ -2044,17 +2132,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
     const [likesSheetPost, setLikesSheetPost] = useState<Post | null>(null);
     const [taggedSheetPost, setTaggedSheetPost] = useState<Post | null>(null);
-    const [dmSheetOpen, setDmSheetOpen] = useState(false);
-    const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
-    const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
-    const [dmSheetMessage, setDmSheetMessage] = useState('');
-    const [feedDmDeliveryFx, setFeedDmDeliveryFx] = useState<FeedDmDeliveryFxState | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
     const [headerScopePicker, setHeaderScopePicker] = useState<LocationSuggestion | null>(null);
     const [headerScopePickerKind, setHeaderScopePickerKind] = useState<'location' | 'venue' | 'landmark'>(
         'location'
     );
-    const dmAnchorRefs = useRef<Record<string, View>>({});
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
     const [overflowVisible, setOverflowVisible] = useState(false);
@@ -4412,84 +4494,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         });
     }, [customLocation]);
 
-    const registerDmAnchor = useCallback((key: string, ref: View | null) => {
-        if (ref) {
-            dmAnchorRefs.current[key] = ref;
-        } else {
-            delete dmAnchorRefs.current[key];
-        }
-    }, []);
-
-    const measureDmTarget = useCallback(
-        (toHandle: string, anchorPostId: string | null, cb: (targetX: number, targetY: number) => void) => {
-            const keys: string[] = [];
-            if (anchorPostId) keys.push(`post:${anchorPostId}`);
-            keys.push(`handle:${toHandle}`);
-            const tryKey = (index: number) => {
-                if (index >= keys.length) {
-                    cb(40, 42);
-                    return;
-                }
-                const view = dmAnchorRefs.current[keys[index]];
-                if (!view?.measureInWindow) {
-                    tryKey(index + 1);
-                    return;
-                }
-                view.measureInWindow((x, y, w, h) => {
-                    cb(x + w / 2, y + h / 2);
-                });
-            };
-            tryKey(0);
-        },
-        []
-    );
-
-    const startFeedDmDeliveryFx = useCallback(
-        (toHandle: string, anchorPostId: string | null) => {
-            const { width, height } = Dimensions.get('window');
-            const startX = width / 2;
-            const startY = height - 112;
-            measureDmTarget(toHandle, anchorPostId, (targetX, targetY) => {
-                setFeedDmDeliveryFx({
-                    toHandle,
-                    startX,
-                    startY,
-                    targetX,
-                    targetY,
-                    phase: 'start',
-                });
-                setTimeout(() => {
-                    setFeedDmDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
-                }, 14);
-                setTimeout(() => setFeedDmDeliveryFx(null), 4300);
-            });
-        },
-        [measureDmTarget]
-    );
-
-    const openDmSheet = useCallback((handle: string, postId: string) => {
-        setDmSheetRecipientHandle(handle);
-        setDmSheetAnchorPostId(postId);
-        setDmSheetMessage('');
-        setDmSheetOpen(true);
-    }, []);
-
-    const sendDmFromSheet = useCallback(() => {
-        const text = dmSheetMessage.trim();
-        if (!text || !user?.handle || !dmSheetRecipientHandle) return;
-        const recipient = dmSheetRecipientHandle;
-        const anchorId = dmSheetAnchorPostId;
-        appendMessage(user.handle, recipient, { text, sourcePostId: anchorId ?? undefined })
-            .then(() => {
-                setDmSheetMessage('');
-                setDmSheetOpen(false);
-                setDmSheetRecipientHandle(null);
-                setDmSheetAnchorPostId(null);
-                setTimeout(() => startFeedDmDeliveryFx(recipient, anchorId), 50);
-            })
-            .catch((err) => console.error('Send DM failed:', err));
-    }, [dmSheetMessage, user?.handle, dmSheetRecipientHandle, dmSheetAnchorPostId, startFeedDmDeliveryFx]);
-
     const isVisitorInCustomLocation = useMemo(() => {
         if (!customLocation || !user) return false;
         const loc = customLocation.trim().toLowerCase();
@@ -4776,14 +4780,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                             void openStories24FromHeader();
                         }}
                         storyCount={stories24Items.length}
-                        storyAvatars={stories24Items
-                            .filter((s) => !isStories24AddYoursHandle(s.handle))
-                            .map((s) => s.avatarUrl)
-                            .filter((url): url is string => Boolean(url))}
-                        storyHandles={stories24Items
-                            .filter((s) => !isStories24AddYoursHandle(s.handle))
-                            .map((s) => s.handle)
-                            .filter(Boolean)}
+                        stories={stories24Items.filter(
+                            (s) => !isStories24AddYoursHandle(s.handle),
+                        )}
                     />,
                 );
             }
@@ -5307,8 +5306,7 @@ onVisitProfile={() =>
                     isCurrentUser={user?.handle === mergedPost.userHandle}
                     viewerHandle={user?.handle}
                     viewerUserId={userId}
-                    onOpenDM={user?.handle ? openDmSheet : undefined}
-                    onRegisterDmAnchor={registerDmAnchor}
+                    onOpenDM={user?.handle ? openDmThread : undefined}
                     onOpenLikesSheet={() => setLikesSheetPost(mergedPost)}
                     onOpenTaggedSheet={() => setTaggedSheetPost(mergedPost)}
                 />,
@@ -5799,6 +5797,18 @@ onVisitProfile={() =>
                 />
             ) : null}
 
+            <FeedDmSheet
+                open={dmSheetOpen}
+                recipientHandle={dmSheetRecipientHandle}
+                message={dmSheetMessage}
+                onChangeMessage={setDmSheetMessage}
+                onClose={closeDmSheet}
+                onSend={() => {
+                    void sendDmFromSheet();
+                }}
+                sending={dmSheetSending}
+            />
+
             {shareModalOpen && selectedPostForShare ? (
                 <FeedShareModal
                     post={selectedPostForShare}
@@ -5837,23 +5847,6 @@ onVisitProfile={() =>
                 onDismiss={() => setFeedGazetteerAlert(null)}
             />
 
-            {dmSheetOpen && dmSheetRecipientHandle ? (
-                <FeedDmSheet
-                    open={dmSheetOpen}
-                    recipientHandle={dmSheetRecipientHandle}
-                    message={dmSheetMessage}
-                    onChangeMessage={setDmSheetMessage}
-                    onClose={() => {
-                        setDmSheetOpen(false);
-                        setDmSheetRecipientHandle(null);
-                        setDmSheetAnchorPostId(null);
-                        setDmSheetMessage('');
-                    }}
-                    onSend={sendDmFromSheet}
-                />
-            ) : null}
-
-            <FeedDmDeliveryFx fx={feedDmDeliveryFx} />
 
             {headerScopePicker ? (
                 <PlaceFeedScopePickerModal

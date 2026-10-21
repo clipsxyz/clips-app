@@ -36,7 +36,7 @@ export type FeedPostHeaderProps = {
     /** Top chrome for text-only feed (avatar + handle on transparent canvas). */
     variant?: 'default' | 'textOnlyChrome';
     onFollow?: () => Promise<void>;
-    onOpenDM?: (handle: string, postId: string) => void;
+    onOpenDM?: (handle: string, postId: string, isMutual?: boolean) => void;
     onProfileMenuPress?: () => void;
     /**
      * Avatar tap. Receives the live "has unviewed active stories" value so the
@@ -44,7 +44,6 @@ export type FeedPostHeaderProps = {
      */
     onAvatarPress?: (hasStory: boolean) => void;
     onOverflowPress?: () => void;
-    onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onHasStoryChange?: (hasStory: boolean) => void;
     menuAnchorRef?: React.Ref<View>;
 };
@@ -60,7 +59,6 @@ export default function FeedPostHeader({
     onProfileMenuPress,
     onAvatarPress,
     onOverflowPress,
-    onRegisterDmAnchor,
     onHasStoryChange,
     menuAnchorRef,
 }: FeedPostHeaderProps) {
@@ -130,10 +128,6 @@ export default function FeedPostHeader({
     const avatarBlock = showAvatar ? (
         <View
             style={[styles.avatarWrap, { width: FEED_HEADER_AVATAR_SIZE, height: FEED_HEADER_AVATAR_SIZE }]}
-            ref={(r) => {
-                onRegisterDmAnchor?.(`post:${post.id}`, r);
-                onRegisterDmAnchor?.(`handle:${post.userHandle || safeHandle}`, r);
-            }}
             collapsable={false}
         >
             <TouchableOpacity
@@ -174,7 +168,13 @@ export default function FeedPostHeader({
             {!isCurrentUser && isMutualFollow && onOpenDM ? (
                 <TouchableOpacity
                     style={styles.dmButton}
-                    onPress={() => onOpenDM(post.userHandle || safeHandle, post.id)}
+                    onPress={() => {
+                        const handle = (post.userHandle || safeHandle).trim();
+                        if (!handle) return;
+                        onOpenDM(handle, post.id, true);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Message ${safeHandle}`}
                 >
                     <Icon name="paper-plane" size={FEED_HEADER_BADGE_ICON} color="#EF4444" />
                 </TouchableOpacity>

@@ -11,12 +11,11 @@ type Props = {
     cardWidth: number;
     isCurrentUser: boolean;
     onFollow?: () => Promise<void>;
-    onOpenDM?: (handle: string, postId: string) => void;
+    onOpenDM?: (handle: string, postId: string, isMutual?: boolean) => void;
     onProfileMenuPress?: () => void;
     onAvatarPress?: (hasStory: boolean) => void;
     onOverflowPress?: () => void;
     onDoubleLike: () => void;
-    onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onShowTaggedUsers?: () => void;
     menuAnchorRef?: React.Ref<View>;
 };
@@ -32,7 +31,6 @@ export default function FeedTextOnlyFeedLayout({
     onAvatarPress,
     onOverflowPress,
     onDoubleLike,
-    onRegisterDmAnchor,
     onShowTaggedUsers,
     menuAnchorRef,
 }: Props) {
@@ -49,7 +47,6 @@ export default function FeedTextOnlyFeedLayout({
                 onProfileMenuPress={onProfileMenuPress}
                 onAvatarPress={onAvatarPress}
                 onOverflowPress={onOverflowPress}
-                onRegisterDmAnchor={onRegisterDmAnchor}
                 menuAnchorRef={menuAnchorRef}
             />
 
