@@ -15,7 +15,7 @@ export default function LocationPlaceSummaryBody({ locationLabel, data, loading 
         <View>
             <Text style={styles.badge}>DISCOVER</Text>
             <Text style={styles.title}>{`About ${titleName}`}</Text>
-            {loading ? (
+            {loading && !data ? (
                 <View style={styles.loadingWrap}>
                     <ActivityIndicator color="#94A3B8" />
                 </View>

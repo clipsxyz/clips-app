@@ -12,6 +12,7 @@ export function usePlaceSummary(
 ): { data: PlaceSummary | null; loading: boolean } {
     const [data, setData] = React.useState<PlaceSummary | null>(null);
     const [loading, setLoading] = React.useState(true);
+    const loadedKeyRef = React.useRef('');
 
     React.useEffect(() => {
         if (!enabled) {
@@ -22,22 +23,28 @@ export function usePlaceSummary(
         const trimmed = locationLabel.trim();
         if (!trimmed) {
             setData(null);
+            loadedKeyRef.current = '';
             setLoading(false);
             return;
         }
 
+        const key = `${trimmed}|${placeId ?? ''}`;
         const ctrl = new AbortController();
-        setLoading(true);
-        setData(null);
+        // Keep the last summary on reopen / refetch so the modal does not flash empty.
+        if (loadedKeyRef.current !== key) {
+            setLoading(true);
+        }
 
         fetchPlaceSummary(trimmed, placeId, ctrl.signal)
             .then((result) => {
                 if (ctrl.signal.aborted) return;
                 setData(result ?? buildClientPlaceSummaryFallback(trimmed));
+                loadedKeyRef.current = key;
             })
             .catch(() => {
                 if (ctrl.signal.aborted) return;
                 setData(buildClientPlaceSummaryFallback(trimmed));
+                loadedKeyRef.current = key;
             })
             .finally(() => {
                 if (!ctrl.signal.aborted) setLoading(false);

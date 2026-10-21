@@ -667,77 +667,65 @@ function PillTabs({
             return;
         }
         let cancelled = false;
+        const ctrl = new AbortController();
         const timer = setTimeout(async () => {
             try {
                 setLoadingSuggestions(true);
                 const modeForApi = parsedVenue ? 'venue' : parsedLandmark ? 'landmark' : 'all';
-                const res = await searchLocations(q, 6, modeForApi);
-                if (!cancelled) {
-                    const allApiSuggestions = Array.isArray(res) ? res : [];
-                    const mappedApi: HeaderSuggestion[] = allApiSuggestions.flatMap((raw) => {
-                        if (!raw || typeof raw !== 'object') return [];
-                        const s = raw as LocationSuggestion;
-                        const name = String(s.name || s.display_name || '').trim();
-                        if (!name) return [];
-                        try {
-                            const normalized: LocationSuggestion = {
-                                ...s,
-                                name,
-                                country: s.country != null ? String(s.country) : undefined,
-                                type: s.type || 'location',
-                            };
-                            const sel = resolvePlaceFeedSelection(normalized);
-                            const t = String(normalized.type || '').toLowerCase();
-                            const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
-                                ? 'venue'
-                                : t.includes('landmark')
-                                    ? 'landmark'
-                                    : 'location';
-                            return [{
-                                name,
-                                country: normalized.country,
-                                type: kind,
-                                filter: sel.filter,
-                                label: sel.label,
-                                placeId: sel.placeId,
-                                scope: sel.scope,
-                                source: normalized,
-                            }];
-                        } catch {
-                            return [];
-                        }
-                    });
-                    const fallbackCombined: HeaderSuggestion[] = [
-                        ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
-                        ...fallbackVenues.map((name) => ({ name, type: 'venue' as const })),
-                        ...fallbackLandmarks.map((name) => ({ name, type: 'landmark' as const })),
-                    ];
-                    const filteredFallback = fallbackCombined.filter((x) => x.name.toLowerCase().includes(q.toLowerCase()));
-                    const merged = [...mappedApi, ...filteredFallback];
-                    const deduped = merged
-                        .filter((item, idx) => merged.findIndex((x) => x.name.toLowerCase() === item.name.toLowerCase()) === idx);
-                    const ordered = [...deduped].sort((a, b) => {
-                        const aBoost = a.type === preferredType ? 1 : 0;
-                        const bBoost = b.type === preferredType ? 1 : 0;
-                        return bBoost - aBoost;
-                    }).slice(0, 6);
-                    if (ordered.length > 0) {
-                        setUsingFallbackSuggestions(false);
-                        setLocationSuggestions(ordered);
-                    } else {
-                        const fallback = [...fallbackPlaces, ...fallbackVenues, ...fallbackLandmarks]
-                            .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
-                            .slice(0, 6)
-                            .map((name) => ({
-                                name,
-                                type: fallbackVenues.includes(name) ? 'venue' as const : fallbackLandmarks.includes(name) ? 'landmark' as const : 'location' as const,
-                            }));
-                        setUsingFallbackSuggestions(fallback.length > 0);
-                        setLocationSuggestions(fallback);
+                const res = await searchLocations(q, 6, modeForApi, ctrl.signal);
+                if (cancelled || ctrl.signal.aborted) return;
+                const allApiSuggestions = Array.isArray(res) ? res : [];
+                const mappedApi: HeaderSuggestion[] = allApiSuggestions.flatMap((raw) => {
+                    if (!raw || typeof raw !== 'object') return [];
+                    const s = raw as LocationSuggestion;
+                    const name = String(s.name || s.display_name || '').trim();
+                    if (!name) return [];
+                    try {
+                        const normalized: LocationSuggestion = {
+                            ...s,
+                            name,
+                            country: s.country != null ? String(s.country) : undefined,
+                            type: s.type || 'location',
+                        };
+                        const sel = resolvePlaceFeedSelection(normalized);
+                        const t = String(normalized.type || '').toLowerCase();
+                        const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
+                            ? 'venue'
+                            : t.includes('landmark')
+                                ? 'landmark'
+                                : 'location';
+                        return [{
+                            name,
+                            country: normalized.country,
+                            type: kind,
+                            filter: sel.filter,
+                            label: sel.label,
+                            placeId: sel.placeId,
+                            scope: sel.scope,
+                            source: normalized,
+                        }];
+                    } catch {
+                        return [];
                     }
-                }
-            } catch {
-                if (!cancelled) {
+                });
+                const fallbackCombined: HeaderSuggestion[] = [
+                    ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
+                    ...fallbackVenues.map((name) => ({ name, type: 'venue' as const })),
+                    ...fallbackLandmarks.map((name) => ({ name, type: 'landmark' as const })),
+                ];
+                const filteredFallback = fallbackCombined.filter((x) => x.name.toLowerCase().includes(q.toLowerCase()));
+                const merged = [...mappedApi, ...filteredFallback];
+                const deduped = merged
+                    .filter((item, idx) => merged.findIndex((x) => x.name.toLowerCase() === item.name.toLowerCase()) === idx);
+                const ordered = [...deduped].sort((a, b) => {
+                    const aBoost = a.type === preferredType ? 1 : 0;
+                    const bBoost = b.type === preferredType ? 1 : 0;
+                    return bBoost - aBoost;
+                }).slice(0, 6);
+                if (ordered.length > 0) {
+                    setUsingFallbackSuggestions(false);
+                    setLocationSuggestions(ordered);
+                } else {
                     const fallback = [...fallbackPlaces, ...fallbackVenues, ...fallbackLandmarks]
                         .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
                         .slice(0, 6)
@@ -748,13 +736,25 @@ function PillTabs({
                     setUsingFallbackSuggestions(fallback.length > 0);
                     setLocationSuggestions(fallback);
                 }
+            } catch (e) {
+                if (cancelled || ctrl.signal.aborted || (e as Error)?.name === 'AbortError') return;
+                const fallback = [...fallbackPlaces, ...fallbackVenues, ...fallbackLandmarks]
+                    .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
+                    .slice(0, 6)
+                    .map((name) => ({
+                        name,
+                        type: fallbackVenues.includes(name) ? 'venue' as const : fallbackLandmarks.includes(name) ? 'landmark' as const : 'location' as const,
+                    }));
+                setUsingFallbackSuggestions(fallback.length > 0);
+                setLocationSuggestions(fallback);
             } finally {
-                if (!cancelled) setLoadingSuggestions(false);
+                if (!cancelled && !ctrl.signal.aborted) setLoadingSuggestions(false);
             }
         }, 220);
         return () => {
             cancelled = true;
             clearTimeout(timer);
+            ctrl.abort();
         };
     }, [menuOpen, locationQuery, fallbackPlaces, fallbackVenues, fallbackLandmarks]);
 

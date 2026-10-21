@@ -59,6 +59,8 @@ export default function PlaceAutocompleteField({
   const inputRef = React.useRef<TextInput>(null);
   /** After a tap on a suggestion, ignore the follow-up search for that filled-in value. */
   const pickedRef = React.useRef(false);
+  /** Bumps on re-focus so the same location can be searched/picked again. */
+  const [searchEpoch, setSearchEpoch] = React.useState(0);
 
   React.useEffect(() => {
     if (pickedRef.current) {
@@ -69,6 +71,7 @@ export default function PlaceAutocompleteField({
     }
     const q = value.trim();
     if (q.length < 2) {
+      pickedRef.current = false;
       setSuggestions([]);
       setLoading(false);
       setOpen(false);
@@ -94,7 +97,7 @@ export default function PlaceAutocompleteField({
       clearTimeout(id);
       ctrl.abort();
     };
-  }, [mode, value]);
+  }, [mode, value, searchEpoch]);
 
   const showList = open && value.trim().length >= 2;
 
@@ -126,8 +129,10 @@ export default function PlaceAutocompleteField({
           onChange(text);
         }}
         onFocus={() => {
-          if (pickedRef.current) return;
-          if (value.trim().length >= 2) setOpen(true);
+          pickedRef.current = false;
+          if (value.trim().length < 2) return;
+          setOpen(true);
+          setSearchEpoch((n) => n + 1);
         }}
         placeholder={placeholder}
         placeholderTextColor="#6B7280"
