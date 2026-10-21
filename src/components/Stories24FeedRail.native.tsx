@@ -35,6 +35,11 @@ import {
     pickFirstStories24RailStory,
     rankStories24RailItems,
 } from '../utils/stories24Rail';
+import {
+    STORY_GRADIENT_RING_COLORS,
+    STORY_GRADIENT_RING_END,
+    STORY_GRADIENT_RING_START,
+} from '../utils/storyRingNative';
 const CARD_W = 175;
 const CARD_H = 102;
 const CARD_RADIUS = 10;
@@ -240,13 +245,21 @@ function StoryCard({
                     </Text>
                 ) : null}
                 <View style={styles.cardAvatarCenter} pointerEvents="none">
-                    <View style={styles.cardAvatarRing}>
-                        <Avatar
-                            src={avatarSrc}
-                            name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                            size={48}
-                        />
-                    </View>
+                    <LinearGradient
+                        colors={[...STORY_GRADIENT_RING_COLORS]}
+                        start={STORY_GRADIENT_RING_START}
+                        end={STORY_GRADIENT_RING_END}
+                        style={styles.cardAvatarRing}
+                    >
+                        <View style={styles.cardAvatarRingInner}>
+                            <Avatar
+                                src={avatarSrc}
+                                name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
+                                size={48}
+                                hideBorder
+                            />
+                        </View>
+                    </LinearGradient>
                 </View>
                 <View style={styles.cardFooter}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
@@ -834,8 +847,8 @@ const styles = StyleSheet.create({
     scrollContent: {
         paddingLeft: 16,
         paddingRight: 16,
-        gap: 8,
-        columnGap: 8,
+        gap: 10,
+        columnGap: 10,
     },
     card: {
         width: CARD_W,
@@ -888,16 +901,26 @@ const styles = StyleSheet.create({
         paddingBottom: 10,
     },
     cardAvatarRing: {
-        padding: 2,
+        width: 56,
+        height: 56,
         borderRadius: 28,
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.92)',
-        backgroundColor: 'rgba(0,0,0,0.35)',
+        padding: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.45,
         shadowRadius: 4,
         elevation: 4,
+    },
+    cardAvatarRingInner: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
     },
     cardFooter: {
         position: 'absolute',

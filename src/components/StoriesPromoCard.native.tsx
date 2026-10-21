@@ -1,10 +1,16 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getAvatarForHandle } from '../api/users';
 import { isVideoUrl } from '../utils/storyMediaNative';
+import {
+    STORY_GRADIENT_RING_COLORS,
+    STORY_GRADIENT_RING_END,
+    STORY_GRADIENT_RING_START,
+} from '../utils/storyRingNative';
+import Avatar from './Avatar';
 
 /**
  * GLASS STATUS — read before assuming this card blurs.
@@ -37,7 +43,7 @@ type Props = {
     onPress: () => void;
     /** Rail item count. Subtitle only — never used to pad empty avatar rings. */
     storyCount?: number;
-    /** Story posters from the feed rail. Avatar stack reads unique author photos only. */
+    /** Story posters from the feed rail. Avatar stack reads unique authors only. */
     stories?: StoryAvatarSource[];
     /** Optional pre-resolved avatar URLs when `stories` is not passed. */
     storyAvatars?: string[];
@@ -50,17 +56,20 @@ type Props = {
  */
 const SCRIM = ['rgba(18, 28, 26, 0.82)', 'rgba(14, 22, 20, 0.72)'] as const;
 const WASH = ['rgba(16, 185, 129, 0.12)', 'rgba(0, 242, 254, 0.08)', 'rgba(18, 28, 26, 0.04)'] as const;
-/** Inbox header story rail — teal → sky → magenta. */
-const RING = ['#2DD4BF', '#0EA5E9', '#D946EF'] as const;
 
-/** Inner photo diameter; the emerald-cyan ring adds 2px padding on each side. */
+/** Inner photo diameter; 2px gradient ring matches Inbox header story avatars. */
 const AVATAR_SIZE = 32;
 const RING_PAD = 2;
 const RING_SIZE = AVATAR_SIZE + RING_PAD * 2;
-const AVATAR_OVERLAP = -14;
-/** In-app default face — never leave a ring empty when a poster has no photo. */
-const DEFAULT_AVATAR =
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop';
+const AVATAR_OVERLAP = -10;
+const STACK_MAX = 3;
+
+type StackPerson = {
+    key: string;
+    handle: string;
+    src?: string;
+    name: string;
+};
 
 function usableAvatarUri(raw?: string | null): string | undefined {
     const trimmed = typeof raw === 'string' ? raw.trim() : '';
@@ -68,59 +77,46 @@ function usableAvatarUri(raw?: string | null): string | undefined {
     return resolvePublicMediaUrl(trimmed) || trimmed;
 }
 
-function resolveStoryAvatarUri(story: StoryAvatarSource): string {
-    return (
-        usableAvatarUri(story.authorAvatar) ||
-        usableAvatarUri(story.avatarUrl) ||
-        usableAvatarUri(story.user?.avatarUrl) ||
-        usableAvatarUri(getAvatarForHandle(story.handle)) ||
-        DEFAULT_AVATAR
-    );
+function personName(handle: string): string {
+    return handle.replace(/^@/, '').split('@')[0] || 'User';
 }
 
-function uniqueAvatarList(
+function uniqueStoryPeople(
     stories: StoryAvatarSource[] | undefined,
     storyAvatars: string[] | undefined,
-): string[] {
-    const list: string[] = [];
+): StackPerson[] {
+    const list: StackPerson[] = [];
     const seen = new Set<string>();
-    const push = (uri: string) => {
-        if (!uri || seen.has(uri)) return;
-        seen.add(uri);
-        list.push(uri);
+    const pushPerson = (handleRaw: string | null | undefined, srcRaw?: string | null) => {
+        const handle = (handleRaw || '').trim();
+        if (!handle) return false;
+        const key = handle.toLowerCase().replace(/^@/, '');
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        list.push({
+            key,
+            handle,
+            src: usableAvatarUri(srcRaw) || usableAvatarUri(getAvatarForHandle(handle)),
+            name: personName(handle),
+        });
+        return list.length >= STACK_MAX;
     };
+
     for (const story of stories || []) {
-        push(resolveStoryAvatarUri(story));
-        if (list.length >= 3) return list;
+        if (pushPerson(story.handle, story.authorAvatar || story.avatarUrl || story.user?.avatarUrl)) {
+            return list;
+        }
     }
     for (const raw of storyAvatars || []) {
-        push(usableAvatarUri(raw) || DEFAULT_AVATAR);
-        if (list.length >= 3) return list;
+        const uri = usableAvatarUri(raw);
+        if (!uri) continue;
+        const key = `uri:${uri}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({ key, handle: key, src: uri, name: 'User' });
+        if (list.length >= STACK_MAX) return list;
     }
     return list;
-}
-
-function StackAvatarImage({ uri }: { uri: string }) {
-    const [src, setSrc] = React.useState(uri);
-    const [showGlyph, setShowGlyph] = React.useState(false);
-    React.useEffect(() => {
-        setSrc(uri);
-        setShowGlyph(false);
-    }, [uri]);
-    if (showGlyph) {
-        return <Icon name="person" size={13} color="rgba(255,255,255,0.72)" />;
-    }
-    return (
-        <Image
-            source={{ uri: src }}
-            style={styles.avatarImage}
-            resizeMode="cover"
-            onError={() => {
-                if (src !== DEFAULT_AVATAR) setSrc(DEFAULT_AVATAR);
-                else setShowGlyph(true);
-            }}
-        />
-    );
 }
 
 function AvatarStack({
@@ -130,29 +126,33 @@ function AvatarStack({
     stories: StoryAvatarSource[] | undefined;
     avatars: string[] | undefined;
 }) {
-    const avatarList = uniqueAvatarList(stories, avatars);
-    if (avatarList.length === 0) return null;
-    const totalWidth =
-        RING_SIZE + (avatarList.length - 1) * (RING_SIZE + AVATAR_OVERLAP);
+    const people = uniqueStoryPeople(stories, avatars);
+    if (people.length === 0) return null;
+    const totalWidth = RING_SIZE + (people.length - 1) * (RING_SIZE + AVATAR_OVERLAP);
     return (
         <View style={[styles.avatarStack, { width: totalWidth }]}>
-            {avatarList.map((uri, idx) => (
+            {people.map((person, idx) => (
                 <LinearGradient
-                    key={idx}
-                    colors={[...RING]}
-                    start={{ x: 0, y: 1 }}
-                    end={{ x: 1, y: 0 }}
+                    key={person.key}
+                    colors={[...STORY_GRADIENT_RING_COLORS]}
+                    start={STORY_GRADIENT_RING_START}
+                    end={STORY_GRADIENT_RING_END}
                     pointerEvents="none"
                     style={[
                         styles.avatarRing,
                         {
-                            zIndex: avatarList.length - idx,
+                            zIndex: people.length - idx,
                             marginLeft: idx > 0 ? AVATAR_OVERLAP : 0,
                         },
                     ]}
                 >
-                    <View style={styles.avatar}>
-                        <StackAvatarImage uri={uri || DEFAULT_AVATAR} />
+                    <View style={styles.avatarWell}>
+                        <Avatar
+                            src={person.src}
+                            name={person.name}
+                            size={AVATAR_SIZE}
+                            hideBorder
+                        />
                     </View>
                 </LinearGradient>
             ))}
@@ -247,19 +247,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    avatar: {
-        width: AVATAR_SIZE,
-        height: AVATAR_SIZE,
-        borderRadius: AVATAR_SIZE / 2,
+    avatarWell: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 999,
+        backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
-        backgroundColor: '#121C1A',
-    },
-    avatarImage: {
-        width: AVATAR_SIZE,
-        height: AVATAR_SIZE,
-        borderRadius: AVATAR_SIZE / 2,
     },
     copy: {
         flex: 1,

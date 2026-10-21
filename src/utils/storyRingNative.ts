@@ -20,6 +20,11 @@ export const STORY_RING_SEEN_COLOR = '#8E8E93';
 /** No-stories ring: the faint idle outline used for plain avatars. Mirrors `AVATAR_IDLE_BORDER_COLOR`. */
 export const STORY_RING_NONE_COLOR = 'rgba(255, 255, 255, 0.15)';
 
+/** Inbox header + newsfeed Stories cards: cyan → sky → magenta. */
+export const STORY_GRADIENT_RING_COLORS = ['#2DD4BF', '#0EA5E9', '#D946EF'] as const;
+export const STORY_GRADIENT_RING_START = { x: 0, y: 1 } as const;
+export const STORY_GRADIENT_RING_END = { x: 1, y: 0 } as const;
+
 /** Ring thickness shared with the feed header / inbox story rails. */
 export const STORY_RING_WIDTH = 2;
 /** Background-colored standoff between the ring and the photo (Instagram parity). */
