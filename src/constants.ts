@@ -20,9 +20,12 @@ export const TEMPLATE_IDS = {
   YOUTUBE_SHORTS: 'template-10',
 } as const;
 
+// Maximum media items allowed in a single carousel post (Instagram-style).
+export const CAROUSEL_MAX_ITEMS = 5;
+
 // Maximum clips for top templates
 export const MAX_CLIPS = 1; // For TikTok, Instagram, YouTube Shorts
-export const MAX_CLIPS_CAROUSEL = 10; // For Gazetteer carousel
+export const MAX_CLIPS_CAROUSEL = CAROUSEL_MAX_ITEMS; // For Gazetteer carousel
 export const MIN_CLIPS = 1;
 
 // Default clip duration (in milliseconds)

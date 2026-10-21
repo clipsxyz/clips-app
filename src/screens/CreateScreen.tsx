@@ -92,6 +92,9 @@ export default function CreateScreen({ navigation, route }: any) {
     };
     
     const [selectedMedia, setSelectedMedia] = useState<string | null>(normalizeMediaUri(passedMedia));
+    const [singleMediaSize, setSingleMediaSize] = useState<{ width: number; height: number } | null>(
+        null,
+    );
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(passedMediaType);
     const [carouselItems, setCarouselItems] = useState<LocalCarouselItem[]>([]);
     const [carouselActiveIndex, setCarouselActiveIndex] = useState(0);
@@ -278,12 +281,20 @@ export default function CreateScreen({ navigation, route }: any) {
         }
     }, [route.params?.carouselItems, route.params?.draftCaption]);
 
-    const applySingleMedia = useCallback((uri: string | null, type: 'image' | 'video') => {
-        setCarouselItems([]);
-        setCarouselActiveIndex(0);
-        setSelectedMedia(normalizeMediaUri(uri));
-        setMediaType(type);
-    }, []);
+    const applySingleMedia = useCallback(
+        (uri: string | null, type: 'image' | 'video', size?: { width?: number; height?: number }) => {
+            setCarouselItems([]);
+            setCarouselActiveIndex(0);
+            setSelectedMedia(normalizeMediaUri(uri));
+            setMediaType(type);
+            setSingleMediaSize(
+                size && Number(size.width) > 0 && Number(size.height) > 0
+                    ? { width: Number(size.width), height: Number(size.height) }
+                    : null,
+            );
+        },
+        [],
+    );
 
     const assetIsVideo = (asset: { type?: string; uri?: string }) =>
         Boolean(
@@ -293,7 +304,7 @@ export default function CreateScreen({ navigation, route }: any) {
         );
 
     const applyCarouselFromAssets = useCallback(
-        (assets: Array<{ uri?: string; type?: string; duration?: number }>) => {
+        (assets: Array<{ uri?: string; type?: string; duration?: number; width?: number; height?: number }>) => {
             const items: LocalCarouselItem[] = [];
             for (const a of assets) {
                 if (items.length >= 10) break;
@@ -309,6 +320,12 @@ export default function CreateScreen({ navigation, route }: any) {
                     uri,
                     type: isVideo ? 'video' : 'image',
                 };
+                const w = Number(a.width);
+                const h = Number(a.height);
+                if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+                    slide.width = w;
+                    slide.height = h;
+                }
                 if (isVideo) {
                     slide.videoCoverTime = 0;
                     if (durationSec != null) slide.durationSec = durationSec;
@@ -431,6 +448,7 @@ export default function CreateScreen({ navigation, route }: any) {
             applySingleMedia(
                 normalizeMediaUri(asset.uri),
                 assetIsVideo(asset) ? 'video' : 'image',
+                { width: Number(asset.width), height: Number(asset.height) },
             );
             if (assetIsVideo(asset) && Number(asset.duration) > 0) {
                 setVideoDurationSec(Math.max(0.1, Number(asset.duration)));
@@ -452,7 +470,10 @@ export default function CreateScreen({ navigation, route }: any) {
                 cropperCancelText: 'Cancel',
                 compressImageQuality: 0.9,
             });
-            applySingleMedia(normalizeMediaUri(image.path || null), 'image');
+            applySingleMedia(normalizeMediaUri(image.path || null), 'image', {
+                width: Number(image.width),
+                height: Number(image.height),
+            });
         } catch (err: any) {
             if (err?.code !== 'E_PICKER_CANCELLED') {
                 console.error('Camera picker error:', err);
@@ -547,6 +568,8 @@ export default function CreateScreen({ navigation, route }: any) {
                 localThumbUri,
                 localMediaItems: isCarousel ? carouselItems : undefined,
                 mediaType,
+                mediaWidth: isCarousel ? carouselItems[0]?.width : singleMediaSize?.width,
+                mediaHeight: isCarousel ? carouselItems[0]?.height : singleMediaSize?.height,
                 videoCoverTime,
                 filterForExport,
                 userLocal: user.local,

@@ -7,6 +7,9 @@ export type PendingCarouselLocalItem = {
     type: 'image' | 'video';
     videoCoverTime?: number;
     durationSec?: number;
+    /** Intrinsic pixel size of the picked asset (see LocalCarouselItem). */
+    width?: number;
+    height?: number;
 };
 
 export type PendingFeedUploadJob = {
@@ -20,6 +23,10 @@ export type PendingFeedUploadJob = {
     location: string;
     localMediaUri: string | null;
     localThumbUri: string | null;
+    /** Intrinsic pixel size of the single local media (non-carousel). Forwarded to createPost
+     *  so the server persists width/height and the feed lays out on first paint. */
+    mediaWidth?: number;
+    mediaHeight?: number;
     /** When length > 1, feed shows carousel while uploading (web parity). */
     localMediaItems?: PendingCarouselLocalItem[];
     mediaType: 'image' | 'video' | null;

@@ -27,6 +27,7 @@ import {
     ensureCameraCapturePermission,
 } from '../utils/galleryMediaPermissionsNative';
 import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
+import { CAROUSEL_MAX_ITEMS as MAX_GALLERY_ITEMS } from '../constants';
 import { MAX_FEED_VIDEO_DURATION_SEC } from '../utils/validateLocalVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
 
@@ -43,7 +44,6 @@ const CREATE_MODE_ITEMS = [
 const ORBIT_RADIUS = 128;
 const STEP_DEG = 360 / CREATE_MODE_ITEMS.length;
 const GALLERY_INDEX = CREATE_MODE_ITEMS.findIndex((item) => item.id === 'gallery');
-const MAX_GALLERY_ITEMS = 10;
 /** Mobile optical parity — web CSS px reads larger on phone browsers. */
 const TILE_CENTERED = 96;
 const TILE_IDLE = 68;

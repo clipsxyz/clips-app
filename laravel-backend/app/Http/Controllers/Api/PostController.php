@@ -631,6 +631,10 @@ class PostController extends Controller
             'mediaItems.*.type' => 'required|in:image,video,text',
             'mediaItems.*.duration' => 'nullable|numeric|min:0',
             'mediaItems.*.posterUrl' => 'nullable|string|max:2048',
+            // Per-slide intrinsic size, mirroring the top-level width/height ceiling so the
+            // carousel reads mediaItems[i].width/height without a second decode.
+            'mediaItems.*.width' => 'nullable|integer|min:1|max:8192',
+            'mediaItems.*.height' => 'nullable|integer|min:1|max:8192',
             'textStyle' => 'nullable|array',
             'textStyle.color' => 'nullable|string|max:50',
             'textStyle.size' => 'nullable|in:small,medium,large',

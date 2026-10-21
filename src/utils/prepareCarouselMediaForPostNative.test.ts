@@ -62,4 +62,23 @@ describe('prepareCarouselMediaForPostNative', () => {
             expect.objectContaining({ mediaType: 'video', videoCoverTime: 7 }),
         );
     });
+
+    it('carries picked width/height through to the uploaded items', async () => {
+        // The feed needs these to lay the card out on first paint; without them the post is
+        // persisted NULL and the card snaps to its real ratio on ExoPlayer onLoad.
+        const result = await prepareCarouselMediaForPostNative([
+            { uri: 'file:///a.jpg', type: 'image', width: 1920, height: 1080 },
+            { uri: 'file:///b.mp4', type: 'video', width: 1080, height: 1920 },
+        ]);
+        expect(result.items[0]).toMatchObject({ width: 1920, height: 1080 });
+        expect(result.items[1]).toMatchObject({ width: 1080, height: 1920 });
+    });
+
+    it('omits dimensions when the picked asset had none', async () => {
+        const result = await prepareCarouselMediaForPostNative([
+            { uri: 'file:///a.jpg', type: 'image' },
+        ]);
+        expect(result.items[0].width).toBeUndefined();
+        expect(result.items[0].height).toBeUndefined();
+    });
 });

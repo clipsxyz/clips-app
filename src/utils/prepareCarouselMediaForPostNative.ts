@@ -7,6 +7,12 @@ export type LocalCarouselItem = {
     /** Cover frame for this slide when type is video (seconds). */
     videoCoverTime?: number;
     durationSec?: number;
+    /**
+     * Intrinsic pixel size of the picked asset. Carried through so the created post can
+     * persist width/height and the feed lays the card out on first paint (no onLoad snap).
+     */
+    width?: number;
+    height?: number;
 };
 
 export type UploadedCarouselItem = {
@@ -15,6 +21,9 @@ export type UploadedCarouselItem = {
     duration?: number;
     /** Per-slide feed poster when type is video. */
     posterUrl?: string;
+    /** Intrinsic pixel size carried from the picked asset (see LocalCarouselItem). */
+    width?: number;
+    height?: number;
 };
 
 export type PrepareCarouselOptions = {
@@ -92,12 +101,16 @@ export async function prepareCarouselMediaForPostNative(
                 type: item.type,
                 duration: item.durationSec,
                 posterUrl: prep.videoPosterUrl,
+                width: item.width,
+                height: item.height,
             });
         } else {
             uploaded.push({
                 url: prep.mediaUrl,
                 type: item.type,
                 duration: item.durationSec,
+                width: item.width,
+                height: item.height,
             });
         }
     }

@@ -10,7 +10,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { RATIO_FALLBACK } from '../utils/mediaAspectRatio';
+import { RATIO_FEED_UNKNOWN } from '../utils/mediaAspectRatio';
 import { FEED_CARD_FLOAT_WRAP } from './FeedPageLayout.native';
 
 /**
@@ -114,9 +114,10 @@ const styles = StyleSheet.create({
   },
   media: {
     width: '100%',
-    // MUST equal mediaAspectRatio.RATIO_FALLBACK. If these two drift, the feed visibly
-    // jumps when the real card replaces the skeleton on first paint.
-    aspectRatio: RATIO_FALLBACK,
+    // MUST equal mediaAspectRatio.RATIO_FEED_UNKNOWN (the box a card with unknown media
+    // dimensions adopts). If these two drift, the feed visibly jumps when the real card
+    // replaces the skeleton on first paint.
+    aspectRatio: RATIO_FEED_UNKNOWN,
     borderRadius: 14,
     backgroundColor: BLOCK,
   },

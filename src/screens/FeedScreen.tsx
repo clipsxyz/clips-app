@@ -295,7 +295,7 @@ import {
 import type { FeedScope } from '../utils/placeFeedLevels';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
-import FeedDmSheet from '../components/FeedDmSheet.native';
+import FeedDmSheet, { type FeedDmSheetHandle } from '../components/FeedDmSheet.native';
 import {
     loadLocationNotifyPrefs,
     locationNotifyKey,
@@ -1781,11 +1781,7 @@ const FeedCard = React.memo(function FeedCard({
                               const target = (handle || profileHandle || post.userHandle || '').trim();
                               closeProfileMenu();
                               if (!target) return;
-                              // Wait until the Quick Actions RN Modal has unmounted.
-                              // Presenting FeedDmSheet in the same frame is a no-op on Android.
-                              InteractionManager.runAfterInteractions(() => {
-                                  onOpenDM(target, String(post.id), true);
-                              });
+                              onOpenDM(target, String(post.id), true);
                           }
                         : undefined
                 }
@@ -1896,11 +1892,18 @@ function nextPreloadNeighborIds(rows: FeedListRow[], primaryPostId: string | nul
 }
 
 function useFeedDmComposer(viewerHandle: string | undefined) {
+    const dmSheetRef = useRef<FeedDmSheetHandle>(null);
     const [dmSheetOpen, setDmSheetOpen] = useState(false);
     const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
     const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
     const [dmSheetMessage, setDmSheetMessage] = useState('');
     const [dmSheetSending, setDmSheetSending] = useState(false);
+    const [pendingDmUser, setPendingDmUser] = useState<string | null>(null);
+    const [pendingDmPostId, setPendingDmPostId] = useState<string | null>(null);
+    const [dmSheetEpoch, setDmSheetEpoch] = useState(0);
+    const dmSessionRef = useRef(0);
+    const suppressDismissRef = useRef(false);
+    const unlockDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const openDmThread = useCallback(
         (handle: string, postId: string, isMutual?: boolean) => {
@@ -1913,14 +1916,35 @@ function useFeedDmComposer(viewerHandle: string | undefined) {
             }
             const nextHandle = (handle || '').trim();
             if (!nextHandle) return;
+            // Stash the recipient now; present() waits until Quick Actions has unmounted.
+            dmSessionRef.current += 1;
+            suppressDismissRef.current = true;
+            setPendingDmUser(nextHandle);
+            setPendingDmPostId(postId ? String(postId) : null);
             setDmSheetRecipientHandle(nextHandle);
             setDmSheetAnchorPostId(postId ? String(postId) : null);
             setDmSheetMessage('');
             setDmSheetSending(false);
-            setDmSheetOpen(true);
         },
         [],
     );
+
+    useEffect(() => {
+        if (!pendingDmUser) return undefined;
+        const session = dmSessionRef.current;
+        const t = setTimeout(() => {
+            if (session !== dmSessionRef.current) return;
+            setDmSheetOpen(true);
+            setPendingDmUser(null);
+            setPendingDmPostId(null);
+            dmSheetRef.current?.present();
+            if (unlockDismissTimerRef.current) clearTimeout(unlockDismissTimerRef.current);
+            unlockDismissTimerRef.current = setTimeout(() => {
+                if (session === dmSessionRef.current) suppressDismissRef.current = false;
+            }, 400);
+        }, 250);
+        return () => clearTimeout(t);
+    }, [pendingDmUser, pendingDmPostId]);
 
     const sendDmFromSheet = useCallback(async () => {
         const text = dmSheetMessage.trim();
@@ -1932,10 +1956,7 @@ function useFeedDmComposer(viewerHandle: string | undefined) {
                 text,
                 sourcePostId: dmSheetAnchorPostId ?? undefined,
             });
-            setDmSheetMessage('');
-            setDmSheetOpen(false);
-            setDmSheetRecipientHandle(null);
-            setDmSheetAnchorPostId(null);
+            dmSheetRef.current?.dismiss();
         } catch (err) {
             Alert.alert(
                 'Could not send',
@@ -1946,15 +1967,23 @@ function useFeedDmComposer(viewerHandle: string | undefined) {
         }
     }, [dmSheetAnchorPostId, dmSheetMessage, dmSheetRecipientHandle, dmSheetSending, viewerHandle]);
 
+    // Gorhom already tore the sheet down. Calling dismiss() again here leaves
+    // status=DISMISSING, so the next present() never paints.
     const closeDmSheet = useCallback(() => {
+        if (suppressDismissRef.current) return;
         setDmSheetOpen(false);
+        setPendingDmUser(null);
+        setPendingDmPostId(null);
         setDmSheetRecipientHandle(null);
         setDmSheetAnchorPostId(null);
         setDmSheetMessage('');
         setDmSheetSending(false);
+        setTimeout(() => setDmSheetEpoch((n) => n + 1), 0);
     }, []);
 
     return {
+        dmSheetRef,
+        dmSheetEpoch,
         dmSheetOpen,
         dmSheetRecipientHandle,
         dmSheetMessage,
@@ -1971,6 +2000,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const userId = user?.id ?? 'anon';
     const isFeedFocused = useIsFocused();
     const {
+        dmSheetRef,
+        dmSheetEpoch,
         dmSheetOpen,
         dmSheetRecipientHandle,
         dmSheetMessage,
@@ -5798,6 +5829,8 @@ onVisitProfile={() =>
             ) : null}
 
             <FeedDmSheet
+                key={dmSheetEpoch}
+                ref={dmSheetRef}
                 open={dmSheetOpen}
                 recipientHandle={dmSheetRecipientHandle}
                 message={dmSheetMessage}

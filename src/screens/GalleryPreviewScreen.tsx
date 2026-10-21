@@ -26,7 +26,7 @@ import StickerOverlayNative from '../components/StickerOverlay.native';
 import TextStickerModalNative from '../components/TextStickerModal.native';
 import UserTaggingModalNative from '../components/UserTaggingModal.native';
 import type { Sticker, StickerOverlay } from '../types';
-import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
+import { TEXT_POST_BODY_MAX_LENGTH, CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../constants';
 import {
     buildFilterInfo,
     getFilterOverlayStyle,
@@ -38,7 +38,8 @@ import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
-import { ensureCameraPermission, ensureGalleryMediaPermission } from '../utils/galleryMediaPermissionsNative';
+import { ensureCameraPermission } from '../utils/galleryMediaPermissionsNative';
+import { pickFromFullGallery } from '../utils/pickDeviceMediaNative';
 import { resetToHomeFeed } from '../utils/finishFeedPostNavigationNative';
 import { ox } from '../constants/nativeOpticalScale';
 import {
@@ -47,8 +48,6 @@ import {
     savedToDraftsSheet,
     type DraftSaveSheetState,
 } from '../utils/draftSaveSheetNative';
-
-const CAROUSEL_MAX = 10;
 
 function assetIsVideo(asset: { type?: string; uri?: string }) {
     return Boolean(
@@ -65,6 +64,14 @@ function assetToCarouselItem(a: ImagePicker.Asset): LocalCarouselItem | null {
         uri: a.uri,
         type: isVideo ? 'video' : 'image',
     };
+    // Carry the picker's intrinsic size so the created post can persist width/height and
+    // the feed lays the card out on first paint instead of snapping on ExoPlayer onLoad.
+    const w = Number(a.width);
+    const h = Number(a.height);
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+        slide.width = w;
+        slide.height = h;
+    }
     if (isVideo) {
         slide.videoCoverTime = 0;
         const d = Number(a.duration || 0);
@@ -193,42 +200,33 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
     const addCarouselFromPicker = useCallback(() => {
         void (async () => {
-            const allowed = await ensureGalleryMediaPermission();
-            if (!allowed) return;
             const remaining = CAROUSEL_MAX - carouselItems.length;
             if (remaining <= 0) {
                 Alert.alert('Carousel full', `You can add up to ${CAROUSEL_MAX} photos or videos.`);
                 return;
             }
-            ImagePicker.launchImageLibrary(
-                {
-                    mediaType: 'mixed',
-                    selectionLimit: remaining > 1 ? remaining : 1,
-                    quality: 0.9,
-                    videoQuality: 'high',
-                    includeExtra: true,
-                },
-                (response) => {
-                    if (response.didCancel) return;
-                    if (response.errorCode) {
-                        Alert.alert('Media error', response.errorMessage || 'Could not open your gallery.');
-                        return;
-                    }
-                    const assets = response.assets || [];
-                    if (assets.length < 1) return;
-                    const toAdd = assetsToCarouselItems(assets, remaining);
-                    if (toAdd.length === 0) return;
-                    setCarouselItems((prev) => {
-                        const existingUris = new Set(prev.map((item) => item.uri));
-                        const merged = [
-                            ...prev,
-                            ...toAdd.filter((item) => !existingUris.has(item.uri)),
-                        ];
-                        return merged.slice(0, CAROUSEL_MAX);
-                    });
-                    setCardTab('carousel');
-                },
-            );
+            // Use the same rich gallery picker as the initial media selection
+            // (native device gallery), not react-native-image-picker's generic explorer.
+            const picked = await pickFromFullGallery(remaining);
+            if (picked === 'denied') {
+                Alert.alert(
+                    'Gallery access needed',
+                    'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
+                );
+                return;
+            }
+            if (picked === 'cancel') return;
+            const toAdd = assetsToCarouselItems(picked, remaining);
+            if (toAdd.length === 0) return;
+            setCarouselItems((prev) => {
+                const existingUris = new Set(prev.map((item) => item.uri));
+                const merged = [
+                    ...prev,
+                    ...toAdd.filter((item) => !existingUris.has(item.uri)),
+                ];
+                return merged.slice(0, CAROUSEL_MAX);
+            });
+            setCardTab('carousel');
         })();
     }, [carouselItems.length]);
 
@@ -248,32 +246,23 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
 
         if (autoStart.source === 'library') {
             void (async () => {
-                const allowed = await ensureGalleryMediaPermission();
-                if (!allowed) {
+                // Rich native gallery picker (same as the create screen + "+ Add" button).
+                const limit = autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1;
+                const picked = await pickFromFullGallery(limit);
+                if (picked === 'denied') {
+                    Alert.alert(
+                        'Gallery access needed',
+                        'Allow access to all photos and videos in Settings (not “selected photos”) so you can see your full camera roll.',
+                    );
                     navigation.goBack();
                     return;
                 }
-                ImagePicker.launchImageLibrary(
-                    {
-                        mediaType: autoStart.mediaType ?? 'mixed',
-                        selectionLimit: autoStart.kind === 'carousel' ? CAROUSEL_MAX : 1,
-                        quality: 0.9,
-                        videoQuality: 'high',
-                    },
-                    (response) => {
-                        if (response.didCancel) {
-                            navigation.goBack();
-                            return;
-                        }
-                        if (response.errorCode) {
-                            Alert.alert('Media error', response.errorMessage || 'Could not open your library.');
-                            navigation.goBack();
-                            return;
-                        }
-                        const ok = applyAssets(response.assets || []);
-                        if (!ok) navigation.goBack();
-                    },
-                );
+                if (picked === 'cancel') {
+                    navigation.goBack();
+                    return;
+                }
+                const ok = applyAssets(picked);
+                if (!ok) navigation.goBack();
             })();
             return;
         }
@@ -419,6 +408,8 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
             localThumbUri: first.uri,
             localMediaItems: isCarousel ? carouselItems : undefined,
             mediaType: first.type,
+            mediaWidth: first.width,
+            mediaHeight: first.height,
             videoCoverTime:
                 first.type === 'video'
                     ? first.videoCoverTime ?? 0

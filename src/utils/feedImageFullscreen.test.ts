@@ -89,8 +89,7 @@ describe('collectFeedFullscreenSlides', () => {
         expect(slides.map((s) => s.kind)).toEqual(['video', 'image', 'image']);
     });
 
-    it('excludes text slides, which are not media', () => {
-        const slides = collectFeedFullscreenSlides(
+    it('excludes text slides, which are not media', () => {        const slides = collectFeedFullscreenSlides(
             imagePost({
                 mediaItems: [
                     { url: 'data:text/hello', type: 'text' },
@@ -113,6 +112,37 @@ describe('collectFeedFullscreenSlides', () => {
         );
 
         expect(slides).toEqual([]);
+    });
+
+    it('carries per-slide intrinsic dimensions so the frame can fit before onLoad', () => {
+        const slides = collectFeedFullscreenSlides(
+            videoPost({
+                mediaItems: [
+                    { url: 'http://h/land.mp4', type: 'video', width: 1920, height: 1080 },
+                    { url: 'http://h/port.jpg', type: 'image', width: 1080, height: 1920 },
+                ],
+            }),
+        );
+
+        expect(slides[0]).toMatchObject({ kind: 'video', width: 1920, height: 1080 });
+        expect(slides[1]).toMatchObject({ kind: 'image', width: 1080, height: 1920 });
+    });
+
+    it('omits dimensions when a slide has none, so the viewer falls back cleanly', () => {
+        const slides = collectFeedFullscreenSlides(
+            videoPost({ mediaItems: [{ url: 'http://h/x.mp4', type: 'video' }] }),
+        );
+
+        expect(slides[0].width).toBeUndefined();
+        expect(slides[0].height).toBeUndefined();
+    });
+
+    it('uses post-level dimensions on the legacy mediaUrl fallback', () => {
+        const slides = collectFeedFullscreenSlides(
+            videoPost({ mediaItems: undefined, width: 1920, height: 1080 }),
+        );
+
+        expect(slides[0]).toMatchObject({ width: 1920, height: 1080 });
     });
 });
 

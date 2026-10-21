@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
     feedAspectRatio,
+    feedCardAspectRatio,
     feedMediaHeight,
+    fitContainBox,
     intrinsicRatio,
     orientationOf,
     RATIO_FALLBACK,
+    RATIO_FEED_UNKNOWN,
     resolveIntrinsicSize,
     RATIO_FEED_MAX_PORTRAIT,
     RATIO_LANDSCAPE_16_9,
@@ -445,5 +448,173 @@ describe('RATIO_FALLBACK is portrait 4:5, not 16:9 or 1:1', () => {
 
         // fullscreenPortrait may go to true 9:16.
         expect(feedAspectRatio(1080, 1920, { fullscreenPortrait: true })).toBeCloseTo(9 / 16, 6);
+    });
+});
+
+/**
+ * Regression guards for the fullscreen distortion: a landscape clip used to be forced into
+ * a rigid screen-height box (`contain` inside `100%x100%`), and the poster cover (`cover`)
+ * popped against it. `fitContainBox` is the aspect-correct frame both now share.
+ */
+describe('fitContainBox', () => {
+    // Typical phone portrait screen box.
+    const SCREEN_W = 390;
+    const SCREEN_H = 844;
+
+    it('letterboxes a landscape clip by width (bars top/bottom, no crop)', () => {
+        // 16:9 landscape (1920x1080) -> fitted by width, height = 390 / (16/9) ≈ 219.
+        const box = fitContainBox(SCREEN_W, SCREEN_H, 1920, 1080);
+        expect(box.width).toBeCloseTo(SCREEN_W, 6);
+        expect(box.height).toBeCloseTo(SCREEN_W / (16 / 9), 6);
+        expect(box.height).toBeLessThan(SCREEN_H);
+        // Ratio preserved exactly.
+        expect(box.width / box.height).toBeCloseTo(16 / 9, 6);
+    });
+
+    it('fills a portrait clip by width when it is wider than the screen ratio', () => {
+        // 9:16 (1080x1920, ratio 0.5625) on a 390x844 screen (ratio 0.462). The clip is
+        // WIDER than the screen, so it fits by width: height = 390 / 0.5625 ≈ 693, and the
+        // remaining vertical space is the letterbox. Ratio preserved, no crop, no upscale.
+        const box = fitContainBox(SCREEN_W, SCREEN_H, 1080, 1920);
+        expect(box.width).toBeCloseTo(SCREEN_W, 6);
+        expect(box.height).toBeCloseTo(SCREEN_W / (9 / 16), 6);
+        expect(box.height).toBeLessThan(SCREEN_H);
+        expect(box.width / box.height).toBeCloseTo(9 / 16, 6);
+    });
+
+    it('fills a very tall clip by height when it is narrower than the screen ratio', () => {
+        // 1:2.5 (1080x2700, ratio 0.4) is NARROWER than the screen (0.462), so it fits by
+        // height and pillarboxes horizontally.
+        const box = fitContainBox(SCREEN_W, SCREEN_H, 1080, 2700);
+        expect(box.height).toBeCloseTo(SCREEN_H, 6);
+        expect(box.width).toBeCloseTo(SCREEN_H * (1080 / 2700), 6);
+        expect(box.width).toBeLessThan(SCREEN_W);
+        expect(box.width / box.height).toBeCloseTo(0.4, 6);
+    });
+
+    it('never upscales past the screen in either dimension', () => {
+        for (const [w, h] of [
+            [1920, 1080],
+            [1080, 1920],
+            [1080, 1080],
+            [4000, 1200],
+            [1200, 4000],
+        ]) {
+            const box = fitContainBox(SCREEN_W, SCREEN_H, w, h);
+            expect(box.width).toBeLessThanOrEqual(SCREEN_W + 1e-6);
+            expect(box.height).toBeLessThanOrEqual(SCREEN_H + 1e-6);
+            expect(box.width).toBeGreaterThan(0);
+            expect(box.height).toBeGreaterThan(0);
+            // Aspect preserved.
+            expect(box.width / box.height).toBeCloseTo((w as number) / (h as number), 6);
+        }
+    });
+
+    it('fits a square clip into the smaller dimension', () => {
+        // 1:1 on a portrait screen -> fitted by width.
+        const box = fitContainBox(SCREEN_W, SCREEN_H, 1080, 1080);
+        expect(box.width).toBeCloseTo(SCREEN_W, 6);
+        expect(box.height).toBeCloseTo(SCREEN_W, 6);
+    });
+
+    it('falls back to the full box when dimensions are unknown', () => {
+        expect(fitContainBox(SCREEN_W, SCREEN_H)).toEqual({ width: SCREEN_W, height: SCREEN_H });
+        expect(fitContainBox(SCREEN_W, SCREEN_H, null, null)).toEqual({
+            width: SCREEN_W,
+            height: SCREEN_H,
+        });
+        expect(fitContainBox(SCREEN_W, SCREEN_H, 0, 0)).toEqual({
+            width: SCREEN_W,
+            height: SCREEN_H,
+        });
+    });
+
+    it('guards against a zero/degenerate box', () => {
+        const box = fitContainBox(0, 0, 1920, 1080);
+        expect(box.width).toBeGreaterThan(0);
+        expect(box.height).toBeGreaterThan(0);
+    });
+
+    it('uses a neutral fallback ratio for unknown dims when one is given', () => {
+        // Fullscreen seeds RATIO_FEED_UNKNOWN so the frame matches the feed's neutral box and
+        // does not jump from full-screen to widescreen when naturalSize arrives.
+        const box = fitContainBox(SCREEN_W, SCREEN_H, undefined, undefined, RATIO_FEED_UNKNOWN);
+        expect(box.width).toBeCloseTo(SCREEN_W, 6);
+        expect(box.height).toBeCloseTo(SCREEN_W / RATIO_FEED_UNKNOWN, 6);
+        // Identical to passing the matching intrinsic dims.
+        const equiv = fitContainBox(SCREEN_W, SCREEN_H, 1920, 1080);
+        expect(box).toEqual(equiv);
+    });
+});
+
+describe('feedCardAspectRatio (landscape side-crop fix)', () => {
+    it('keeps a 16:9 landscape clip at exactly 16:9 (no change)', () => {
+        expect(feedCardAspectRatio(1920, 1080)).toBeCloseTo(RATIO_LANDSCAPE_16_9, 6);
+    });
+
+    it('does NOT cap a wider-than-16:9 cinematic clip (the side-crop bug)', () => {
+        // 2.39:1 — the old feedAspectRatio crushed this to 16:9, so the box was too tall
+        // and `cover` trimmed the left/right. The card ratio must now reflect the frame.
+        const cinematic = feedCardAspectRatio(2048, 858);
+        expect(cinematic).toBeCloseTo(2048 / 858, 6);
+        expect(cinematic).toBeGreaterThan(RATIO_LANDSCAPE_16_9);
+        // Contrast: the shared clamp still slivers it to 16:9.
+        expect(feedAspectRatio(2048, 858)).toBeCloseTo(RATIO_LANDSCAPE_16_9, 6);
+    });
+
+    it('keeps ultra-wide 21:9 uncapped so the whole frame fits', () => {
+        const ultrawide = feedCardAspectRatio(2560, 1080);
+        expect(ultrawide).toBeCloseTo(2560 / 1080, 6);
+    });
+
+    it('preserves the 4:5 feed floor for portrait (unchanged behaviour)', () => {
+        expect(feedCardAspectRatio(1080, 1920)).toBeCloseTo(RATIO_FEED_MAX_PORTRAIT, 6);
+        expect(feedCardAspectRatio(1080, 1920)).toBe(feedAspectRatio(1080, 1920));
+    });
+
+    it('leaves square at 1:1', () => {
+        expect(feedCardAspectRatio(1080, 1080)).toBe(1);
+    });
+
+    it('falls back to a neutral 16:9 box when dimensions are unknown', () => {
+        // Unknown media must NOT default to a tall 4:5 box: a first-view landscape clip was
+        // exactly what snapped from that portrait fallback to widescreen on ExoPlayer load.
+        expect(feedCardAspectRatio(undefined, undefined)).toBe(RATIO_FEED_UNKNOWN);
+        expect(feedCardAspectRatio(0, 0)).toBe(RATIO_FEED_UNKNOWN);
+        expect(RATIO_FEED_UNKNOWN).toBeCloseTo(RATIO_LANDSCAPE_16_9, 6);
+    });
+});
+
+describe('feedMediaHeight with fitLandscape', () => {
+    const WIDTH = 390;
+
+    it('sizes a landscape box from the true ratio, not the 16:9 cap', () => {
+        // 2.39:1 at 390 wide -> ~163pt tall. The old (capped) path gave 390/1.777 = 219pt,
+        // which is 56pt too tall and was what forced the cover-crop.
+        const fitted = feedMediaHeight(WIDTH, 2048, 858, { fitLandscape: true });
+        expect(fitted).toBeCloseTo(WIDTH / (2048 / 858), 6);
+        expect(fitted).toBeLessThan(feedMediaHeight(WIDTH, 2048, 858));
+    });
+
+    it('is identical to the default path for portrait', () => {
+        expect(feedMediaHeight(WIDTH, 1080, 1920, { fitLandscape: true })).toBe(
+            feedMediaHeight(WIDTH, 1080, 1920),
+        );
+    });
+
+    it('matches the default path for a true 16:9 clip', () => {
+        expect(feedMediaHeight(WIDTH, 1920, 1080, { fitLandscape: true })).toBeCloseTo(
+            feedMediaHeight(WIDTH, 1920, 1080),
+            6,
+        );
+    });
+
+    it('sizes unknown media to a stable 16:9 box (no onLoad reflow)', () => {
+        // The card must pick this height on frame 0 and never resize. A landscape clip that
+        // reports 16:9 at load lands on the SAME height, so there is no snap.
+        const unknown = feedMediaHeight(WIDTH, undefined, undefined, { fitLandscape: true });
+        const known16x9 = feedMediaHeight(WIDTH, 1920, 1080, { fitLandscape: true });
+        expect(unknown).toBeCloseTo(WIDTH / RATIO_FEED_UNKNOWN, 6);
+        expect(unknown).toBeCloseTo(known16x9, 6);
     });
 });

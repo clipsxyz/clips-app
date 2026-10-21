@@ -6,7 +6,7 @@
  * Supports up to CAROUSEL_MAX items for Instagram-style carousel posts.
  */
 
-const CAROUSEL_MAX = 10;
+import { CAROUSEL_MAX_ITEMS as CAROUSEL_MAX } from '../constants';
 
 type CachedGalleryItem = {
   blob: Blob;

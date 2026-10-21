@@ -1,5 +1,5 @@
 /* @refresh reset */
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { StyleSheet, type ViewStyle } from 'react-native';
 import {
     BottomSheetModal,
@@ -46,7 +46,20 @@ export const GAZETTEER_SHEET_DARK = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_NAVY = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_PROFILE = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_CHARCOAL = GAZETTEER_SHEET_DISCOVER;
-export const GAZETTEER_SHEET_DM = GAZETTEER_SHEET_DISCOVER;
+export const GAZETTEER_SHEET_DM = {
+    background: {
+        backgroundColor: '#0F172A',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: DISCOVER_SHEET_BORDER,
+    } as ViewStyle,
+    handle: {
+        width: 40,
+        backgroundColor: 'rgba(255,255,255,0.28)',
+    } as ViewStyle,
+};
 export const GAZETTEER_SHEET_BOOST = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_SAVE = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_PASSPORT = GAZETTEER_SHEET_DISCOVER;
@@ -70,96 +83,131 @@ type Props = {
     keyboardBlurBehavior?: BottomSheetModalProps['keyboardBlurBehavior'];
     android_keyboardInputMode?: BottomSheetModalProps['android_keyboardInputMode'];
     enableDynamicSizing?: boolean;
+    /** Override safe-area bottom inset. Pass 0 when content already pads itself. */
+    bottomInset?: number;
     /** Delay before present(); raise this when opening after another RN Modal. */
     presentDelayMs?: number;
+    /** When false, the parent must call `present()` on the ref. Default true. */
+    autoPresent?: boolean;
+};
+
+export type GazetteerBottomSheetModalHandle = {
+    present: () => void;
+    dismiss: () => void;
+    snapToIndex: (index: number) => void;
 };
 
 /**
  * Shared @gorhom/bottom-sheet modal — drag-to-dismiss, native backdrop, safe-area aware.
  *
- * Hook order is fixed: every hook runs on every render, then we may return null.
+ * Hook order is fixed: every hook runs on every render. The modal stays mounted so
+ * `present()` on the ref is not dropped after another RN Modal (Quick Actions) closes.
  */
-export default function GazetteerBottomSheetModal({
-    visible,
-    onDismiss,
-    children,
-    snapPoints: snapPointsProp,
-    horizontalInset = 12,
-    backgroundStyle,
-    handleIndicatorStyle,
-    backdropOpacity = 0.6,
-    enablePanDownToClose = true,
-    footerComponent,
-    keyboardBehavior,
-    keyboardBlurBehavior,
-    android_keyboardInputMode,
-    enableDynamicSizing = false,
-    presentDelayMs = 50,
-}: Props) {
-    const bottomSheetRef = useRef<BottomSheetModal>(null);
-    const presentStateRef = useRef({ didPresent: false, presentDelayMs });
-    presentStateRef.current.presentDelayMs = presentDelayMs;
-    const insets = useSafeAreaInsets();
+const GazetteerBottomSheetModal = forwardRef<GazetteerBottomSheetModalHandle, Props>(
+    function GazetteerBottomSheetModal(
+        {
+            visible,
+            onDismiss,
+            children,
+            snapPoints: snapPointsProp,
+            horizontalInset = 12,
+            backgroundStyle,
+            handleIndicatorStyle,
+            backdropOpacity = 0.6,
+            enablePanDownToClose = true,
+            footerComponent,
+            keyboardBehavior,
+            keyboardBlurBehavior,
+            android_keyboardInputMode,
+            enableDynamicSizing = false,
+            bottomInset: bottomInsetProp,
+            presentDelayMs = 50,
+            autoPresent = true,
+        },
+        ref,
+    ) {
+        const bottomSheetRef = useRef<BottomSheetModal>(null);
+        const presentStateRef = useRef({ didPresent: false });
+        const insets = useSafeAreaInsets();
+        const bottomInset = bottomInsetProp ?? Math.max(insets.bottom, 16);
 
-    const snapPoints = useMemo(
-        () => (enableDynamicSizing ? undefined : snapPointsProp ?? ['70%']),
-        [enableDynamicSizing, snapPointsProp],
-    );
+        const snapPoints = useMemo(
+            () => (enableDynamicSizing ? undefined : snapPointsProp ?? ['70%']),
+            [enableDynamicSizing, snapPointsProp],
+        );
 
-    const renderBackdrop = useCallback(
-        (props: BottomSheetBackdropProps) => (
-            <BottomSheetBackdrop
-                {...props}
-                disappearsOnIndex={-1}
-                appearsOnIndex={0}
-                opacity={backdropOpacity}
-                pressBehavior="close"
-            />
-        ),
-        [backdropOpacity],
-    );
+        const present = useCallback(() => {
+            bottomSheetRef.current?.present();
+            presentStateRef.current.didPresent = true;
+        }, []);
 
-    useEffect(() => {
-        if (visible) {
-            const t = setTimeout(() => {
-                bottomSheetRef.current?.present();
-                presentStateRef.current.didPresent = true;
-            }, presentStateRef.current.presentDelayMs);
-            return () => clearTimeout(t);
-        }
-        if (presentStateRef.current.didPresent) {
+        const dismiss = useCallback(() => {
             bottomSheetRef.current?.dismiss();
             presentStateRef.current.didPresent = false;
-        }
-        return undefined;
-    }, [visible]);
+        }, []);
 
-    if (!visible) return null;
+        useImperativeHandle(
+            ref,
+            () => ({
+                present,
+                dismiss,
+                snapToIndex: (index: number) => {
+                    bottomSheetRef.current?.snapToIndex(index);
+                },
+            }),
+            [present, dismiss],
+        );
 
-    return (
-        <BottomSheetModal
-            ref={bottomSheetRef}
-            snapPoints={snapPoints}
-            enableDynamicSizing={enableDynamicSizing}
-            enablePanDownToClose={enablePanDownToClose}
-            onDismiss={onDismiss}
-            onChange={(index) => {
-                if (index === -1) presentStateRef.current.didPresent = false;
-            }}
-            backdropComponent={renderBackdrop}
-            backgroundStyle={backgroundStyle ?? GAZETTEER_SHEET_DISCOVER.background}
-            handleIndicatorStyle={handleIndicatorStyle ?? GAZETTEER_SHEET_DISCOVER.handle}
-            footerComponent={footerComponent}
-            keyboardBehavior={keyboardBehavior}
-            keyboardBlurBehavior={keyboardBlurBehavior}
-            android_keyboardInputMode={android_keyboardInputMode}
-            bottomInset={Math.max(insets.bottom, 16)}
-            containerStyle={[styles.container, { marginHorizontal: horizontalInset }]}
-        >
-            {children}
-        </BottomSheetModal>
-    );
-}
+        const renderBackdrop = useCallback(
+            (props: BottomSheetBackdropProps) => (
+                <BottomSheetBackdrop
+                    {...props}
+                    disappearsOnIndex={-1}
+                    appearsOnIndex={0}
+                    opacity={backdropOpacity}
+                    pressBehavior="close"
+                />
+            ),
+            [backdropOpacity],
+        );
+
+        useEffect(() => {
+            if (!autoPresent) return undefined;
+            if (visible) {
+                const t = setTimeout(() => present(), presentDelayMs);
+                return () => clearTimeout(t);
+            }
+            if (presentStateRef.current.didPresent) dismiss();
+            return undefined;
+        }, [autoPresent, dismiss, present, presentDelayMs, visible]);
+
+        return (
+            <BottomSheetModal
+                ref={bottomSheetRef}
+                snapPoints={snapPoints}
+                enableDynamicSizing={enableDynamicSizing}
+                enablePanDownToClose={enablePanDownToClose}
+                onDismiss={onDismiss}
+                onChange={(index) => {
+                    if (index === -1) presentStateRef.current.didPresent = false;
+                }}
+                backdropComponent={renderBackdrop}
+                backgroundStyle={backgroundStyle ?? GAZETTEER_SHEET_DISCOVER.background}
+                handleIndicatorStyle={handleIndicatorStyle ?? GAZETTEER_SHEET_DISCOVER.handle}
+                footerComponent={footerComponent}
+                keyboardBehavior={keyboardBehavior}
+                keyboardBlurBehavior={keyboardBlurBehavior}
+                android_keyboardInputMode={android_keyboardInputMode}
+                bottomInset={bottomInset}
+                containerStyle={[styles.container, { marginHorizontal: horizontalInset }]}
+            >
+                {children}
+            </BottomSheetModal>
+        );
+    },
+);
+
+export default GazetteerBottomSheetModal;
 
 const styles = StyleSheet.create({
     container: {

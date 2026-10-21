@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -40,7 +40,10 @@ import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDim
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia from '../components/FeedPostMedia.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
-import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
+import {
+    setImageFullscreenLaunch,
+    updateImageFullscreenPost,
+} from '../utils/imageFullscreenLaunchNative';
 import {
     collectFeedFullscreenSlides,
     fullscreenSlideIndexForCarousel,
@@ -75,6 +78,9 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const hideSaveAction = Boolean(fromCollection);
 
     const [post, setPost] = useState<Post | null>(null);
+    /** Latest post for the fullscreen route's handlers (they outlive a single render). */
+    const postRef = useRef<Post | null>(null);
+    postRef.current = post;
     const [loading, setLoading] = useState(true);
     const [mediaHeight, setMediaHeight] = useState(screenWidth * FEED_UI.media.maxAspect);
     const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -93,6 +99,13 @@ export default function PostDetailScreen({ route, navigation }: any) {
     useEffect(() => {
         loadPost();
     }, [postId]);
+
+    // Keep an open fullscreen route in sync with live post mutations (like/reclip).
+    useEffect(() => {
+        if (imageFullscreenOpen && post) {
+            updateImageFullscreenPost(post);
+        }
+    }, [imageFullscreenOpen, post]);
 
     useEffect(() => {
         if (openComments) setCommentsOpen(true);
@@ -252,9 +265,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
     };
 
     const handleLike = async () => {
-        if (!post) return;
+        const p = postRef.current;
+        if (!p) return;
         try {
-            const updated = await toggleLike(userId, post.id, post);
+            const updated = await toggleLike(userId, p.id, p);
             setPost(updated);
             upsertLocalPost(updated);
             syncPostOut(updated);
@@ -264,45 +278,46 @@ export default function PostDetailScreen({ route, navigation }: any) {
     };
 
     const tryReclip = async () => {
-        if (!post || !user?.handle) return;
+        const p = postRef.current;
+        if (!p || !user?.handle) return;
         const norm = (h?: string) => String(h || '').trim().toLowerCase();
-        if (norm(post.userHandle) === norm(user.handle)) {
+        if (norm(p.userHandle) === norm(user.handle)) {
             Alert.alert('Cannot reclip', 'You cannot reclip your own post.');
             return;
         }
-        if (post.userReclipped) {
+        if (p.userReclipped) {
             Alert.alert('Already reclipped', 'You have already reclipped this post.');
             return;
         }
-        const prevReclips = post.stats.reclips;
+        const prevReclips = p.stats.reclips;
         const newReclips = prevReclips + 1;
-        setReclipState(userId, post.id, true);
-        setPost((p) => {
-            const next = p
+        setReclipState(userId, p.id, true);
+        setPost((prev) => {
+            const next = prev
                 ? {
-                      ...p,
+                      ...prev,
                       userReclipped: true,
-                      stats: { ...p.stats, reclips: newReclips },
+                      stats: { ...prev.stats, reclips: newReclips },
                   }
                 : null;
             syncPostOut(next);
             return next;
         });
         try {
-            const result = await reclipPost(userId, post.id, user.handle);
+            const result = await reclipPost(userId, p.id, user.handle);
             if (result.originalPost) {
                 setPost(result.originalPost);
                 upsertLocalPost(result.originalPost);
             }
         } catch (err: any) {
             console.warn('Reclip failed:', err);
-            setReclipState(userId, post.id, false);
-            setPost((p) =>
-                p
+            setReclipState(userId, p.id, false);
+            setPost((prev) =>
+                prev
                     ? {
-                          ...p,
+                          ...prev,
                           userReclipped: false,
-                          stats: { ...p.stats, reclips: prevReclips },
+                          stats: { ...prev.stats, reclips: prevReclips },
                       }
                     : null,
             );
@@ -420,6 +435,24 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                             isTextOnlyPost(post)
                                         ) {
                                             setImageFullscreenOpen(true);
+                                            setImageFullscreenLaunch({
+                                                post,
+                                                startIndex: fullscreenSlideIndexForCarousel(
+                                                    post,
+                                                    carouselIndex,
+                                                ),
+                                                handlers: {
+                                                    onClose: () =>
+                                                        setImageFullscreenOpen(false),
+                                                    onLike: handleLike,
+                                                    onComment: () => setCommentsOpen(true),
+                                                    onReclip: tryReclip,
+                                                    onMenu: () => setOverflowVisible(true),
+                                                },
+                                            });
+                                            navigation.navigate('ImageFullscreenModal', {
+                                                postId: String(post.id),
+                                            });
                                         }
                                     }}
                                 />
@@ -700,17 +733,6 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 visible={inviteGroupOpen}
                 inviteeHandle={post?.userHandle || ''}
                 onClose={() => setInviteGroupOpen(false)}
-            />
-
-            <ImageFullscreenModal
-                post={post}
-                visible={imageFullscreenOpen}
-                initialIndex={fullscreenSlideIndexForCarousel(post, carouselIndex)}
-                onClose={() => setImageFullscreenOpen(false)}
-                onLike={handleLike}
-                onComment={() => setCommentsOpen(true)}
-                onReclip={tryReclip}
-                onMenu={() => setOverflowVisible(true)}
             />
 
             {post && editModalVisible ? (

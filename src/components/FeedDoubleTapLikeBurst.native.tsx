@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Platform, StyleSheet, View } from 'react-native';
-import Svg, { G, Line } from 'react-native-svg';
+import Svg, { G, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { hasFinitePoint, safeLayoutNumber } from '../utils/safeLayoutNative';
 
@@ -10,35 +10,30 @@ const THUMB_SIZE = 96;
 
 /** Radiating lines — web ShortsLikeBurstLines parity. */
 function BurstLines() {
-    const lines = useMemo(() => {
+    // One <Path> per stroke color keeps the same radiating spokes at 2 native
+    // views instead of 36, so mounting the burst can't jank the TextureView video.
+    const { bright, soft } = useMemo(() => {
         const cx = 50;
         const cy = 50;
-        return Array.from({ length: LINE_COUNT }, (_, i) => {
+        let bright = '';
+        let soft = '';
+        for (let i = 0; i < LINE_COUNT; i++) {
             const angle = ((i * 360) / LINE_COUNT) * (Math.PI / 180);
             const r = 38 + (i % 3) * 4;
-            return {
-                x2: cx + r * Math.cos(angle),
-                y2: cy + r * Math.sin(angle),
-                stroke: i % 2 === 0 ? '#ff1744' : '#f48fb1',
-                strokeWidth: i % 2 === 0 ? 2.2 : 1.6,
-            };
-        });
+            const x2 = (cx + r * Math.cos(angle)).toFixed(3);
+            const y2 = (cy + r * Math.sin(angle)).toFixed(3);
+            const segment = `M50,50L${x2},${y2}`;
+            if (i % 2 === 0) bright += segment;
+            else soft += segment;
+        }
+        return { bright, soft };
     }, []);
 
     return (
         <Svg width={BURST_SIZE} height={BURST_SIZE} viewBox="0 0 100 100">
-            <G strokeLinecap="round">
-                {lines.map((line, i) => (
-                    <Line
-                        key={i}
-                        x1={50}
-                        y1={50}
-                        x2={line.x2}
-                        y2={line.y2}
-                        stroke={line.stroke}
-                        strokeWidth={line.strokeWidth}
-                    />
-                ))}
+            <G strokeLinecap="round" fill="none">
+                <Path d={bright} stroke="#ff1744" strokeWidth={2.2} />
+                <Path d={soft} stroke="#f48fb1" strokeWidth={1.6} />
             </G>
         </Svg>
     );

@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { InteractionManager, StatusBar } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { StatusBar } from 'react-native';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import ScenesViewer from '../components/ScenesViewer.native';
@@ -62,15 +62,37 @@ export default function ScenesScreen({ route, navigation }: any) {
     const initialMuted = launch?.initialMuted ?? params.initialMuted;
     const feedLabel = launch?.feedLabel ?? params.feedLabel;
     const [posts, setPosts] = useState<Post[]>(() => resolveScenesPosts(params));
-    const openingPostsRef = useRef(posts);
+
+    /**
+     * Real-time engagement sync. Likes/follows made in the viewer must reach the host the
+     * moment they happen, not only when the route closes — Scenes can sit on top of other
+     * routes for a long while, and every other surface reading the shared store (the feed
+     * card, the still viewer, PostDetail, CollectionFeed) would otherwise keep the pre-Scenes
+     * count until `handleClose` runs. Doubles as the baseline for the close-time backstop,
+     * which only has to push whatever changed after the last live flush (e.g. on the final
+     * frame); flushing an already-empty queue is a no-op.
+     */
+    const syncedPostsRef = useRef(posts);
+    useEffect(() => {
+        let changed = false;
+        for (const p of posts) {
+            const prev = syncedPostsRef.current.find((q) => String(q.id) === String(p.id));
+            if (scenesPostNeedsFeedSync(prev, p)) {
+                setScenesPostUpdate(p);
+                changed = true;
+            }
+        }
+        syncedPostsRef.current = posts;
+        if (changed) flushScenesPostUpdates();
+    }, [posts]);
 
     const handleClose = useCallback(
         (savedTime?: number, postId?: string, mutedState?: boolean) => {
-            const initialById = new Map(
-                openingPostsRef.current.map((p) => [String(p.id), p] as const),
+            const lastSyncedById = new Map(
+                syncedPostsRef.current.map((p) => [String(p.id), p] as const),
             );
             for (const p of posts) {
-                if (scenesPostNeedsFeedSync(initialById.get(String(p.id)), p)) {
+                if (scenesPostNeedsFeedSync(lastSyncedById.get(String(p.id)), p)) {
                     setScenesPostUpdate(p);
                 }
             }
@@ -82,10 +104,10 @@ export default function ScenesScreen({ route, navigation }: any) {
                 });
             }
             clearScenesLaunchPayload();
+            // Apply any last-frame patches before the feed paints again. A deferred flush
+            // left the card on the numbers from before the modal opened.
+            flushScenesPostUpdates();
             navigation.goBack();
-            InteractionManager.runAfterInteractions(() => {
-                flushScenesPostUpdates();
-            });
         },
         [initialMuted, navigation, posts],
     );

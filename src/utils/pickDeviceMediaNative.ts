@@ -2,6 +2,7 @@ import { NativeModules, Platform } from 'react-native';
 import ImageCropPicker, { type Image as CropImage } from 'react-native-image-crop-picker';
 import type { Asset } from 'react-native-image-picker';
 import { ensureGalleryMediaPermission } from './galleryMediaPermissionsNative';
+import { CAROUSEL_MAX_ITEMS } from '../constants';
 
 type GalleryRollItem = { uri?: string; type?: string; fileName?: string; fileSize?: number; duration?: number };
 
@@ -46,7 +47,7 @@ function isCancel(err: unknown): boolean {
  * Android: ACTION_PICK against MediaStore (Oppo Gallery), not DocumentsUI Recents.
  * iOS: Photos library via image-crop-picker.
  */
-export async function pickFromFullGallery(selectionLimit = 10): Promise<Asset[] | 'denied' | 'cancel'> {
+export async function pickFromFullGallery(selectionLimit = CAROUSEL_MAX_ITEMS): Promise<Asset[] | 'denied' | 'cancel'> {
     const allowed = await ensureGalleryMediaPermission();
     if (!allowed) return 'denied';
 

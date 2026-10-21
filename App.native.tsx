@@ -11,6 +11,7 @@ import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { rootNavigationRef as navigationRef } from './src/navigation/rootNavigationRef';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { enableFreeze } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
 import { getUnreadTotal } from './src/api/messages';
@@ -54,6 +55,7 @@ import ClipScreen from './src/screens/ClipScreen';
 import ClipPollScreen from './src/screens/ClipPollScreen';
 import Story24ComposerScreen from './src/screens/Story24ComposerScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
+import ImageFullscreenScreen from './src/screens/ImageFullscreenScreen.native';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
 import { schedulePushNotificationNavigation } from './src/utils/pushNotificationNavigationNative';
@@ -61,6 +63,11 @@ import UploadProgressToast from './src/components/UploadProgressToast.native';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+// Freeze inactive screens so background tabs stop re-rendering on the JS thread.
+// Without this, every context/poll update reconciled all mounted tab trees. Called once
+// at module load, before the first navigator renders.
+enableFreeze(true);
 
 type ErrorBoundaryState = { error: Error | null };
 
@@ -208,6 +215,7 @@ function MainTabs() {
         tabBarStyle: TAB_BAR_STYLE,
         sceneStyle: { backgroundColor: 'transparent' },
         lazy: true,
+        freezeOnBlur: true,
       }}
       tabBar={(props) => (
         <MainTabBar
@@ -225,7 +233,7 @@ function MainTabs() {
       <Tab.Screen
         name="Boost"
         component={BoostTabStack}
-        options={{ title: 'Boost', lazy: false }}
+        options={{ title: 'Boost' }}
       />
       <Tab.Screen
         name="Create"
@@ -236,7 +244,7 @@ function MainTabs() {
       <Tab.Screen
         name="Inbox"
         component={InboxTabStack}
-        options={{ title: 'Inbox', lazy: false }}
+        options={{ title: 'Inbox' }}
       />
     </Tab.Navigator>
   );
@@ -291,6 +299,17 @@ function App(): React.JSX.Element {
             name="MainTabs"
             component={MainTabs}
             options={{ contentStyle: { backgroundColor: 'transparent' } }}
+          />
+          {/* Full-screen media viewer — real native route (was an RN <Modal>). */}
+          <Stack.Screen
+            name="ImageFullscreenModal"
+            component={ImageFullscreenScreen}
+            options={{
+              presentation: 'transparentModal',
+              animation: 'fade',
+              headerShown: false,
+              contentStyle: { backgroundColor: 'transparent' },
+            }}
           />
           <Stack.Screen name="Discover" component={DiscoverScreen} />
           <Stack.Screen name="ProfileCover" component={ProfileCoverScreen} />

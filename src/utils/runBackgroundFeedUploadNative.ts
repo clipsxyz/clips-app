@@ -75,6 +75,8 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             url: item.uri,
             type: item.type,
             duration: item.durationSec,
+            width: item.width,
+            height: item.height,
         }));
         let carouselVideoPoster: string | undefined =
             job.localMediaItems.find((i) => i.type === 'video')?.uri || undefined;
@@ -139,6 +141,13 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
             undefined,
             undefined,
             carouselVideoPoster,
+            undefined,
+            undefined,
+            undefined,
+            // Primary slide's intrinsic size -- the server persists post-level width/height so
+            // the feed sizes the first frame on first paint. Per-slide dims ride on `uploaded`.
+            first.width,
+            first.height,
         );
         completePendingFeedUpload(job.tempId, createdPost);
         getUploadOverlayForJob(job.tempId)?.success();
@@ -217,6 +226,14 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
         undefined,
         undefined,
         videoPosterUrl,
+        undefined,
+        undefined,
+        undefined,
+        // Intrinsic size captured at pick time. The media is uploaded to a remote URL first,
+        // so the server cannot read it locally; sending the dims is what lets the post
+        // persist width/height and the feed lay out on first paint (no onLoad snap).
+        job.mediaWidth,
+        job.mediaHeight,
     );
 
     completePendingFeedUpload(job.tempId, createdPost);

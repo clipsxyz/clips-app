@@ -152,8 +152,8 @@ export default function FeedPostProfileQuickMenu({
                     style={styles.item}
                     onPress={() => {
                         const handle = profileHandle.trim();
-                        // Close the RN Modal first; presenting a gorhom sheet while it
-                        // is still up (especially on Android) silently no-ops.
+                        // Dismiss this RN Modal first. FeedScreen stashes `pendingDmUser`
+                        // and presents FeedDmSheet after 250ms so gorhom is not dropped.
                         onClose();
                         if (handle) onMessage(handle);
                     }}

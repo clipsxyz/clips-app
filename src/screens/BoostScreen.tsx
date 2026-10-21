@@ -90,10 +90,18 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         void loadUserPosts();
     }, [loadUserPosts]);
 
+    /** Mount effect above covers the first load; skip the focus effect's first pass so
+     *  mounting never issues a second (guarded) fetch. Later focuses refresh silently. */
+    const boostFirstFocusRef = useRef(true);
+
     // Soft refresh on focus — keep existing tiles visible (no full-screen spinner).
     // Guarded by the in-flight flag + debounce above, so it never loops.
     useFocusEffect(
         useCallback(() => {
+            if (boostFirstFocusRef.current) {
+                boostFirstFocusRef.current = false;
+                return;
+            }
             void loadUserPosts({ silent: true });
         }, [loadUserPosts]),
     );

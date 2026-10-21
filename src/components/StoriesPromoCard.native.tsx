@@ -2,7 +2,9 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import { resolvePublicMediaUrl } from '../api/apiBaseUrl';
 import { getAvatarForHandle } from '../api/users';
+import { isVideoUrl } from '../utils/storyMediaNative';
 
 /**
  * GLASS STATUS — read before assuming this card blurs.
@@ -23,28 +25,22 @@ import { getAvatarForHandle } from '../api/users';
  * blurAmount={18} reducedTransparencyFallbackColor="#101B2F" />.
  */
 
+type StoryAvatarSource = {
+    handle?: string | null;
+    authorAvatar?: string | null;
+    avatarUrl?: string | null;
+    user?: { avatarUrl?: string | null } | null;
+};
+
 type Props = {
     /** Fire the same Stories-24 open path the header pill used to use. */
     onPress: () => void;
-    /** Rail item count. Drives how many avatars the stack shows (clamped to 2-3). */
+    /** Rail item count. Subtitle only — never used to pad empty avatar rings. */
     storyCount?: number;
-    /**
-     * Avatar URLs from the actual story posters, in rail order. Preferred source.
-     *
-     * NOTE: FeedScreen does not pass this. It cannot, in fact — Stories24RailItem
-     * (src/utils/stories24Rail.ts) carries only handle/title/subtitle/thumb/
-     * previewVideoUrl. There is no avatar URL on the rail item to read.
-     */
+    /** Story posters from the feed rail. Avatar stack reads unique author photos only. */
+    stories?: StoryAvatarSource[];
+    /** Optional pre-resolved avatar URLs when `stories` is not passed. */
     storyAvatars?: string[];
-    /**
-     * Story poster handles in rail order. Resolved through getAvatarForHandle, which
-     * only knows the 8 seed mock accounts — a real API handle returns undefined and
-     * degrades to the glyph. Passing this is better than nothing but will not show
-     * real photos for live stories.
-     *
-     * Wiring at the call site: storyHandles={stories24Items.map((s) => s.handle)}
-     */
-    storyHandles?: string[];
 };
 
 /**
@@ -52,105 +48,114 @@ type Props = {
  * frames, so this sits under the tint wash and keeps the copy legible regardless of
  * what scrolls underneath.
  */
-const SCRIM = ['rgba(10, 14, 20, 0.62)', 'rgba(12, 18, 26, 0.55)'] as const;
-const WASH = ['rgba(246,226,122,0.16)', 'rgba(212,175,55,0.12)', 'rgba(20,184,166,0.14)'] as const;
+const SCRIM = ['rgba(18, 28, 26, 0.82)', 'rgba(14, 22, 20, 0.72)'] as const;
+const WASH = ['rgba(16, 185, 129, 0.12)', 'rgba(0, 242, 254, 0.08)', 'rgba(18, 28, 26, 0.04)'] as const;
+/** Inbox header story rail — teal → sky → magenta. */
+const RING = ['#2DD4BF', '#0EA5E9', '#D946EF'] as const;
 
-/** Avatar diameter and horizontal overlap for the stack. -10 as specified. */
+/** Inner photo diameter; the emerald-cyan ring adds 2px padding on each side. */
 const AVATAR_SIZE = 32;
-const AVATAR_OVERLAP = -10;
+const RING_PAD = 2;
+const RING_SIZE = AVATAR_SIZE + RING_PAD * 2;
+const AVATAR_OVERLAP = -14;
+/** In-app default face — never leave a ring empty when a poster has no photo. */
+const DEFAULT_AVATAR =
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop';
 
-/**
- * Deterministic accent fills behind each ring. They sit under the avatar image, so
- * they are only visible while an image loads or if it fails outright.
- */
-const AVATAR_FILLS = ['#3B4A6B', '#4A3B63', '#3B635B'] as const;
-
-/**
- * Mock handles used only when the caller supplies no real poster avatars. These are
- * the app's seed mock accounts and resolve to remote Unsplash photos, so they need
- * network; if they fail to load the ring falls back to the person glyph rather than
- * rendering a broken image.
- */
-const AVATAR_MOCK_HANDLES = ['Alice@Dublin', 'Sarah@Artane', 'Noah@london'] as const;
-
-/** Clamp to 2-3 avatars: a single avatar reads as broken, four overflow the gutters. */
-function avatarSlots(count: number): number {
-    if (count <= 0) return 3;
-    return Math.min(Math.max(count, 2), 3);
+function usableAvatarUri(raw?: string | null): string | undefined {
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    if (!trimmed || isVideoUrl(trimmed)) return undefined;
+    return resolvePublicMediaUrl(trimmed) || trimmed;
 }
 
-/**
- * Resolution order per ring: real poster URL, then the poster's handle via
- * getAvatarForHandle, then a mock handle, then nothing (person glyph). Deduped so
- * three rings never show the same person twice (the mock map repeats photos across
- * handle variants such as Bob@Ireland / Bob@Finglas).
- */
-function resolveAvatarSources(
+function resolveStoryAvatarUri(story: StoryAvatarSource): string {
+    return (
+        usableAvatarUri(story.authorAvatar) ||
+        usableAvatarUri(story.avatarUrl) ||
+        usableAvatarUri(story.user?.avatarUrl) ||
+        usableAvatarUri(getAvatarForHandle(story.handle)) ||
+        DEFAULT_AVATAR
+    );
+}
+
+function uniqueAvatarList(
+    stories: StoryAvatarSource[] | undefined,
     storyAvatars: string[] | undefined,
-    storyHandles: string[] | undefined,
-    slots: number,
-): (string | undefined)[] {
-    const used: string[] = [];
-    const pick = (candidates: (string | undefined)[]): string | undefined => {
-        for (const candidate of candidates) {
-            const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
-            if (trimmed && !used.includes(trimmed)) {
-                used.push(trimmed);
-                return trimmed;
-            }
-        }
-        return undefined;
+): string[] {
+    const list: string[] = [];
+    const seen = new Set<string>();
+    const push = (uri: string) => {
+        if (!uri || seen.has(uri)) return;
+        seen.add(uri);
+        list.push(uri);
     };
-    return Array.from({ length: slots }, (_, i) =>
-        pick([
-            storyAvatars?.[i],
-            storyHandles?.[i] ? getAvatarForHandle(storyHandles[i]) : undefined,
-            getAvatarForHandle(AVATAR_MOCK_HANDLES[i % AVATAR_MOCK_HANDLES.length]),
-        ]),
+    for (const story of stories || []) {
+        push(resolveStoryAvatarUri(story));
+        if (list.length >= 3) return list;
+    }
+    for (const raw of storyAvatars || []) {
+        push(usableAvatarUri(raw) || DEFAULT_AVATAR);
+        if (list.length >= 3) return list;
+    }
+    return list;
+}
+
+function StackAvatarImage({ uri }: { uri: string }) {
+    const [src, setSrc] = React.useState(uri);
+    const [showGlyph, setShowGlyph] = React.useState(false);
+    React.useEffect(() => {
+        setSrc(uri);
+        setShowGlyph(false);
+    }, [uri]);
+    if (showGlyph) {
+        return <Icon name="person" size={13} color="rgba(255,255,255,0.72)" />;
+    }
+    return (
+        <Image
+            source={{ uri: src }}
+            style={styles.avatarImage}
+            resizeMode="cover"
+            onError={() => {
+                if (src !== DEFAULT_AVATAR) setSrc(DEFAULT_AVATAR);
+                else setShowGlyph(true);
+            }}
+        />
     );
 }
 
 function AvatarStack({
-    count,
+    stories,
     avatars,
-    handles,
 }: {
-    count: number;
+    stories: StoryAvatarSource[] | undefined;
     avatars: string[] | undefined;
-    handles: string[] | undefined;
 }) {
-    const slots = avatarSlots(count);
-    const sources = resolveAvatarSources(avatars, handles, slots);
-    // Tracks per-slot load failures so one dead URL degrades to the glyph in place.
-    const [failed, setFailed] = React.useState<Record<number, boolean>>({});
-    const totalWidth = AVATAR_SIZE + (slots - 1) * (AVATAR_SIZE + AVATAR_OVERLAP);
+    const avatarList = uniqueAvatarList(stories, avatars);
+    if (avatarList.length === 0) return null;
+    const totalWidth =
+        RING_SIZE + (avatarList.length - 1) * (RING_SIZE + AVATAR_OVERLAP);
     return (
         <View style={[styles.avatarStack, { width: totalWidth }]}>
-            {Array.from({ length: slots }, (_, i) => {
-                const uri = sources[i];
-                const showImage = Boolean(uri) && !failed[i];
-                return (
-                    <View
-                        key={`stack-${i}`}
-                        pointerEvents="none"
-                        style={[
-                            styles.avatar,
-                            { backgroundColor: AVATAR_FILLS[i % AVATAR_FILLS.length] },
-                            i > 0 ? styles.avatarOverlap : null,
-                        ]}
-                    >
-                        {showImage ? (
-                            <Image
-                                source={{ uri: uri as string }}
-                                style={styles.avatarImage}
-                                onError={() => setFailed((prev) => ({ ...prev, [i]: true }))}
-                            />
-                        ) : (
-                            <Icon name="person" size={13} color="rgba(255,255,255,0.72)" />
-                        )}
+            {avatarList.map((uri, idx) => (
+                <LinearGradient
+                    key={idx}
+                    colors={[...RING]}
+                    start={{ x: 0, y: 1 }}
+                    end={{ x: 1, y: 0 }}
+                    pointerEvents="none"
+                    style={[
+                        styles.avatarRing,
+                        {
+                            zIndex: avatarList.length - idx,
+                            marginLeft: idx > 0 ? AVATAR_OVERLAP : 0,
+                        },
+                    ]}
+                >
+                    <View style={styles.avatar}>
+                        <StackAvatarImage uri={uri || DEFAULT_AVATAR} />
                     </View>
-                );
-            })}
+                </LinearGradient>
+            ))}
         </View>
     );
 }
@@ -158,8 +163,8 @@ function AvatarStack({
 export default function StoriesPromoCard({
     onPress,
     storyCount = 0,
+    stories,
     storyAvatars,
-    storyHandles,
 }: Props) {
     return (
         <TouchableOpacity
@@ -182,18 +187,22 @@ export default function StoriesPromoCard({
                 style={StyleSheet.absoluteFill}
             />
             <View style={styles.row}>
-                <AvatarStack count={storyCount} avatars={storyAvatars} handles={storyHandles} />
+                <AvatarStack stories={stories} avatars={storyAvatars} />
                 <View style={styles.copy}>
-                    <Text style={styles.title} numberOfLines={1}>
-                        Stories 24
-                    </Text>
+                    <View style={styles.titleRow}>
+                        <View style={styles.liveDot} />
+                        <Text style={styles.title} numberOfLines={1}>
+                            Stories
+                        </Text>
+                    </View>
                     <Text style={styles.subtitle} numberOfLines={1}>
-                        Recent local updates
+                        {storyCount > 0 ? `${storyCount} recent updates` : '24 recent updates'}
                     </Text>
                 </View>
-                <View style={styles.watchPill}>
-                    <Icon name="play" size={11} color="#FFFFFF" />
+                <View style={styles.watchLink}>
+                    <Icon name="play" size={12} color="#10B981" />
                     <Text style={styles.watchText}>Watch</Text>
+                    <Icon name="chevron-forward" size={14} color="rgba(255,255,255,0.55)" />
                 </View>
             </View>
         </TouchableOpacity>
@@ -211,13 +220,13 @@ const styles = StyleSheet.create({
      * blur is installed in this project — see note at top of file.
      */
     card: {
-        borderRadius: 16,
+        borderRadius: 18,
         marginVertical: 12,
         marginHorizontal: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        backgroundColor: 'rgba(18, 28, 26, 0.7)',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.12)',
-        paddingHorizontal: 14,
+        borderColor: 'rgba(16, 185, 129, 0.18)',
+        paddingHorizontal: 16,
         paddingVertical: 14,
         overflow: 'hidden',
     },
@@ -230,53 +239,69 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
+    avatarRing: {
+        width: RING_SIZE,
+        height: RING_SIZE,
+        borderRadius: RING_SIZE / 2,
+        padding: RING_PAD,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     avatar: {
         width: AVATAR_SIZE,
         height: AVATAR_SIZE,
         borderRadius: AVATAR_SIZE / 2,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: '#EC4899',
-    },
-    avatarOverlap: {
-        marginLeft: AVATAR_OVERLAP,
+        overflow: 'hidden',
+        backgroundColor: '#121C1A',
     },
     avatarImage: {
-        width: '100%',
-        height: '100%',
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
         borderRadius: AVATAR_SIZE / 2,
     },
     copy: {
         flex: 1,
         minWidth: 0,
     },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 7,
+    },
+    liveDot: {
+        width: 7,
+        height: 7,
+        borderRadius: 4,
+        backgroundColor: '#10B981',
+        flexShrink: 0,
+    },
     title: {
         color: '#FFFFFF',
         fontSize: 15,
         fontWeight: '600',
+        flexShrink: 1,
     },
     subtitle: {
-        // #94A3B8 is the slate used for secondary feed copy. Short enough that it
-        // clears the avatar stack and Watch pill on a 320pt feed without ellipsizing.
-        color: '#94A3B8',
+        color: '#8E8E93',
         fontSize: 12,
-        marginTop: 2,
+        marginTop: 3,
     },
-    watchPill: {
+    watchLink: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 5,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        columnGap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+        borderRadius: 999,
+        backgroundColor: 'rgba(16, 185, 129, 0.10)',
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.15)',
+        borderColor: 'rgba(16, 185, 129, 0.22)',
     },
     watchText: {
-        color: '#FFFFFF',
-        fontSize: 12,
+        color: '#E8FFF6',
+        fontSize: 13,
         fontWeight: '600',
     },
 });

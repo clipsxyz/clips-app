@@ -20,6 +20,13 @@ export type FullscreenSlide = {
     url: string;
     /** First frame for video slides, so playback is never a black flash before `onLoad`. */
     posterUrl?: string;
+    /**
+     * Intrinsic pixel dimensions of this slide, when the backend recorded them. Drives the
+     * fullscreen frame's aspect-correct fit (letterbox landscape, fill portrait) on the
+     * very first paint, before ExoPlayer reports `naturalSize`.
+     */
+    width?: number;
+    height?: number;
 };
 
 /** Best available still for a video slide. Posters are generated for video by the backend. */
@@ -51,10 +58,26 @@ export function collectFeedFullscreenSlides(post: Post): FullscreenSlide[] {
             if (!item?.url) continue;
             if (item.type === 'text') continue;
             if (/^data:text\//i.test(item.url)) continue;
+            const itemWidth = Number(item.width);
+            const itemHeight = Number(item.height);
+            const hasDims =
+                Number.isFinite(itemWidth) &&
+                Number.isFinite(itemHeight) &&
+                itemWidth > 0 &&
+                itemHeight > 0;
             slides.push(
                 item.type === 'video'
-                    ? { kind: 'video', url: item.url, posterUrl: poster }
-                    : { kind: 'image', url: item.url },
+                    ? {
+                          kind: 'video',
+                          url: item.url,
+                          posterUrl: poster,
+                          ...(hasDims ? { width: itemWidth, height: itemHeight } : {}),
+                      }
+                    : {
+                          kind: 'image',
+                          url: item.url,
+                          ...(hasDims ? { width: itemWidth, height: itemHeight } : {}),
+                      },
             );
         }
     }
@@ -63,8 +86,26 @@ export function collectFeedFullscreenSlides(post: Post): FullscreenSlide[] {
         const url = post.mediaUrl;
         if (typeof url === 'string' && url !== '' && !/^data:text\//i.test(url)) {
             const isVideo = post.mediaType === 'video' || VIDEO_URL_RE.test(url);
+            const postWidth = Number(post.width);
+            const postHeight = Number(post.height);
+            const hasDims =
+                Number.isFinite(postWidth) &&
+                Number.isFinite(postHeight) &&
+                postWidth > 0 &&
+                postHeight > 0;
             slides.push(
-                isVideo ? { kind: 'video', url, posterUrl: poster } : { kind: 'image', url },
+                isVideo
+                    ? {
+                          kind: 'video',
+                          url,
+                          posterUrl: poster,
+                          ...(hasDims ? { width: postWidth, height: postHeight } : {}),
+                      }
+                    : {
+                          kind: 'image',
+                          url,
+                          ...(hasDims ? { width: postWidth, height: postHeight } : {}),
+                      },
             );
         }
     }

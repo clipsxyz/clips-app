@@ -6,6 +6,7 @@ import {
     View,
     useWindowDimensions,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
 import {
     discoverAmbientTimeFromElapsedMs,
@@ -48,6 +49,11 @@ export default function DiscoverAmbientCanvas({
     const [tick, setTick] = useState(0);
     const [reduceMotion, setReduceMotion] = useState(false);
     const [paused, setPaused] = useState(false);
+    // Track focus through navigation events (not render state): a blurred screen is also
+    // frozen by freezeOnBlur, so a React-effect cleanup would not run to stop the timer.
+    // The listener fires regardless, letting the interval callback bail when off-screen.
+    const navigation = useNavigation();
+    const focusedRef = React.useRef(true);
 
     useEffect(() => {
         let mounted = true;
@@ -71,9 +77,28 @@ export default function DiscoverAmbientCanvas({
     }, []);
 
     useEffect(() => {
+        // Seed from the current focus then keep the ref in sync via navigation events.
+        focusedRef.current = navigation.isFocused();
+        const unsubFocus = navigation.addListener('focus', () => {
+            focusedRef.current = true;
+        });
+        const unsubBlur = navigation.addListener('blur', () => {
+            focusedRef.current = false;
+        });
+        return () => {
+            unsubFocus();
+            unsubBlur();
+        };
+    }, [navigation]);
+
+    useEffect(() => {
+        // Backgrounded screens don't tick (AppState). Off-screen (blurred) screens are
+        // frozen, so we can't rely on effect cleanup — instead the interval callback
+        // bails via focusedRef, keeping a ~21fps setState loop off a hidden screen.
         if (reduceMotion || paused || width <= 0 || height <= 0) return;
         const started = Date.now();
         const id = setInterval(() => {
+            if (!focusedRef.current) return;
             setTick(discoverAmbientTimeFromElapsedMs(Date.now() - started));
         }, 48);
         return () => clearInterval(id);

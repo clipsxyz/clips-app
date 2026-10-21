@@ -80,7 +80,11 @@ export default function MyFeedPostCard({
     const isCurrentUser = true;
     // Same shared geometry as the main feed so a landscape clip and a portrait clip are
     // both content-sized instead of inheriting one hardcoded ratio.
-    const mediaHeight = feedMediaHeight(cardMediaWidth, post.width, post.height);
+    // `fitLandscape` keeps a wider-than-16:9 clip's TRUE ratio so the full widescreen frame
+    // shows instead of being side-cropped by the 16:9 cap (see feedCardAspectRatio).
+    const mediaHeight = feedMediaHeight(cardMediaWidth, post.width, post.height, {
+        fitLandscape: true,
+    });
 
     const triggerHeartDrop = (pageX: number, pageY: number) => {
         setHeartDrop({ startX: pageX, startY: pageY });
