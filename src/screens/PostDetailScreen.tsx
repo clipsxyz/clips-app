@@ -35,19 +35,15 @@ import {
     hasPostNotificationsPrefMobile,
     setPostNotificationsPrefMobile,
 } from '../utils/feedEngagementPrefsMobile';
-import { timeAgo } from '../utils/timeAgo';
 import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia from '../components/FeedPostMedia.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
-import {
-    setImageFullscreenLaunch,
-    updateImageFullscreenPost,
-} from '../utils/imageFullscreenLaunchNative';
-import {
-    collectFeedFullscreenSlides,
-    fullscreenSlideIndexForCarousel,
-} from '../utils/feedImageFullscreen';
+import FeedPostHeader from '../components/FeedPostHeader.native';
+import FeedCaptionText from '../components/FeedCaptionText.native';
+import FeedEngagementRow from '../components/FeedEngagementRow';
+import FeedEngagementRightActions from '../components/FeedEngagementRightActions.native';
+import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import {
     hideFeedPostMobile,
     markNotInterestedFeedPostMobile,
@@ -55,9 +51,17 @@ import {
 } from '../utils/feedContentPrefsMobile';
 import type { Post } from '../types';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
-import Avatar from '../components/Avatar';
-import { getAvatarForHandle } from '../api/users';
+import { getPostDisplayCaption } from '../utils/feedPostMeta';
+import { feedMediaHeight } from '../utils/mediaAspectRatio';
 import FeedShareModal from '../components/FeedShareModal';
+import {
+    FEED_CARD_BG,
+    FEED_CARD_HEADER_WRAP,
+    FEED_CARD_RADIUS,
+    FEED_CARD_SHELL_BORDER_COLOR,
+    FEED_CARD_SHELL_BORDER_WIDTH,
+    FEED_PAGE_BG,
+} from '../components/FeedPageLayout.native';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
 import EditPostModal from '../components/EditPostModal.native';
 import SavePostModal from '../components/SavePostModal.native';
@@ -99,18 +103,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
     const [carouselIndex, setCarouselIndex] = useState(0);
-    const [imageFullscreenOpen, setImageFullscreenOpen] = useState(false);
 
     useEffect(() => {
         loadPost();
     }, [postId]);
-
-    // Keep an open fullscreen route in sync with live post mutations (like/reclip).
-    useEffect(() => {
-        if (imageFullscreenOpen && post) {
-            updateImageFullscreenPost(post);
-        }
-    }, [imageFullscreenOpen, post]);
 
     useEffect(() => {
         if (openComments) setCommentsOpen(true);
@@ -345,7 +341,11 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
+            <GazetteerScreenShell
+                ambient={false}
+                ambientVariant="passport"
+                contentStyle={styles.centeredShell}
+            >
                 <ActivityIndicator size="large" color="#f472b6" />
             </GazetteerScreenShell>
         );
@@ -353,196 +353,175 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     if (!post) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.centeredShell}>
+            <GazetteerScreenShell
+                ambient={false}
+                ambientVariant="passport"
+                contentStyle={styles.centeredShell}
+            >
                 <Text style={styles.errorText}>Post not found</Text>
             </GazetteerScreenShell>
         );
     }
 
     const textOnlyPost = isTextOnlyPost(post);
-    const hasPostMedia =
-        textOnlyPost || Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+    const hasVisualMedia = Boolean(
+        post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0),
+    );
     const windowHeight = Dimensions.get('window').height;
+    const pageGutter = ox(16);
+    const cardMediaWidth = fromCollection
+        ? screenWidth - ox(48)
+        : screenWidth - pageGutter * 2;
+    const sizedHeight = feedMediaHeight(cardMediaWidth, post.width, post.height, {
+        fitLandscape: true,
+    });
     const detailMediaHeight = textOnlyPost
-        ? Math.min(screenWidth * 0.55, windowHeight * 0.32)
+        ? Math.min(cardMediaWidth * 0.55, windowHeight * 0.32)
         : fromCollection
-          ? Math.min(mediaHeight, windowHeight * 0.46)
-          : mediaHeight;
+          ? Math.min(sizedHeight || mediaHeight, windowHeight * 0.46)
+          : sizedHeight || mediaHeight;
+    const isCurrentUser = Boolean(
+        user?.handle &&
+            String(user.handle).trim().toLowerCase() ===
+                String(post.userHandle).trim().toLowerCase(),
+    );
+    const displayCaption = getPostDisplayCaption(post);
+    const openProfile = () =>
+        navigation.navigate('ViewProfile', { handle: post.userHandle });
 
     return (
-        <GazetteerScreenShell ambient={false} ambientVariant="passport">
+        <GazetteerScreenShell
+            ambient={false}
+            ambientVariant="passport"
+            contentStyle={styles.pageFill}
+        >
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
                     <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Post</Text>
-                <TouchableOpacity
-                    onPress={() => setOverflowVisible(true)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                    <Icon name="list-outline" size={ox(22)} color="#E5E7EB" />
-                </TouchableOpacity>
+                <View style={styles.headerSide} />
             </View>
 
-            <ScrollView
-                style={styles.content}
-                contentContainerStyle={[
-                    styles.contentInner,
-                    fromCollection ? styles.contentInnerCentered : null,
-                ]}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-                nestedScrollEnabled
-                removeClippedSubviews={false}
-            >
-                <View style={fromCollection ? styles.postStage : undefined} collapsable={false}>
-                    <View style={styles.postHeader}>
-                        <TouchableOpacity
-                            onPress={() =>
-                                navigation.navigate('ViewProfile', { handle: post.userHandle })
-                            }
-                        >
-                            <Avatar
-                                src={getAvatarForHandle(post.userHandle)}
-                                name={post.userHandle.split('@')[0]}
-                                size={ox(40)}
-                            />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.postHeaderInfo}
-                            onPress={() =>
-                                navigation.navigate('ViewProfile', { handle: post.userHandle })
-                            }
-                        >
-                            <Text style={styles.userHandle}>{post.userHandle}</Text>
-                            <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
-                        </TouchableOpacity>
+            <View style={styles.page}>
+                <View style={styles.card} collapsable={false}>
+                    {textOnlyPost ? (
+                        <FeedTextOnlyFeedLayout
+                            post={post}
+                            viewerHandle={user?.handle}
+                            cardWidth={cardMediaWidth}
+                            isCurrentUser={isCurrentUser}
+                            onAvatarPress={openProfile}
+                            onProfileMenuPress={openProfile}
+                            onOverflowPress={() => setOverflowVisible(true)}
+                            onDoubleLike={() => {
+                                void handleLike();
+                            }}
+                        />
+                    ) : (
+                    <>
+                    <View style={FEED_CARD_HEADER_WRAP}>
+                        <FeedPostHeader
+                            post={post}
+                            viewerHandle={user?.handle}
+                            isCurrentUser={isCurrentUser}
+                            onAvatarPress={openProfile}
+                            onProfileMenuPress={openProfile}
+                            onOverflowPress={() => setOverflowVisible(true)}
+                        />
                     </View>
+                    {hasVisualMedia ? (
+                        <View
+                            style={styles.mediaWrap}
+                            collapsable={false}
+                            renderToHardwareTextureAndroid={false}
+                        >
+                            <FeedPostMedia
+                                post={post}
+                                carouselIndex={carouselIndex}
+                                onCarouselIndexChange={setCarouselIndex}
+                                width={cardMediaWidth}
+                                height={detailMediaHeight}
+                                mode="detail"
+                                isActive
+                                immediateVideoSurface
+                                muted={false}
+                            />
+                        </View>
+                    ) : null}
+                    {carouselThumbItems.length > 1 ? (
+                        <FeedMediaCarouselThumbs
+                            items={carouselThumbItems}
+                            post={post}
+                            activeIndex={carouselIndex}
+                            onSelect={setCarouselIndex}
+                        />
+                    ) : null}
+                    </>
+                    )}
 
-                    {hasPostMedia ? (
-                        <>
-                            <View
-                                style={[
-                                    styles.mediaWrap,
-                                    fromCollection ? styles.mediaWrapCentered : null,
-                                ]}
-                                collapsable={false}
-                            >
-                                <FeedPostMedia
-                                    post={post}
-                                    carouselIndex={carouselIndex}
-                                    onCarouselIndexChange={setCarouselIndex}
-                                    width={
-                                        fromCollection
-                                            ? screenWidth - ox(24)
-                                            : screenWidth
-                                    }
-                                    height={detailMediaHeight}
-                                    mode="detail"
-                                    isActive
-                                    immediateVideoSurface
-                                    muted={false}
-                                    // Guarded: the fullscreen surface is image+video aware now,
-                                    // but a post whose only media is unrenderable (missing file,
-                                    // data:text URL) would still open a black shell. StoriesScreen
-                                    // applies the same precondition; this tap had none, which is how
-                                    // every video post landed on an empty fullscreen state.
-                                    onPress={() => {
-                                        if (
-                                            collectFeedFullscreenSlides(post).length > 0 ||
-                                            isTextOnlyPost(post)
-                                        ) {
-                                            setImageFullscreenOpen(true);
-                                            setImageFullscreenLaunch({
-                                                post,
-                                                startIndex: fullscreenSlideIndexForCarousel(
-                                                    post,
-                                                    carouselIndex,
-                                                ),
-                                                handlers: {
-                                                    onClose: () =>
-                                                        setImageFullscreenOpen(false),
-                                                    onLike: handleLike,
-                                                    onComment: () => setCommentsOpen(true),
-                                                    onReclip: tryReclip,
-                                                    onMenu: () => setOverflowVisible(true),
-                                                },
-                                            });
-                                            navigation.navigate('ImageFullscreenModal', {
-                                                postId: String(post.id),
-                                            });
-                                        }
+                    <ScrollView
+                        style={styles.content}
+                        contentContainerStyle={styles.contentInner}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                        nestedScrollEnabled
+                        removeClippedSubviews={false}
+                    >
+                        {!textOnlyPost && displayCaption.length > 0 && hasVisualMedia ? (
+                            <View style={styles.captionWrap}>
+                                <FeedCaptionText caption={displayCaption} />
+                            </View>
+                        ) : null}
+
+                        <View style={styles.engagementBar}>
+                            <View style={styles.engagementLeft}>
+                                <FeedEngagementRow
+                                    likes={post.stats?.likes ?? 0}
+                                    comments={post.stats?.comments ?? 0}
+                                    shares={post.stats?.shares ?? 0}
+                                    reclips={post.stats?.reclips ?? 0}
+                                    userLiked={post.userLiked}
+                                    userReclipped={post.userReclipped}
+                                    isSaved={post.isBookmarked}
+                                    onLike={() => {
+                                        void handleLike();
                                     }}
+                                    onComment={() => setCommentsOpen(true)}
+                                    onReclip={() => {
+                                        void tryReclip();
+                                    }}
+                                    onSave={
+                                        hideSaveAction
+                                            ? undefined
+                                            : () => {
+                                                  void toggleCollectionsSave();
+                                              }
+                                    }
+                                    showShareToStories={false}
+                                    showReclip={!isCurrentUser}
+                                    showSave={!hideSaveAction}
+                                    showSaveLabel={!post.isBoosted}
+                                    compact={Boolean(post.isBoosted)}
+                                    tone="feed"
                                 />
                             </View>
-                            {carouselThumbItems.length > 1 ? (
-                                <FeedMediaCarouselThumbs
-                                    items={carouselThumbItems}
-                                    post={post}
-                                    activeIndex={carouselIndex}
-                                    onSelect={setCarouselIndex}
-                                />
-                            ) : null}
-                        </>
-                    ) : null}
-
-                    {!textOnlyPost && post.text?.trim() ? (
-                        <View style={styles.textContainer}>
-                            <Text style={styles.textContent}>{post.text}</Text>
-                        </View>
-                    ) : null}
-
-                    <View style={styles.engagementBar}>
-                        <View style={styles.actionButtons}>
-                            <TouchableOpacity onPress={handleLike} style={styles.actionButton}>
-                                <Icon
-                                    name={post.userLiked ? 'heart' : 'heart-outline'}
-                                    size={FEED_UI.icon.action}
-                                    color={post.userLiked ? '#EF4444' : '#FFFFFF'}
-                                />
-                                <Text style={styles.actionText}>{post.stats.likes}</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                onPress={() => setCommentsOpen(true)}
-                                style={styles.actionButton}
-                            >
-                                <Icon
-                                    name="chatbubble-outline"
-                                    size={FEED_UI.icon.action}
-                                    color="#FFFFFF"
-                                />
-                                <Text style={styles.actionText}>{post.stats.comments}</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity onPress={openShare} style={styles.actionButton}>
-                                <Icon
-                                    name="share-outline"
-                                    size={FEED_UI.icon.action}
-                                    color="#FFFFFF"
-                                />
-                                <Text style={styles.actionText}>{post.stats.shares}</Text>
-                            </TouchableOpacity>
+                            <FeedEngagementRightActions
+                                shares={post.stats?.shares ?? 0}
+                                onShare={() => {
+                                    void openShare();
+                                }}
+                            />
                         </View>
 
-                        {!hideSaveAction ? (
-                            <TouchableOpacity onPress={toggleCollectionsSave}>
-                                <Icon
-                                    name={post.isBookmarked ? 'bookmark' : 'bookmark-outline'}
-                                    size={FEED_UI.icon.action}
-                                    color={post.isBookmarked ? '#8B5CF6' : '#FFFFFF'}
-                                />
-                            </TouchableOpacity>
-                        ) : null}
-                    </View>
-
-                    <View style={styles.statsContainer}>
-                        <Text style={styles.statsText}>
-                            {post.stats.views} views • {post.stats.reclips} reclips
-                        </Text>
-                    </View>
+                        <View style={styles.statsContainer}>
+                            <Text style={styles.statsText}>
+                                {post.stats.views} views • {post.stats.reclips} reclips
+                            </Text>
+                        </View>
+                    </ScrollView>
                 </View>
-            </ScrollView>
+            </View>
 
             <Modal
                 visible={commentsOpen}
@@ -794,116 +773,89 @@ export default function PostDetailScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    pageFill: {
+        flex: 1,
+        backgroundColor: FEED_PAGE_BG,
+    },
     centeredShell: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: FEED_PAGE_BG,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: ox(16),
-        paddingVertical: ox(14),
+        paddingVertical: ox(12),
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: 'transparent',
+        backgroundColor: FEED_PAGE_BG,
+    },
+    headerSide: {
+        width: ox(32),
+        height: ox(32),
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerTitle: {
         fontSize: ox(18),
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
+    page: {
+        flex: 1,
+        backgroundColor: FEED_PAGE_BG,
+        paddingHorizontal: ox(16),
+        paddingTop: ox(12),
+        paddingBottom: ox(12),
+    },
+    card: {
+        flex: 1,
+        backgroundColor: FEED_CARD_BG,
+        borderRadius: FEED_CARD_RADIUS,
+        borderWidth: FEED_CARD_SHELL_BORDER_WIDTH,
+        borderColor: FEED_CARD_SHELL_BORDER_COLOR,
+        overflow: 'visible',
+    },
     content: {
         flex: 1,
-        backgroundColor: 'transparent',
+        backgroundColor: FEED_CARD_BG,
     },
     contentInner: {
         flexGrow: 1,
-        paddingBottom: ox(28),
-    },
-    contentInnerCentered: {
-        justifyContent: 'center',
-        paddingVertical: ox(20),
-    },
-    postStage: {
-        marginHorizontal: ox(12),
-        borderRadius: ox(18),
-        overflow: 'hidden',
-        backgroundColor: 'rgba(15, 23, 42, 0.55)',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: 'rgba(255,255,255,0.12)',
-        paddingBottom: ox(8),
-    },
-    postHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.normalV,
-        gap: FEED_UI.spacing.groupGapTight,
-    },
-    postHeaderInfo: {
-        flex: 1,
-    },
-    userHandle: {
-        fontSize: ox(16),
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    timeText: {
-        fontSize: ox(12),
-        color: '#9CA3AF',
-        marginTop: ox(2),
+        paddingBottom: ox(20),
     },
     mediaWrap: {
         width: '100%',
         backgroundColor: '#000000',
         overflow: 'visible',
     },
-    mediaWrapCentered: {
-        alignItems: 'center',
-        backgroundColor: 'transparent',
-        borderRadius: ox(12),
-        overflow: 'hidden',
-        marginHorizontal: ox(10),
-    },
-    media: {
-        width: '100%',
-        backgroundColor: '#111827',
-    },
-    textContainer: {
-        paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.normalV,
-    },
-    textContent: {
-        fontSize: ox(16),
-        color: '#F9FAFB',
-        lineHeight: ox(24),
+    captionWrap: {
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(10),
     },
     engagementBar: {
         flexDirection: 'row',
+        alignItems: 'center',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.compactV,
+        paddingHorizontal: ox(12),
+        paddingVertical: ox(8),
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.06)',
+        minWidth: 0,
+        backgroundColor: FEED_CARD_BG,
     },
-    actionButtons: {
-        flexDirection: 'row',
-        gap: FEED_UI.spacing.groupGap,
-    },
-    actionButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: ox(4),
-    },
-    actionText: {
-        fontSize: FEED_UI.type.actionCount,
-        fontWeight: '600',
-        color: '#FFFFFF',
+    engagementLeft: {
+        flex: 1,
+        minWidth: 0,
+        flexShrink: 1,
+        marginRight: ox(8),
     },
     statsContainer: {
-        paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.normalV,
-        paddingTop: 0,
+        paddingHorizontal: ox(12),
+        paddingBottom: ox(12),
     },
     statsText: {
         fontSize: ox(14),

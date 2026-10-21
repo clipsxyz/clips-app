@@ -34,7 +34,7 @@ import {
 import { postHasVideoMedia } from '../utils/postMedia';
 import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import { ox } from '../constants/nativeOpticalScale';
-import { GAZETTEER_ABYSS, gazetteerHeader, glassSurface } from '../theme/gazetteerAmbientNative';
+import { GAZETTEER_ABYSS, glassSurface } from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -65,6 +65,8 @@ function MyFeedModal({
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
     const activeVideoPostIdRef = useRef<string | null>(null);
     activeVideoPostIdRef.current = activeVideoPostId;
+    /** Wait out the Modal slide so TextureView attaches after the window is settled. */
+    const [modalReady, setModalReady] = useState(false);
 
     const [commentsPost, setCommentsPost] = useState<Post | null>(null);
     const [sharePost, setSharePost] = useState<Post | null>(null);
@@ -88,7 +90,13 @@ function MyFeedModal({
     }, [visible, posts]);
 
     useEffect(() => {
-        if (!visible) activateVideo(null);
+        if (!visible) {
+            setModalReady(false);
+            activateVideo(null);
+            return undefined;
+        }
+        const timer = setTimeout(() => setModalReady(true), 360);
+        return () => clearTimeout(timer);
     }, [activateVideo, visible]);
 
     useLayoutEffect(() => {
@@ -154,7 +162,7 @@ function MyFeedModal({
                 <MyFeedPostCard
                     post={item}
                     user={user}
-                    isActive={active && visible}
+                    isActive={active && visible && modalReady}
                     onPress={() =>
                         navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
                     }
@@ -185,7 +193,7 @@ function MyFeedModal({
                 />
             );
         },
-        [activeVideoPostId, applyLocalPost, feedPosts, handleLike, navigation, user, visible],
+        [activeVideoPostId, applyLocalPost, feedPosts, handleLike, modalReady, navigation, user, visible],
     );
 
     return (
@@ -212,11 +220,12 @@ function MyFeedModal({
                             </TouchableOpacity>
                         </View>
                     </View>
+                    <View style={styles.headerSpacer} />
                     {visible ? (
                         <FlatList
                             style={styles.list}
                             data={feedPosts}
-                            extraData={activeVideoPostId}
+                            extraData={`${activeVideoPostId ?? ''}|${modalReady ? 1 : 0}`}
                             keyExtractor={(item) => item.id}
                             renderItem={renderItem}
                             contentContainerStyle={styles.listContent}
@@ -384,8 +393,8 @@ const styles = StyleSheet.create({
     },
     headerSafe: {
         backgroundColor: GAZETTEER_ABYSS,
-        zIndex: 80,
-        elevation: 80,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.1)',
     },
     header: {
         flexDirection: 'row',
@@ -393,7 +402,11 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: ox(14),
         paddingVertical: ox(10),
-        ...gazetteerHeader,
+        backgroundColor: GAZETTEER_ABYSS,
+    },
+    headerSpacer: {
+        height: ox(12),
+        backgroundColor: GAZETTEER_ABYSS,
     },
     headerLeft: {
         flexDirection: 'row',
@@ -418,6 +431,7 @@ const styles = StyleSheet.create({
     },
     listContent: {
         paddingHorizontal: ox(12),
+        paddingTop: ox(8),
         paddingBottom: ox(28),
         rowGap: ox(12),
     },

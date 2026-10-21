@@ -37,6 +37,7 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
@@ -210,6 +211,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     useFocusEffect(
         React.useCallback(() => {
+            // Grid tiles are stills only — kill leftover feed ExoPlayer audio so Passport
+            // does not sound like the tiles themselves are playing.
+            setActiveFeedVideoPostId(null);
             // Refresh silently on return. A synchronous setLoading(true) here wiped the
             // already-rendered profile and blocked the native transition; the mount effect
             // above already covered the first load, so skip this pass.

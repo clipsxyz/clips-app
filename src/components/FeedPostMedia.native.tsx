@@ -36,7 +36,7 @@ import {
 import { getFeedScrollPauseTarget, subscribeFeedScrollPauseTarget } from '../utils/feedScrollBusyNative';
 import { consumeFeedVideoHandoff, setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import { setGlobalVideoMutedNative } from '../utils/globalVideoMuteNative';
-import { androidListSafeVideoProps } from '../utils/androidSafeVideoNative';
+import { androidListSafeVideoProps, hasValidVideoFrame } from '../utils/androidSafeVideoNative';
 import { withFeedVideoCache } from '../utils/feedVideoSourceNative';
 import {
     getTextOnlyBackgroundColor,
@@ -155,6 +155,11 @@ type FeedNativeVideoProps = {
     /** Landscape frames use `contain` (letterboxed, never side-cropped); portrait uses `cover`. */
     resizeMode?: 'cover' | 'contain';
     isViewable: boolean;
+    /** Pixel box for the TextureView. Percent/absoluteFill parents collapse to 0×0 on Android. */
+    frameWidth?: number;
+    frameHeight?: number;
+    /** Post viewer / My Feed: no opacity wrapper, no transparent shutter. */
+    opaqueSurface?: boolean;
     videoRef: React.Ref<VideoRef>;
     onLoadStart: React.ComponentProps<typeof Video>['onLoadStart'];
     onReadyForDisplay: React.ComponentProps<typeof Video>['onReadyForDisplay'];
@@ -188,6 +193,9 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
     repeat,
     mode,
     resizeMode = 'cover',
+    frameWidth,
+    frameHeight,
+    opaqueSurface = false,
     videoRef,
     onLoadStart,
     onReadyForDisplay,
@@ -230,24 +238,34 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
      * Both directions are synchronous now; the scoped subscription keeps the work to a
      * single leaf, which is what made that affordable.
      */
+    const videoStyle =
+        opaqueSurface && hasValidVideoFrame(frameWidth ?? 0, frameHeight ?? 0)
+            ? {
+                  position: 'absolute' as const,
+                  top: 0,
+                  left: 0,
+                  width: frameWidth,
+                  height: frameHeight,
+              }
+            : styles.videoFill;
     return (
         <Video
             key={videoKey}
             ref={videoRef}
             source={source}
-            style={styles.videoFill}
+            style={videoStyle}
             resizeMode={resizeMode}
             controls={false}
             paused={paused || (mode === 'feed' && scrollPaused)}
             muted={muted}
-            volume={mode === 'detail' ? 1 : soundOn ? 1 : 0}
+            volume={mode === 'detail' || opaqueSurface ? 1 : soundOn ? 1 : 0}
             repeat={repeat}
             playInBackground={false}
             playWhenInactive={false}
             ignoreSilentSwitch="ignore"
             useTextureView
-            hideShutterView
-            shutterColor="transparent"
+            hideShutterView={!opaqueSurface}
+            shutterColor={opaqueSurface ? '#000000' : 'transparent'}
             progressUpdateInterval={100}
             {...androidListSafeVideoProps()}
             pointerEvents="none"
@@ -270,7 +288,10 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
     prev.repeat === next.repeat &&
     prev.mode === next.mode &&
     prev.resizeMode === next.resizeMode &&
-    prev.isViewable === next.isViewable,
+    prev.isViewable === next.isViewable &&
+    prev.opaqueSurface === next.opaqueSurface &&
+    prev.frameWidth === next.frameWidth &&
+    prev.frameHeight === next.frameHeight,
 );
 
 export type FeedPostMediaHandle = {
@@ -847,12 +868,14 @@ const FeedPostMedia = React.memo(
         mediaRevealRef.current = null;
         setAppliedPosterHoldKey(posterHoldKey);
         if (mode === 'detail' || immediateVideoSurface) {
-            // Post viewer: keep the TextureView fully opaque. Hiding it at opacity 0
-            // (feed anti-flash) leaves audio playing over a blank frame on Android.
+            // Post viewer: keep the TextureView fully opaque AND drop the poster cover.
+            // The cover used elevation:1 with posterOpacity stuck at 1 (fadeOutPosterCover
+            // bails when posterCoveringRef is false), so audio played under a frozen frame.
             firstFrameReadyRef.current = true;
             progressReadyRef.current = true;
             posterCoveringRef.current = false;
             posterRevealAllowedRef.current = true;
+            posterOpacity.setValue(0);
             videoOpacity.setValue(1);
             setVideoSurfaceReady(true);
             setPosterPaintedForSlide(true);
@@ -1277,8 +1300,10 @@ const FeedPostMedia = React.memo(
             slideVideo &&
             slideIsCurrent &&
             !playFailed &&
+            !videoSuspended &&
             (mode === 'detail' ||
-                (mode === 'feed' && !videoSuspended && (feedVideoMounted || feedVideoHeld)));
+                immediateVideoSurface ||
+                (mode === 'feed' && (feedVideoMounted || feedVideoHeld)));
         // Still images: never gated by video readiness — always fully opaque.
         if (!slideVideo) {
             return (
@@ -1324,165 +1349,150 @@ const FeedPostMedia = React.memo(
             ? [styles.viewerFrame, frameStyle]
             : [styles.mediaFrame, frameStyle];
 
+        const nativeVideo = slideMountVideo ? (
+            <FeedNativeVideo
+                videoKey={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
+                postId={String(post.id)}
+                source={cachedVideoSource as object}
+                paused={
+                    viewerSurface
+                        ? paused
+                        : !isAudioPrimary || slideDragHeld || feedVideoHeld
+                }
+                muted={viewerSurface ? false : !soundOn || !videoSurfaceReady}
+                soundOn={soundOn}
+                repeat
+                mode={mode}
+                resizeMode={slideResizeMode}
+                isViewable={feedSurfaceMounted}
+                frameWidth={width}
+                frameHeight={frameHeight}
+                opaqueSurface={viewerSurface}
+                videoRef={feedVideoRef}
+                onLoadStart={() => {
+                    beginUrlLoad(slideRawUrl);
+                }}
+                onReadyForDisplay={onFirstFrameReady}
+                onLoad={(meta) => {
+                    // Metrics + handoff only -- the FADE stays on onReadyForDisplay.
+                    markUrlLoaded(slideRawUrl);
+                    const seekTo =
+                        pendingSeekRef.current ??
+                        (playbackTimeRef.current > 0.05 ? playbackTimeRef.current : null);
+                    if (
+                        seekTo != null &&
+                        Number.isFinite(seekTo) &&
+                        seekTo > 0.05 &&
+                        feedVideoRef.current
+                    ) {
+                        pendingSeekRef.current = null;
+                        try {
+                            feedVideoRef.current.seek(seekTo);
+                        } catch {
+                            /* ignore */
+                        }
+                    }
+                    const ns = meta?.naturalSize;
+                    if (ns) {
+                        reportMeasuredSize({
+                            width: Number(ns.width),
+                            height: Number(ns.height),
+                        });
+                    }
+                }}
+                onProgress={(e) => {
+                    const t = e?.currentTime;
+                    if (typeof t === 'number' && Number.isFinite(t)) {
+                        playbackTimeRef.current = t;
+                        if (!progressReadyRef.current && t > 0.05) {
+                            progressReadyRef.current = true;
+                            fadeOutPosterCover();
+                        }
+                    }
+                    if (mode !== 'feed' || !isFeedAutoplayActive) return;
+                    if (typeof t === 'number' && Number.isFinite(t)) {
+                        setFeedVideoHandoff(String(post.id), {
+                            currentTime: t,
+                            muted: !soundOn,
+                            mediaUrl: slideRawUrl,
+                        });
+                    }
+                }}
+                onError={(e) => onVideoError(slideRawUrl, e)}
+            />
+        ) : null;
+
         return (
             <View style={slideFrameStyle} collapsable={false}>
-                <Animated.View
-                    style={[
-                        styles.posterCover,
-                        // Base layer. Opaque tint (not transparent) so the cover holds a
-                        // surface colour while the poster bytes decode and when there is no
-                        // poster at all. The video top layer fades in above it, so this never
-                        // has to be lifted mid-mount.
-                        { backgroundColor: placeholderColor },
-                        { opacity: slideMountVideo ? posterOpacity : 1 },
-                    ]}
-                    pointerEvents="none"
-                    collapsable={false}
-                >
-                    {slidePosterUri ? (
-                        <Animated.Image
-                            source={{ uri: slidePosterUri, cache: 'force-cache' }}
-                            style={StyleSheet.absoluteFill}
-                            resizeMode={slideResizeMode}
-                            resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
-                            fadeDuration={0}
-                            onLoad={() => {
-                                // Record the paint for EVERY slide, including non-current
-                                // ones. A neighbouring slide's poster decodes while the
-                                // carousel is still on another page; if we skipped it here
-                                // the per-URI set stayed empty and the cover never lifted
-                                // once that page became current.
-                                paintedPosterUrisRef.current.add(slidePosterUri);
-                                if (!slideIsCurrent) return;
-                                if (slidePosterUri !== activePosterUriRef.current) return;
-                                posterCoveringRef.current = true;
-                                // Poster bytes are on screen — drop the pending spinner
-                                // immediately, independent of ExoPlayer readiness.
-                                setPosterPaintedForSlide(true);
-                                markUrlLoaded(slideRawUrl);
-                                fadeOutPosterCover();
-                            }}
-                            onError={() => {
-                                paintedPosterUrisRef.current.add(slidePosterUri);
-                                if (!slideIsCurrent) return;
-                                posterCoveringRef.current = true;
-                                setPosterPaintedForSlide(true);
-                                markUrlLoaded(slideRawUrl);
-                                fadeOutPosterCover();
-                            }}
-                        />
-                    ) : null}
-                </Animated.View>
-
-                {slideMountVideo ? (
-                    <View
-                        style={
-                            viewerSurface
-                                ? [styles.viewerVideoClip]
-                                : [styles.videoClip, styles.videoTopLayer]
-                        }
-                        pointerEvents={mediaPointerEvents}
+                {viewerSurface ? null : (
+                    <Animated.View
+                        style={[
+                            styles.posterCover,
+                            { backgroundColor: placeholderColor },
+                            { opacity: slideMountVideo ? posterOpacity : 1 },
+                        ]}
+                        pointerEvents="none"
                         collapsable={false}
                     >
-                        {/* Top layer, ABOVE the opaque poster base. Transparent until the
-                            first composited frame, then faded in (0 -> 1) — the poster below
-                            is never lifted, so no void can show through mid-mount. */}
-                        <Animated.View
-                            style={[
-                                viewerSurface ? styles.viewerVideoClip : styles.videoClip,
-                                {
-                                    opacity:
-                                        viewerSurface
-                                            ? 1
-                                            : videoSurfaceReady
-                                              ? videoOpacity
-                                              : 0,
-                                },
-                            ]}
-                            pointerEvents="none"
+                        {slidePosterUri ? (
+                            <Animated.Image
+                                source={{ uri: slidePosterUri, cache: 'force-cache' }}
+                                style={StyleSheet.absoluteFill}
+                                resizeMode={slideResizeMode}
+                                resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
+                                fadeDuration={0}
+                                onLoad={() => {
+                                    paintedPosterUrisRef.current.add(slidePosterUri);
+                                    if (!slideIsCurrent) return;
+                                    if (slidePosterUri !== activePosterUriRef.current) return;
+                                    posterCoveringRef.current = true;
+                                    setPosterPaintedForSlide(true);
+                                    markUrlLoaded(slideRawUrl);
+                                    fadeOutPosterCover();
+                                }}
+                                onError={() => {
+                                    paintedPosterUrisRef.current.add(slidePosterUri);
+                                    if (!slideIsCurrent) return;
+                                    posterCoveringRef.current = true;
+                                    setPosterPaintedForSlide(true);
+                                    markUrlLoaded(slideRawUrl);
+                                    fadeOutPosterCover();
+                                }}
+                            />
+                        ) : null}
+                    </Animated.View>
+                )}
+
+                {nativeVideo ? (
+                    viewerSurface ? (
+                        <View
+                            style={[styles.viewerVideoClip, styles.videoTopLayer]}
+                            pointerEvents={mediaPointerEvents}
+                            collapsable={false}
+                            renderToHardwareTextureAndroid={false}
+                        >
+                            {nativeVideo}
+                        </View>
+                    ) : (
+                        <View
+                            style={[styles.videoClip, styles.videoTopLayer]}
+                            pointerEvents={mediaPointerEvents}
                             collapsable={false}
                         >
-                        <FeedNativeVideo
-                            videoKey={`video-${post.id}-${slideIndex}-${slideRawUrl}-${playerEpoch}`}
-                            postId={String(post.id)}
-                            source={cachedVideoSource as object}
-                            paused={
-                                mode === 'detail'
-                                    ? paused
-                                    : !isAudioPrimary || slideDragHeld || feedVideoHeld
-                            }
-                            muted={mode === 'feed' ? !soundOn || !videoSurfaceReady : false}
-                            soundOn={soundOn}
-                            repeat
-                            mode={mode}
-                            resizeMode={slideResizeMode}
-                            isViewable={feedSurfaceMounted}
-                            videoRef={feedVideoRef}
-                            onLoadStart={() => {
-                                beginUrlLoad(slideRawUrl);
-                            }}
-                            onReadyForDisplay={onFirstFrameReady}
-                            onLoad={(meta) => {
-                                // Metrics + handoff only -- the FADE stays on onReadyForDisplay.
-                                markUrlLoaded(slideRawUrl);
-                                const seekTo =
-                                    pendingSeekRef.current ??
-                                    (playbackTimeRef.current > 0.05 ? playbackTimeRef.current : null);
-                                if (
-                                    seekTo != null &&
-                                    Number.isFinite(seekTo) &&
-                                    seekTo > 0.05 &&
-                                    feedVideoRef.current
-                                ) {
-                                    pendingSeekRef.current = null;
-                                    try {
-                                        feedVideoRef.current.seek(seekTo);
-                                    } catch {
-                                        /* ignore */
-                                    }
-                                }
-                                // Intrinsic dimensions straight from the container
-                                // metadata. `naturalSize` is the pre-rotation size; a clip
-                                // recorded at 1920x1080 then rotated to portrait reports
-                                // width < height, which is exactly what we want to size to.
-                                //
-                                // In feed mode this is handed UP to the wrapper (see
-                                // `reportMeasuredSize`), which adopts it immediately and
-                                // re-renders this card at the corrected height — no
-                                // waiting for the cell to be recycled.
-                                const ns = meta?.naturalSize;
-                                if (ns) {
-                                    reportMeasuredSize({
-                                        width: Number(ns.width),
-                                        height: Number(ns.height),
-                                    });
-                                }
-                            }}
-                            onProgress={(e) => {
-                                const t = e?.currentTime;
-                                if (typeof t === 'number' && Number.isFinite(t)) {
-                                    playbackTimeRef.current = t;
-                                    // Android first-frame gate: the immediate tick at
-                                    // STATE_READY reports ~0s (frame not composited yet); a
-                                    // later, non-zero tick proves the decoder is rendering.
-                                    if (!progressReadyRef.current && t > 0.05) {
-                                        progressReadyRef.current = true;
-                                        fadeOutPosterCover();
-                                    }
-                                }
-                                if (mode !== 'feed' || !isFeedAutoplayActive) return;
-                                if (typeof t === 'number' && Number.isFinite(t)) {
-                                    setFeedVideoHandoff(String(post.id), {
-                                        currentTime: t,
-                                        muted: !soundOn,
-                                        mediaUrl: slideRawUrl,
-                                    });
-                                }
-                            }}
-                            onError={(e) => onVideoError(slideRawUrl, e)}
-                        />
-                        </Animated.View>
-                    </View>
+                            <Animated.View
+                                style={[
+                                    styles.videoClip,
+                                    {
+                                        opacity: videoSurfaceReady ? videoOpacity : 0,
+                                    },
+                                ]}
+                                pointerEvents="none"
+                                collapsable={false}
+                            >
+                                {nativeVideo}
+                            </Animated.View>
+                        </View>
+                    )
                 ) : null}
             </View>
         );
@@ -1541,12 +1551,13 @@ const FeedPostMedia = React.memo(
     return (
         <View
             style={[
-                styles.wrap,
-                mode === 'detail' || immediateVideoSurface ? styles.viewerFrame : styles.mediaFrame,
+                mode === 'detail' || immediateVideoSurface ? styles.viewerFrame : styles.wrap,
+                mode === 'detail' || immediateVideoSurface ? null : styles.mediaFrame,
                 frameStyle,
                 style,
             ]}
             collapsable={false}
+            renderToHardwareTextureAndroid={false}
         >
             {feedTapCapture && hasCarousel ? (
                 <GestureDetector gesture={mediaTapGesture}>

@@ -1,12 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
     Dimensions,
+    Pressable,
     StyleSheet,
     Text,
-    TouchableOpacity,
     View,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post, User } from '../types';
 import FeedPostHeader from './FeedPostHeader.native';
 import FeedPostMedia from './FeedPostMedia.native';
@@ -95,43 +94,47 @@ export default function MyFeedPostCard({
     };
 
     return (
-        <TouchableOpacity
-            activeOpacity={0.95}
-            style={styles.card}
-            onPress={onPress}
-            onLongPress={onOverflowPress}
-            delayLongPress={280}
-        >
-            <FeedPostTagRow tags={postTags} />
+        <View style={[styles.card, isActive ? styles.cardUnclipped : null]}>
+            <Pressable onPress={onPress} onLongPress={onOverflowPress} delayLongPress={280}>
+                <FeedPostTagRow tags={postTags} />
 
-            {post.isBoosted ? (
-                <View style={styles.sponsoredBadge}>
-                    <Text style={styles.sponsoredText}>Sponsored</Text>
-                </View>
-            ) : null}
+                {post.isBoosted ? (
+                    <View style={styles.sponsoredBadge}>
+                        <Text style={styles.sponsoredText}>Sponsored</Text>
+                    </View>
+                ) : null}
+            </Pressable>
 
             {textOnlyPost ? (
-                <FeedTextOnlyFeedLayout
-                    post={post}
-                    viewerHandle={user?.handle}
-                    cardWidth={cardMediaWidth}
-                    isCurrentUser={isCurrentUser}
-                    onDoubleLike={() => {
-                        onLikePress?.();
-                    }}
-                    onShowTaggedUsers={() => setTaggedSheetVisible(true)}
-                />
+                <Pressable onPress={onPress} onLongPress={onOverflowPress} delayLongPress={280}>
+                    <FeedTextOnlyFeedLayout
+                        post={post}
+                        viewerHandle={user?.handle}
+                        cardWidth={cardMediaWidth}
+                        isCurrentUser={isCurrentUser}
+                        onDoubleLike={() => {
+                            onLikePress?.();
+                        }}
+                        onShowTaggedUsers={() => setTaggedSheetVisible(true)}
+                    />
+                </Pressable>
             ) : (
-                <View style={FEED_CARD_BODY}>
-                    <View style={FEED_CARD_HEADER_WRAP}>
-                        <FeedPostHeader
-                            post={post}
-                            viewerHandle={user?.handle}
-                            isCurrentUser={isCurrentUser}
-                        />
-                    </View>
+                <View style={isActive ? styles.bodyUnclipped : FEED_CARD_BODY}>
+                    <Pressable onPress={onPress} onLongPress={onOverflowPress} delayLongPress={280}>
+                        <View style={FEED_CARD_HEADER_WRAP}>
+                            <FeedPostHeader
+                                post={post}
+                                viewerHandle={user?.handle}
+                                isCurrentUser={isCurrentUser}
+                            />
+                        </View>
+                    </Pressable>
                     {hasFeedMedia ? (
-                        <View style={styles.mediaWrap}>
+                        <View
+                            style={[styles.mediaWrap, isActive ? styles.mediaWrapUnclipped : null]}
+                            collapsable={false}
+                            renderToHardwareTextureAndroid={false}
+                        >
                             <FeedPostMedia
                                 post={post}
                                 carouselIndex={carouselIndex}
@@ -142,6 +145,7 @@ export default function MyFeedPostCard({
                                 mode={isActive ? 'detail' : 'feed'}
                                 isActive={isActive}
                                 immediateVideoSurface={isActive}
+                                suspendNativeVideo={!isActive}
                                 muted={!isActive}
                             />
                         </View>
@@ -158,9 +162,11 @@ export default function MyFeedPostCard({
             )}
 
             {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
-                <View style={styles.captionWrap}>
-                    <FeedCaptionText caption={displayCaption} />
-                </View>
+                <Pressable onPress={onPress} onLongPress={onOverflowPress} delayLongPress={280}>
+                    <View style={styles.captionWrap}>
+                        <FeedCaptionText caption={displayCaption} />
+                    </View>
+                </Pressable>
             ) : null}
 
             <FeedHeartDrop
@@ -242,7 +248,7 @@ export default function MyFeedPostCard({
                 onClose={() => setShareModalOpen(false)}
                 onShareSuccess={onShareToStoriesSuccess}
             />
-        </TouchableOpacity>
+        </View>
     );
 }
 
@@ -254,6 +260,15 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.06)',
+        flexDirection: 'column',
+    },
+    cardUnclipped: {
+        overflow: 'visible',
+    },
+    bodyUnclipped: {
+        position: 'relative',
+        width: '100%',
+        overflow: 'visible',
         flexDirection: 'column',
     },
     sponsoredBadge: {
@@ -270,6 +285,9 @@ const styles = StyleSheet.create({
         position: 'relative',
         overflow: 'hidden',
         width: '100%',
+    },
+    mediaWrapUnclipped: {
+        overflow: 'visible',
     },
     captionWrap: {
         paddingHorizontal: 12,
