@@ -2121,6 +2121,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [cursor, setCursor] = useState<string | number | null>(0);
     const [initialLoading, setInitialLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
+    /** Synchronous lock so two onEndReached in one frame cannot both pass the loadingMore state guard. */
+    const loadingMoreRef = useRef(false);
     const [end, setEnd] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
@@ -2170,6 +2172,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     );
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
+    const savedByPostIdRef = useRef(savedByPostId);
+    savedByPostIdRef.current = savedByPostId;
     const [overflowVisible, setOverflowVisible] = useState(false);
     const [overflowPost, setOverflowPost] = useState<Post | null>(null);
     const [editPost, setEditPost] = useState<Post | null>(null);
@@ -2989,12 +2993,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         };
     }, []);
 
-    // Helper to update a post in pages
-    const updatePost = (postId: string, updater: (post: Post) => Post) => {
+    // Helper to update a post in pages. Stable identity so bookmark/like callbacks
+    // (and renderItem) do not churn when only one post's engagement fields change.
+    const updatePost = React.useCallback((postId: string, updater: (post: Post) => Post) => {
         setPages(prev => prev.map(page =>
             page.map(p => p.id === postId ? updater(p) : p)
         ));
-    };
+    }, []);
 
     const recordFeedView = useCallback(
         (postId: string) => {
@@ -3155,11 +3160,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const toggleCollectionsSaveForPost = React.useCallback(
         async (target: Post) => {
             const idKey = String(target.id);
-            const prevSaved = savedByPostId[idKey] ?? target.isBookmarked === true;
+            const prevSaved = savedByPostIdRef.current[idKey] ?? target.isBookmarked === true;
             const nextSaved = !prevSaved;
             // Optimistic flip: reflect the tap in the card icon immediately, before the
             // Laravel request round-trips. Rolled back below if the request fails.
-            setSavedByPostId((prev) => ({ ...prev, [idKey]: nextSaved }));
+            setSavedByPostId((prev) => {
+                const next = { ...prev, [idKey]: nextSaved };
+                savedByPostIdRef.current = next;
+                return next;
+            });
             updatePost(target.id, (p) => ({ ...p, isBookmarked: nextSaved }));
             try {
                 if (nextSaved) {
@@ -3169,11 +3178,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }
             } catch (err) {
                 console.error('Collections save toggle failed:', err);
-                setSavedByPostId((prev) => ({ ...prev, [idKey]: prevSaved }));
+                setSavedByPostId((prev) => {
+                    const next = { ...prev, [idKey]: prevSaved };
+                    savedByPostIdRef.current = next;
+                    return next;
+                });
                 updatePost(target.id, (p) => ({ ...p, isBookmarked: prevSaved }));
             }
         },
-        [userId, updatePost, savedByPostId]
+        [userId, updatePost]
     );
 
     useEffect(() => {
@@ -3775,9 +3788,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     reloadFeedFromStartRef.current = reloadFeedFromStart;
 
     const loadMore = React.useCallback(async () => {
-        if (initialLoading || loadingMore || end || cursor === null) {
+        if (loadingMoreRef.current) return;
+        if (initialLoading || end || cursor === null) {
             return;
         }
+        loadingMoreRef.current = true;
         const gen = feedLoadGenRef.current;
         setLoadingMore(true);
         setError(null);
@@ -3820,9 +3835,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             console.error('Error loading feed:', err);
             setError('Failed to load feed');
         } finally {
+            loadingMoreRef.current = false;
             setLoadingMore(false);
         }
-    }, [buildFeedFetchParams, cursor, end, initialLoading, loadingMore]);
+    }, [buildFeedFetchParams, cursor, end, initialLoading]);
 
     // Mask the previous scope the instant the location/scope changes: clear the cards and
     // show the pulsing skeleton until the new page lands. The list is keyed by
@@ -4946,7 +4962,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             const post = item.post;
             const mergedPost: Post = {
                 ...post,
-                isBookmarked: savedByPostId[post.id] ?? post.isBookmarked,
+                isBookmarked: savedByPostIdRef.current[post.id] ?? post.isBookmarked,
             };
             const isPendingUpload =
                 mergedPost.clientUploadStatus === 'uploading' ||
@@ -5354,7 +5370,6 @@ onVisitProfile={() =>
             openShareToStoriesForPost,
             updatePost,
             loadMore,
-            savedByPostId,
             openShareForPost,
             tryReclipPost,
             toggleCollectionsSaveForPost,
@@ -5590,7 +5605,8 @@ onVisitProfile={() =>
                     />
                 }
                 onEndReached={() => {
-                    if (!initialLoading && !loadingMore && !end) {
+                    if (loadingMoreRef.current) return;
+                    if (!initialLoading && !end) {
                         loadMore();
                     }
                 }}
