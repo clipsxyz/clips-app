@@ -171,6 +171,7 @@ export default function ProfileGridPeekSheet({
                                                 mode="feed"
                                                 muted={videoMuted}
                                                 isActive
+                                                immediateVideoSurface
                                             />
                                         ) : (
                                             <Image

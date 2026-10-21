@@ -323,6 +323,11 @@ type Props = {
     holdNativeVideo?: boolean;
     /** Feed autoplay is muted by default (global mute pref). */
     muted?: boolean;
+    /**
+     * Skip the feed poster-cover (opacity 0 TextureView). Required in post viewers /
+     * profile sheets where an opacity-0 surface plays audio but never composites.
+     */
+    immediateVideoSurface?: boolean;
     style?: StyleProp<ViewStyle>;
 };
 
@@ -345,6 +350,7 @@ const FeedPostMedia = React.memo(
         suspendNativeVideo = false,
         holdNativeVideo = false,
         muted = true,
+        immediateVideoSurface = false,
         style,
     },
     ref,
@@ -450,9 +456,11 @@ const FeedPostMedia = React.memo(
         // A silent preload neighbor keeps its poster opaque until it becomes the primary
         // player, so warming the surface never shows a frozen first frame.
         if (!posterRevealAllowedRef.current) return;
-        // Android: wait for playback to actually advance before lifting the cover — STATE_READY
-        // can precede the first composited frame (see progressReadyRef).
-        if (Platform.OS === 'android' && !progressReadyRef.current) return;
+        // Android feed: wait for playback to actually advance before lifting the cover —
+        // STATE_READY can precede the first composited frame (see progressReadyRef).
+        // Detail / post-viewer must not wait: an opacity-0 TextureView never composites
+        // on some OEMs, so onReadyForDisplay/progress never fire and audio plays over a blank frame.
+        if (!immediateVideoSurface && mode !== 'detail' && Platform.OS === 'android' && !progressReadyRef.current) return;
         setVideoSurfaceReady((prev) => {
             if (prev) return prev;
             mediaRevealRef.current?.stop();
@@ -470,7 +478,7 @@ const FeedPostMedia = React.memo(
             });
             return true;
         });
-    }, [videoOpacity]);
+    }, [immediateVideoSurface, mode, videoOpacity]);
 
     useEffect(() => {
         if (mode !== 'feed') return;
@@ -837,16 +845,28 @@ const FeedPostMedia = React.memo(
         const coverAlreadyPainted = !!activePosterUri && paintedPosterUrisRef.current.has(activePosterUri);
         mediaRevealRef.current?.stop();
         mediaRevealRef.current = null;
-        firstFrameReadyRef.current = false;
-        progressReadyRef.current = false;
-        posterCoveringRef.current = coverAlreadyPainted || !activePosterUri;
-        posterOpacity.setValue(1);
-        videoOpacity.setValue(0);
         setAppliedPosterHoldKey(posterHoldKey);
-        setVideoSurfaceReady(false);
-        // Seed the pending-overlay flag from the resident bitmaps: a poster that already
-        // decoded keeps suppressing the spinner across the re-mount / re-swipe.
-        setPosterPaintedForSlide(coverAlreadyPainted);
+        if (mode === 'detail' || immediateVideoSurface) {
+            // Post viewer: keep the TextureView fully opaque. Hiding it at opacity 0
+            // (feed anti-flash) leaves audio playing over a blank frame on Android.
+            firstFrameReadyRef.current = true;
+            progressReadyRef.current = true;
+            posterCoveringRef.current = false;
+            posterRevealAllowedRef.current = true;
+            videoOpacity.setValue(1);
+            setVideoSurfaceReady(true);
+            setPosterPaintedForSlide(true);
+        } else {
+            firstFrameReadyRef.current = false;
+            progressReadyRef.current = false;
+            posterCoveringRef.current = coverAlreadyPainted || !activePosterUri;
+            posterOpacity.setValue(1);
+            videoOpacity.setValue(0);
+            setVideoSurfaceReady(false);
+            // Seed the pending-overlay flag from the resident bitmaps: a poster that already
+            // decoded keeps suppressing the spinner across the re-mount / re-swipe.
+            setPosterPaintedForSlide(coverAlreadyPainted);
+        }
     }
 
     useEffect(() => {
@@ -1360,7 +1380,14 @@ const FeedPostMedia = React.memo(
                         <Animated.View
                             style={[
                                 styles.videoClip,
-                                { opacity: videoSurfaceReady ? videoOpacity : 0 },
+                                {
+                                    opacity:
+                                        mode === 'detail' || immediateVideoSurface
+                                            ? 1
+                                            : videoSurfaceReady
+                                              ? videoOpacity
+                                              : 0,
+                                },
                             ]}
                             pointerEvents="none"
                             collapsable={false}
@@ -1583,6 +1610,7 @@ const FeedPostMedia = React.memo(
             prev.mode === next.mode &&
             prev.muted === next.muted &&
             prev.isActive === next.isActive &&
+            prev.immediateVideoSurface === next.immediateVideoSurface &&
             prev.suspendNativeVideo === next.suspendNativeVideo &&
             prev.holdNativeVideo === next.holdNativeVideo &&
             prev.carouselIndex === next.carouselIndex &&

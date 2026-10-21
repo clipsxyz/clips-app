@@ -78,11 +78,15 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const screenWidth = Dimensions.get('window').width;
     const hideSaveAction = Boolean(fromCollection);
 
-    const [post, setPost] = useState<Post | null>(null);
+    const [post, setPost] = useState<Post | null>(() =>
+        initialPost && String(initialPost.id) === String(postId) ? (initialPost as Post) : null,
+    );
     /** Latest post for the fullscreen route's handlers (they outlive a single render). */
     const postRef = useRef<Post | null>(null);
     postRef.current = post;
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(
+        () => !(initialPost && String(initialPost.id) === String(postId)),
+    );
     const [mediaHeight, setMediaHeight] = useState(screenWidth * FEED_UI.media.maxAspect);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
@@ -420,6 +424,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                     styles.mediaWrap,
                                     fromCollection ? styles.mediaWrapCentered : null,
                                 ]}
+                                collapsable={false}
                             >
                                 <FeedPostMedia
                                     post={post}

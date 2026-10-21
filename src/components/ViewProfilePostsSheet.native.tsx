@@ -209,6 +209,10 @@ export default function ViewProfilePostsSheet({
                                         postHasVideoMedia(item) &&
                                         String(activeVideoPostId) === String(item.id)
                                     }
+                                    immediateVideoSurface={
+                                        postHasVideoMedia(item) &&
+                                        String(activeVideoPostId) === String(item.id)
+                                    }
                                     suspendNativeVideo={!isScreenFocused}
                                     onLike={() => handleLike(item)}
                                     onView={async () => {

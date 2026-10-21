@@ -1125,6 +1125,7 @@ const FeedCard = React.memo(function FeedCard({
     isCurrentUser,
     onOverflowPress,
     isVideoActive,
+    immediateVideoSurface,
     feedVideoMuted,
     suspendNativeVideo,
     holdNativeVideo,
@@ -1163,6 +1164,8 @@ const FeedCard = React.memo(function FeedCard({
     isCurrentUser: boolean;
     onOverflowPress?: () => void;
     isVideoActive?: boolean;
+    /** Profile / My Feed viewers: paint the TextureView immediately (no opacity-0 cover). */
+    immediateVideoSurface?: boolean;
     feedVideoMuted?: boolean;
     suspendNativeVideo?: boolean;
     /** Feed: keep this card's native Video mounted (paused) under a viewer route. */
@@ -1596,6 +1599,7 @@ const FeedCard = React.memo(function FeedCard({
                                 onMediaLoad={isClientUploading ? undefined : handleMediaLoadOnce}
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
+                                immediateVideoSurface={immediateVideoSurface}
                                 suspendNativeVideo={suspendNativeVideo}
                                 holdNativeVideo={holdNativeVideo}
                                 muted={feedVideoMuted}
@@ -1827,6 +1831,7 @@ onBlock={onBlockUser}
         a.originalUserHandle === b.originalUserHandle &&
         prev.isCurrentUser === next.isCurrentUser &&
         prev.isVideoActive === next.isVideoActive &&
+        prev.immediateVideoSurface === next.immediateVideoSurface &&
         prev.feedVideoMuted === next.feedVideoMuted &&
         prev.suspendNativeVideo === next.suspendNativeVideo &&
         prev.holdNativeVideo === next.holdNativeVideo &&

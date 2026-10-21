@@ -17,9 +17,7 @@ import {
     Platform,
     DeviceEventEmitter,
     useWindowDimensions,
-    type ViewToken,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import { useStoryRingState } from '../hooks/useHasActiveStories';
@@ -28,7 +26,6 @@ import { navigateMainTab } from '../navigation/mainTabs';
 import {
     chipActiveMagenta,
     chipActiveMagentaText,
-    GAZETTEER_ABYSS,
     glassPanel,
     glassSearch,
     glassSurface,
@@ -39,11 +36,11 @@ import {
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, getFollowedUsers } from '../api/posts';
+import { fetchPostsByUser, getFollowedUsers, reclipPost } from '../api/posts';
 import {
     getCollectionThumbnailUrl,
     getUserCollections,
@@ -58,26 +55,9 @@ import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
-import { FeedCard } from './FeedScreen';
-import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
-import SavePostModal from '../components/SavePostModal.native';
-import EditPostModal from '../components/EditPostModal.native';
-import QRCodeModal from '../components/QRCodeModal.native';
 import CreateGroupModal from '../components/CreateGroupModal.native';
+import MyFeedModal from '../components/MyFeedModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
-import FeedShareModal from '../components/FeedShareModal';
-import {
-    incrementViews,
-    deletePost,
-    reclipPost,
-} from '../api/posts';
-import { getCollectionsForPost } from '../api/collections';
-import { updatePost as apiUpdatePost } from '../api/client';
-import {
-    markFeedPostArchivedMobile,
-    setPostNotificationsPrefMobile,
-    hasPostNotificationsPrefMobile,
-} from '../utils/feedEngagementPrefsMobile';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
@@ -92,10 +72,7 @@ import {
     type NotificationPreferences,
 } from '../services/notifications';
 import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
-import { timeAgo } from '../utils/timeAgo';
 import { ox } from '../constants/nativeOpticalScale';
-import { postHasVideoMedia } from '../utils/postMedia';
-import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
 
 type ProfileAlertConfig = {
     title: string;
@@ -111,7 +88,6 @@ type ProfileAlertConfig = {
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { height: windowHeight } = useWindowDimensions();
     const { user, logout, login } = useAuth();
-    const isProfileFocused = useIsFocused();
     const ownRing = useStoryRingState(user?.handle || '', {
         viewerId: user?.id != null ? String(user.id) : undefined,
         isCurrentUser: true,
@@ -127,23 +103,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
     const [myFeedOpen, setMyFeedOpen] = useState(false);
-    const [myFeedActiveVideoPostId, setMyFeedActiveVideoPostId] = useState<string | null>(null);
-    const [myFeedOverflowPost, setMyFeedOverflowPost] = useState<Post | null>(null);
-    const [myFeedOverflowVisible, setMyFeedOverflowVisible] = useState(false);
-    const [myFeedOverflowSaved, setMyFeedOverflowSaved] = useState(false);
-    const [myFeedOverflowNotify, setMyFeedOverflowNotify] = useState(false);
-    const [myFeedSavePost, setMyFeedSavePost] = useState<Post | null>(null);
-    const [myFeedEditPost, setMyFeedEditPost] = useState<Post | null>(null);
-    const [myFeedQrPost, setMyFeedQrPost] = useState<Post | null>(null);
-    const [myFeedSharePost, setMyFeedSharePost] = useState<Post | null>(null);
-    const [myFeedCreateGroupOpen, setMyFeedCreateGroupOpen] = useState(false);
-    const [myFeedCommentsOpen, setMyFeedCommentsOpen] = useState(false);
-    const [myFeedCommentsPost, setMyFeedCommentsPost] = useState<Post | null>(null);
-    const [myFeedComments, setMyFeedComments] = useState<any[]>([]);
-    const [myFeedCommentsLoading, setMyFeedCommentsLoading] = useState(false);
-    const [myFeedCommentDraft, setMyFeedCommentDraft] = useState('');
-    const [myFeedReplyingTo, setMyFeedReplyingTo] = useState<string | null>(null);
-    const [myFeedReplyDraft, setMyFeedReplyDraft] = useState('');
+    const closeMyFeed = useCallback(() => setMyFeedOpen(false), []);
+    const handleMyFeedPostUpdated = useCallback((updated: Post) => {
+        setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    }, []);
+    const handleMyFeedPostRemoved = useCallback((postId: string) => {
+        setPosts((prev) => prev.filter((p) => p.id !== postId));
+    }, []);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [showProfilePictureModal, setShowProfilePictureModal] = useState(false);
     const [openPassportCardRequest, setOpenPassportCardRequest] = useState<ProfileCardId | null>(null);
@@ -203,41 +169,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
      *  first pass and refreshes silently afterwards, so a focus never double-fetches or
      *  flips the loading skeleton over an already-rendered profile. */
     const profileFirstFocusRef = React.useRef(true);
-
-    const myFeedActiveVideoPostIdRef = useRef<string | null>(null);
-    myFeedActiveVideoPostIdRef.current = myFeedActiveVideoPostId;
-
-    const activateMyFeedVideo = useCallback((postId: string | null) => {
-        const next = postId ? String(postId) : null;
-        myFeedActiveVideoPostIdRef.current = next;
-        setMyFeedActiveVideoPostId(next);
-        setActiveFeedVideoPostId(next);
-    }, []);
-
-    useEffect(() => {
-        if (!myFeedOpen) {
-            activateMyFeedVideo(null);
-            return;
-        }
-        if (myFeedActiveVideoPostIdRef.current) return;
-        const firstVideo = posts.find((p) => postHasVideoMedia(p));
-        activateMyFeedVideo(firstVideo ? String(firstVideo.id) : null);
-    }, [activateMyFeedVideo, myFeedOpen, posts]);
-
-    const myFeedViewabilityConfig = useRef({
-        itemVisiblePercentThreshold: 60,
-        minimumViewTime: 80,
-    }).current;
-
-    const onMyFeedViewableItemsChanged = useRef(
-        ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
-            const visibleVideos = viewableItems
-                .filter((token) => token.isViewable && token.item && postHasVideoMedia(token.item as Post))
-                .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-            const next = visibleVideos[0]?.item as Post | undefined;
-            if (next) activateMyFeedVideo(String(next.id));
-        },
-    ).current;
 
     // Hydrate Push Notification toggles from AsyncStorage (survive restarts in mock mode).
     useEffect(() => {
@@ -411,93 +342,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             console.error('Error loading profile extras:', error);
         }
     };
-
-    const openMyFeedComments = React.useCallback(async (post: Post) => {
-        setMyFeedCommentsPost(post);
-        setMyFeedCommentsOpen(true);
-        setMyFeedCommentDraft('');
-        setMyFeedReplyingTo(null);
-        setMyFeedReplyDraft('');
-        setMyFeedCommentsLoading(true);
-        try {
-            const rows = await fetchComments(post.id);
-            setMyFeedComments(Array.isArray(rows) ? rows : []);
-        } catch (error) {
-            console.error('Error loading My feed comments:', error);
-            setMyFeedComments([]);
-        } finally {
-            setMyFeedCommentsLoading(false);
-        }
-    }, []);
-
-    const handleAddMyFeedComment = React.useCallback(async () => {
-        if (!user?.handle || !myFeedCommentsPost?.id) return;
-        const text = myFeedCommentDraft.trim();
-        if (!text) return;
-        try {
-            const created = await addComment(myFeedCommentsPost.id, user.handle, text);
-            setMyFeedComments((prev) => [...prev, created]);
-            setMyFeedCommentDraft('');
-            setPosts((prev) =>
-                prev.map((p) =>
-                    p.id === myFeedCommentsPost.id
-                        ? {
-                              ...p,
-                              stats: { ...p.stats, comments: (p.stats?.comments ?? 0) + 1 },
-                          }
-                        : p
-                )
-            );
-        } catch (error) {
-            console.error('Error adding My feed comment:', error);
-            showProfileAlert({ title: 'Could not add comment', message: 'Please try again.', icon: 'alert' });
-        }
-    }, [myFeedCommentDraft, myFeedCommentsPost?.id, user?.handle]);
-
-    const handleToggleMyFeedCommentLike = React.useCallback(async (commentId: string) => {
-        const original = myFeedComments.find((c) => c.id === commentId);
-        try {
-            const updated = await toggleCommentLike(commentId, original);
-            setMyFeedComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
-        } catch (error) {
-            console.error('Error toggling comment like in My feed:', error);
-        }
-    }, [myFeedComments]);
-
-    const handleAddMyFeedReply = React.useCallback(async () => {
-        if (!myFeedCommentsPost?.id || !myFeedReplyingTo || !user?.handle) return;
-        const text = myFeedReplyDraft.trim();
-        if (!text) return;
-        try {
-            const reply = await addReply(myFeedCommentsPost.id, myFeedReplyingTo, user.handle, text);
-            setMyFeedComments((prev) =>
-                prev.map((c) =>
-                    c.id === myFeedReplyingTo
-                        ? {
-                              ...c,
-                              replies: [...(c.replies || []), reply],
-                              replyCount: (c.replyCount || 0) + 1,
-                          }
-                        : c
-                )
-            );
-            setMyFeedReplyDraft('');
-            setMyFeedReplyingTo(null);
-        } catch (error) {
-            console.error('Error adding reply in My feed:', error);
-            showProfileAlert({ title: 'Could not add reply', message: 'Please try again.', icon: 'alert' });
-        }
-    }, [myFeedCommentsPost?.id, myFeedReplyingTo, myFeedReplyDraft, user?.handle]);
-
-    const handleToggleMyFeedReplyLike = React.useCallback(async (parentId: string, replyId: string) => {
-        const originalParent = myFeedComments.find((c) => c.id === parentId);
-        try {
-            const updatedParent = await toggleReplyLike(parentId, replyId, originalParent);
-            setMyFeedComments((prev) => prev.map((c) => (c.id === parentId ? updatedParent : c)));
-        } catch (error) {
-            console.error('Error toggling reply like in My feed:', error);
-        }
-    }, [myFeedComments]);
 
     const handleOpenPostFromCommentSafety = React.useCallback(
         (postId: string) => {
@@ -1634,223 +1478,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
-            {/* My Feed Modal */}
-            <Modal
+            <MyFeedModal
                 visible={myFeedOpen}
-                animationType="slide"
-                transparent={false}
-                onRequestClose={() => {
-                    activateMyFeedVideo(null);
-                    setMyFeedOpen(false);
-                }}
-            >
-                <SafeAreaView style={styles.myFeedScreen}>
-                    <View style={styles.myFeedHeader}>
-                        <View style={styles.myFeedHeaderLeft}>
-                            <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
-                            <Text style={styles.myFeedTitle}>My feed</Text>
-                        </View>
-                        <TouchableOpacity
-                            onPress={() => {
-                                activateMyFeedVideo(null);
-                                setMyFeedOpen(false);
-                            }}
-                            style={styles.myFeedCloseButton}
-                        >
-                            <Icon name="close" size={ox(22)} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
-
-                    <FlatList
-                        data={posts}
-                        keyExtractor={(item) => item.id}
-                        contentContainerStyle={styles.myFeedListContent}
-                        extraData={myFeedActiveVideoPostId}
-                        viewabilityConfig={myFeedViewabilityConfig}
-                        onViewableItemsChanged={onMyFeedViewableItemsChanged}
-                        renderItem={({ item }) => (
-                            <FeedCard
-                                post={item}
-                                isCurrentUser
-                                viewerHandle={user?.handle}
-                                viewerUserId={user?.id}
-                                isVideoActive={
-                                    postHasVideoMedia(item) &&
-                                    String(myFeedActiveVideoPostId) === String(item.id)
-                                }
-                                suspendNativeVideo={!isProfileFocused}
-                                onLike={async () => {
-                                    if (!user?.id) return;
-                                    const updated = await toggleLike(user.id, item.id, item);
-                                    setPosts((prev) => prev.map((p) => (p.id === item.id ? updated : p)));
-                                }}
-                                onView={async () => {
-                                    if (!user?.id) return;
-                                    await incrementViews(user.id, item.id);
-                                }}
-                                onComment={() => void openMyFeedComments(item)}
-                                onShare={async () => {
-                                    setMyFeedSharePost(item);
-                                }}
-                                onReclip={async () => {}}
-                                onBookmark={async () => {
-                                    setMyFeedSavePost(item);
-                                }}
-                                onOverflowPress={() => {
-                                    setMyFeedOverflowPost(item);
-                                    setMyFeedOverflowVisible(true);
-                                    void getCollectionsForPost(user?.id || 'anon', item.id).then((cols) =>
-                                        setMyFeedOverflowSaved(cols.length > 0),
-                                    );
-                                    void hasPostNotificationsPrefMobile(user?.id || 'anon', item.id).then(
-                                        setMyFeedOverflowNotify,
-                                    );
-                                }}
-                                onPostPress={() =>
-                                    navigation.navigate('PostDetail', { postId: item.id, initialPost: item })
-                                }
-                                onShareToStoriesSuccess={(postId) => {
-                                    setPosts((prev) =>
-                                        prev.map((p) =>
-                                            p.id === postId
-                                                ? {
-                                                      ...p,
-                                                      stats: {
-                                                          ...p.stats,
-                                                          shares: (p.stats?.shares ?? 0) + 1,
-                                                      },
-                                                  }
-                                                : p,
-                                        ),
-                                    );
-                                }}
-                            />
-                        )}
-                        ListEmptyComponent={
-                            <View style={styles.emptyContainer}>
-                                <Text style={styles.emptyText}>You have not posted anything yet.</Text>
-                            </View>
-                        }
-                    />
-                </SafeAreaView>
-            </Modal>
-
-            <PostOverflowMenuModal
-                visible={myFeedOverflowVisible}
-                post={myFeedOverflowPost}
-                viewerUserId={user?.id || 'anon'}
-                viewerHandle={user?.handle}
-                isSaved={myFeedOverflowSaved}
-                hasNotifications={myFeedOverflowNotify}
-                onClose={() => {
-                    setMyFeedOverflowVisible(false);
-                    setMyFeedOverflowPost(null);
-                }}
-                onOpenSave={() => myFeedOverflowPost && setMyFeedSavePost(myFeedOverflowPost)}
-                onShare={async () => {
-                    if (!myFeedOverflowPost) return;
-                    setMyFeedSharePost(myFeedOverflowPost);
-                }}
-                onBoost={() => {
-                    setMyFeedOverflowVisible(false);
-                    navigation.navigate('Boost');
-                }}
-                onEdit={() => myFeedOverflowPost && setMyFeedEditPost(myFeedOverflowPost)}
-                onCreateGroup={() => setMyFeedCreateGroupOpen(true)}
-                onArchive={async () => {
-                    if (!myFeedOverflowPost || !user?.id) return;
-                    await markFeedPostArchivedMobile(user.id, myFeedOverflowPost.id);
-                    setPosts((prev) => prev.filter((p) => p.id !== myFeedOverflowPost.id));
-                }}
-                onToggleNotifications={async () => {
-                    if (!myFeedOverflowPost || !user?.id) return;
-                    const next = !myFeedOverflowNotify;
-                    await setPostNotificationsPrefMobile(user.id, myFeedOverflowPost.id, next);
-                    setMyFeedOverflowNotify(next);
-                }}
-                onDelete={() =>
-                    new Promise<void>((resolve) => {
-                        if (!myFeedOverflowPost || !user?.handle) {
-                            resolve();
-                            return;
-                        }
-                        showProfileAlert({
-                            title: 'Delete post?',
-                            message: 'This cannot be undone.',
-                            icon: 'alert',
-                            showCancelButton: true,
-                            confirmButtonText: 'Delete',
-                            cancelButtonText: 'Cancel',
-                            onConfirm: () => {
-                                setProfileAlert(null);
-                                void (async () => {
-                                    try {
-                                        await deletePost(user.id, myFeedOverflowPost.id, user.handle);
-                                        setPosts((prev) =>
-                                            prev.filter((p) => p.id !== myFeedOverflowPost.id),
-                                        );
-                                    } finally {
-                                        resolve();
-                                    }
-                                })();
-                            },
-                            onDismiss: () => resolve(),
-                        });
-                    })
-                }
+                onClose={closeMyFeed}
+                posts={posts}
+                navigation={navigation}
+                onPostUpdated={handleMyFeedPostUpdated}
+                onPostRemoved={handleMyFeedPostRemoved}
             />
-
-            {myFeedSavePost ? (
-                <SavePostModal
-                    post={myFeedSavePost}
-                    userId={user?.id || 'anon'}
-                    visible={!!myFeedSavePost}
-                    onClose={() => setMyFeedSavePost(null)}
-                    onSaved={async () => {
-                        const cols = await getCollectionsForPost(user?.id || 'anon', myFeedSavePost.id);
-                        const saved = cols.length > 0;
-                        setPosts((prev) =>
-                            prev.map((p) =>
-                                p.id === myFeedSavePost.id ? { ...p, isBookmarked: saved } : p,
-                            ),
-                        );
-                    }}
-                />
-            ) : null}
-
-            {myFeedEditPost ? (
-                <EditPostModal
-                    post={myFeedEditPost}
-                    visible={!!myFeedEditPost}
-                    onClose={() => setMyFeedEditPost(null)}
-                    onSave={async (text, location, venue, landmark) => {
-                        await apiUpdatePost(myFeedEditPost.id, {
-                            text,
-                            location,
-                            venue: venue || undefined,
-                            landmark: landmark || undefined,
-                        });
-                        setPosts((prev) =>
-                            prev.map((p) =>
-                                p.id === myFeedEditPost.id
-                                    ? {
-                                          ...p,
-                                          text,
-                                          caption: text,
-                                          locationLabel: location,
-                                          venue,
-                                          landmark,
-                                      }
-                                    : p,
-                            ),
-                        );
-                    }}
-                />
-            ) : null}
-
-            {myFeedQrPost ? (
-                <QRCodeModal post={myFeedQrPost} visible={!!myFeedQrPost} onClose={() => setMyFeedQrPost(null)} />
-            ) : null}
 
             <CreateGroupModal
                 visible={createGroupOpen}
@@ -1871,145 +1506,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     });
                 }}
             />
-
-            <CreateGroupModal
-                visible={myFeedCreateGroupOpen}
-                onClose={() => setMyFeedCreateGroupOpen(false)}
-                onCreated={(g) => {
-                    setMyFeedCreateGroupOpen(false);
-                    navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
-                }}
-            />
-
-            <FeedShareModal
-                post={myFeedSharePost || ({} as Post)}
-                isOpen={!!myFeedSharePost}
-                onClose={() => setMyFeedSharePost(null)}
-                onShareSuccess={(postId) => {
-                    setPosts((prev) =>
-                        prev.map((p) =>
-                            p.id === postId
-                                ? {
-                                      ...p,
-                                      stats: {
-                                          ...p.stats,
-                                          shares: (p.stats?.shares ?? 0) + 1,
-                                      },
-                                  }
-                                : p,
-                        ),
-                    );
-                }}
-            />
-
-            {/* My Feed Comments Modal */}
-            <Modal
-                visible={myFeedCommentsOpen}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setMyFeedCommentsOpen(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.myFeedCommentsModalContent}>
-                        <View style={styles.myFeedCommentsModalHeader}>
-                            <Text style={styles.modalTitle}>
-                                {myFeedComments.length} {myFeedComments.length === 1 ? 'comment' : 'comments'}
-                            </Text>
-                            <TouchableOpacity onPress={() => setMyFeedCommentsOpen(false)}>
-                                <Icon name="close" size={ox(24)} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.myFeedCommentsModalBody}>
-                            {myFeedCommentsLoading ? (
-                                <ActivityIndicator size="small" color="#f472b6" />
-                            ) : (
-                                <ScrollView style={styles.myFeedCommentsList}>
-                                    {myFeedComments.length === 0 ? (
-                                        <Text style={styles.emptyText}>No comments yet.</Text>
-                                    ) : (
-                                        myFeedComments.map((comment) => (
-                                            <View key={comment.id} style={styles.myFeedCommentItem}>
-                                                {(((comment as any).updatedAt && (comment as any).updatedAt !== comment.createdAt) ||
-                                                    ((comment as any).updated_at && (comment as any).updated_at !== (comment as any).created_at) ||
-                                                    (comment as any).editedAt) ? (
-                                                    <Text style={styles.myFeedEditedBadge}>edited</Text>
-                                                ) : null}
-                                                <Text style={styles.myFeedCommentAuthor}>{comment.userHandle || 'User'}</Text>
-                                                <Text style={styles.myFeedCommentText}>{comment.text || ''}</Text>
-                                                <Text style={styles.myFeedCommentTime}>
-                                                    {comment.createdAt ? timeAgo(comment.createdAt) : 'just now'}
-                                                </Text>
-                                                <View style={styles.myFeedCommentActionsRow}>
-                                                    <TouchableOpacity onPress={() => { void handleToggleMyFeedCommentLike(comment.id); }}>
-                                                        <Text style={styles.myFeedCommentActionText}>
-                                                            {(comment.userLiked ? 'Unlike' : 'Like')} ({comment.likes ?? 0})
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity onPress={() => setMyFeedReplyingTo(comment.id)}>
-                                                        <Text style={styles.myFeedCommentActionText}>Reply ({comment.replyCount ?? 0})</Text>
-                                                    </TouchableOpacity>
-                                                </View>
-                                                {Array.isArray(comment.replies) && comment.replies.length > 0 ? (
-                                                    <View style={styles.myFeedReplyList}>
-                                                        {comment.replies.map((reply: any) => (
-                                                            <View key={reply.id} style={styles.myFeedReplyItem}>
-                                                                {(((reply as any).updatedAt && (reply as any).updatedAt !== reply.createdAt) ||
-                                                                    ((reply as any).updated_at && (reply as any).updated_at !== (reply as any).created_at) ||
-                                                                    (reply as any).editedAt) ? (
-                                                                    <Text style={styles.myFeedEditedBadge}>edited</Text>
-                                                                ) : null}
-                                                                <Text style={styles.myFeedReplyAuthor}>{reply.userHandle || 'User'}</Text>
-                                                                <Text style={styles.myFeedReplyText}>{reply.text || ''}</Text>
-                                                                <Text style={styles.myFeedReplyTime}>
-                                                                    {reply.createdAt ? timeAgo(reply.createdAt) : 'just now'}
-                                                                </Text>
-                                                                <TouchableOpacity onPress={() => { void handleToggleMyFeedReplyLike(comment.id, reply.id); }}>
-                                                                    <Text style={styles.myFeedReplyActionText}>
-                                                                        {(reply.userLiked ? 'Unlike' : 'Like')} ({reply.likes ?? 0})
-                                                                    </Text>
-                                                                </TouchableOpacity>
-                                                            </View>
-                                                        ))}
-                                                    </View>
-                                                ) : null}
-                                            </View>
-                                        ))
-                                    )}
-                                </ScrollView>
-                            )}
-                            {myFeedReplyingTo ? (
-                                <View style={styles.myFeedCommentInputRow}>
-                                    <TextInput
-                                        style={styles.myFeedCommentInput}
-                                        value={myFeedReplyDraft}
-                                        onChangeText={setMyFeedReplyDraft}
-                                        placeholder="Write a reply..."
-                                        placeholderTextColor="#6B7280"
-                                    />
-                                    <TouchableOpacity style={styles.smallActionButton} onPress={() => setMyFeedReplyingTo(null)}>
-                                        <Text style={styles.smallActionButtonText}>Cancel</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={styles.addWordButton} onPress={() => { void handleAddMyFeedReply(); }}>
-                                        <Text style={styles.addWordButtonText}>Reply</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ) : null}
-                            <View style={styles.myFeedCommentInputRow}>
-                                <TextInput
-                                    style={styles.myFeedCommentInput}
-                                    value={myFeedCommentDraft}
-                                    onChangeText={setMyFeedCommentDraft}
-                                    placeholder="Add a comment..."
-                                    placeholderTextColor="#6B7280"
-                                />
-                                <TouchableOpacity style={styles.addWordButton} onPress={() => { void handleAddMyFeedComment(); }}>
-                                    <Text style={styles.addWordButtonText}>Post</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
 
             {/* Settings Modal */}
             <Modal
@@ -2632,148 +2128,6 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 12,
     },
-    myFeedScreen: {
-        flex: 1,
-        backgroundColor: GAZETTEER_ABYSS,
-    },
-    myFeedHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: ox(14),
-        paddingVertical: ox(10),
-        ...gazetteerHeader,
-    },
-    myFeedHeaderLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    myFeedLogo: {
-        width: ox(32),
-        height: ox(32),
-        borderRadius: ox(8),
-        marginRight: 8,
-    },
-    myFeedTitle: {
-        fontSize: ox(22),
-        fontWeight: '700',
-        color: '#FFFFFF',
-    },
-    myFeedCloseButton: {
-        borderRadius: ox(999),
-        padding: ox(8),
-        ...glassSurface,
-    },
-    myFeedListContent: {
-        padding: ox(12),
-        rowGap: ox(12),
-        paddingBottom: ox(28),
-    },
-    myFeedCard: {
-        borderRadius: ox(16),
-        overflow: 'hidden',
-        ...glassPanel,
-    },
-    myFeedCardHeader: {
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(10),
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-        rowGap: ox(8),
-    },
-    myFeedAuthorRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    myFeedAuthorMeta: {
-        marginLeft: 10,
-        flex: 1,
-    },
-    myFeedLocationPill: {
-        alignSelf: 'flex-start',
-        borderRadius: ox(999),
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#0F172A',
-        paddingHorizontal: ox(8),
-        paddingVertical: ox(4),
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: ox(4),
-        maxWidth: '100%',
-    },
-    myFeedLocationText: {
-        color: '#BFDBFE',
-        fontSize: ox(11),
-        fontWeight: '600',
-        maxWidth: 260,
-    },
-    myFeedMedia: {
-        width: '100%',
-        height: 320,
-        backgroundColor: '#000000',
-    },
-    myFeedVideoPreviewWrap: {
-        position: 'relative',
-    },
-    myFeedVideoOverlay: {
-        position: 'absolute',
-        inset: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    },
-    myFeedVideoPlaceholder: {
-        width: '100%',
-        height: 320,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#030712',
-    },
-    myFeedVideoPlaceholderText: {
-        marginTop: ox(8),
-        color: '#D1D5DB',
-        fontSize: ox(12),
-        fontWeight: '600',
-    },
-    myFeedTextCard: {
-        paddingHorizontal: ox(14),
-        paddingVertical: ox(16),
-        ...glassSurface,
-    },
-    myFeedTextCardText: {
-        color: '#FFFFFF',
-        fontSize: ox(15),
-        lineHeight: ox(22),
-    },
-    myFeedCaptionWrap: {
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(10),
-    },
-    myFeedCaptionText: {
-        color: '#E5E7EB',
-        fontSize: ox(13),
-        lineHeight: ox(20),
-    },
-    myFeedStatsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: ox(12),
-        paddingVertical: ox(10),
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.08)',
-        columnGap: ox(12),
-    },
-    myFeedStatPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: ox(4),
-    },
-    myFeedStatText: {
-        color: '#D1D5DB',
-        fontSize: ox(12),
-        fontWeight: '600',
-    },
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(11, 7, 17, 0.82)',
@@ -2810,24 +2164,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(14),
         paddingTop: ox(12),
         paddingBottom: ox(28),
-    },
-    myFeedCommentsModalContent: {
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        maxHeight: '80%',
-        overflow: 'hidden',
-        ...glassPanel,
-    },
-    myFeedCommentsModalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: ox(16),
-        ...gazetteerHeader,
-    },
-    myFeedCommentsModalBody: {
-        paddingHorizontal: ox(14),
-        paddingVertical: ox(12),
     },
     draftItem: {
         flexDirection: 'row',
@@ -2984,97 +2320,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         columnGap: ox(8),
-    },
-    myFeedCommentsList: {
-        maxHeight: 260,
-        marginBottom: ox(12),
-    },
-    myFeedCommentItem: {
-        paddingVertical: ox(8),
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
-    },
-    myFeedEditedBadge: {
-        alignSelf: 'flex-start',
-        marginBottom: ox(4),
-        paddingHorizontal: ox(6),
-        paddingVertical: ox(2),
-        borderRadius: ox(999),
-        backgroundColor: '#1E3A8A',
-        color: '#DBEAFE',
-        fontSize: ox(10),
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
-    myFeedCommentAuthor: {
-        color: '#FFFFFF',
-        fontSize: ox(13),
-        fontWeight: '700',
-        marginBottom: ox(2),
-    },
-    myFeedCommentText: {
-        color: '#D1D5DB',
-        fontSize: ox(13),
-        lineHeight: ox(18),
-    },
-    myFeedCommentTime: {
-        marginTop: ox(3),
-        color: '#9CA3AF',
-        fontSize: ox(11),
-    },
-    myFeedCommentActionsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: ox(14),
-        marginTop: ox(6),
-    },
-    myFeedCommentActionText: {
-        color: '#93C5FD',
-        fontSize: ox(12),
-        fontWeight: '600',
-    },
-    myFeedReplyList: {
-        marginTop: ox(8),
-        paddingLeft: ox(10),
-        borderLeftWidth: 1,
-        borderLeftColor: '#374151',
-        rowGap: ox(6),
-    },
-    myFeedReplyItem: {},
-    myFeedReplyAuthor: {
-        color: '#E5E7EB',
-        fontSize: ox(12),
-        fontWeight: '700',
-    },
-    myFeedReplyText: {
-        color: '#CBD5E1',
-        fontSize: ox(12),
-        lineHeight: ox(17),
-    },
-    myFeedReplyTime: {
-        marginTop: ox(2),
-        color: '#94A3B8',
-        fontSize: ox(10),
-    },
-    myFeedReplyActionText: {
-        marginTop: ox(3),
-        color: '#93C5FD',
-        fontSize: ox(11),
-        fontWeight: '600',
-    },
-    myFeedCommentInputRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: ox(8),
-    },
-    myFeedCommentInput: {
-        flex: 1,
-        borderRadius: ox(8),
-        paddingHorizontal: ox(10),
-        paddingVertical: ox(8),
-        color: '#FFFFFF',
-        fontSize: ox(13),
-        ...glassSearch,
     },
     wordInput: {
         flex: 1,
