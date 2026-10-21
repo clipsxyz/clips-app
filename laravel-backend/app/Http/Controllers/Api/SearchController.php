@@ -294,17 +294,18 @@ class SearchController extends Controller
             $offset = $usersCursor * $usersLimit;
             $users = User::query()
                 ->where(function ($query) use ($q) {
-                    $query->whereRaw("LOWER(handle) LIKE ?", ["%$q%"])
-                        ->orWhereRaw("LOWER(display_name) LIKE ?", ["%$q%"]);
+                    $query->whereRaw('LOWER(handle) LIKE ?', ["%$q%"])
+                        ->orWhereRaw('LOWER(display_name) LIKE ?', ["%$q%"])
+                        ->orWhereRaw('LOWER(username) LIKE ?', ["%$q%"]);
                 })
                 ->select('id', 'username', 'display_name', 'handle', 'avatar_url')
                 ->orderByRaw(
-                    "CASE WHEN LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ? THEN 0 ELSE 1 END",
-                    ["$q%", "$q%"]
+                    'CASE WHEN LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(username) LIKE ? THEN 0 ELSE 1 END',
+                    ["$q%", "$q%", "$q%"]
                 )
                 ->orderByRaw(
-                    "CASE WHEN LOWER(handle) = ? THEN 0 WHEN LOWER(display_name) = ? THEN 1 ELSE 2 END",
-                    [$q, $q]
+                    'CASE WHEN LOWER(handle) = ? THEN 0 WHEN LOWER(display_name) = ? THEN 1 WHEN LOWER(username) = ? THEN 2 ELSE 3 END',
+                    [$q, $q, $q]
                 )
                 ->orderBy('handle')
                 ->offset($offset)

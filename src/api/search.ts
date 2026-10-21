@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { getRuntimeEnv, isMockMode } from '../config/runtimeEnv';
 
 export type SearchSections = {
     users?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
@@ -7,37 +7,69 @@ export type SearchSections = {
     posts?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
 };
 
-// Mock users for testing (Sarah, Bob, Ava, Clips24)
+function useLiveSearchApi(): boolean {
+    if (isMockMode()) return false;
+    if (getRuntimeEnv('VITE_USE_LARAVEL_API') === 'false') return false;
+    return true;
+}
+
+function emptySearchResult(q: string): { q: string; sections: SearchSections } {
+    return {
+        q,
+        sections: {
+            users: { items: [], nextCursor: null },
+        },
+    };
+}
+
+/** In-memory directory used only when `EXPO_PUBLIC_USE_MOCK=true` / Laravel is explicitly off. */
 const mockUsers = [
     {
         id: 'sarah-artane-1',
         username: 'sarah',
         display_name: 'Sarah',
         handle: 'Sarah@Artane',
-        avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop'
+        avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop',
     },
     {
         id: 'bob-artane-1',
         username: 'bob',
         display_name: 'Bob',
         handle: 'Bob@Artane',
-        avatar_url: undefined
+        avatar_url: undefined,
     },
     {
         id: 'ava-dublin-1',
         username: 'ava',
         display_name: 'Ava',
         handle: 'Ava@Dublin',
-        avatar_url: undefined
+        avatar_url: undefined,
     },
     {
         id: 'clips24-1',
         username: 'clips24',
         display_name: 'Clips 24',
         handle: 'Clips24',
-        avatar_url: undefined
-    }
+        avatar_url: undefined,
+    },
 ];
+
+function mockUserSearch(q: string): { q: string; sections: SearchSections } {
+    const qLower = q.toLowerCase();
+    const items = mockUsers.filter((u) => {
+        return (
+            u.handle.toLowerCase().includes(qLower) ||
+            (u.display_name && u.display_name.toLowerCase().includes(qLower)) ||
+            (u.username && u.username.toLowerCase().includes(qLower))
+        );
+    });
+    return {
+        q,
+        sections: {
+            users: { items, nextCursor: null },
+        },
+    };
+}
 
 export async function unifiedSearch(params: {
     q: string;
@@ -49,8 +81,6 @@ export async function unifiedSearch(params: {
     locationsLimit?: number;
     postsLimit?: number;
 }) {
-    const useLaravelAPI = isLaravelApiEnabled();
-
     const searchParams = new URLSearchParams();
     searchParams.set('q', params.q);
     if (params.types) searchParams.set('types', params.types);
@@ -61,65 +91,19 @@ export async function unifiedSearch(params: {
     if (params.locationsLimit != null) searchParams.set('locationsLimit', String(params.locationsLimit));
     if (params.postsLimit != null) searchParams.set('postsLimit', String(params.postsLimit));
 
-    try {
-        // When backend API is disabled (mock mode), skip the network call entirely
-        // so dev server doesn't spam ECONNREFUSED proxy errors.
-        if (!useLaravelAPI) {
-            throw new Error('Laravel API disabled via VITE_USE_LARAVEL_API=false');
+    if (!useLiveSearchApi()) {
+        if (params.types?.includes('users') || !params.types) {
+            return mockUserSearch(params.q);
         }
+        return emptySearchResult(params.q);
+    }
 
-        const result = await apiRequest(`/search?${searchParams.toString()}`, {
+    try {
+        return (await apiRequest(`/search?${searchParams.toString()}`, {
             method: 'GET',
             timeoutMs: 6000,
-        }) as { q: string; sections: SearchSections };
-        
-        // Add Sarah@Artane to search results if query matches (for testing)
-        const qLower = params.q.toLowerCase();
-        if (result.sections?.users && (qLower.includes('sarah') || qLower.includes('artane') || qLower.includes('sarah@artane'))) {
-            const existingHandles = new Set(result.sections.users.items.map((u: any) => u.handle?.toLowerCase()));
-            if (!existingHandles.has('sarah@artane')) {
-                // Add Sarah@Artane to the beginning of results
-                result.sections.users.items = [mockUsers[0], ...result.sections.users.items];
-            }
-        }
-        
-        return result;
-    } catch (error) {
-        // Fallback: return mock results if API fails (for testing)
-        const qLower = params.q.toLowerCase();
-        if (params.types?.includes('users')) {
-            const filteredUsers = mockUsers.filter((u) => {
-                return (
-                    u.handle.toLowerCase().includes(qLower) ||
-                    (u.display_name && u.display_name.toLowerCase().includes(qLower)) ||
-                    (u.username && u.username.toLowerCase().includes(qLower))
-                );
-            });
-
-            if (filteredUsers.length > 0) {
-                return {
-                    q: params.q,
-                    sections: {
-                        users: {
-                            items: filteredUsers,
-                            nextCursor: null
-                        }
-                    }
-                };
-            }
-        }
-
-        // Return empty results instead of throwing error
-        return {
-            q: params.q,
-            sections: {
-                users: {
-                    items: [],
-                    nextCursor: null
-                }
-            }
-        };
+        })) as { q: string; sections: SearchSections };
+    } catch {
+        return emptySearchResult(params.q);
     }
 }
-
-
