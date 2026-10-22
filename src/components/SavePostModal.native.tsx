@@ -36,18 +36,24 @@ import {
     isTextOnlyPost,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_ACTIVE,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    UCL_TEXT_SECONDARY,
+} from '../theme/gazetteerAmbientNative';
 
 const DEFAULT_COLLECTION_NAME = 'All Posts';
-/** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
-const PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
-/** View Profile night-atlas chrome (light type on passport canvas). */
+/** High-contrast type on the navy canvas. */
 const P = {
-    text: '#e8eef2',
-    muted: 'rgba(232, 238, 242, 0.62)',
+    text: UCL_TEXT_PRIMARY,
+    muted: UCL_TEXT_SECONDARY,
+    placeholder: UCL_TEXT_PLACEHOLDER,
     border: 'rgba(255,255,255,0.12)',
-    accent: PASSPORT_PALETTE.wavePrimary,
+    accent: UCL_TEXT_ACTIVE,
     chipBg: 'rgba(15, 36, 48, 0.72)',
     plusBg: 'rgba(15, 36, 48, 0.88)',
     handle: 'rgba(255,255,255,0.28)',
@@ -304,7 +310,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                             value={newName}
                             onChangeText={setNewName}
                             placeholder="Collection name"
-                            placeholderTextColor={P.muted}
+                            placeholderTextColor={P.placeholder}
                             returnKeyType="done"
                             onSubmitEditing={() => void createNew()}
                             maxLength={60}
@@ -431,7 +437,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
 
                     <Pressable style={styles.newCollectionRow} onPress={openCreate}>
                         <View style={styles.newCollectionIcon}>
-                            <Icon name="add" size={20} color={P.text} />
+                            <Icon name="add" size={20} color={P.accent} />
                         </View>
                         <Text style={styles.newCollectionText}>New collection</Text>
                         <Icon name="chevron-forward" size={18} color={P.muted} />
@@ -441,22 +447,12 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
         </>
     );
 
-    const sheetInner =
-        Platform.OS === 'ios' ? (
-            <View style={styles.sheetCanvas} collapsable={false}>
-                <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
-                    <DiscoverAmbientCanvas variant="passport" fillParent />
-                </View>
-                <View style={styles.sheetContent} collapsable={false}>
-                    {sheetBody}
-                </View>
-            </View>
-        ) : (
+    const sheetInner = (
             <LinearGradient
-                colors={[...PASSPORT_WASH]}
-                locations={[0, 0.28, 0.55, 0.78, 1]}
-                start={{ x: 0.1, y: 1 }}
-                end={{ x: 0.9, y: 0 }}
+                colors={[...UCL_SHEET_GRADIENT]}
+                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                start={{ x: 0.12, y: 0 }}
+                end={{ x: 0.88, y: 1 }}
                 style={styles.sheetCanvas}
             >
                 <View style={styles.sheetContent} collapsable={false}>
@@ -507,10 +503,10 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     sheetCanvas: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     ambientBack: {
@@ -544,7 +540,7 @@ const styles = StyleSheet.create({
     pickerTitle: {
         color: P.text,
         fontSize: 16,
-        fontWeight: '700',
+        fontWeight: '600',
     },
     closeBtn: {
         position: 'absolute',
@@ -558,7 +554,7 @@ const styles = StyleSheet.create({
     savedBanner: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 10,
         marginHorizontal: 16,
         marginBottom: 12,
         paddingVertical: 10,
@@ -586,7 +582,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     sectionHint: {
-        color: P.muted,
+        color: P.placeholder,
         fontSize: 13,
         paddingHorizontal: 16,
         marginBottom: 14,
@@ -674,7 +670,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: P.border,
-        gap: 12,
+        gap: 16,
     },
     newCollectionIcon: {
         width: 36,
@@ -759,7 +755,7 @@ const styles = StyleSheet.create({
     },
     createHint: {
         marginTop: 14,
-        color: P.muted,
+        color: P.placeholder,
         fontSize: 13,
         textAlign: 'center',
         lineHeight: 18,

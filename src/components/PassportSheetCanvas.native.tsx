@@ -12,6 +12,7 @@ type Props = {
     children: React.ReactNode;
     style?: StyleProp<ViewStyle>;
     contentStyle?: StyleProp<ViewStyle>;
+    tone?: 'discover' | 'ucl';
 };
 
 /**
@@ -19,9 +20,9 @@ type Props = {
  * PassportSheetCanvas now inherits the Discover Canvas design system
  * via {@link DiscoverSheetCanvas} (dark near-black → emerald gradient).
  */
-export default function PassportSheetCanvas({ children, style, contentStyle }: Props) {
+export default function PassportSheetCanvas({ children, style, contentStyle, tone }: Props) {
     return (
-        <DiscoverSheetCanvas style={style} contentStyle={contentStyle}>
+        <DiscoverSheetCanvas tone={tone} style={style} contentStyle={contentStyle}>
             {children}
         </DiscoverSheetCanvas>
     );

@@ -26,6 +26,13 @@ import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { ox } from '../constants/nativeOpticalScale';
 import Avatar from './Avatar.native';
 import DiscoverSheetCanvas from './DiscoverSheetCanvas.native';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_ACTIVE,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    UCL_TEXT_SECONDARY,
+} from '../theme/gazetteerAmbientNative';
 
 type Props = {
     post: Post | null;
@@ -284,21 +291,21 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                 keyboardVerticalOffset={0}
             >
                 <View style={styles.shareModalShell}>
-                    <DiscoverSheetCanvas contentStyle={styles.shareModalContent}>
+                    <DiscoverSheetCanvas tone="ucl" contentStyle={styles.shareModalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Share</Text>
                         <TouchableOpacity onPress={onClose}>
-                            <Icon name="close" size={24} color="#FFFFFF" />
+                            <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
                         </TouchableOpacity>
                     </View>
 
                     <View style={styles.searchWrap}>
-                        <Icon name="search" size={18} color="#9CA3AF" />
+                        <Icon name="search" size={18} color={UCL_TEXT_PLACEHOLDER} style={styles.searchIcon} />
                         <TextInput
                             value={searchQuery}
                             onChangeText={setSearchQuery}
                             placeholder="Search"
-                            placeholderTextColor="#6B7280"
+                            placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                             style={styles.searchInput}
                             autoCorrect={false}
                             autoCapitalize="none"
@@ -341,9 +348,9 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                                         {handle}
                                     </Text>
                                     {selected ? (
-                                        <Icon name="checkmark-circle" size={ox(20)} color="#3D9B8F" />
+                                        <Icon name="checkmark-circle" size={ox(20)} color={UCL_TEXT_ACTIVE} />
                                     ) : (
-                                        <Icon name="ellipse-outline" size={ox(20)} color="#6B7280" />
+                                        <Icon name="ellipse-outline" size={ox(20)} color={UCL_TEXT_PLACEHOLDER} />
                                     )}
                                 </TouchableOpacity>
                                 );
@@ -361,7 +368,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                                     value={shareCaption}
                                     onChangeText={setShareCaption}
                                     placeholder="Include message..."
-                                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                                    placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                                     style={styles.captionInput}
                                     multiline
                                     maxLength={1000}
@@ -465,12 +472,12 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                     </ScrollView>
 
                     <TouchableOpacity onPress={handleShareSystem} style={styles.shareOption}>
-                        <Icon name="share-social" size={22} color="#FFFFFF" />
+                        <Icon name="share-social" size={22} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
                         <Text style={styles.shareOptionText}>Share via…</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleCopyLink} style={styles.shareOption}>
-                        <Icon name="link" size={22} color="#FFFFFF" />
+                        <Icon name="link" size={22} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
                         <Text style={styles.shareOptionText}>Copy link</Text>
                     </TouchableOpacity>
                     </DiscoverSheetCanvas>
@@ -487,7 +494,7 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     shareModalShell: {
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        backgroundColor: UCL_CANVAS_NAVY,
         borderTopLeftRadius: 12,
         borderTopRightRadius: 12,
         borderWidth: 1,
@@ -510,15 +517,15 @@ const styles = StyleSheet.create({
     },
     modalTitle: {
         fontSize: 18,
-        fontWeight: 'bold',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
     },
     searchWrap: {
         marginTop: 14,
         marginBottom: 12,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 14,
         paddingHorizontal: 14,
         paddingVertical: 10,
         borderRadius: 999,
@@ -526,9 +533,10 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.1)',
     },
+    searchIcon: { marginRight: 4 },
     searchInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 15,
         paddingVertical: 0,
     },
@@ -543,7 +551,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(61, 155, 143, 0.35)',
     },
     sendBarLabel: {
-        color: '#8FD8CB',
+        color: UCL_TEXT_SECONDARY,
         fontSize: 12,
         fontWeight: '600',
     },
@@ -554,7 +562,7 @@ const styles = StyleSheet.create({
     },
     captionInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 15,
         paddingHorizontal: 14,
         paddingVertical: 10,
@@ -607,14 +615,14 @@ const styles = StyleSheet.create({
     emptyText: {
         paddingVertical: 18,
         textAlign: 'center',
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: 14,
         fontWeight: '500',
     },
     followRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 14,
         paddingVertical: 10,
         paddingHorizontal: 12,
         marginBottom: 8,
@@ -629,7 +637,7 @@ const styles = StyleSheet.create({
     },
     followHandle: {
         flex: 1,
-        color: '#E5E7EB',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -641,13 +649,13 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
     },
     shareToTitle: {
-        color: '#9CA3AF',
+        color: UCL_TEXT_SECONDARY,
         fontSize: 12,
         letterSpacing: 1.2,
         fontWeight: '700',
     },
     resetLink: {
-        color: '#3D9B8F',
+        color: UCL_TEXT_ACTIVE,
         fontSize: 13,
         fontWeight: '600',
     },
@@ -677,7 +685,7 @@ const styles = StyleSheet.create({
     },
     appLabel: {
         marginTop: 8,
-        color: '#D1D5DB',
+        color: UCL_TEXT_SECONDARY,
         fontSize: 11,
         fontWeight: '600',
     },
@@ -696,16 +704,18 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '800',
     },
+    listIcon: { marginRight: 4 },
     shareOption: {
         flexDirection: 'row',
         alignItems: 'center',
         padding: 16,
-        gap: 12,
+        gap: 16,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
     shareOptionText: {
         fontSize: 16,
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
     },
 });

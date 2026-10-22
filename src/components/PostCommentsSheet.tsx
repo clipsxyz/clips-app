@@ -25,10 +25,15 @@ import {
     type BottomSheetFlatListMethods,
 } from '@gorhom/bottom-sheet';
 import GazetteerBottomSheetModal, {
-    GAZETTEER_SHEET_PASSPORT,
+    GAZETTEER_SHEET_UCL,
 } from './GazetteerBottomSheetModal.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_TEXT_ACTIVE,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    UCL_TEXT_SECONDARY,
+} from '../theme/gazetteerAmbientNative';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Avatar from './Avatar';
@@ -63,13 +68,14 @@ const COMMENT_EMOJIS = [
 ];
 const HANDLE_REGEX = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.58, 520);
-const BRAND_600 = PASSPORT_PALETTE.wavePrimary;
-const COMMENT_LIKE_ACTIVE = '#FFFFFF';
-const MENTION_COLOR = '#9fd4cb';
-/** View Profile night-atlas chrome. */
+const BRAND_600 = UCL_TEXT_ACTIVE;
+const COMMENT_LIKE_ACTIVE = UCL_TEXT_PRIMARY;
+const MENTION_COLOR = UCL_TEXT_ACTIVE;
+/** High-contrast type on the navy canvas. */
 const P = {
-    text: '#e8eef2',
-    muted: 'rgba(232, 238, 242, 0.62)',
+    text: UCL_TEXT_PRIMARY,
+    muted: UCL_TEXT_SECONDARY,
+    placeholder: UCL_TEXT_PLACEHOLDER,
     border: 'rgba(255,255,255,0.12)',
     chipBg: 'rgba(15, 36, 48, 0.72)',
     inputBg: 'rgba(6, 13, 22, 0.72)',
@@ -329,7 +335,7 @@ function CommentItem({
                                             : getAvatarForHandle(reply.userHandle);
                                     return (
                                         <View key={reply.id} style={styles.replyItem}>
-                                            <CommentAvatarRing size={24} gap={8}>
+                                            <CommentAvatarRing size={24} gap={12}>
                                                 <Avatar
                                                     src={replyAvatarSrc}
                                                     name={reply.userHandle?.split('@')[0] || 'User'}
@@ -443,7 +449,7 @@ function CommentInput({
                 </View>
             ) : null}
             <View style={styles.commentInputRow}>
-                <CommentAvatarRing size="sm" gap={8}>
+                <CommentAvatarRing size="sm" gap={12}>
                     <Avatar src={user?.avatarUrl} name={user?.name || 'User'} size="sm" />
                 </CommentAvatarRing>
                 <TouchableOpacity
@@ -452,7 +458,7 @@ function CommentInput({
                 >
                     <FeedSmileIcon
                         size={20}
-                        color={showEmojiPicker ? P.text : P.muted}
+                        color={showEmojiPicker ? BRAND_600 : P.muted}
                     />
                 </TouchableOpacity>
                 <View style={styles.commentInputGradientWrap}>
@@ -460,7 +466,7 @@ function CommentInput({
                         ref={inputRef as any}
                         style={styles.commentInput}
                         placeholder={placeholder}
-                        placeholderTextColor={P.muted}
+                        placeholderTextColor={P.placeholder}
                         value={text}
                         onChangeText={setText}
                         editable={!isLoading}
@@ -1147,7 +1153,7 @@ export default function PostCommentsSheet({
     };
 
     const sheetBody = (
-        <PassportSheetCanvas style={[styles.sheetCanvas, styles.sheetBodyFill]} contentStyle={styles.sheetBodyFill}>
+        <PassportSheetCanvas tone="ucl" style={[styles.sheetCanvas, styles.sheetBodyFill]} contentStyle={styles.sheetBodyFill}>
             <View style={[styles.sheet, styles.sheetBodyFill]}>
                 {/* Pin chrome outside FlatList so Android Modal height quirks can't blank the sheet. */}
                 {sheetMediaPreview}
@@ -1200,14 +1206,14 @@ export default function PostCommentsSheet({
             onDismiss={handleClose}
             snapPoints={['75%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
+            backgroundStyle={GAZETTEER_SHEET_UCL.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_UCL.handle}
             footerComponent={renderCommentsFooter}
             keyboardBehavior="interactive"
             keyboardBlurBehavior="restore"
             android_keyboardInputMode="adjustResize"
         >
-            <PassportSheetCanvas style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
+            <PassportSheetCanvas tone="ucl" style={styles.sheetCanvas} contentStyle={styles.sheetCanvasContent}>
                 <BottomSheetFlatList
                     {...(loading
                         ? {
@@ -1290,7 +1296,7 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         overflow: 'hidden',
         backgroundColor: P.chipBg,
-        marginRight: 12,
+        marginRight: 16,
     },
     mediaPreviewMedia: {
         width: '100%',
@@ -1450,12 +1456,13 @@ const styles = StyleSheet.create({
     },
     emptyTitle: {
         fontSize: 15,
-        color: P.muted,
+        color: P.text,
+        fontWeight: '600',
         marginTop: 16,
     },
     emptySubtitle: {
         fontSize: 14,
-        color: P.muted,
+        color: P.placeholder,
         marginTop: 8,
     },
     loadMoreButton: {
@@ -1470,7 +1477,8 @@ const styles = StyleSheet.create({
     },
     loadMoreText: {
         fontSize: 14,
-        color: P.muted,
+        color: BRAND_600,
+        fontWeight: '600',
     },
     commentItem: {
         flexDirection: 'row',
@@ -1531,7 +1539,7 @@ const styles = StyleSheet.create({
     },
     commentReplyText: {
         fontSize: 12,
-        color: P.muted,
+        color: BRAND_600,
         fontWeight: '500',
     },
     commentReplyTextActive: {
@@ -1677,7 +1685,7 @@ const styles = StyleSheet.create({
     emojiToggle: {
         padding: 8,
         borderRadius: 8,
-        marginRight: 8,
+        marginRight: 12,
     },
     emojiToggleActive: {
         backgroundColor: 'rgba(255,255,255,0.12)',

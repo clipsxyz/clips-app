@@ -9,6 +9,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DISCOVER_SHEET_BASE, DISCOVER_SHEET_BORDER } from '../utils/discoverAmbientPalette';
+import { UCL_CANVAS_NAVY, UCL_SHEET_BORDER } from '../theme/gazetteerAmbientNative';
 
 /** Discover Canvas sheet preset — solid base of the sheet gradient
  * (gorhom backgroundStyle can't paint a gradient; inner content that needs
@@ -63,6 +64,21 @@ export const GAZETTEER_SHEET_DM = {
 export const GAZETTEER_SHEET_BOOST = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_SAVE = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_PASSPORT = GAZETTEER_SHEET_DISCOVER;
+/** Champions League navy canvas — comments / share / save sheets. */
+export const GAZETTEER_SHEET_UCL = {
+    background: {
+        backgroundColor: UCL_CANVAS_NAVY,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: UCL_SHEET_BORDER,
+    } as ViewStyle,
+    handle: {
+        width: 40,
+        backgroundColor: 'rgba(255,255,255,0.28)',
+    } as ViewStyle,
+};
 export const GAZETTEER_SHEET_STICKER = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_SLATE = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_GROUP = GAZETTEER_SHEET_DISCOVER;

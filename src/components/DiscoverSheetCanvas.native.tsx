@@ -6,6 +6,11 @@ import {
     DISCOVER_SHEET_GRADIENT,
     DISCOVER_SHEET_GRADIENT_LOCATIONS,
 } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 
 export {
     DISCOVER_SHEET_ACCENT,
@@ -22,6 +27,8 @@ type Props = {
     children: React.ReactNode;
     style?: StyleProp<ViewStyle>;
     contentStyle?: StyleProp<ViewStyle>;
+    /** `ucl` = Champions League navy canvas; default remains Discover emerald. */
+    tone?: 'discover' | 'ucl';
 };
 
 /**
@@ -30,14 +37,20 @@ type Props = {
  * All current and future sheets should render through this (directly, or via
  * the backwards-compatible PassportSheetCanvas alias).
  */
-export default function DiscoverSheetCanvas({ children, style, contentStyle }: Props) {
+export default function DiscoverSheetCanvas({
+    children,
+    style,
+    contentStyle,
+    tone = 'discover',
+}: Props) {
+    const ucl = tone === 'ucl';
     return (
         <LinearGradient
-            colors={[...DISCOVER_SHEET_GRADIENT]}
-            locations={[...DISCOVER_SHEET_GRADIENT_LOCATIONS]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={[styles.canvas, style]}
+            colors={[...(ucl ? UCL_SHEET_GRADIENT : DISCOVER_SHEET_GRADIENT)]}
+            locations={[...(ucl ? UCL_SHEET_GRADIENT_LOCATIONS : DISCOVER_SHEET_GRADIENT_LOCATIONS)]}
+            start={ucl ? { x: 0.12, y: 0 } : { x: 0.5, y: 0 }}
+            end={ucl ? { x: 0.88, y: 1 } : { x: 0.5, y: 1 }}
+            style={[styles.canvas, ucl && styles.canvasUcl, style]}
         >
             <View style={[styles.content, contentStyle]} collapsable={false}>
                 {children}
@@ -50,6 +63,9 @@ const styles = StyleSheet.create({
     canvas: {
         backgroundColor: DISCOVER_SHEET_BASE,
         overflow: 'hidden',
+    },
+    canvasUcl: {
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     content: {
         position: 'relative',

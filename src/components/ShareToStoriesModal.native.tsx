@@ -21,7 +21,8 @@ import ShareTextStoryCapture, {
     type ShareTextStoryCaptureHandle,
 } from './ShareTextStoryCapture.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { UCL_CANVAS_NAVY } from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -186,7 +187,7 @@ export default function ShareToStoriesModal({
         >
             <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.card} onPress={() => {}}>
-                    <PassportSheetCanvas contentStyle={styles.cardInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.cardInner}>
                     <View style={styles.iconWrap}>
                         <ShareToStoriesFeedIcon size={52} color="#FFFFFF" />
                     </View>
@@ -234,7 +235,7 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     cardInner: {

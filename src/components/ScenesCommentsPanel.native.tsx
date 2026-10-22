@@ -109,7 +109,7 @@ export default function ScenesCommentsPanel({
                 onPress={onClose}
             />
             <Animated.View style={[styles.sheet, sheetStyle]}>
-                <PassportSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+                <PassportSheetCanvas tone="ucl" style={styles.canvas} contentStyle={styles.canvasContent}>
                     <GestureDetector gesture={pan}>
                         <View style={styles.dragHandleRow}>
                             <View style={styles.dragHandle} />

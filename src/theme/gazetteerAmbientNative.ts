@@ -125,5 +125,10 @@ export const UCL_SHEET_GRADIENT_LOCATIONS = [0, 0.42, 0.78, 1] as const;
 export const UCL_SHEET_BORDER = 'rgba(0, 242, 255, 0.45)';
 export const UCL_SHEET_ROW_BORDER = 'rgba(0, 242, 255, 0.14)';
 export const UCL_SHEET_SURFACE = 'rgba(0, 242, 255, 0.06)';
-export const UCL_SHEET_TEXT = '#F4FBFF';
+export const UCL_SHEET_TEXT = '#FFFFFF';
 export const UCL_SHEET_TEXT_MUTED = 'rgba(0, 242, 255, 0.55)';
+/** High-contrast type on the navy canvas. */
+export const UCL_TEXT_PRIMARY = '#FFFFFF';
+export const UCL_TEXT_SECONDARY = '#D1E4FF';
+export const UCL_TEXT_PLACEHOLDER = '#94A3B8';
+export const UCL_TEXT_ACTIVE = UCL_CYAN;

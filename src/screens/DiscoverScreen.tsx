@@ -21,6 +21,15 @@ import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSel
 import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import Avatar from '../components/Avatar.native';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_ACTIVE,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    UCL_TEXT_SECONDARY,
+} from '../theme/gazetteerAmbientNative';
 import { navigateMainTab, navigatePassport } from '../navigation/mainTabs';
 import {
     clearPendingLocationFeed,
@@ -38,9 +47,6 @@ const ROTATING_CITIES = [
     'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam',
 ];
 const PLACEHOLDER_ROTATE_MS = 2800;
-
-/** Gemini-style canvas: black field, Gazetteer sea-glass only in the lower third. */
-const DISCOVER_WASH = ['#000000', '#020807', '#0a2e28', '#14756a'] as const;
 
 export default function DiscoverScreen({ navigation }: any) {
     const { user } = useAuth();
@@ -295,7 +301,7 @@ export default function DiscoverScreen({ navigation }: any) {
                     accessibilityLabel="Back to Feed"
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                    <Icon name="home-outline" size={ox(22)} color="#E5E7EB" />
+                    <Icon name="home-outline" size={ox(22)} color={UCL_TEXT_PRIMARY} />
                 </TouchableOpacity>
                 <TouchableOpacity
                     onPress={goLocalFeed}
@@ -355,7 +361,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                               onPress={() => onSuggestionSelected(s)}
                                               style={styles.resultRow}
                                           >
-                                              <Icon name="location-outline" size={ox(16)} color={PASSPORT_PALETTE.wavePrimary} />
+                                              <Icon name="location-outline" size={ox(16)} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
                                               <View style={styles.resultCopy}>
                                                   <Text style={styles.resultPrimary}>{primary}</Text>
                                                   <Text style={styles.resultSecondary}>{s.name}</Text>
@@ -371,7 +377,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                           onPress={() => selectPopularCity(name)}
                                           style={styles.resultRow}
                                       >
-                                          <Icon name="location-outline" size={ox(16)} color={PASSPORT_PALETTE.wavePrimary} />
+                                          <Icon name="location-outline" size={ox(16)} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
                                           <Text style={styles.resultPrimary}>{name}</Text>
                                       </TouchableOpacity>
                                   ))
@@ -387,7 +393,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 style={styles.promptRow}
                                 accessibilityLabel={item.label}
                             >
-                                <Icon name="return-down-forward-outline" size={ox(18)} color="rgba(255,255,255,0.72)" />
+                                <Icon name="return-down-forward-outline" size={ox(18)} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
                                 <Text style={styles.promptText}>{item.label}</Text>
                             </TouchableOpacity>
                         ))}
@@ -413,7 +419,7 @@ export default function DiscoverScreen({ navigation }: any) {
                     </TouchableOpacity>
                 ) : null}
                 <View style={styles.searchPill}>
-                    <Icon name="add" size={ox(22)} color="#E5E7EB" style={styles.searchIcon} />
+                    <Icon name="add" size={ox(22)} color={UCL_TEXT_ACTIVE} style={styles.searchIcon} />
                     <TextInput
                         ref={inputRef}
                         value={query}
@@ -423,9 +429,9 @@ export default function DiscoverScreen({ navigation }: any) {
                             setHideSuggestions(false);
                         }}
                         placeholder={hasSearchQuery ? '' : placeholderLabel}
-                        placeholderTextColor="rgba(229,231,235,0.55)"
+                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         style={styles.searchInput}
-                        selectionColor={PASSPORT_PALETTE.wavePrimary}
+                        selectionColor={UCL_TEXT_ACTIVE}
                         onSubmitEditing={chooseFromQuery}
                         returnKeyType="search"
                         autoCorrect={false}
@@ -434,10 +440,10 @@ export default function DiscoverScreen({ navigation }: any) {
                     />
                     {hasSearchQuery ? (
                         <TouchableOpacity onPress={clearSearch} style={styles.clearBtn}>
-                            <Icon name="close" size={ox(16)} color="#9CA3AF" />
+                            <Icon name="close" size={ox(16)} color={UCL_TEXT_PLACEHOLDER} />
                         </TouchableOpacity>
                     ) : null}
-                    {loading ? <ActivityIndicator size="small" color={PASSPORT_PALETTE.wavePrimary} /> : null}
+                    {loading ? <ActivityIndicator size="small" color={UCL_TEXT_ACTIVE} /> : null}
                     <TouchableOpacity
                         onPress={chooseFromQuery}
                         style={styles.goBtn}
@@ -452,11 +458,12 @@ export default function DiscoverScreen({ navigation }: any) {
 
     return (
         <>
+            {/* Page canvas only — UCL navy / purple wash. Search chrome is unchanged. */}
             <LinearGradient
-                colors={[...DISCOVER_WASH]}
-                locations={[0, 0.38, 0.74, 1]}
-                start={{ x: 0.5, y: 0 }}
-                end={{ x: 0.5, y: 1 }}
+                colors={[...UCL_SHEET_GRADIENT]}
+                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                start={{ x: 0.12, y: 0 }}
+                end={{ x: 0.88, y: 1 }}
                 style={styles.root}
             >
                 <KeyboardAvoidingView
@@ -488,7 +495,7 @@ const styles = StyleSheet.create({
     flex: { flex: 1 },
     root: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     ui: {
         flex: 1,
@@ -518,7 +525,7 @@ const styles = StyleSheet.create({
         maxWidth: 140,
     },
     localChipText: {
-        color: '#E5E7EB',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(12),
         fontWeight: '600',
     },
@@ -535,10 +542,10 @@ const styles = StyleSheet.create({
         marginBottom: ox(18),
     },
     greetingText: {
-        color: '#F3F4F6',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(28),
         lineHeight: ox(36),
-        fontWeight: '400',
+        fontWeight: '600',
         textAlign: 'center',
         includeFontPadding: false,
     },
@@ -561,7 +568,7 @@ const styles = StyleSheet.create({
     },
     promptText: {
         flex: 1,
-        color: 'rgba(243,244,246,0.92)',
+        color: UCL_TEXT_SECONDARY,
         fontSize: ox(16),
         lineHeight: ox(22),
         fontWeight: '400',
@@ -580,21 +587,22 @@ const styles = StyleSheet.create({
     suggestionEmpty: {
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(14),
     },
     resultRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: ox(12),
+        gap: ox(10),
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255,255,255,0.06)',
     },
     resultCopy: { flex: 1, minWidth: 0 },
-    resultPrimary: { color: '#F3F4F6', fontSize: ox(14), fontWeight: '500' },
-    resultSecondary: { color: '#6B7280', fontSize: ox(11), marginTop: ox(2) },
+    listIcon: { marginRight: ox(6) },
+    resultPrimary: { color: UCL_TEXT_PRIMARY, fontSize: ox(14), fontWeight: '600' },
+    resultSecondary: { color: UCL_TEXT_SECONDARY, fontSize: ox(11), marginTop: ox(2) },
     liveDropBadge: {
         alignSelf: 'center',
         flexDirection: 'row',
@@ -620,10 +628,10 @@ const styles = StyleSheet.create({
         paddingRight: ox(6),
         minHeight: ox(54),
     },
-    searchIcon: { marginRight: 8 },
+    searchIcon: { marginRight: 12 },
     searchInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(16),
         fontWeight: '400',
         paddingVertical: ox(12),
