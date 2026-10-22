@@ -39,7 +39,7 @@ class ChatGroupController extends Controller
                 'avatar_url' => $g->avatar_url,
                 'conversation_id' => $g->conversation_id,
                 'creator_id' => $g->creator_id,
-                'is_admin' => $g->creator_id === Auth::id(),
+                'is_admin' => $g->isAdmin($user),
                 'role' => $m->role,
                 'member_count' => $g->activeMembers()->count(),
                 'created_at' => $g->created_at,
@@ -156,6 +156,10 @@ class ChatGroupController extends Controller
 
         if (! $group->hasActiveMember($user)) {
             return response()->json(['error' => 'You are not a member of this group'], 403);
+        }
+
+        if (! $group->isAdmin($user)) {
+            return response()->json(['error' => 'Only group admins can send invites.'], 403);
         }
 
         // Invites are notification-based (accept/decline). Do not reuse DM

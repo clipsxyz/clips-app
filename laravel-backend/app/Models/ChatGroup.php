@@ -69,7 +69,14 @@ class ChatGroup extends Model
 
     public function isAdmin(User $user): bool
     {
-        return $this->creator_id === $user->id;
+        if ($this->creator_id === $user->id) {
+            return true;
+        }
+
+        return $this->activeMembers()
+            ->where('user_id', $user->id)
+            ->where('role', 'admin')
+            ->exists();
     }
 
     public function hasActiveMember(User $user): bool

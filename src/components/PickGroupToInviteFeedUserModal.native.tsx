@@ -13,10 +13,12 @@ import { useAuth } from '../context/Auth';
 import {
     fetchMyChatGroups,
     inviteUserToChatGroup,
+    isChatGroupAdmin,
     type ChatGroupSummary,
 } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_GROUP } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
+import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
 function normalizeHandle(h: string): string {
     return h.trim().replace(/^@/g, '').split(/\s+/)[0] || '';
@@ -42,7 +44,9 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
         setLoading(true);
         void fetchMyChatGroups(user.handle)
             .then((items) => {
-                if (!cancelled) setGroups(items ?? []);
+                if (!cancelled) {
+                    setGroups((items ?? []).filter((g) => isChatGroupAdmin(g, user?.id)));
+                }
             })
             .catch(() => {
                 if (!cancelled) {
@@ -56,12 +60,16 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
         return () => {
             cancelled = true;
         };
-    }, [visible, user?.handle]);
+    }, [visible, user?.handle, user?.id]);
 
     const invite = useCallback(
         async (g: ChatGroupSummary) => {
             if (!normalizedInvitee) {
                 Alert.alert('Invite', 'Invalid username');
+                return;
+            }
+            if (!isChatGroupAdmin(g, user?.id)) {
+                Alert.alert('Invite', 'Only group admins can send invites.');
                 return;
             }
             if (normalizeHandle(user?.handle || '') === normalizedInvitee) {
@@ -103,7 +111,7 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
                 {invitingId === g.id ? (
                     <ActivityIndicator size="small" color="#93C5FD" />
                 ) : (
-                    <Icon name="chevron-forward" size={18} color="#6B7280" />
+                    <Icon name="chevron-forward" size={18} color="#64748B" />
                 )}
             </TouchableOpacity>
         ),
@@ -116,15 +124,15 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
             onDismiss={onClose}
             snapPoints={['70%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_GROUP.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_GROUP.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             backdropOpacity={0.65}
         >
             <BottomSheetView style={styles.headerBlock}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Invite to a group</Text>
                     <TouchableOpacity onPress={onClose}>
-                        <Icon name="close" size={24} color="#FFF" />
+                        <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
                 <Text style={styles.subtitle}>
@@ -139,7 +147,7 @@ export default function PickGroupToInviteFeedUserModal({ visible, onClose, invit
             ) : groups.length === 0 ? (
                 <BottomSheetView>
                     <Text style={styles.empty}>
-                        No groups yet. Create one from post options first.
+                        Only groups you admin can receive invites. Create a group from post options first.
                     </Text>
                 </BottomSheetView>
             ) : (
@@ -166,8 +174,8 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255,255,255,0.08)',
     },
-    title: { color: '#FFF', fontSize: 17, fontWeight: '700' },
-    subtitle: { color: '#9CA3AF', fontSize: 13, paddingHorizontal: 16, paddingTop: 8 },
+    title: { color: UCL_TEXT_PRIMARY, fontSize: 17, fontWeight: '600' },
+    subtitle: { color: '#E2E8F0', fontSize: 13, paddingHorizontal: 16, paddingTop: 8 },
     list: { paddingHorizontal: 8, paddingBottom: 24 },
     row: {
         flexDirection: 'row',
@@ -176,6 +184,6 @@ const styles = StyleSheet.create({
         padding: 14,
         borderRadius: 10,
     },
-    rowName: { flex: 1, color: '#FFF', fontSize: 15, fontWeight: '600' },
-    empty: { color: '#9CA3AF', textAlign: 'center', padding: 32, fontSize: 14 },
+    rowName: { flex: 1, color: UCL_TEXT_PRIMARY, fontSize: 15, fontWeight: '600' },
+    empty: { color: UCL_TEXT_PLACEHOLDER, textAlign: 'center', padding: 32, fontSize: 14 },
 });

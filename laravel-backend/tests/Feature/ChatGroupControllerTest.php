@@ -76,6 +76,33 @@ class ChatGroupControllerTest extends TestCase
             ->assertJson(['error' => 'Cannot invite yourself']);
     }
 
+    public function test_invite_rejects_regular_member(): void
+    {
+        $creator = User::factory()->create(['handle' => 'gazetteer@dublin']);
+        $member = User::factory()->create(['handle' => 'ava@galway']);
+        $invitee = User::factory()->create(['handle' => 'barry@cork']);
+        $group = $this->makeGroupWithMember($creator, 'Cork crew');
+        ChatGroupMember::create([
+            'chat_group_id' => $group->id,
+            'user_id' => $member->id,
+            'role' => 'member',
+        ]);
+
+        $response = $this->actingAs($member, 'sanctum')
+            ->postJson("/api/chat-groups/{$group->id}/invites", [
+                'invitee_handle' => 'barry@cork',
+            ]);
+
+        $response->assertStatus(403)
+            ->assertJson(['error' => 'Only group admins can send invites.']);
+
+        $this->assertDatabaseMissing('chat_group_invites', [
+            'chat_group_id' => $group->id,
+            'inviter_id' => $member->id,
+            'invitee_id' => $invitee->id,
+        ]);
+    }
+
     public function test_invite_rejects_existing_member(): void
     {
         $inviter = User::factory()->create(['handle' => 'gazetteer@dublin']);

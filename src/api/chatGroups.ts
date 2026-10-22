@@ -14,6 +14,16 @@ export interface ChatGroupSummary {
   created_at?: string;
 }
 
+export function isChatGroupAdmin(
+  group: Pick<ChatGroupSummary, 'is_admin' | 'role' | 'creator_id'> | null | undefined,
+  viewerId?: string | null,
+): boolean {
+  if (!group) return false;
+  if (group.is_admin === true || group.role === 'admin') return true;
+  if (viewerId && group.creator_id && String(group.creator_id) === String(viewerId)) return true;
+  return false;
+}
+
 export interface ChatGroupInviteRow {
   id: string;
   chat_group_id: string;

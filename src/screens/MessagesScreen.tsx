@@ -46,7 +46,13 @@ import {
     deleteConversation,
     type ChatMessage,
 } from '../api/messages';
-import { createChatGroup, inviteUserToChatGroup, leaveChatGroup } from '../api/chatGroups';
+import {
+    createChatGroup,
+    fetchMyChatGroups,
+    inviteUserToChatGroup,
+    isChatGroupAdmin,
+    leaveChatGroup,
+} from '../api/chatGroups';
 import { connectSocket, joinGroupChat, leaveGroupChat } from '../services/socketio';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
@@ -68,7 +74,11 @@ import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import PassportSheetCanvas from '../components/PassportSheetCanvas.native';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/GazetteerMenuSheet.native';
 import DmMessageActionsSheet, { type DmMessageAction } from '../components/DmMessageActionsSheet.native';
 import DmReactionFlyOverlay, {
@@ -916,6 +926,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [newGroupAvatarDataUrl, setNewGroupAvatarDataUrl] = useState<string | undefined>(undefined);
     const [creatingGroup, setCreatingGroup] = useState(false);
     const [inviteOpen, setInviteOpen] = useState(false);
+    const [isGroupAdmin, setIsGroupAdmin] = useState(false);
     const [inviteHandle, setInviteHandle] = useState('');
     const [inviteBusy, setInviteBusy] = useState(false);
     const [inviteSuggestions, setInviteSuggestions] = useState<Array<{ handle: string; displayName?: string; avatarUrl?: string }>>([]);
@@ -1342,6 +1353,29 @@ export default function MessagesScreen({ route, navigation }: any) {
             }
         };
     }, [user?.handle, handle, chatGroupId, isGroupThread]);
+
+    useEffect(() => {
+        if (!isGroupThread || !chatGroupId) {
+            setIsGroupAdmin(false);
+            return;
+        }
+        let cancelled = false;
+        void fetchMyChatGroups(user?.handle)
+            .then((groups) => {
+                if (cancelled) return;
+                const current = (groups || []).find((g) => String(g.id) === String(chatGroupId));
+                const admin = isChatGroupAdmin(current, user?.id);
+                setIsGroupAdmin(admin);
+                if (current?.name?.trim()) setGroupName(current.name.trim());
+                if (current?.avatar_url) setGroupAvatarUrl(current.avatar_url);
+            })
+            .catch(() => {
+                if (!cancelled) setIsGroupAdmin(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isGroupThread, chatGroupId, user?.handle, user?.id]);
 
     useEffect(() => {
         if (!inviteOpen) return;
@@ -2317,6 +2351,15 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     const handleInviteMember = async () => {
         if (!chatGroupId || inviteBusy) return;
+        if (!isGroupAdmin) {
+            showAlert({
+                title: 'Invite failed',
+                message: 'Only group admins can send invites.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
         const normalized = inviteHandle.trim().replace(/^@/, '');
         if (!normalized) {
             showAlert({
@@ -2345,10 +2388,18 @@ export default function MessagesScreen({ route, navigation }: any) {
                 confirmButtonText: 'OK',
             });
         } catch (error) {
-            console.error('Invite failed:', error);
+            const apiBody =
+                error && typeof error === 'object' && 'response' in error
+                    ? (error as { response?: { error?: string; message?: string; errors?: unknown } }).response
+                    : undefined;
+            console.error('Invite failed:', error, apiBody);
+            const apiMessage =
+                (typeof apiBody?.message === 'string' && apiBody.message) ||
+                (typeof apiBody?.error === 'string' && apiBody.error) ||
+                (error instanceof Error ? error.message : null);
             showAlert({
                 title: 'Invite failed',
-                message: error instanceof Error ? error.message : 'Could not send invite right now.',
+                message: apiMessage || 'Could not send invite right now.',
                 icon: 'alert',
                 confirmButtonText: 'OK',
             });
@@ -3043,7 +3094,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                             <Icon name="location-outline" size={ox(22)} color="#FFFFFF" />
                         </TouchableOpacity>
                     ) : null}
-                    {isGroupThread ? (
+                    {isGroupThread && isGroupAdmin ? (
                         <TouchableOpacity
                             onPress={() => setInviteOpen(true)}
                             style={styles.headerActionButton}
@@ -3369,14 +3420,14 @@ export default function MessagesScreen({ route, navigation }: any) {
                         { paddingBottom: Math.max(insets.bottom, 16) },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetCanvasInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetCanvasInner}>
                         <Text style={styles.sheetTitle}>Create group</Text>
                         <Text style={styles.sheetLabel}>Group name</Text>
                         <TextInput
                             value={newGroupName}
                             onChangeText={setNewGroupName}
                             placeholder="e.g. Dublin creators"
-                            placeholderTextColor="#6B7280"
+                            placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                             style={styles.sheetInput}
                             maxLength={80}
                         />
@@ -3422,21 +3473,21 @@ export default function MessagesScreen({ route, navigation }: any) {
                 </View>
             </View>
 
-            <View style={[styles.sheetOverlay, !inviteOpen && styles.hidden]}>
+            <View style={[styles.sheetOverlay, !(inviteOpen && isGroupAdmin) && styles.hidden]}>
                 <View
                     style={[
                         styles.sheetCard,
                         { paddingBottom: Math.max(insets.bottom, 16) },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetCanvasInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetCanvasInner}>
                         <Text style={styles.sheetTitle}>Invite member</Text>
                         <Text style={styles.sheetLabel}>Handle</Text>
                         <TextInput
                             value={inviteHandle}
                             onChangeText={setInviteHandle}
                             placeholder="@username"
-                            placeholderTextColor="#6B7280"
+                            placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                             style={styles.sheetInput}
                             autoCapitalize="none"
                             autoCorrect={false}
@@ -3503,11 +3554,11 @@ export default function MessagesScreen({ route, navigation }: any) {
                         { paddingBottom: Math.max(insets.bottom, 16) },
                     ]}
                 >
-                    <PassportSheetCanvas style={styles.chatInfoCanvas}>
+                    <PassportSheetCanvas tone="ucl" style={styles.chatInfoCanvas}>
                         <View style={styles.chatInfoHeader}>
                             <Text style={styles.chatInfoTitle}>Chat Info</Text>
                             <TouchableOpacity onPress={() => setShowChatInfo(false)}>
-                                <Icon name="close" size={ox(24)} color="#9CA3AF" />
+                                <Icon name="close" size={ox(24)} color={UCL_TEXT_PRIMARY} />
                             </TouchableOpacity>
                         </View>
                         {isGroupThread ? (
@@ -3528,8 +3579,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                                     </View>
                                 </View>
                                 <Text style={styles.chatInfoHint}>
-                                    To add people, use the + button in the chat header, or open someone&apos;s
-                                    profile and choose Invite to group.
+                                    {isGroupAdmin
+                                        ? "To add people, use the + button in the chat header, or open someone's profile and choose Invite to group."
+                                        : 'Only the group admin can invite people to this chat.'}
                                 </Text>
                                 <TouchableOpacity
                                     style={styles.leaveGroupBtn}
@@ -4431,7 +4483,7 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     chatInfoSheet: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         borderWidth: 1,
@@ -4454,9 +4506,9 @@ const styles = StyleSheet.create({
         borderBottomColor: 'rgba(255,255,255,0.12)',
     },
     chatInfoTitle: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(16),
-        fontWeight: '700',
+        fontWeight: '600',
     },
     chatInfoBody: {
         maxHeight: 480,
@@ -4476,17 +4528,17 @@ const styles = StyleSheet.create({
         minWidth: 0,
     },
     chatInfoName: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(18),
-        fontWeight: '700',
+        fontWeight: '600',
     },
     chatInfoSubtitle: {
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         fontSize: ox(14),
         marginTop: ox(2),
     },
     chatInfoHint: {
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(12),
         lineHeight: ox(18),
         marginBottom: ox(16),
@@ -4505,12 +4557,12 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     dmBubbleLabel: {
-        color: '#6B7280',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(12),
         marginBottom: ox(4),
     },
     dmBubbleHint: {
-        color: '#6B7280',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(11),
         marginBottom: ox(8),
     },
@@ -4563,7 +4615,7 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     sheetCard: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
         borderWidth: 1,
@@ -4575,13 +4627,13 @@ const styles = StyleSheet.create({
         padding: ox(16),
     },
     sheetTitle: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(18),
-        fontWeight: '700',
+        fontWeight: '600',
         marginBottom: ox(12),
     },
     sheetLabel: {
-        color: 'rgba(232,238,242,0.72)',
+        color: '#E2E8F0',
         fontSize: ox(13),
         marginBottom: ox(6),
     },
@@ -4590,7 +4642,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(10),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.12)',
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         paddingHorizontal: ox(12),
         paddingVertical: ox(10),
         fontSize: ox(14),
@@ -4656,11 +4708,11 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     suggestionName: {
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         fontSize: ox(12),
     },
     suggestionsHint: {
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(12),
         marginBottom: ox(12),
     },
