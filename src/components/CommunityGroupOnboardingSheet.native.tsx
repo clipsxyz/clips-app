@@ -12,7 +12,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import { COMMUNITY_GROUP_ONBOARDING } from '../constants/communityGroupOnboarding';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_CYAN,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 type Props = {
@@ -85,7 +89,7 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                         },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetInner}>
                         <TouchableOpacity
                             style={styles.closeButton}
                             onPress={onDismiss}
@@ -93,7 +97,7 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                             accessibilityRole="button"
                             accessibilityLabel="Close community group introduction"
                         >
-                            <Icon name="close" size={ox(22)} color="#FFFFFF" />
+                            <Icon name="close" size={ox(22)} color={UCL_TEXT_PRIMARY} />
                         </TouchableOpacity>
                         <View style={styles.handleWrap}>
                             <View style={styles.handle} />
@@ -155,7 +159,7 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                                 {copy.features.map((feature) => (
                                     <View key={feature.title} style={styles.featureRow}>
                                         <View style={styles.featureIcon}>
-                                            <Icon name={feature.icon} size={ox(20)} color="#FFFFFF" />
+                                            <Icon name={feature.icon} size={ox(20)} color={UCL_TEXT_PRIMARY} />
                                         </View>
                                         <View style={styles.featureCopy}>
                                             <Text style={styles.featureTitle}>{feature.title}</Text>
@@ -190,10 +194,10 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         overflow: 'hidden',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(0, 242, 255, 0.3)',
     },
     sheetInner: {
         paddingHorizontal: 20,
@@ -221,7 +225,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.28)',
+        backgroundColor: UCL_CYAN,
     },
     scroll: {
         paddingBottom: 8,
@@ -331,9 +335,11 @@ const styles = StyleSheet.create({
     },
     outgoingBubble: {
         maxWidth: '70%',
-        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        backgroundColor: 'rgba(0, 242, 255, 0.22)',
         borderRadius: 16,
         borderBottomRightRadius: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 242, 255, 0.4)',
         paddingHorizontal: 12,
         paddingVertical: 8,
     },
@@ -361,19 +367,19 @@ const styles = StyleSheet.create({
         fontSize: 13,
     },
     badgeText: {
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_CYAN,
         fontSize: 13,
         fontWeight: '700',
     },
     title: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 22,
-        fontWeight: '800',
+        fontWeight: '600',
         textAlign: 'center',
         marginBottom: 6,
     },
     subtitle: {
-        color: 'rgba(232,238,242,0.78)',
+        color: '#E2E8F0',
         fontSize: 14,
         lineHeight: 20,
         textAlign: 'center',
@@ -390,9 +396,9 @@ const styles = StyleSheet.create({
         gap: 12,
         padding: 12,
         borderRadius: 12,
-        backgroundColor: 'rgba(255,255,255,0.05)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     featureIcon: {
         width: ox(38),
@@ -400,33 +406,33 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(61,155,143,0.22)',
+        backgroundColor: 'rgba(0, 242, 255, 0.12)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(0, 242, 255, 0.28)',
     },
     featureCopy: {
         flex: 1,
         minWidth: 0,
     },
     featureTitle: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 14,
-        fontWeight: '700',
+        fontWeight: '600',
         marginBottom: 2,
     },
     featureBody: {
-        color: 'rgba(232,238,242,0.62)',
+        color: '#E2E8F0',
         fontSize: 12,
         lineHeight: 17,
     },
     cta: {
         borderRadius: 999,
-        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        backgroundColor: UCL_CYAN,
         paddingVertical: 14,
         alignItems: 'center',
     },
     ctaText: {
-        color: '#FFFFFF',
+        color: UCL_CANVAS_NAVY,
         fontSize: 15,
         fontWeight: '700',
     },

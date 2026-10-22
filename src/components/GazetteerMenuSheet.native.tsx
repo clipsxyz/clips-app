@@ -13,7 +13,11 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_CYAN,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 export type GazetteerMenuOption = {
     label: string;
@@ -95,7 +99,7 @@ export default function GazetteerMenuSheet({
                         },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetInner}>
                         <View style={styles.handleWrap}>
                             <View style={styles.handle} />
                         </View>
@@ -122,7 +126,7 @@ export default function GazetteerMenuSheet({
                                             <Icon
                                                 name={option.icon}
                                                 size={20}
-                                                color="#FFFFFF"
+                                                color={UCL_TEXT_PRIMARY}
                                             />
                                         </View>
                                     ) : null}
@@ -164,10 +168,10 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         overflow: 'hidden',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(0, 242, 255, 0.3)',
     },
     sheetInner: {
         paddingHorizontal: 20,
@@ -181,27 +185,27 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.28)',
+        backgroundColor: UCL_CYAN,
     },
     gazetteerLabel: {
         fontSize: 12,
         fontWeight: '600',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_CYAN,
         textAlign: 'center',
         marginBottom: 10,
     },
     title: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
         textAlign: 'center',
         marginBottom: 6,
     },
     subtitle: {
         fontSize: 14,
-        color: 'rgba(232,238,242,0.72)',
+        color: '#E2E8F0',
         textAlign: 'center',
         lineHeight: 20,
         marginBottom: 12,
@@ -230,14 +234,14 @@ const styles = StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: 'rgba(61, 155, 143, 0.22)',
+        backgroundColor: 'rgba(0, 242, 255, 0.12)',
         borderWidth: 1,
-        borderColor: 'rgba(61, 155, 143, 0.45)',
+        borderColor: 'rgba(0, 242, 255, 0.28)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     optionText: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 15,
         fontWeight: '600',
         textAlign: 'center',
@@ -252,7 +256,8 @@ const styles = StyleSheet.create({
     cancelBtn: {
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         paddingVertical: 14,
         alignItems: 'center',
         marginTop: 4,
@@ -260,6 +265,6 @@ const styles = StyleSheet.create({
     cancelBtnText: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
     },
 });
