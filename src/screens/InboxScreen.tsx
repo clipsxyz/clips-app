@@ -52,6 +52,14 @@ import {
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 import { connectSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
+import {
+    acceptChatGroupInvite,
+    declineChatGroupInvite,
+    fetchPendingGroupInvites,
+    pendingInviteGroupName,
+    pendingInviteInviterHandle,
+    type ChatGroupInviteRow,
+} from '../api/chatGroups';
 import { ox } from '../constants/nativeOpticalScale';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
 
@@ -98,6 +106,8 @@ export default function InboxScreen({ navigation, route }: any) {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unavailableStoryIds, setUnavailableStoryIds] = useState<Set<string>>(new Set());
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+    const [pendingInvites, setPendingInvites] = useState<ChatGroupInviteRow[]>([]);
+    const [actingInviteId, setActingInviteId] = useState<string | null>(null);
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<InboxTab>('messages');
@@ -338,10 +348,26 @@ export default function InboxScreen({ navigation, route }: any) {
             setLoading(true);
         }
         try {
-            const [notifs, storyInsights] = await Promise.all([
+            const [notifs, storyInsights, pending] = await Promise.all([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
+                fetchPendingGroupInvites(),
             ]);
+            const pendingRows = Array.isArray(pending) ? pending : [];
+            setPendingInvites(pendingRows);
+            const pendingById = new Map(pendingRows.map((row) => [row.id, row]));
+            const hydratedNotifs = notifs.map((n) => {
+                if (n.type !== 'group_invite') return n;
+                const row = n.chatGroupInviteId ? pendingById.get(n.chatGroupInviteId) : undefined;
+                if (!row) return n;
+                return {
+                    ...n,
+                    chatGroupInviteId: n.chatGroupInviteId || row.id,
+                    chatGroupId: n.chatGroupId || row.chat_group_id,
+                    groupName: n.groupName || pendingInviteGroupName(row),
+                    fromHandle: n.fromHandle || pendingInviteInviterHandle(row),
+                };
+            });
             const storyReplyNotifs = notifs.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
             if (storyReplyNotifs.length > 0) {
                 const handles = Array.from(new Set(storyReplyNotifs.map((n) => n.fromHandle)));
@@ -369,7 +395,7 @@ export default function InboxScreen({ navigation, route }: any) {
             } else {
                 setUnavailableStoryIds(new Set());
             }
-            setNotifications(notifs);
+            setNotifications(hydratedNotifs);
             setInsights(storyInsights);
             const convs = await listConversations(user.handle);
             setConversations(Array.isArray(convs) ? convs : []);
@@ -513,6 +539,10 @@ export default function InboxScreen({ navigation, route }: any) {
             return;
         }
 
+        if (notif.type === 'group_invite') {
+            return;
+        }
+
         if (notif.chatGroupId && user?.handle) {
             await markGroupConversationReadById(notif.chatGroupId, user.handle);
             navigateToMessages({ chatGroupId: notif.chatGroupId, kind: 'group' });
@@ -597,6 +627,47 @@ export default function InboxScreen({ navigation, route }: any) {
         } catch (error) {
             console.error('Failed to accept follow request:', error);
             Alert.alert('Error', 'Failed to accept follow request.');
+        }
+    };
+
+    const handleAcceptGroupInvite = async (inviteId: string) => {
+        if (!inviteId || actingInviteId) return;
+        setActingInviteId(inviteId);
+        try {
+            await acceptChatGroupInvite(inviteId);
+            setPendingInvites((prev) => prev.filter((row) => row.id !== inviteId));
+            setNotifications((prev) =>
+                prev.filter((n) => n.type !== 'group_invite' || n.chatGroupInviteId !== inviteId),
+            );
+            await loadData({ silent: true });
+        } catch (error) {
+            console.error('Failed to accept group invite:', error);
+            Alert.alert(
+                'Invite',
+                error instanceof Error ? error.message : 'Could not accept this invite.',
+            );
+        } finally {
+            setActingInviteId(null);
+        }
+    };
+
+    const handleDeclineGroupInvite = async (inviteId: string) => {
+        if (!inviteId || actingInviteId) return;
+        setActingInviteId(inviteId);
+        try {
+            await declineChatGroupInvite(inviteId);
+            setPendingInvites((prev) => prev.filter((row) => row.id !== inviteId));
+            setNotifications((prev) =>
+                prev.filter((n) => n.type !== 'group_invite' || n.chatGroupInviteId !== inviteId),
+            );
+        } catch (error) {
+            console.error('Failed to decline group invite:', error);
+            Alert.alert(
+                'Invite',
+                error instanceof Error ? error.message : 'Could not decline this invite.',
+            );
+        } finally {
+            setActingInviteId(null);
         }
     };
 
@@ -696,6 +767,8 @@ export default function InboxScreen({ navigation, route }: any) {
                 return `wants to follow you`;
             case 'new_post':
                 return notif.message || 'posted a new clip';
+            case 'group_invite':
+                return notif.message || `invited you to join ${notif.groupName || 'a group'}`;
             default:
                 return notif.message || '';
         }
@@ -713,6 +786,8 @@ export default function InboxScreen({ navigation, route }: any) {
                 return 'chatbubble';
             case 'follow_request':
                 return 'person-add';
+            case 'group_invite':
+                return 'people';
             default:
                 return 'notifications';
         }
@@ -1028,9 +1103,13 @@ export default function InboxScreen({ navigation, route }: any) {
                     style={[styles.tab, activeTab === 'groups' && styles.tabActive]}
                 >
                     <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>Groups</Text>
-                    {unreadGroups > 0 && (
+                    {(unreadGroups > 0 || pendingInvites.length > 0) && (
                         <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadGroups > 9 ? '9+' : unreadGroups}</Text>
+                            <Text style={styles.badgeText}>
+                                {unreadGroups + pendingInvites.length > 9
+                                    ? '9+'
+                                    : unreadGroups + pendingInvites.length}
+                            </Text>
                         </View>
                     )}
                 </TouchableOpacity>
@@ -1102,7 +1181,9 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </Text>
                                     <View style={styles.notifKindChip}>
                                         <Text style={styles.notifKindChipText}>
-                                            {item.chatGroupId
+                                            {item.type === 'group_invite'
+                                                ? 'Invite'
+                                                : item.chatGroupId
                                                 ? 'Group'
                                                 : item.postId && (item.type === 'comment' || item.type === 'reply') && !item.storyId
                                                     ? 'Comment'
@@ -1130,6 +1211,26 @@ export default function InboxScreen({ navigation, route }: any) {
                                             onPress={() => { void handleDenyFollowRequest(item); }}
                                         >
                                             <Text style={styles.followRequestDenyText}>Deny</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                                {item.type === 'group_invite' && !!item.chatGroupInviteId && (
+                                    <View style={styles.followRequestActions}>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
+                                            disabled={actingInviteId === item.chatGroupInviteId}
+                                            onPress={() => { void handleAcceptGroupInvite(item.chatGroupInviteId!); }}
+                                        >
+                                            <Text style={styles.followRequestAcceptText}>
+                                                {actingInviteId === item.chatGroupInviteId ? '…' : 'Accept'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
+                                            disabled={actingInviteId === item.chatGroupInviteId}
+                                            onPress={() => { void handleDeclineGroupInvite(item.chatGroupInviteId!); }}
+                                        >
+                                            <Text style={styles.followRequestDenyText}>Decline</Text>
                                         </TouchableOpacity>
                                     </View>
                                 )}
@@ -1336,13 +1437,77 @@ export default function InboxScreen({ navigation, route }: any) {
                             tintColor="#FFFFFF"
                         />
                     }
+                    ListHeaderComponent={
+                        pendingInvites.length > 0 ? (
+                            <View style={styles.pendingInvitesWrap}>
+                                <Text style={styles.sectionHeader}>Pending Group Invites</Text>
+                                {pendingInvites.map((invite) => {
+                                    const inviterHandle = pendingInviteInviterHandle(invite);
+                                    const groupName = pendingInviteGroupName(invite);
+                                    const busy = actingInviteId === invite.id;
+                                    return (
+                                        <View key={invite.id} style={styles.pendingInviteCard}>
+                                            <Avatar
+                                                src={
+                                                    invite.inviter?.avatar_url ||
+                                                    (inviterHandle ? getAvatarForHandle(inviterHandle) : undefined)
+                                                }
+                                                name={invite.inviter?.display_name || inviterHandle || groupName}
+                                                size={ox(40)}
+                                                cornerRadius={ox(12)}
+                                            />
+                                            <View style={styles.itemContent}>
+                                                <Text style={styles.itemTitle} numberOfLines={1}>
+                                                    {groupName}
+                                                </Text>
+                                                <Text style={styles.itemMessage} numberOfLines={2}>
+                                                    {inviterHandle
+                                                        ? `@${inviterHandle} invited you to join`
+                                                        : 'You were invited to join this group'}
+                                                </Text>
+                                                <View style={styles.followRequestActions}>
+                                                    <TouchableOpacity
+                                                        style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
+                                                        disabled={busy}
+                                                        onPress={() => { void handleAcceptGroupInvite(invite.id); }}
+                                                    >
+                                                        <Text style={styles.followRequestAcceptText}>
+                                                            {busy ? '…' : 'Accept'}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
+                                                        disabled={busy}
+                                                        onPress={() => { void handleDeclineGroupInvite(invite.id); }}
+                                                    >
+                                                        <Text style={styles.followRequestDenyText}>Decline</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    );
+                                })}
+                                {groupMessages.length > 0 ? (
+                                    <Text style={styles.sectionHeader}>Your groups</Text>
+                                ) : null}
+                            </View>
+                        ) : null
+                    }
                     renderItem={({ item }) => renderConversationRow(item)}
                     ListEmptyComponent={
-                        <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>
-                                No group chats yet. Use New group on your profile or Create group on your own post (⋯ menu), then invite people from the + button in the group or from their profile.
-                            </Text>
-                        </View>
+                        pendingInvites.length > 0 ? (
+                            <View style={styles.emptyContainer}>
+                                <Text style={styles.emptyText}>
+                                    Accept an invite above to join the group chat.
+                                </Text>
+                            </View>
+                        ) : (
+                            <View style={styles.emptyContainer}>
+                                <Text style={styles.emptyText}>
+                                    No group chats yet. Use New group on your profile or Create group on your own post (⋯ menu), then invite people from the + button in the group or from their profile.
+                                </Text>
+                            </View>
+                        )
                     }
                 />
             ) : (
@@ -1877,6 +2042,22 @@ const styles = StyleSheet.create({
         color: '#111827',
         fontSize: ox(10),
         fontWeight: '700',
+    },
+    pendingInvitesWrap: {
+        paddingBottom: ox(4),
+    },
+    pendingInviteCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        paddingHorizontal: ox(10),
+        paddingVertical: ox(12),
+        marginHorizontal: ox(6),
+        marginBottom: ox(8),
+        borderRadius: ox(12),
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.16)',
+        gap: ox(10),
     },
     emptyContainer: {
         flex: 1,

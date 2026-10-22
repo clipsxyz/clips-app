@@ -226,6 +226,30 @@ class User extends Authenticatable
         return $this->followers()->where('follower_id', $sender->id)->exists();
     }
 
+    /**
+     * Resolve a user by handle (optional leading @, case-insensitive).
+     */
+    public static function findByHandle(?string $raw): ?self
+    {
+        $raw = trim((string) $raw);
+        if ($raw === '') {
+            return null;
+        }
+
+        $withoutAt = ltrim($raw, '@');
+        $withAt = '@'.$withoutAt;
+        $candidates = array_values(array_unique(array_filter([$raw, $withoutAt, $withAt])));
+
+        foreach ($candidates as $handle) {
+            $user = static::whereRaw('LOWER(handle) = ?', [mb_strtolower($handle)])->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        return null;
+    }
+
     public function hasLikedPost(Post $post)
     {
         return $this->postLikes()->where('post_id', $post->id)->exists();

@@ -140,7 +140,7 @@ class ChatGroupController extends Controller
     public function invite(Request $request, string $id): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'invitee_handle' => 'required|string|exists:users,handle',
+            'invitee_handle' => 'required|string|max:100',
         ]);
 
         if ($validator->fails()) {
@@ -158,7 +158,12 @@ class ChatGroupController extends Controller
             return response()->json(['error' => 'You are not a member of this group'], 403);
         }
 
-        $invitee = User::where('handle', $request->invitee_handle)->firstOrFail();
+        // Invites are notification-based (accept/decline). Do not reuse DM
+        // privacy (`canSendMessage`) — a private profile must still be invitable.
+        $invitee = User::findByHandle($request->invitee_handle);
+        if (! $invitee) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
 
         if ($invitee->id === $user->id) {
             return response()->json(['error' => 'Cannot invite yourself'], 400);
@@ -166,13 +171,6 @@ class ChatGroupController extends Controller
 
         if ($group->activeMembers()->where('user_id', $invitee->id)->exists()) {
             return response()->json(['error' => 'User is already in this group'], 400);
-        }
-
-        if (! $invitee->canSendMessage($user)) {
-            return response()->json([
-                'error' => 'Cannot invite this user',
-                'message' => 'Messaging is restricted for this account.',
-            ], 403);
         }
 
         $invite = DB::transaction(function () use ($group, $user, $invitee) {
@@ -202,7 +200,10 @@ class ChatGroupController extends Controller
             return $invite->load(['chatGroup', 'inviter', 'invitee']);
         });
 
-        return response()->json($invite, 201);
+        return response()->json([
+            ...$invite->toArray(),
+            'inviteeHandle' => $invitee->handle,
+        ], 201);
     }
 
     public function pendingInvites(Request $request): JsonResponse

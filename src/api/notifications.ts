@@ -9,7 +9,8 @@ export type NotificationType =
     | 'comment'
     | 'follow'
     | 'follow_request'
-    | 'new_post';
+    | 'new_post'
+    | 'group_invite';
 
 export interface Notification {
     id: string;
@@ -24,6 +25,7 @@ export interface Notification {
     storyContextText?: string;
     storyContextOwner?: string;
     chatGroupId?: string;
+    chatGroupInviteId?: string;
     groupName?: string;
     timestamp: number;
     read: boolean;
@@ -108,9 +110,53 @@ function normalizeNotificationChannel(notification: Pick<Notification, 'type' | 
             return 'follow_request' as const;
         case 'new_post':
             return 'follow' as const;
+        case 'group_invite':
+            return 'group_chat' as const;
         default:
             return 'dm' as const;
     }
+}
+
+function nestedInvitePayload(n: Record<string, any>) {
+    return n.chat_group_invite || n.chatGroupInvite || null;
+}
+
+function nestedGroupPayload(n: Record<string, any>) {
+    const invite = nestedInvitePayload(n);
+    return n.chat_group || n.chatGroup || invite?.chat_group || invite?.chatGroup || null;
+}
+
+export function normalizeLaravelNotification(n: Record<string, any>, forHandle: string): Notification {
+    const invite = nestedInvitePayload(n);
+    const group = nestedGroupPayload(n);
+    const chatGroupInviteId =
+        n.chat_group_invite_id || n.chatGroupInviteId || invite?.id || undefined;
+    const chatGroupId =
+        n.chat_group_id ||
+        n.chatGroupId ||
+        invite?.chat_group_id ||
+        invite?.chatGroupId ||
+        group?.id ||
+        undefined;
+    const groupName = n.group_name || n.groupName || group?.name || undefined;
+    return {
+        id: n.id,
+        type: n.type,
+        fromHandle: n.from_handle || n.fromHandle || '',
+        toHandle: n.to_handle || n.toHandle || forHandle,
+        message: n.message || undefined,
+        postId: n.post_id || n.postId || undefined,
+        commentId: n.comment_id || n.commentId || undefined,
+        storyId: n.story_id || n.storyId || undefined,
+        imageUrl: n.image_url || n.imageUrl || undefined,
+        storyContextText: n.story_context_text || n.storyContextText || undefined,
+        storyContextOwner: n.story_context_owner || n.storyContextOwner || undefined,
+        chatGroupId: chatGroupId || undefined,
+        chatGroupInviteId: chatGroupInviteId || undefined,
+        groupName: groupName || undefined,
+        timestamp: n.created_at ? new Date(n.created_at).getTime() : n.timestamp || Date.now(),
+        read: !!n.read,
+    };
 }
 
 function filterNotificationsByPreferences(forHandle: string, items: Notification[]): Notification[] {
@@ -133,23 +179,7 @@ export async function getNotifications(forHandle: string): Promise<Notification[
             const apiClient = await import('./client');
             const response = await apiClient.fetchNotifications(0, 100);
             const items = Array.isArray(response?.items) ? response.items : [];
-            const normalized = items.map((n: any) => ({
-                id: n.id,
-                type: n.type,
-                fromHandle: n.from_handle || '',
-                toHandle: n.to_handle || forHandle,
-                message: n.message || undefined,
-                postId: n.post_id || undefined,
-                commentId: n.comment_id || undefined,
-                storyId: n.story_id || undefined,
-                imageUrl: n.image_url || undefined,
-                storyContextText: n.story_context_text || undefined,
-                storyContextOwner: n.story_context_owner || undefined,
-                chatGroupId: n.chat_group_id || undefined,
-                groupName: n.group_name || undefined,
-                timestamp: n.created_at ? new Date(n.created_at).getTime() : Date.now(),
-                read: !!n.read,
-            }));
+            const normalized = items.map((n: any) => normalizeLaravelNotification(n, forHandle));
             const local = notifications.get(forHandle) || [];
             const merged = [...local, ...normalized].sort((a, b) => b.timestamp - a.timestamp);
             const byId = new Map<string, Notification>();
