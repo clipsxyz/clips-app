@@ -16,16 +16,14 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import {
     UCL_CANVAS_NAVY,
-    UCL_CYAN,
-    UCL_MAGENTA,
-    UCL_SHEET_BORDER,
     UCL_SHEET_GRADIENT,
     UCL_SHEET_GRADIENT_LOCATIONS,
-    UCL_SHEET_ROW_BORDER,
-    UCL_SHEET_SURFACE,
-    UCL_SHEET_TEXT,
-    UCL_SHEET_TEXT_MUTED,
+    UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
+
+const ROW_ICON = UCL_TEXT_PRIMARY;
+const ROW_CHEVRON = '#64748B';
+const ROW_DANGER = '#F43F5E';
 
 export type PostOverflowMenuModalProps = {
     visible: boolean;
@@ -141,9 +139,9 @@ export default function PostOverflowMenuModal({
             onPress={onPress}
             disabled={disabled || busy}
         >
-            <Icon name={icon} size={22} color={danger ? UCL_MAGENTA : UCL_CYAN} />
+            <Icon name={icon} size={22} color={danger ? ROW_DANGER : ROW_ICON} />
             <Text style={[styles.rowLabel, danger && styles.rowLabelDanger]}>{label}</Text>
-            <Icon name="chevron-forward" size={18} color={UCL_SHEET_TEXT_MUTED} />
+            <Icon name="chevron-forward" size={18} color={ROW_CHEVRON} />
         </TouchableOpacity>
     );
 
@@ -161,7 +159,7 @@ export default function PostOverflowMenuModal({
                     <View style={styles.grabber} />
                     <Text style={styles.title}>Post options</Text>
                     {busy ? (
-                        <ActivityIndicator color={UCL_CYAN} style={{ marginVertical: 12 }} />
+                        <ActivityIndicator color={UCL_TEXT_PRIMARY} style={{ marginVertical: 12 }} />
                     ) : null}
                     <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
                         {isOwn && onCreateGroup ? (
@@ -389,7 +387,7 @@ const styles = StyleSheet.create({
         paddingBottom: 28,
         maxHeight: '72%',
         borderTopWidth: 1,
-        borderColor: UCL_SHEET_BORDER,
+        borderColor: 'rgba(255, 255, 255, 0.08)',
         overflow: 'hidden',
     },
     sheetCanvas: {
@@ -401,15 +399,14 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: UCL_CYAN,
-        opacity: 0.7,
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
         marginTop: 10,
         marginBottom: 8,
     },
     title: {
-        color: UCL_SHEET_TEXT,
+        color: UCL_TEXT_PRIMARY,
         fontSize: 16,
-        fontWeight: '700',
+        fontWeight: '600',
         paddingHorizontal: 20,
         paddingBottom: 8,
     },
@@ -423,20 +420,20 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         paddingHorizontal: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: UCL_SHEET_ROW_BORDER,
-        backgroundColor: UCL_SHEET_SURFACE,
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+        backgroundColor: 'transparent',
     },
     rowDisabled: {
         opacity: 0.35,
     },
     rowLabel: {
         flex: 1,
-        color: UCL_SHEET_TEXT,
+        color: UCL_TEXT_PRIMARY,
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: '500',
     },
     rowLabelDanger: {
-        color: UCL_MAGENTA,
+        color: ROW_DANGER,
     },
     cancelBtn: {
         marginTop: 12,
@@ -444,7 +441,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     cancelText: {
-        color: UCL_SHEET_TEXT_MUTED,
+        color: '#CBD5E1',
         fontSize: 16,
         fontWeight: '600',
     },
