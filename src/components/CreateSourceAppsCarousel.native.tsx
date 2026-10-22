@@ -10,6 +10,7 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Svg, { Defs, Path, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
+import { UCL_CYAN } from '../theme/gazetteerAmbientNative';
 
 const CAPCUT_APP_ICON = require('../assets/capcut-app-icon.jpg');
 
@@ -179,8 +180,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.09)',
-        backgroundColor: 'rgba(60,64,67,0.92)',
+        borderColor: UCL_CYAN,
+        backgroundColor: '#0F172A',
         paddingVertical: 4,
         paddingLeft: 4,
         paddingRight: 16,

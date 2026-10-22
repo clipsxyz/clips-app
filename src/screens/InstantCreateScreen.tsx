@@ -22,7 +22,14 @@ import GazetteerMenuSheet, { type GazetteerMenuOption } from '../components/Gaze
 import { CreateModeIcon } from '../components/CreateModeIcons.native';
 import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarousel.native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_CYAN,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import {
     ensureCameraCapturePermission,
 } from '../utils/galleryMediaPermissionsNative';
@@ -152,7 +159,7 @@ function OrbitModeItem({ item, idx, orbitAnim, centeredMode, onPress }: OrbitMod
                             <CreateModeIcon
                                 id={item.icon}
                                 size={isCentered ? ICON_CENTERED : ICON_IDLE}
-                                color={isCentered ? '#0B1220' : '#FFFFFF'}
+                                color={UCL_TEXT_PRIMARY}
                             />
                         </View>
                     </Animated.View>
@@ -524,10 +531,17 @@ export default function InstantCreateScreen({ navigation, route }: any) {
     return (
         <GazetteerScreenShell
             edges={['top']}
-            ambient
-            ambientVariant="passport"
+            ambient={false}
             style={styles.shell}
         >
+            {/* Page canvas only — UCL navy / purple wash. Create chrome is unchanged. */}
+            <LinearGradient
+                colors={[...UCL_SHEET_GRADIENT]}
+                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                start={{ x: 0.12, y: 0 }}
+                end={{ x: 0.88, y: 1 }}
+                style={styles.canvas}
+            >
             <LinearGradient
                 colors={['rgba(0,0,0,0.5)', 'transparent']}
                 style={styles.headerScrim}
@@ -622,6 +636,7 @@ export default function InstantCreateScreen({ navigation, route }: any) {
                 options={mediaSourceMenu?.options ?? []}
                 onDismiss={() => setMediaSourceMenu(null)}
             />
+            </LinearGradient>
         </GazetteerScreenShell>
     );
 }
@@ -629,7 +644,11 @@ export default function InstantCreateScreen({ navigation, route }: any) {
 const styles = StyleSheet.create({
     shell: {
         flex: 1,
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
+    },
+    canvas: {
+        flex: 1,
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     headerScrim: {
         position: 'absolute',
@@ -747,12 +766,12 @@ const styles = StyleSheet.create({
         height: TILE_IDLE,
     },
     modeTileActive: {
-        backgroundColor: '#F3F4F6',
-        borderColor: 'rgba(255,255,255,0.95)',
+        backgroundColor: 'rgba(15, 23, 42, 0.8)',
+        borderColor: 'rgba(0, 242, 255, 0.4)',
     },
     modeTileIdle: {
-        backgroundColor: 'rgba(0,0,0,0.85)',
-        borderColor: 'rgba(255,255,255,0.22)',
+        backgroundColor: 'rgba(255, 255, 255, 0.07)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     modePlus: {
         position: 'absolute',
@@ -762,15 +781,15 @@ const styles = StyleSheet.create({
         width: ox(28),
         height: ox(28),
         borderRadius: ox(14),
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
         borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.15)',
+        borderColor: UCL_CYAN,
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 2,
     },
     modePlusText: {
-        color: '#000000',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(14),
         fontWeight: '700',
     },
@@ -781,7 +800,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontSize: ox(13),
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#E2E8F0',
         includeFontPadding: false,
     },
     modeLabelActive: { opacity: 1 },
@@ -792,7 +811,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(16),
     },
     helperText: {
-        color: 'rgba(255,255,255,0.55)',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(11),
         lineHeight: ox(15),
         textAlign: 'center',
