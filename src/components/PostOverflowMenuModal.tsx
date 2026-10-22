@@ -9,12 +9,23 @@ import {
     ActivityIndicator,
     Alert,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { buildShareablePostUrl } from '../utils/shareUrls';
-import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_CYAN,
+    UCL_MAGENTA,
+    UCL_SHEET_BORDER,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_SHEET_ROW_BORDER,
+    UCL_SHEET_SURFACE,
+    UCL_SHEET_TEXT,
+    UCL_SHEET_TEXT_MUTED,
+} from '../theme/gazetteerAmbientNative';
 
 export type PostOverflowMenuModalProps = {
     visible: boolean;
@@ -130,9 +141,9 @@ export default function PostOverflowMenuModal({
             onPress={onPress}
             disabled={disabled || busy}
         >
-            <Icon name={icon} size={22} color={danger ? '#FCA5A5' : '#E5E7EB'} />
+            <Icon name={icon} size={22} color={danger ? UCL_MAGENTA : UCL_CYAN} />
             <Text style={[styles.rowLabel, danger && styles.rowLabelDanger]}>{label}</Text>
-            <Icon name="chevron-forward" size={18} color="#6B7280" />
+            <Icon name="chevron-forward" size={18} color={UCL_SHEET_TEXT_MUTED} />
         </TouchableOpacity>
     );
 
@@ -140,11 +151,17 @@ export default function PostOverflowMenuModal({
         <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
             <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
                 <TouchableOpacity activeOpacity={1} style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-                    <PassportSheetCanvas>
+                    <LinearGradient
+                        colors={[...UCL_SHEET_GRADIENT]}
+                        locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                        start={{ x: 0.15, y: 0 }}
+                        end={{ x: 0.9, y: 1 }}
+                        style={styles.sheetCanvas}
+                    >
                     <View style={styles.grabber} />
                     <Text style={styles.title}>Post options</Text>
                     {busy ? (
-                        <ActivityIndicator color={PASSPORT_PALETTE.wavePrimary} style={{ marginVertical: 12 }} />
+                        <ActivityIndicator color={UCL_CYAN} style={{ marginVertical: 12 }} />
                     ) : null}
                     <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
                         {isOwn && onCreateGroup ? (
@@ -352,7 +369,7 @@ export default function PostOverflowMenuModal({
                             <Text style={styles.cancelText}>Cancel</Text>
                         </TouchableOpacity>
                     </ScrollView>
-                    </PassportSheetCanvas>
+                    </LinearGradient>
                 </TouchableOpacity>
             </TouchableOpacity>
         </Modal>
@@ -362,17 +379,21 @@ export default function PostOverflowMenuModal({
 const styles = StyleSheet.create({
     backdrop: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        backgroundColor: 'rgba(3, 9, 27, 0.72)',
         justifyContent: 'flex-end',
     },
     sheet: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         paddingBottom: 28,
         maxHeight: '72%',
         borderTopWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: UCL_SHEET_BORDER,
+        overflow: 'hidden',
+    },
+    sheetCanvas: {
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     grabber: {
@@ -380,12 +401,13 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.28)',
+        backgroundColor: UCL_CYAN,
+        opacity: 0.7,
         marginTop: 10,
         marginBottom: 8,
     },
     title: {
-        color: '#fff',
+        color: UCL_SHEET_TEXT,
         fontSize: 16,
         fontWeight: '700',
         paddingHorizontal: 20,
@@ -401,19 +423,20 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         paddingHorizontal: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: UCL_SHEET_ROW_BORDER,
+        backgroundColor: UCL_SHEET_SURFACE,
     },
     rowDisabled: {
         opacity: 0.35,
     },
     rowLabel: {
         flex: 1,
-        color: '#F3F4F6',
+        color: UCL_SHEET_TEXT,
         fontSize: 16,
         fontWeight: '600',
     },
     rowLabelDanger: {
-        color: '#FCA5A5',
+        color: UCL_MAGENTA,
     },
     cancelBtn: {
         marginTop: 12,
@@ -421,7 +444,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     cancelText: {
-        color: '#9CA3AF',
+        color: UCL_SHEET_TEXT_MUTED,
         fontSize: 16,
         fontWeight: '600',
     },

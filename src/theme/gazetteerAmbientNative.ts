@@ -110,3 +110,20 @@ export const profileCardIconSurface = {
 
 /** Structural dividers on profile chrome (web `border-gray-800`). */
 export const profilePassportDivider = '#1F2937';
+
+/**
+ * Champions League test canvas — midnight navy + electric cyan + neon magenta/purple.
+ * Applied only to the Post options swal (`PostOverflowMenuModal`) until we promote it.
+ */
+export const UCL_CANVAS_NAVY = '#03091B';
+export const UCL_CANVAS_NAVY_MID = '#071330';
+export const UCL_CYAN = '#00F2FF';
+export const UCL_MAGENTA = '#FF0080';
+export const UCL_PURPLE = '#7000FF';
+export const UCL_SHEET_GRADIENT = ['#03091B', '#071330', '#160830', '#0A051C'] as const;
+export const UCL_SHEET_GRADIENT_LOCATIONS = [0, 0.42, 0.78, 1] as const;
+export const UCL_SHEET_BORDER = 'rgba(0, 242, 255, 0.45)';
+export const UCL_SHEET_ROW_BORDER = 'rgba(0, 242, 255, 0.14)';
+export const UCL_SHEET_SURFACE = 'rgba(0, 242, 255, 0.06)';
+export const UCL_SHEET_TEXT = '#F4FBFF';
+export const UCL_SHEET_TEXT_MUTED = 'rgba(0, 242, 255, 0.55)';
