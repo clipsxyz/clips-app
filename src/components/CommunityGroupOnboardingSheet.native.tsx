@@ -8,13 +8,13 @@ import {
     View,
     useWindowDimensions,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import { COMMUNITY_GROUP_ONBOARDING } from '../constants/communityGroupOnboarding';
 import {
     UCL_CANVAS_NAVY,
-    UCL_CYAN,
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
 import { ox } from '../constants/nativeOpticalScale';
@@ -67,8 +67,9 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
     const sheetLayout = useMemo(() => {
         const sheetWidth = Math.min(width - 24, 400);
         const marginHorizontal = Math.max(12, Math.floor((width - sheetWidth) / 2));
-        return { sheetWidth, marginHorizontal, maxHeight: Math.round(height * 0.92) };
+        return { sheetWidth, marginHorizontal, height: Math.round(height * 0.85) };
     }, [width, height]);
+    const footerPadBottom = Math.max(insets.bottom, 24);
 
     if (!visible) return null;
 
@@ -84,12 +85,11 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                         {
                             marginHorizontal: sheetLayout.marginHorizontal,
                             width: sheetLayout.sheetWidth,
-                            maxHeight: sheetLayout.maxHeight,
-                            paddingBottom: Math.max(insets.bottom, 16),
+                            height: sheetLayout.height,
                         },
                     ]}
                 >
-                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetInner}>
+                    <PassportSheetCanvas tone="ucl" style={styles.sheetCanvas} contentStyle={styles.sheetInner}>
                         <TouchableOpacity
                             style={styles.closeButton}
                             onPress={onDismiss}
@@ -104,6 +104,7 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                         </View>
 
                         <ScrollView
+                            style={styles.scrollFlex}
                             bounces={false}
                             showsVerticalScrollIndicator={false}
                             contentContainerStyle={styles.scroll}
@@ -168,11 +169,17 @@ export default function CommunityGroupOnboardingSheet({ visible, onCreateGroup, 
                                     </View>
                                 ))}
                             </View>
+                        </ScrollView>
 
+                        <LinearGradient
+                            pointerEvents="box-none"
+                            colors={['rgba(3, 9, 27, 0)', UCL_CANVAS_NAVY]}
+                            style={[styles.ctaFooter, { paddingBottom: footerPadBottom }]}
+                        >
                             <TouchableOpacity style={styles.cta} onPress={onCreateGroup} activeOpacity={0.88}>
                                 <Text style={styles.ctaText}>{copy.cta}</Text>
                             </TouchableOpacity>
-                        </ScrollView>
+                        </LinearGradient>
                     </PassportSheetCanvas>
                 </View>
             </View>
@@ -197,9 +204,13 @@ const styles = StyleSheet.create({
         backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(0, 242, 255, 0.3)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
+    },
+    sheetCanvas: {
+        flex: 1,
     },
     sheetInner: {
+        flex: 1,
         paddingHorizontal: 20,
         paddingTop: 4,
     },
@@ -225,10 +236,23 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: UCL_CYAN,
+        backgroundColor: UCL_TEXT_PRIMARY,
+    },
+    scrollFlex: {
+        flex: 1,
     },
     scroll: {
-        paddingBottom: 8,
+        paddingBottom: 90,
+    },
+    ctaFooter: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 6,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 24,
     },
     preview: {
         position: 'relative',
@@ -335,11 +359,11 @@ const styles = StyleSheet.create({
     },
     outgoingBubble: {
         maxWidth: '70%',
-        backgroundColor: 'rgba(0, 242, 255, 0.22)',
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
         borderRadius: 16,
         borderBottomRightRadius: 6,
         borderWidth: 1,
-        borderColor: 'rgba(0, 242, 255, 0.4)',
+        borderColor: 'rgba(255, 255, 255, 0.2)',
         paddingHorizontal: 12,
         paddingVertical: 8,
     },
@@ -367,7 +391,7 @@ const styles = StyleSheet.create({
         fontSize: 13,
     },
     badgeText: {
-        color: UCL_CYAN,
+        color: UCL_TEXT_PRIMARY,
         fontSize: 13,
         fontWeight: '700',
     },
@@ -388,7 +412,7 @@ const styles = StyleSheet.create({
     },
     features: {
         gap: 10,
-        marginBottom: 22,
+        marginBottom: 8,
     },
     featureRow: {
         flexDirection: 'row',
@@ -406,9 +430,9 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0, 242, 255, 0.12)',
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
         borderWidth: 1,
-        borderColor: 'rgba(0, 242, 255, 0.28)',
+        borderColor: 'rgba(255, 255, 255, 0.2)',
     },
     featureCopy: {
         flex: 1,
@@ -427,7 +451,7 @@ const styles = StyleSheet.create({
     },
     cta: {
         borderRadius: 999,
-        backgroundColor: UCL_CYAN,
+        backgroundColor: UCL_TEXT_PRIMARY,
         paddingVertical: 14,
         alignItems: 'center',
     },
