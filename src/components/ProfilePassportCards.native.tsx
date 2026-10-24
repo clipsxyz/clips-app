@@ -1033,7 +1033,7 @@ export default function ProfilePassportCards({
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.quickBtn} onPress={onPressCover}>
                         <Icon name="image-outline" size={16} color="#FFFFFF" />
-                        <Text style={styles.quickBtnText}>Cover</Text>
+                        <Text style={styles.quickBtnText}>Change Cover</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.quickBtn} onPress={() => setSelectedCard('bio')}>
                         <Icon name="create-outline" size={16} color="#FFFFFF" />

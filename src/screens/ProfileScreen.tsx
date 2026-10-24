@@ -74,6 +74,10 @@ import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import CachedImage from '../components/CachedImage.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
+import Video from 'react-native-video';
+import { mockFeedVideoSource } from '../constants/mockFeedVideos.native';
+import { androidListSafeVideoProps, isPlayableVideoUri } from '../utils/androidSafeVideoNative';
+import { isVideoMediaUri, resolvePostPlaybackUri } from '../utils/postMedia';
 import {
     getPostBodyText,
     getTextOnlyBackgroundColor,
@@ -111,10 +115,44 @@ function peekLocationLabel(post: Post): string | undefined {
     return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function resolvePeekVideoUri(post: Post): string | undefined {
+    const extra = post as Post & { video_url?: string; media_url?: string };
+    const firstVideo = (post.mediaItems || []).find((item) => item?.type === 'video') ?? null;
+    const uri =
+        resolvePostPlaybackUri(post, firstVideo) ||
+        extra.video_url ||
+        extra.media_url ||
+        post.mediaUrl;
+    if (!isPlayableVideoUri(uri)) return undefined;
+    if (/\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(uri)) return undefined;
+    return uri;
+}
+
 function PeekPreviewMedia({ post }: { post: Post }) {
     const imageUri = resolvePostThumbnail(post);
     const bodyText = getPostBodyText(post);
     const videoPost = isVideoPost(post);
+    const videoUri = resolvePeekVideoUri(post);
+    const canPlayVideo = Boolean(videoUri && (videoPost || isVideoMediaUri(videoUri)));
+
+    if (canPlayVideo && videoUri) {
+        return (
+            <Video
+                source={mockFeedVideoSource(videoUri)}
+                style={styles.peekMedia}
+                resizeMode="cover"
+                paused={false}
+                repeat
+                muted
+                controls={false}
+                poster={imageUri}
+                playInBackground={false}
+                playWhenInactive={false}
+                ignoreSilentSwitch="obey"
+                {...androidListSafeVideoProps()}
+            />
+        );
+    }
 
     if (imageUri) {
         return <CachedImage source={{ uri: imageUri }} style={styles.peekMedia} resizeMode="cover" />;
@@ -1157,8 +1195,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 name={user?.name || user?.handle || 'User'}
                 hasStory={ownRing.hasStory}
                 storyRingState={ownRing.state}
-                showChangeCover
-                onPressChangeCover={() => navigation.navigate('ProfileCover')}
                 onAvatarPress={() => setShowProfilePictureModal(true)}
             />
 
@@ -1201,13 +1237,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     >
                         <Icon name="create-outline" size={ox(16)} color="#0A194E" />
                         <Text style={styles.editProfilePrimaryText}>Edit Profile</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.editProfileSecondaryBtn}
-                        activeOpacity={0.85}
-                        onPress={() => navigation.navigate('ProfileCover')}
-                    >
-                        <Icon name="image-outline" size={ox(16)} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -1968,6 +1997,17 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             keyboardShouldPersistTaps="handled"
                             showsVerticalScrollIndicator={false}
                         >
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => {
+                                    closeEditSheet();
+                                    navigation.navigate('ProfileCover');
+                                }}
+                            >
+                                <Icon name="image-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Change Cover</Text>
+                            </TouchableOpacity>
                             <ProfilePassportCards
                                 navigation={navigation}
                                 isPrivate={isPrivate}
@@ -2032,7 +2072,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                         </Text>
                                     </View>
                                 ) : null}
-                                {isVideoPost(peekPost) ? (
+                                {isVideoPost(peekPost) && !resolvePeekVideoUri(peekPost) ? (
                                     <View style={styles.peekPlayBadge} pointerEvents="none">
                                         <Icon name="play" size={ox(22)} color="#FFFFFF" />
                                     </View>
@@ -2362,6 +2402,24 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     editSheetScrollContent: {
         paddingBottom: ox(28),
+    },
+    editSheetOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: ox(10),
+        marginHorizontal: ox(16),
+        marginBottom: ox(4),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(12),
+        borderRadius: ox(14),
+        backgroundColor: UEFA_GLASS_BG,
+        borderWidth: 1,
+        borderColor: UEFA_GLASS_BORDER,
+    },
+    editSheetOptionText: {
+        color: '#FFFFFF',
+        fontSize: ox(15),
+        fontWeight: '700',
     },
     peekBackdrop: {
         flex: 1,
