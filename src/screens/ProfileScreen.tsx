@@ -1238,7 +1238,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <Text style={styles.emptyText}>No collections yet</Text>
                         </View>
                     ) : (
-                    <View style={styles.collectionsList}>
+                    <View style={styles.collectionsGrid}>
                         {collections.map((item) => {
                             const thumbSrc = getCollectionThumbnailUrl(item, posts);
                             const firstPost = item.postIds?.length
@@ -1250,40 +1250,48 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             return (
                                 <TouchableOpacity
                                     key={item.id}
-                                    style={styles.collectionItem}
+                                    style={styles.collectionCard}
+                                    activeOpacity={0.88}
                                     onPress={() => navigation.navigate('CollectionFeed', {
                                         collectionId: item.id,
                                         collectionName: item.name,
                                     })}
                                 >
-                                    {firstPost ? (
-                                        <View style={styles.collectionThumbnailWrap}>
-                                            <ProfileGridThumb post={firstPost} />
+                                    <View style={styles.collectionCardSurface}>
+                                        <View style={styles.collectionCardThumb}>
+                                            {firstPost ? (
+                                                <ProfileGridThumb post={firstPost} />
+                                            ) : thumbSrc && !thumbBroken ? (
+                                                <Image
+                                                    source={{ uri: thumbSrc }}
+                                                    style={styles.collectionCardImage}
+                                                    onError={() =>
+                                                        setBrokenCollectionThumbs((prev) => ({
+                                                            ...prev,
+                                                            [item.id]: true,
+                                                        }))
+                                                    }
+                                                />
+                                            ) : postCount > 0 && textFallback ? (
+                                                <View style={[styles.collectionCardImage, styles.collectionThumbnailTextFallback]}>
+                                                    <Text style={styles.collectionThumbnailText} numberOfLines={4}>
+                                                        {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
+                                                    </Text>
+                                                </View>
+                                            ) : (
+                                                <View style={styles.collectionCardPlaceholder}>
+                                                    <Icon name="bookmark" size={ox(28)} color="#94A3B8" />
+                                                </View>
+                                            )}
                                         </View>
-                                    ) : thumbSrc && !thumbBroken ? (
-                                        <Image
-                                            source={{ uri: thumbSrc }}
-                                            style={styles.collectionThumbnail}
-                                            onError={() =>
-                                                setBrokenCollectionThumbs((prev) => ({ ...prev, [item.id]: true }))
-                                            }
-                                        />
-                                    ) : postCount > 0 && textFallback ? (
-                                        <View style={[styles.collectionThumbnail, styles.collectionThumbnailTextFallback]}>
-                                            <Text style={styles.collectionThumbnailText} numberOfLines={4}>
-                                                {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
+                                        <View style={styles.collectionCardMeta}>
+                                            <Text style={styles.collectionName} numberOfLines={1}>
+                                                {item.name}
+                                            </Text>
+                                            <Text style={styles.collectionCount}>
+                                                {postCount} {postCount === 1 ? 'post' : 'posts'}
                                             </Text>
                                         </View>
-                                    ) : (
-                                        <View style={styles.collectionThumbnailPlaceholder}>
-                                            <Icon name="bookmark" size={ox(24)} color="#6B7280" />
-                                        </View>
-                                    )}
-                                    <View style={styles.collectionInfo}>
-                                        <Text style={styles.collectionName}>{item.name}</Text>
-                                        <Text style={styles.collectionCount}>
-                                            {postCount} {postCount === 1 ? 'post' : 'posts'}
-                                        </Text>
                                     </View>
                                 </TouchableOpacity>
                             );
@@ -2303,7 +2311,47 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         flexDirection: 'row',
         flexWrap: 'wrap',
     },
-    collectionsList: {},
+    collectionsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        paddingHorizontal: ox(10),
+        paddingTop: ox(8),
+        paddingBottom: ox(16),
+    },
+    collectionCard: {
+        width: '50%',
+        padding: ox(6),
+    },
+    collectionCardSurface: {
+        borderRadius: ox(16),
+        overflow: 'hidden',
+        backgroundColor: 'rgba(2, 11, 38, 0.75)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    collectionCardThumb: {
+        width: '100%',
+        aspectRatio: 1,
+        backgroundColor: '#111827',
+        overflow: 'hidden',
+    },
+    collectionCardImage: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#111827',
+    },
+    collectionCardPlaceholder: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#111827',
+    },
+    collectionCardMeta: {
+        paddingHorizontal: ox(10),
+        paddingTop: ox(8),
+        paddingBottom: ox(10),
+    },
     postsEmptyState: {
         alignItems: 'center',
         paddingVertical: ox(32),
@@ -2495,20 +2543,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         justifyContent: 'center',
         alignItems: 'center',
     },
-    collectionItem: {
-        padding: ox(16),
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
-    },
     collectionName: {
-        fontSize: ox(16),
-        fontWeight: '600',
+        fontSize: ox(14),
+        fontWeight: '700',
         color: '#FFFFFF',
-        marginBottom: ox(4),
+        marginBottom: ox(2),
     },
     collectionCount: {
-        fontSize: ox(14),
-        color: '#9CA3AF',
+        fontSize: ox(12),
+        color: '#94A3B8',
+        fontWeight: '600',
     },
     emptyContainer: {
         flex: 1,
