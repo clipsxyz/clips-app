@@ -1,7 +1,7 @@
 import type { Post } from '../types';
 import { postMatchesLocationTab } from '../api/posts';
 
-/** Feeds where every card must match the post's explicit place tag (not Following / clips). */
+/** Feeds where every card must match the author's signup location (not Following / clips). */
 export function isLocationScopedFeedTab(tab: string | null | undefined): boolean {
     const t = String(tab || '')
         .trim()
@@ -12,8 +12,8 @@ export function isLocationScopedFeedTab(tab: string | null | undefined): boolean
 }
 
 /**
- * Final belt-and-suspenders for location feeds.
- * Drop anything that does not belong — even if an inject path or API regresses.
+ * Final belt-and-suspenders for Discover / Switch Feed.
+ * Keep cards whose author profile location matches the tab. Venue tags stay on Search.
  */
 export function filterPostsForLocationFeed<T extends Post>(posts: T[], tab: string): T[] {
     if (!isLocationScopedFeedTab(tab)) return posts;

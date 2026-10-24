@@ -1830,47 +1830,32 @@ function isCountryFeedQuery(query: string): boolean {
   return countryAliases(query).length > 0;
 }
 
-function postLocationFields(p: Post): Array<string | undefined> {
-  return [
-    (p as { locationLabel?: string }).locationLabel,
-    (p as { location_label?: string }).location_label,
-    p.locationLocal,
-    p.locationRegional,
-    p.locationNational,
-    (p as { venue?: string }).venue,
-    (p as { landmark?: string }).landmark,
-  ];
+function authorProfileFields(p: Post): Array<string | undefined> {
+  return [p.userLocal, p.userRegional, p.userNational];
 }
 
-function postExplicitLocationMatches(p: Post, query: string): boolean {
-  return postLocationFields(p).some((field) => locationFieldMatchesQuery(field, query));
+function authorCityFields(p: Post): Array<string | undefined> {
+  return [p.userLocal, p.userRegional];
+}
+
+function authorProfileMatchesQuery(p: Post, query: string): boolean {
+  return authorProfileFields(p).some((field) => locationFieldMatchesQuery(field, query));
+}
+
+function authorCityMatchesQuery(p: Post, query: string): boolean {
+  return authorCityFields(p).some((field) => locationFieldMatchesQuery(field, query));
 }
 
 function postMatchesCountryFeed(p: Post, query: string): boolean {
   const aliases = countryAliases(query);
-  if (aliases.some((alias) => postExplicitLocationMatches(p, alias))) {
+  if (aliases.some((alias) => authorProfileMatchesQuery(p, alias))) {
     return true;
   }
   const cities = COUNTRY_CITIES[query] ?? [];
-  if (cities.some((city) => postExplicitLocationMatches(p, city))) {
-    return true;
-  }
-  const national = String(p.locationNational || '').trim().toLowerCase();
-  if (aliases.includes(national)) {
-    return true;
-  }
-  const userNational = String(p.userNational || '').trim().toLowerCase();
-  if (!aliases.includes(userNational)) {
-    return false;
-  }
-  const namedForeignCity = Object.entries(COUNTRY_CITIES).some(([country, cities]) => {
-    if (countryAliases(query).includes(country) || country === query) return false;
-    return cities.some((city) => postExplicitLocationMatches(p, city));
-  });
-  return !namedForeignCity;
+  return cities.some((city) => authorCityMatchesQuery(p, city));
 }
 
-/** City feeds match the post tag/hierarchy only. Country feeds roll up child cities. */
+/** Discover / Switch Feed: author signup location only. venue:/landmark: stay post-tag (Search). */
 export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const normalize = (v?: string) => (v || '').trim().toLowerCase();
@@ -1903,7 +1888,7 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   if (isCountryFeedQuery(query)) {
     return postMatchesCountryFeed(p, query);
   }
-  return postExplicitLocationMatches(p, query);
+  return authorCityMatchesQuery(p, query);
 }
 
 export async function fetchPostsPage(tab: string, cursor: string | number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {

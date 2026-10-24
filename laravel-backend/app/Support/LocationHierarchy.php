@@ -3,10 +3,10 @@
 namespace App\Support;
 
 /**
- * Country ↔ city roll-up for location feeds.
+ * Country ↔ city roll-up for Discover / Switch Feed author-profile matching.
  *
- * City filters stay exact. Country filters include known child cities so a
- * Madrid-tagged post appears in Spain without pulling Galway into Dublin.
+ * City filters match users.location_local / location_regional. Country filters
+ * also include known child cities on those profile columns, plus location_national.
  */
 class LocationHierarchy
 {

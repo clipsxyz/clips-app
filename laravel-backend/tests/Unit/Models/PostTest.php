@@ -46,59 +46,87 @@ class PostTest extends TestCase
         $this->assertNotContains($reclippedPost->id, $results);
     }
 
-    public function test_by_location_scope_filters_by_location_label(): void
-    {
-        $user = User::factory()->create([
-            'location_local' => 'Galway',
-            'location_regional' => 'Galway',
-            'location_national' => 'Ireland',
-        ]);
-
-        $dublinPost = Post::factory()->create([
-            'user_id' => $user->id,
-            'location_label' => 'Dublin, Ireland',
-        ]);
-
-        Post::factory()->create([
-            'user_id' => $user->id,
-            'location_label' => 'London, UK',
-        ]);
-
-        $results = Post::byLocation('Dublin')->pluck('id')->all();
-
-        $this->assertContains($dublinPost->id, $results);
-        $this->assertCount(1, $results);
-    }
-
-    public function test_by_location_ignores_author_home_city(): void
+    public function test_by_location_scope_filters_by_author_profile(): void
     {
         $dublinAuthor = User::factory()->create([
             'location_local' => 'Finglas',
             'location_regional' => 'Dublin',
             'location_national' => 'Ireland',
         ]);
-
-        $galwayTagged = Post::factory()->create([
-            'user_id' => $dublinAuthor->id,
-            'location_label' => 'Galway, Ireland',
-            'venue' => 'Eyre Square',
+        $galwayAuthor = User::factory()->create([
+            'location_local' => 'Galway',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
         ]);
 
-        $dublinTagged = Post::factory()->create([
+        $dublinAuthorPost = Post::factory()->create([
             'user_id' => $dublinAuthor->id,
-            'location_label' => 'Temple Bar, Dublin',
+            'location_label' => 'London, UK',
+        ]);
+        Post::factory()->create([
+            'user_id' => $galwayAuthor->id,
+            'location_label' => 'Dublin, Ireland',
+        ]);
+
+        $results = Post::byLocation('Dublin')->pluck('id')->all();
+
+        $this->assertContains($dublinAuthorPost->id, $results);
+        $this->assertCount(1, $results);
+    }
+
+    public function test_by_location_uses_author_profile_not_post_tag(): void
+    {
+        $dublinAuthor = User::factory()->create([
+            'location_local' => 'Finglas',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $galwayAuthor = User::factory()->create([
+            'location_local' => 'Oranmore',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
+        ]);
+
+        $dublinAuthorSpainTag = Post::factory()->create([
+            'user_id' => $dublinAuthor->id,
+            'location_label' => 'Madrid, Spain',
+            'venue' => 'Plaza Mayor',
+        ]);
+        $galwayAuthorSpainTag = Post::factory()->create([
+            'user_id' => $galwayAuthor->id,
+            'location_label' => 'Barcelona, Spain',
+            'venue' => 'Sagrada Familia',
         ]);
 
         $dublinIds = Post::byLocation('Dublin')->pluck('id')->all();
         $galwayIds = Post::byLocation('Galway')->pluck('id')->all();
+        $spainIds = Post::byLocation('Spain')->pluck('id')->all();
         $manchesterIds = Post::byLocation('Manchester')->pluck('id')->all();
 
-        $this->assertContains($dublinTagged->id, $dublinIds);
-        $this->assertNotContains($galwayTagged->id, $dublinIds);
-        $this->assertContains($galwayTagged->id, $galwayIds);
-        $this->assertNotContains($dublinTagged->id, $galwayIds);
-        $this->assertNotContains($dublinTagged->id, $manchesterIds);
-        $this->assertNotContains($galwayTagged->id, $manchesterIds);
+        $this->assertContains($dublinAuthorSpainTag->id, $dublinIds);
+        $this->assertNotContains($galwayAuthorSpainTag->id, $dublinIds);
+        $this->assertContains($galwayAuthorSpainTag->id, $galwayIds);
+        $this->assertNotContains($dublinAuthorSpainTag->id, $galwayIds);
+        $this->assertNotContains($dublinAuthorSpainTag->id, $spainIds);
+        $this->assertNotContains($galwayAuthorSpainTag->id, $spainIds);
+        $this->assertNotContains($dublinAuthorSpainTag->id, $manchesterIds);
+        $this->assertNotContains($galwayAuthorSpainTag->id, $manchesterIds);
+    }
+
+    public function test_by_location_venue_prefix_still_matches_post_venue(): void
+    {
+        $author = User::factory()->create([
+            'location_local' => 'Oranmore',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
+        ]);
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'venue' => 'Eyre Square',
+        ]);
+
+        $this->assertContains($post->id, Post::byLocation('venue:Eyre Square')->pluck('id')->all());
+        $this->assertNotContains($post->id, Post::byLocation('Spain')->pluck('id')->all());
     }
 
     public function test_is_liked_by_returns_true_when_like_exists(): void
@@ -205,7 +233,7 @@ class PostTest extends TestCase
         $this->assertArrayNotHasKey('userNational', $payload);
     }
 
-    public function test_by_location_national_scope_uses_post_tag_not_author_home(): void
+    public function test_by_location_national_scope_uses_author_home_not_post_tag(): void
     {
         $galway = User::factory()->create([
             'location_local' => 'Oranmore',
@@ -215,7 +243,7 @@ class PostTest extends TestCase
         $galwayPost = Post::factory()->create([
             'user_id' => $galway->id,
             'user_handle' => $galway->handle,
-            'location_label' => 'Galway',
+            'location_label' => 'Madrid, Spain',
         ]);
 
         $english = User::factory()->create([
@@ -226,7 +254,7 @@ class PostTest extends TestCase
         Post::factory()->create([
             'user_id' => $english->id,
             'user_handle' => $english->handle,
-            'location_label' => 'London, UK',
+            'location_label' => 'Galway, Ireland',
         ]);
 
         $irelandIds = Post::notReclipped()->byLocation('Ireland')->pluck('id')->all();
@@ -247,7 +275,7 @@ class PostTest extends TestCase
         );
     }
 
-    public function test_by_location_country_rolls_up_spanish_cities(): void
+    public function test_by_location_country_rolls_up_spanish_author_cities(): void
     {
         $author = User::factory()->create([
             'location_local' => 'Madrid',
@@ -256,11 +284,11 @@ class PostTest extends TestCase
         ]);
         $madrid = Post::factory()->create([
             'user_id' => $author->id,
-            'location_label' => 'Madrid',
+            'location_label' => 'Temple Bar, Dublin',
         ]);
         $barcelona = Post::factory()->create([
             'user_id' => $author->id,
-            'location_label' => 'Barcelona',
+            'location_label' => 'Galway',
         ]);
         $irish = User::factory()->create([
             'location_local' => 'Dublin',
@@ -269,8 +297,8 @@ class PostTest extends TestCase
         ]);
         $dublin = Post::factory()->create([
             'user_id' => $irish->id,
-            'location_label' => 'Temple Bar, Dublin',
-            'location_national' => 'Ireland',
+            'location_label' => 'Madrid, Spain',
+            'location_national' => 'Spain',
         ]);
 
         $spainIds = Post::byLocation('Spain')->pluck('id')->all();

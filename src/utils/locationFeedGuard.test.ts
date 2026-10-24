@@ -97,7 +97,7 @@ describe('location core: postMatchesLocationTab', () => {
         expect(postMatchesLocationTab(tricky, 'berlin')).toBe(false);
     });
 
-    it('matches Berlin / Rome posts on their own city feeds via the tag', () => {
+    it('matches Berlin / Rome posts on their own city feeds via the author profile', () => {
         expect(postMatchesLocationTab(berlinPost, 'berlin')).toBe(true);
         expect(postMatchesLocationTab(berlinPost, 'germany')).toBe(true);
         expect(postMatchesLocationTab(berlinPost, 'rome')).toBe(false);
@@ -112,7 +112,7 @@ describe('location core: postMatchesLocationTab', () => {
         expect(postMatchesLocationTab(withVenue as Post, 'venue:park')).toBe(true);
     });
 
-    it('ignores author home city when the post is tagged elsewhere', () => {
+    it('uses author home city and ignores a foreign post tag', () => {
         const dublinAuthorGalwayTag = post({
             id: 'dublin-author-galway-tag',
             userHandle: 'Debs@Dublin',
@@ -121,13 +121,29 @@ describe('location core: postMatchesLocationTab', () => {
             userRegional: 'Dublin',
             userNational: 'Ireland',
         });
-        expect(postMatchesLocationTab(dublinAuthorGalwayTag, 'dublin')).toBe(false);
-        expect(postMatchesLocationTab(dublinAuthorGalwayTag, 'galway')).toBe(true);
+        expect(postMatchesLocationTab(dublinAuthorGalwayTag, 'dublin')).toBe(true);
+        expect(postMatchesLocationTab(dublinAuthorGalwayTag, 'galway')).toBe(false);
         expect(postMatchesLocationTab(dublinAuthorGalwayTag, 'manchester')).toBe(false);
+    });
+
+    it('keeps Barry@Galway out of Spain even with a Spanish venue tag', () => {
+        const barryInSpain = post({
+            id: 'barry-spain-venue',
+            userHandle: 'Barry@Galway',
+            locationLabel: 'Madrid, Spain',
+            venue: 'Plaza Mayor',
+            userLocal: 'Oranmore',
+            userRegional: 'Galway',
+            userNational: 'Ireland',
+        } as Partial<Post> & { id: string; venue?: string });
+        expect(postMatchesLocationTab(barryInSpain, 'spain')).toBe(false);
+        expect(postMatchesLocationTab(barryInSpain, 'galway')).toBe(true);
+        expect(postMatchesLocationTab(barryInSpain, 'ireland')).toBe(true);
+        expect(filterPostsForLocationFeed([barryInSpain as Post], 'spain')).toHaveLength(0);
     });
 });
 
-describe('national scope resolves sub-locations from the post tag', () => {
+describe('national scope resolves sub-locations from the author profile', () => {
     const englishPost = post({
         id: 'english-author',
         userHandle: 'Barry@London',
@@ -137,7 +153,7 @@ describe('national scope resolves sub-locations from the post tag', () => {
         userNational: 'United Kingdom',
     });
 
-    it('keeps Galway and Cork tagged posts on the Ireland feed', () => {
+    it('keeps Galway and Cork authors on the Ireland feed', () => {
         expect(postMatchesLocationTab(galwayPost, 'ireland')).toBe(true);
         expect(postMatchesLocationTab(corkPost, 'ireland')).toBe(true);
         expect(filterPostsForLocationFeed([galwayPost, corkPost], 'ireland')).toHaveLength(2);
@@ -148,13 +164,13 @@ describe('national scope resolves sub-locations from the post tag', () => {
         expect(postMatchesLocationTab(englishPost, 'ireland')).toBe(false);
     });
 
-    it('still scopes a Galway tag to its own city feed and not Dublin or Cork', () => {
+    it('still scopes a Galway author to its own city feed and not Dublin or Cork', () => {
         expect(postMatchesLocationTab(galwayPost, 'galway')).toBe(true);
         expect(postMatchesLocationTab(galwayPost, 'cork')).toBe(false);
         expect(postMatchesLocationTab(galwayPost, 'dublin')).toBe(false);
     });
 
-    it('accepts a post tagged with the country even when the author sits abroad', () => {
+    it('rejects a post tagged with the country when the author sits abroad', () => {
         const taggedAbroad = post({
             id: 'tagged-abroad',
             userHandle: 'Traveller@Dubai',
@@ -163,25 +179,25 @@ describe('national scope resolves sub-locations from the post tag', () => {
             userRegional: 'Dubai',
             userNational: 'United Arab Emirates',
         });
-        expect(postMatchesLocationTab(taggedAbroad, 'ireland')).toBe(true);
+        expect(postMatchesLocationTab(taggedAbroad, 'ireland')).toBe(false);
     });
 
-    it('rolls city-only tags up to their country and never across cities', () => {
+    it('rolls author city profiles up to their country and never across cities', () => {
         const galwayOnly = post({
             id: 'galway-only',
             userHandle: 'Barry@Galway',
-            locationLabel: 'Galway',
-            userLocal: undefined,
-            userRegional: undefined,
-            userNational: undefined,
+            locationLabel: 'Madrid',
+            userLocal: 'Galway',
+            userRegional: 'Galway',
+            userNational: 'Ireland',
         });
         const madridOnly = post({
             id: 'madrid-only',
             userHandle: 'Ana@Madrid',
-            locationLabel: 'Madrid',
-            userLocal: undefined,
-            userRegional: undefined,
-            userNational: undefined,
+            locationLabel: 'Dublin',
+            userLocal: 'Madrid',
+            userRegional: 'Madrid',
+            userNational: 'Spain',
         });
         expect(postMatchesLocationTab(galwayOnly, 'ireland')).toBe(true);
         expect(postMatchesLocationTab(galwayOnly, 'galway')).toBe(true);
