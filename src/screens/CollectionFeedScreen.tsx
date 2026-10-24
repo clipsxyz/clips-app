@@ -19,26 +19,41 @@ import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { ox } from '../constants/nativeOpticalScale';
 
 export default function CollectionFeedScreen({ route, navigation }: any) {
-    const { collectionId, collectionName } = route.params;
+    const collectionId = String(route.params?.collectionId ?? route.params?.slug ?? '').trim();
+    const collectionName = typeof route.params?.collectionName === 'string' ? route.params.collectionName : undefined;
+    const initialCollection =
+        route.params?.initialCollection && typeof route.params.initialCollection === 'object'
+            ? (route.params.initialCollection as Collection)
+            : null;
     const { user } = useAuth();
-    const [collection, setCollection] = useState<Collection | null>(null);
+    const [collection, setCollection] = useState<Collection | null>(initialCollection);
     const [posts, setPosts] = useState<Post[]>([]);
     const [loading, setLoading] = useState(true);
 
     const loadCollection = useCallback(async () => {
-        if (!collectionId || !user?.id) return;
+        const lookupId = collectionId || String(initialCollection?.id ?? '').trim();
+        if (!lookupId && !collectionName) {
+            setCollection(initialCollection);
+            setPosts([]);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
-            const coll = await getCollection(collectionId);
+            const coll =
+                (await getCollection(lookupId, collectionName)) ||
+                initialCollection;
             setCollection(coll);
-            const collectionPosts = await getCollectionPosts(collectionId);
+            const collectionPosts = await getCollectionPosts(lookupId, collectionName);
             setPosts(collectionPosts);
         } catch (error) {
             console.error('Error loading collection:', error);
+            setCollection(initialCollection);
+            setPosts([]);
         } finally {
             setLoading(false);
         }
-    }, [collectionId, user?.id]);
+    }, [collectionId, collectionName, initialCollection, user?.id]);
 
     useEffect(() => {
         void loadCollection();
@@ -65,11 +80,12 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
 
     useFocusEffect(
         useCallback(() => {
-            if (!collectionId || !user?.id) return;
-            void getCollectionPosts(collectionId)
+            const lookupId = collectionId || String(initialCollection?.id ?? '').trim();
+            if (!lookupId && !collectionName) return;
+            void getCollectionPosts(lookupId, collectionName)
                 .then(setPosts)
                 .catch(() => {});
-        }, [collectionId, user?.id]),
+        }, [collectionId, collectionName, initialCollection, user?.id]),
     );
 
     if (loading) {
@@ -96,8 +112,8 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
 
             <View style={styles.infoContainer}>
                 <Text style={styles.postCount}>
-                    {collection?.postIds?.length || 0}{' '}
-                    {collection?.postIds?.length === 1 ? 'post' : 'posts'}
+                    {posts.length || collection?.postIds?.length || 0}{' '}
+                    {(posts.length || collection?.postIds?.length || 0) === 1 ? 'post' : 'posts'}
                 </Text>
             </View>
 

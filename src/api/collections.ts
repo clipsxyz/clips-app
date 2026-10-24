@@ -31,6 +31,21 @@ function mapApiCollection(raw: any, fallbackUserId?: string): Collection {
     };
 }
 
+function findLocalCollection(
+    collections: Collection[],
+    identifier: string,
+    name?: string,
+): Collection | undefined {
+    const key = String(identifier ?? '').trim();
+    if (key) {
+        const byId = collections.find((c) => String(c.id) === key);
+        if (byId) return byId;
+    }
+    const label = String(name ?? '').trim().toLowerCase();
+    if (!label) return undefined;
+    return collections.find((c) => String(c.name || '').trim().toLowerCase() === label);
+}
+
 function mapApiCollections(payload: any, fallbackUserId?: string): Collection[] {
     const list = Array.isArray(payload)
         ? payload
@@ -652,10 +667,16 @@ export async function unsavePost(userId: string, postId: string): Promise<void> 
     }
 }
 
-export async function getCollection(collectionId: string): Promise<Collection | null> {
-    if (isLaravelApiEnabled()) {
+export async function getCollection(
+    collectionId: string,
+    collectionName?: string,
+): Promise<Collection | null> {
+    const id = String(collectionId ?? '').trim();
+    if (!id && !collectionName) return null;
+
+    if (id && isLaravelApiEnabled()) {
         try {
-            const payload = await apiClient.fetchCollection(collectionId);
+            const payload = await apiClient.fetchCollection(id);
             return mapApiCollection(payload?.data ?? payload?.collection ?? payload);
         } catch (error) {
             console.warn('Laravel getCollection failed, falling back to local collections:', error);
@@ -664,7 +685,7 @@ export async function getCollection(collectionId: string): Promise<Collection | 
 
     await delay(50);
     const collections = await loadCollectionsFromPersistence();
-    return collections.find((c) => c.id === collectionId) || null;
+    return findLocalCollection(collections, id, collectionName) || null;
 }
 
 export async function savePostToDefaultCollection(userId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
@@ -689,16 +710,22 @@ export async function savePostToDefaultCollection(userId: string, postId: string
 /**
  * Get all posts in a collection
  */
-export async function getCollectionPosts(collectionId: string): Promise<Post[]> {
-    if (isLaravelApiEnabled()) {
+export async function getCollectionPosts(
+    collectionId: string,
+    collectionName?: string,
+): Promise<Post[]> {
+    const id = String(collectionId ?? '').trim();
+    if (!id && !collectionName) return [];
+
+    if (id && isLaravelApiEnabled()) {
         try {
-            const payload = await apiClient.fetchCollection(collectionId);
+            const payload = await apiClient.fetchCollection(id);
             const list = Array.isArray(payload?.posts)
                 ? payload.posts
                 : Array.isArray(payload?.data?.posts)
                     ? payload.data.posts
-                    : [];
-            if (Array.isArray(list) && list.length > 0) {
+                    : null;
+            if (Array.isArray(list)) {
                 return list as Post[];
             }
         } catch (error) {
@@ -709,9 +736,9 @@ export async function getCollectionPosts(collectionId: string): Promise<Post[]> 
     await delay(100);
 
     const collections = await loadCollectionsFromPersistence();
-    const collection = collections.find(c => c.id === collectionId);
+    const collection = findLocalCollection(collections, id, collectionName);
     if (!collection) {
-        throw new Error('Collection not found');
+        return [];
     }
 
     const collectionWithPreview = collection as CollectionWithPreviewMap;

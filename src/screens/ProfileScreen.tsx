@@ -1253,8 +1253,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     style={styles.collectionCard}
                                     activeOpacity={0.88}
                                     onPress={() => navigation.navigate('CollectionFeed', {
-                                        collectionId: item.id,
+                                        collectionId: String(item.id),
                                         collectionName: item.name,
+                                        initialCollection: item,
                                     })}
                                 >
                                     <View style={styles.collectionCardSurface}>
@@ -1642,8 +1643,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                             onPress={() => {
                                                 setCollectionsOpen(false);
                                                 navigation.navigate('CollectionFeed', {
-                                                    collectionId: collection.id,
+                                                    collectionId: String(collection.id),
                                                     collectionName: collection.name,
+                                                    initialCollection: collection,
                                                 });
                                             }}
                                         >

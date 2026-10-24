@@ -111,21 +111,22 @@ class CollectionController extends Controller
      */
     public function show(Request $request, string $id): JsonResponse
     {
-        $validator = Validator::make(['id' => $id], [
-            'id' => 'required|integer|exists:collections,id'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
-        }
-
         $user = Auth::user();
-        $collection = Collection::where('id', $id)
-            ->where('user_id', $user->id)
+        $collection = Collection::where('user_id', $user->id)
+            ->where(function ($query) use ($id) {
+                $query->where('id', $id);
+                if (ctype_digit($id)) {
+                    $query->orWhere('id', (int) $id);
+                }
+            })
             ->with(['posts' => function ($query) {
                 $query->orderBy('collection_posts.created_at', 'desc');
             }])
-            ->firstOrFail();
+            ->first();
+
+        if (!$collection) {
+            return response()->json(['error' => 'Collection not found'], 404);
+        }
 
         return response()->json([
             'id' => (string) $collection->id,
@@ -366,18 +367,19 @@ class CollectionController extends Controller
      */
     public function getCollectionPosts(Request $request, string $id): JsonResponse
     {
-        $validator = Validator::make(['id' => $id], [
-            'id' => 'required|integer|exists:collections,id'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
-        }
-
         $user = Auth::user();
-        $collection = Collection::where('id', $id)
-            ->where('user_id', $user->id)
-            ->firstOrFail();
+        $collection = Collection::where('user_id', $user->id)
+            ->where(function ($query) use ($id) {
+                $query->where('id', $id);
+                if (ctype_digit($id)) {
+                    $query->orWhere('id', (int) $id);
+                }
+            })
+            ->first();
+
+        if (!$collection) {
+            return response()->json(['error' => 'Collection not found'], 404);
+        }
 
         $posts = $collection->posts()
             ->orderBy('collection_posts.created_at', 'desc')
