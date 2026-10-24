@@ -11,6 +11,7 @@ import {
 } from '../utils/effectiveTextPostStyleNative';
 import { resolvePostThumbnail } from '../api/collections';
 import { mediaItemsEqual } from '../utils/feedPostCompareNative';
+import { formatViewCount } from '../utils/feedPostNewsTicker';
 import CachedImage from './CachedImage.native';
 import {
     FEED_GRID_TILE_BG,
@@ -22,12 +23,6 @@ import {
 type Props = {
     post: Post;
 };
-
-function getPostLocationLabel(post: Post): string | undefined {
-    const label = post.locationLabel || post.venue;
-    const trimmed = typeof label === 'string' ? label.trim() : '';
-    return trimmed.length > 0 ? trimmed : undefined;
-}
 
 function looksLikeVideoUri(url: string): boolean {
     return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
@@ -68,25 +63,21 @@ function resolveGridImageUri(post: Post): string | undefined {
     return undefined;
 }
 
-function ProfileGridThumb({ post }: Props) {
-    const locationLabel = getPostLocationLabel(post);
-    const locationBadge = locationLabel ? (
-        <View style={styles.locationBadge} pointerEvents="none">
-            <Icon name="location-outline" size={10} color="#FFFFFF" />
-            <Text style={styles.locationBadgeText} numberOfLines={1}>
-                {locationLabel}
-            </Text>
-        </View>
-    ) : null;
+function getPostViewCount(post: Post): number {
+    const extra = post as Post & { views_count?: number; views?: number };
+    return Math.max(0, Number(extra.views_count ?? post.stats?.views ?? extra.views ?? 0) || 0);
+}
 
-    const videoOverlays = (
-        <View style={styles.playCenter} pointerEvents="none">
-            <View style={styles.playCircle}>
-                <Icon name="play" size={22} color="#FFFFFF" style={styles.playIconOffset} />
-            </View>
+function ViewsBadge({ post }: { post: Post }) {
+    return (
+        <View style={styles.viewsBadge} pointerEvents="none">
+            <Icon name="eye-outline" size={12} color="#FFFFFF" />
+            <Text style={styles.viewsText}>{formatViewCount(getPostViewCount(post))}</Text>
         </View>
     );
+}
 
+function ProfileGridThumb({ post }: Props) {
     const bodyText = getPostBodyText(post);
     const imageUri = resolveGridImageUri(post);
     const videoPost = isVideoPost(post);
@@ -100,8 +91,7 @@ function ProfileGridThumb({ post }: Props) {
                     resizeMode="cover"
                     pointerEvents="none"
                 />
-                {locationBadge}
-                {videoPost ? videoOverlays : null}
+                <ViewsBadge post={post} />
             </View>
         );
     }
@@ -110,8 +100,8 @@ function ProfileGridThumb({ post }: Props) {
     if (videoPost) {
         return (
             <View style={[styles.cell, styles.placeholder]}>
-                {locationBadge}
-                {videoOverlays}
+                <Icon name="play-outline" size={22} color="#FFFFFF" />
+                <ViewsBadge post={post} />
             </View>
         );
     }
@@ -119,20 +109,19 @@ function ProfileGridThumb({ post }: Props) {
     if (isTextOnlyPost(post) || bodyText) {
         return (
             <View style={[styles.cell, { backgroundColor: getTextOnlyBackgroundColor(post) }]}>
-                {locationBadge}
                 <Text
                     style={[styles.textThumb, { color: getTextOnlyTextColor(post) }]}
                     numberOfLines={4}
                 >
                     {bodyText || 'Post'}
                 </Text>
+                <ViewsBadge post={post} />
             </View>
         );
     }
 
     return (
         <View style={[styles.cell, styles.placeholder]}>
-            {locationBadge}
             {bodyText ? (
                 <Text style={[styles.textThumb, { color: '#E5E7EB' }]} numberOfLines={4}>
                     {bodyText}
@@ -140,6 +129,7 @@ function ProfileGridThumb({ post }: Props) {
             ) : (
                 <Icon name="image-outline" size={22} color="#6B7280" />
             )}
+            <ViewsBadge post={post} />
         </View>
     );
 }
@@ -153,8 +143,8 @@ function profileGridThumbsEqual(prev: Props, next: Props): boolean {
         a.mediaType === b.mediaType &&
         a.videoPosterUrl === b.videoPosterUrl &&
         a.thumbnailUrl === b.thumbnailUrl &&
-        a.locationLabel === b.locationLabel &&
-        a.venue === b.venue &&
+        a.stats?.views === b.stats?.views &&
+        a.views_count === b.views_count &&
         a.text === b.text &&
         a.caption === b.caption &&
         mediaItemsEqual(a.mediaItems, b.mediaItems)
@@ -185,44 +175,25 @@ const styles = StyleSheet.create({
         padding: 6,
         lineHeight: 13,
     },
-    playCenter: {
-        ...StyleSheet.absoluteFill,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    playCircle: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    playIconOffset: {
-        marginLeft: 2,
-    },
-    locationBadge: {
+    viewsBadge: {
         position: 'absolute',
-        top: 6,
-        left: 6,
-        maxWidth: '88%',
+        bottom: 8,
+        left: 8,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 3,
+        gap: 4,
         paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
+        paddingVertical: 3,
+        borderRadius: 8,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
         zIndex: 2,
     },
-    locationBadgeText: {
+    viewsText: {
         color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '600',
-        flexShrink: 1,
+        fontSize: 11,
+        fontWeight: '700',
+        textShadowColor: 'rgba(0, 0, 0, 0.65)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
     },
 });

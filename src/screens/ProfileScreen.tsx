@@ -2327,7 +2327,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     postItem: {
         width: '33.3333%',
-        aspectRatio: 1,
+        aspectRatio: 3 / 4,
         padding: 1.5,
     },
     editSheetOverlay: {
