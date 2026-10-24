@@ -1769,7 +1769,43 @@ function dedupeItemsById(items: Post[]): Post[] {
   }).map(p => byId.get(idKey(p))!);
 }
 
-/** Returns true if the post's AUTHOR location matches the feed tab (for location feeds only). Same rule worldwide: author's local/regional/national must match the place. */
+function escapeLocationQueryRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** True when a post tag field names the feed place as its own token, not a substring of another city. */
+function locationFieldMatchesQuery(raw: unknown, query: string): boolean {
+  const value = String(raw || '').trim().toLowerCase();
+  const q = query.trim().toLowerCase();
+  if (!value || !q || q.length < 2) return false;
+  if (value === q) return true;
+  const parts = value.split(/[,/·|]+/).map((part) => part.trim()).filter(Boolean);
+  for (const part of parts) {
+    if (
+      part === q ||
+      part === `county ${q}` ||
+      part === `co. ${q}` ||
+      part === `co ${q}` ||
+      part.startsWith(`${q} `) ||
+      part.endsWith(` ${q}`)
+    ) {
+      return true;
+    }
+  }
+  return new RegExp(`(?:^|[\\s,./·|])${escapeLocationQueryRe(q)}(?:[\\s,./·]|$)`).test(value);
+}
+
+function postExplicitLocationMatches(p: Post, query: string): boolean {
+  const fields = [
+    (p as { locationLabel?: string }).locationLabel,
+    (p as { location_label?: string }).location_label,
+    (p as { venue?: string }).venue,
+    (p as { landmark?: string }).landmark,
+  ];
+  return fields.some((field) => locationFieldMatchesQuery(field, query));
+}
+
+/** Returns true if the post's explicit place tag matches the feed tab. Author home city is ignored. */
 export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const normalize = (v?: string) => (v || '').trim().toLowerCase();
@@ -1790,51 +1826,17 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const isVenueFeed = t.startsWith('venue:');
   const venueQuery = isVenueFeed ? t.slice('venue:'.length).trim() : '';
   if (isVenueFeed) {
-    return placeTagMatches((p as any).venue, venueQuery);
+    return placeTagMatches((p as { venue?: string }).venue, venueQuery);
   }
   const isLandmarkFeed = t.startsWith('landmark:');
   const landmarkQuery = isLandmarkFeed ? t.slice('landmark:'.length).trim() : '';
   if (isLandmarkFeed) {
-    return placeTagMatches((p as any).landmark, landmarkQuery);
+    return placeTagMatches((p as { landmark?: string }).landmark, landmarkQuery);
   }
-  const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
-  if (predefinedTabs.includes(t)) {
-    // Normalize stored author locations: trim + lowercase so "Ireland " matches "ireland"
-    const userLocalLower = normalize(p.userLocal);
-    const userRegionalLower = normalize(p.userRegional);
-    const userNationalLower = normalize(p.userNational);
-    if (t === 'finglas') return userLocalLower === 'finglas';
-    if (t === 'dublin') return userRegionalLower === 'dublin' || userLocalLower === 'dublin';
-    if (t === 'ireland') {
-      if (userNationalLower === 'ireland') return true;
-      // Match mock-feed rules: Dublin-area authors also appear on Ireland tab.
-      if (userRegionalLower === 'dublin' || userLocalLower === 'dublin') return true;
-      // A post tagged with the country itself is a server-accepted national hit even when
-      // its author sits abroad, so it must not be dropped here.
-      if (normalize((p as any).locationLabel) === 'ireland') return true;
-      return false;
-    }
-    return false;
-  }
+  if (t === 'discover') return false;
   const query = t.trim().toLowerCase();
   if (!query) return false;
-  const local = normalize(p.userLocal);
-  const regional = normalize(p.userRegional);
-  const national = normalize(p.userNational);
-  const locationLabel = normalize((p as any).locationLabel);
-
-  // Author tiers are exact — never substring-match "rome" inside unrelated labels.
-  if (local === query || regional === query || national === query) return true;
-  if (LOCATION_COUNTRIES.has(query)) {
-    if (query === 'uk' && (national === 'united kingdom' || national === 'uk')) return true;
-    if (query === 'usa' && (national === 'usa' || national === 'united states')) return true;
-    return national === query;
-  }
-  if (LOCATION_CITIES.has(query)) {
-    return regional === query || local === query;
-  }
-  // Custom neighbourhood / place name: allow label equality only (no fuzzy includes).
-  return locationLabel === query;
+  return postExplicitLocationMatches(p, query);
 }
 
 export async function fetchPostsPage(tab: string, cursor: string | number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
@@ -2053,38 +2055,15 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
     await delay(0);
 
-    // Filter by tab: Discover = following only (+ your own); location tabs = BY AUTHOR LOCATION ONLY
-    // Location feeds (China, Dublin, Finglas, etc.): show ONLY posts whose author's location matches. No cross-location leaking.
+    // Filter by tab: Discover = following only (+ your own); location tabs = post tag only.
     const norm = (h?: string) => (h || '').trim().toLowerCase();
     const filtered = posts.filter(p => {
       if (p.isReclipped && t !== 'discover') return false;
 
       const isOwn = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && !p.isReclipped;
-      if (isOwn) {
-        if (t === 'discover') return true; // Following feed: always show your posts
-
-        // Always show your own posts on your profile location tiers (and legacy Dublin demo tabs).
-        const ownTabs = [_userLocal, _userRegional, _userNational]
-          .map((s) => (s || '').trim().toLowerCase())
-          .filter(Boolean);
-        if (ownTabs.includes(t) || ['finglas', 'dublin', 'ireland'].includes(t)) {
-          return true;
-        }
-
-        // For custom location feeds, match against current profile location values.
-        const ownLocationPost: Post = {
-          ...p,
-          userLocal: _userLocal || p.userLocal,
-          userRegional: _userRegional || p.userRegional,
-          userNational: _userNational || p.userNational,
-        };
-        return postMatchesLocationTab(ownLocationPost, t);
-      }
+      if (isOwn && t === 'discover') return true;
 
       if (t === 'discover') {
-        // Mock Following feed:
-        // - show posts from any handle the user follows
-        // - always show your own posts (authored or reclipped)
         const follows = getFollowsForDiscover(userId);
         const isFollowing = getFollowState(follows, p.userHandle);
         const isOwnAuthor = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle);
@@ -2098,28 +2077,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         return !!(p.mediaUrl && wasEverAStory(p.mediaUrl));
       }
 
-      const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
-      if (!predefinedTabs.includes(t)) {
-        // Custom location / venue / landmark — one strict matcher, no substring leaks.
-        return postMatchesLocationTab(p, t);
-      }
-
-      const tabLower = t.toLowerCase();
-      const normalize = (v?: string) => (v || '').trim().toLowerCase();
-      const userLocalLower = normalize(p.userLocal);
-      const userRegionalLower = normalize(p.userRegional);
-      const userNationalLower = normalize(p.userNational);
-
-      // For Ireland tab in mock mode, treat Dublin regional/local as Ireland when national is missing.
-      if (t === 'ireland') {
-        if (userNationalLower === 'ireland') return true;
-        if (userNationalLower === '' && (userRegionalLower === 'dublin' || userLocalLower === 'dublin')) return true;
-      }
-
-      if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) return true;
-      if (t === 'finglas' && p.userLocal === 'Finglas') return true;
-      if (t === 'dublin' && p.userRegional === 'Dublin') return true;
-      return false;
+      return postMatchesLocationTab(p, t);
     });
 
 
@@ -2135,23 +2093,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       const hasAvaNormal = sorted.some(p => p.id.startsWith('ava-normal-') && p.userHandle === 'Ava@galway');
       if (!hasAvaNormal) {
         const avaNormal = getAvaNormalPost();
-        sorted = [avaNormal, ...sorted];
-      }
-
-      // Also guarantee ALL of the current user's posts appear in their own Ireland feed,
-      // regardless of how location was snapshotted on the post (mock/dev convenience).
-      if (_currentUserHandle) {
-        const ownHandleLower = _currentUserHandle.trim().toLowerCase();
-        const ownPosts = posts.filter(p => (p.userHandle || '').trim().toLowerCase() === ownHandleLower);
-        if (ownPosts.length > 0) {
-          const seenIds = new Set<string>();
-          const merged = [...ownPosts, ...sorted].filter(p => {
-            const id = String(p.id);
-            if (seenIds.has(id)) return false;
-            seenIds.add(id);
-            return true;
-          });
-          sorted = merged;
+        if (postMatchesLocationTab(avaNormal, t)) {
+          sorted = [avaNormal, ...sorted];
         }
       }
     }
@@ -2217,7 +2160,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
         if (existingIds.has(id)) continue;
         const p = await getPostById(id);
         if (!p) continue;
-        // Only inject into this tab if the post author's location matches the tab
+        // Only inject into this tab if the post's explicit place tag matches the tab
         if (!postMatchesLocationTab(p, tab)) continue;
         const decorated = decorateForUser(userId, { ...p, isBoosted: true, boostFeedType: feedType });
         boostedPosts.push(decorated);
@@ -2267,7 +2210,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     }
     items = dedupeItemsById(items);
 
-    // Final mock-path guard: location feeds never return foreign author cards.
+    // Final mock-path guard: location feeds never return cards tagged for another place.
     if (isCustomLocationFeed || t === 'finglas' || t === 'dublin' || t === 'ireland') {
       const before = items.length;
       items = items.filter((p) => postMatchesLocationTab(p, tab));

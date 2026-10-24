@@ -181,14 +181,9 @@ class PostController extends Controller
     /**
      * Attach the author's location tiers to a serialized post.
      *
-     * The RN client decides whether a post belongs to a location feed from these
-     * tiers (postMatchesLocationTab reads userLocal/userRegional/userNational).
-     * The feed payload used to carry only handle/display_name/avatar_url, so for live
-     * Laravel posts every tier resolved to undefined and the client-side guard
-     * discarded the entire Ireland/Dublin/custom feed — while Following, which skips
-     * that guard, still worked. Emitting them in both the nested camelCase shape the
-     * client reads (user.local/regional/national) and at the top level keeps the
-     * `|| response.userLocal` fallback in transformLaravelPost working too.
+     * Location feeds now match the post's own tag (location_label / venue / landmark /
+     * gazetteer_region_id), not these author home-city tiers. The tiers are still
+     * emitted for profile chrome, suggested-places ranking, and transformLaravelPost.
      *
      * Only emits when the relation is actually loaded and the columns were selected,
      * so endpoints that skip the eager load are unaffected (they simply omit them).

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class Post extends Model
@@ -184,9 +185,9 @@ class Post extends Model
     /**
      * The gazetteer region this post was taken in.
      *
-     * Nullable and not yet populated: every existing post has a NULL here, and nothing
-     * writes to it yet. Location filtering still goes through scopeByLocation(), which
-     * LIKE-matches the free-text location_label / venue / landmark strings.
+     * Nullable and not yet populated for most rows. scopeByLocation() matches this id
+     * when a filter resolves to a gazetteer region, otherwise it LIKE-matches the
+     * free-text location_label / venue / landmark strings. Author home city is ignored.
      */
     public function gazetteerRegion(): BelongsTo
     {
@@ -318,18 +319,54 @@ class Post extends Model
         }
 
         $needle = $raw;
+        $regionIds = $this->regionIdsMatchingLocationName($needle);
 
-        return $query->where(function ($q) use ($needle) {
+        return $query->where(function ($q) use ($needle, $regionIds) {
             $q->where('location_label', 'LIKE', "%{$needle}%")
                 ->orWhere('venue', 'LIKE', "%{$needle}%")
                 ->orWhere('landmark', 'LIKE', "%{$needle}%")
-                ->orWhere('place_id', $needle)
-                ->orWhereHas('user', function ($uq) use ($needle) {
-                    $uq->where('location_local', 'LIKE', "%{$needle}%")
-                        ->orWhere('location_regional', 'LIKE', "%{$needle}%")
-                        ->orWhere('location_national', 'LIKE', "%{$needle}%");
-                });
+                ->orWhere('place_id', $needle);
+
+            if ($regionIds !== [] && Schema::hasColumn($this->getTable(), 'gazetteer_region_id')) {
+                $q->orWhereIn($this->getTable().'.gazetteer_region_id', $regionIds);
+            }
         });
+    }
+
+    /**
+     * Gazetteer region ids whose official name, slug, or alias matches $needle,
+     * plus descendants so a country/county filter includes tagged city posts.
+     *
+     * @return array<int>
+     */
+    private function regionIdsMatchingLocationName(string $needle): array
+    {
+        $trimmed = trim($needle);
+        if ($trimmed === '' || ! Schema::hasTable('gazetteer_regions')) {
+            return [];
+        }
+
+        try {
+            $matched = GazetteerRegion::query()
+                ->where(function ($q) use ($trimmed) {
+                    $q->where('name', 'LIKE', "%{$trimmed}%")
+                        ->orWhere('slug', 'LIKE', '%'.Str::slug($trimmed).'%')
+                        ->orWhereHas('aliases', function ($aq) use ($trimmed) {
+                            $aq->where('alias', 'LIKE', "%{$trimmed}%");
+                        });
+                })
+                ->pluck('id')
+                ->all();
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($matched as $id) {
+            $ids = array_merge($ids, $this->regionIdsWithDescendants($id));
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /**

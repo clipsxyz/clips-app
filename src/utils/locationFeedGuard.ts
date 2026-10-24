@@ -1,7 +1,7 @@
 import type { Post } from '../types';
 import { postMatchesLocationTab } from '../api/posts';
 
-/** Feeds where every card must match author location (not Following / clips). */
+/** Feeds where every card must match the post's explicit place tag (not Following / clips). */
 export function isLocationScopedFeedTab(tab: string | null | undefined): boolean {
     const t = String(tab || '')
         .trim()

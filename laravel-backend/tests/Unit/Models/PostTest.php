@@ -46,17 +46,13 @@ class PostTest extends TestCase
         $this->assertNotContains($reclippedPost->id, $results);
     }
 
-public function test_by_location_scope_filters_by_location_label(): void
-{
-    // UserFactory hardcodes location_regional = 'Dublin'. scopeByLocation() intentionally
-    // also matches the AUTHOR's location_* fields via orWhereHas('user'), so with the default
-    // user BOTH posts match and this test cannot isolate post-level label filtering.
-    // Moving the author off Dublin isolates what this test is actually named for.
-    $user = User::factory()->create([
-        'location_local' => 'Galway',
-        'location_regional' => 'Galway',
-        'location_national' => 'Ireland',
-    ]);
+    public function test_by_location_scope_filters_by_location_label(): void
+    {
+        $user = User::factory()->create([
+            'location_local' => 'Galway',
+            'location_regional' => 'Galway',
+            'location_national' => 'Ireland',
+        ]);
 
         $dublinPost = Post::factory()->create([
             'user_id' => $user->id,
@@ -72,6 +68,37 @@ public function test_by_location_scope_filters_by_location_label(): void
 
         $this->assertContains($dublinPost->id, $results);
         $this->assertCount(1, $results);
+    }
+
+    public function test_by_location_ignores_author_home_city(): void
+    {
+        $dublinAuthor = User::factory()->create([
+            'location_local' => 'Finglas',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+
+        $galwayTagged = Post::factory()->create([
+            'user_id' => $dublinAuthor->id,
+            'location_label' => 'Galway, Ireland',
+            'venue' => 'Eyre Square',
+        ]);
+
+        $dublinTagged = Post::factory()->create([
+            'user_id' => $dublinAuthor->id,
+            'location_label' => 'Temple Bar, Dublin',
+        ]);
+
+        $dublinIds = Post::byLocation('Dublin')->pluck('id')->all();
+        $galwayIds = Post::byLocation('Galway')->pluck('id')->all();
+        $manchesterIds = Post::byLocation('Manchester')->pluck('id')->all();
+
+        $this->assertContains($dublinTagged->id, $dublinIds);
+        $this->assertNotContains($galwayTagged->id, $dublinIds);
+        $this->assertContains($galwayTagged->id, $galwayIds);
+        $this->assertNotContains($dublinTagged->id, $galwayIds);
+        $this->assertNotContains($dublinTagged->id, $manchesterIds);
+        $this->assertNotContains($galwayTagged->id, $manchesterIds);
     }
 
     public function test_is_liked_by_returns_true_when_like_exists(): void
@@ -178,10 +205,8 @@ public function test_by_location_scope_filters_by_location_label(): void
         $this->assertArrayNotHasKey('userNational', $payload);
     }
 
-    public function test_by_location_national_scope_includes_sub_location_authors(): void
+    public function test_by_location_national_scope_uses_post_tag_not_author_home(): void
     {
-        // A Galway author is not "Ireland" by string equality on the post label, but the
-        // national scope must still resolve them via the author's location_national tier.
         $galway = User::factory()->create([
             'location_local' => 'Oranmore',
             'location_regional' => 'Galway',
@@ -190,7 +215,7 @@ public function test_by_location_scope_filters_by_location_label(): void
         $galwayPost = Post::factory()->create([
             'user_id' => $galway->id,
             'user_handle' => $galway->handle,
-            'location_label' => 'Galway',
+            'location_label' => 'Galway, Ireland',
         ]);
 
         $english = User::factory()->create([
@@ -208,10 +233,13 @@ public function test_by_location_scope_filters_by_location_label(): void
 
         $this->assertContains($galwayPost->id, $irelandIds);
 
-        // Sanity: the same author's post is reachable from the city scope too.
         $this->assertContains(
             $galwayPost->id,
             Post::notReclipped()->byLocation('Galway')->pluck('id')->all()
+        );
+        $this->assertNotContains(
+            $galwayPost->id,
+            Post::notReclipped()->byLocation('Dublin')->pluck('id')->all()
         );
     }
 

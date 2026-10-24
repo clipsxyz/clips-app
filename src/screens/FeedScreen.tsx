@@ -3563,7 +3563,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     stats: mergeEngagementStats(p.stats, prev.stats),
                 };
             });
-            // Hard guard: never render a card on a place feed unless author location matches.
+            // Hard guard: never render a card on a place feed unless the post tag matches.
             if (isLocationScopedFeedTab(feedTab)) {
                 const leaks = findLocationFeedLeaks(merged, feedTab);
                 if (leaks.length > 0) {
