@@ -2017,9 +2017,42 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Icon name="image-outline" size={ox(18)} color="#FFFFFF" />
                                 <Text style={styles.editSheetOptionText}>Change Cover</Text>
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('name')}
+                            >
+                                <Icon name="person-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Name</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('bio')}
+                            >
+                                <Icon name="create-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Bio</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('social')}
+                            >
+                                <Icon name="link-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Social Links</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => setOpenPassportCardRequest('location')}
+                            >
+                                <Icon name="location-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Location</Text>
+                            </TouchableOpacity>
                             <ProfilePassportCards
                                 navigation={navigation}
                                 isPrivate={isPrivate}
+                                editorsOnly
                                 onPressPhoto={() => {
                                     closeEditSheet();
                                     setShowProfilePictureModal(true);
@@ -2030,8 +2063,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 }}
                                 openCardRequest={openPassportCardRequest}
                                 onOpenCardRequestHandled={() => setOpenPassportCardRequest(null)}
-                                followersCount={audienceCounts.followers}
-                                followingCount={audienceCounts.following}
                             />
                         </ScrollView>
                     </Animated.View>

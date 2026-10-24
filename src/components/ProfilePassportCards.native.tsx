@@ -72,6 +72,8 @@ type Props = {
      */
     followersCount?: number;
     followingCount?: number;
+    /** Keep the field editors; hide the legacy Audience / Identity / Preferences card stack. */
+    editorsOnly?: boolean;
 };
 
 const FLAG_ISO_OPTIONS = ['IE', 'GB', 'FR', 'ES', 'IT', 'DE', 'PT', 'NL', 'US', 'CA', 'BR', 'MX', 'AU', 'NZ', 'JP', 'CN', 'IN', 'PK', 'ZA', 'KE', 'EG', 'TR', 'RU', 'UA'];
@@ -243,6 +245,7 @@ export default function ProfilePassportCards({
     onOpenCardRequestHandled,
     followersCount: followersCountProp,
     followingCount: followingCountProp,
+    editorsOnly = false,
 }: Props) {
     const { user, login } = useAuth();
     const { width: screenWidth } = useWindowDimensions();
@@ -967,6 +970,30 @@ export default function ProfilePassportCards({
 
     if (!user) return null;
 
+    const editorModal = (
+            <Modal visible={selectedCard !== null} animationType="slide" transparent onRequestClose={() => setSelectedCard(null)}>
+                <View style={styles.modalOverlay}>
+                    <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSelectedCard(null)} />
+                    <View style={styles.modalSheet}>
+                        <View style={styles.modalHandle} />
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>{selectedCard ? cardTitle(selectedCard) : ''}</Text>
+                            <TouchableOpacity onPress={() => setSelectedCard(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+                            {renderSheetBody()}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+    );
+
+    if (editorsOnly) {
+        return <View>{editorModal}</View>;
+    }
+
     return (
         <View style={styles.wrap}>
             {isPrivate ? (
@@ -1095,23 +1122,7 @@ export default function ProfilePassportCards({
                 </View>
             </View>
 
-            <Modal visible={selectedCard !== null} animationType="slide" transparent onRequestClose={() => setSelectedCard(null)}>
-                <View style={styles.modalOverlay}>
-                    <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setSelectedCard(null)} />
-                    <View style={styles.modalSheet}>
-                        <View style={styles.modalHandle} />
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>{selectedCard ? cardTitle(selectedCard) : ''}</Text>
-                            <TouchableOpacity onPress={() => setSelectedCard(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                        <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
-                            {renderSheetBody()}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
+            {editorModal}
         </View>
     );
 }
