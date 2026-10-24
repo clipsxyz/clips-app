@@ -145,6 +145,18 @@ class CollectionController extends Controller
                     'locationLabel' => $post->location_label,
                     'tags' => $post->tags ?? [],
                     'createdAt' => $post->created_at->timestamp * 1000,
+                    'likes_count' => $post->likes_count ?? 0,
+                    'views_count' => $post->views_count ?? 0,
+                    'comments_count' => $post->comments_count ?? 0,
+                    'shares_count' => $post->shares_count ?? 0,
+                    'reclips_count' => $post->reclips_count ?? 0,
+                    'stats' => [
+                        'likes' => $post->likes_count ?? 0,
+                        'views' => $post->views_count ?? 0,
+                        'comments' => $post->comments_count ?? 0,
+                        'shares' => $post->shares_count ?? 0,
+                        'reclips' => $post->reclips_count ?? 0,
+                    ],
                 ];
             }),
             'createdAt' => $collection->created_at->timestamp * 1000,

@@ -303,7 +303,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
             Alert.alert('Already reclipped', 'You have already reclipped this post.');
             return;
         }
-        const prevReclips = p.stats.reclips;
+        const prevReclips = p.stats?.reclips ?? 0;
         const newReclips = prevReclips + 1;
         setReclipState(userId, p.id, true);
         setPost((prev) => {
@@ -311,7 +311,13 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 ? {
                       ...prev,
                       userReclipped: true,
-                      stats: { ...prev.stats, reclips: newReclips },
+                      stats: {
+                          likes: prev.stats?.likes ?? 0,
+                          views: prev.stats?.views ?? prev.views_count ?? 0,
+                          comments: prev.stats?.comments ?? 0,
+                          shares: prev.stats?.shares ?? 0,
+                          reclips: newReclips,
+                      },
                   }
                 : null;
             syncPostOut(next);
@@ -331,7 +337,13 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     ? {
                           ...prev,
                           userReclipped: false,
-                          stats: { ...prev.stats, reclips: prevReclips },
+                          stats: {
+                              likes: prev.stats?.likes ?? 0,
+                              views: prev.stats?.views ?? prev.views_count ?? 0,
+                              comments: prev.stats?.comments ?? 0,
+                              shares: prev.stats?.shares ?? 0,
+                              reclips: prevReclips,
+                          },
                       }
                     : null,
             );
@@ -529,7 +541,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
                         <View style={styles.statsContainer}>
                             <Text style={styles.statsText}>
-                                {post.stats.views} views • {post.stats.reclips} reclips
+                                {post?.stats?.views ?? post?.views_count ?? 0} views • {post?.stats?.reclips ?? 0} reclips
                             </Text>
                         </View>
                     </View>

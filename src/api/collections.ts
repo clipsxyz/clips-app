@@ -31,6 +31,19 @@ function mapApiCollection(raw: any, fallbackUserId?: string): Collection {
     };
 }
 
+function normalizeCollectionPost(raw: any): Post {
+    const likes = Number(raw?.stats?.likes ?? raw?.likes_count ?? 0) || 0;
+    const views = Number(raw?.stats?.views ?? raw?.views_count ?? raw?.views ?? 0) || 0;
+    const comments = Number(raw?.stats?.comments ?? raw?.comments_count ?? 0) || 0;
+    const shares = Number(raw?.stats?.shares ?? raw?.shares_count ?? 0) || 0;
+    const reclips = Number(raw?.stats?.reclips ?? raw?.reclips_count ?? 0) || 0;
+    return {
+        ...(raw as Post),
+        stats: { likes, views, comments, shares, reclips },
+        views_count: views,
+    };
+}
+
 function findLocalCollection(
     collections: Collection[],
     identifier: string,
@@ -753,7 +766,7 @@ export async function getCollectionPosts(
                     ? payload.data.posts
                     : null;
             if (Array.isArray(list)) {
-                return list as Post[];
+                return list.map(normalizeCollectionPost);
             }
         } catch (error) {
             console.warn('Laravel getCollectionPosts failed, falling back to local collections:', error);
