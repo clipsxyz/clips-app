@@ -7,6 +7,7 @@ import FeedMessageSquareIcon from './FeedMessageSquareIcon.native';
 import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 import FeedRepeatIcon from './FeedRepeatIcon.native';
 import FeedBookmarkIcon from './FeedBookmarkIcon.native';
+import FeedLiveShareIcon from './FeedLiveShareIcon.native';
 
 const ACTION_ICON = FEED_UI.icon.action;
 const PILL_ACTION_ICON = 15;
@@ -28,6 +29,10 @@ type FeedEngagementRowProps = {
     onShareToStories?: () => void;
     onReclip?: () => void;
     onSave?: () => void;
+    onShare?: () => void;
+    showShare?: boolean;
+    /** Spread actions evenly across the row (post detail / peek). */
+    distributed?: boolean;
     showShareToStories?: boolean;
     showViews?: boolean;
     showReclip?: boolean;
@@ -60,6 +65,9 @@ export default function FeedEngagementRow({
     onShareToStories,
     onReclip,
     onSave,
+    onShare,
+    showShare = false,
+    distributed = false,
     showShareToStories = true,
     showViews = false,
     showReclip = true,
@@ -85,11 +93,18 @@ export default function FeedEngagementRow({
     const showSaveText = showSaveLabel && !pillChrome;
 
     return (
-        <View style={[styles.row, compact && styles.rowCompact, pillChrome && styles.rowPill]}>
+        <View
+            style={[
+                styles.row,
+                compact && styles.rowCompact,
+                pillChrome && styles.rowPill,
+                distributed && styles.rowDistributed,
+            ]}
+        >
             <View
                 ref={likeButtonRef}
                 collapsable={false}
-                style={[styles.item, compact && styles.itemCompact, pillStyle]}
+                style={[styles.item, compact && styles.itemCompact, pillStyle, distributed && styles.itemDistributed]}
             >
                 <TouchableOpacity onPress={onLike} disabled={!onLike} activeOpacity={0.7}>
                     <FeedLikeThumbsIcon size={iconSize} filled={userLiked} color={likeIconColor} />
@@ -107,7 +122,7 @@ export default function FeedEngagementRow({
 
             <TouchableOpacity
                 onPress={onComment}
-                style={[styles.item, compact && styles.itemCompact, pillStyle]}
+                style={[styles.item, compact && styles.itemCompact, pillStyle, distributed && styles.itemDistributed]}
                 disabled={!onComment}
                 activeOpacity={0.7}
                 accessibilityLabel={`Comments, ${comments}`}
@@ -119,7 +134,7 @@ export default function FeedEngagementRow({
             {showShareToStories ? (
                 <TouchableOpacity
                     onPress={onShareToStories}
-                    style={[styles.item, compact && styles.itemCompact, pillStyle]}
+                    style={[styles.item, compact && styles.itemCompact, pillStyle, distributed && styles.itemDistributed]}
                     disabled={!onShareToStories}
                     activeOpacity={0.7}
                 >
@@ -135,6 +150,7 @@ export default function FeedEngagementRow({
                         styles.item,
                         compact && styles.itemCompact,
                         pillStyle,
+                        distributed && styles.itemDistributed,
                         reclipDisabled && styles.itemDisabled,
                     ]}
                     disabled={!onReclip || reclipDisabled}
@@ -166,7 +182,7 @@ export default function FeedEngagementRow({
             {showSave ? (
                 <TouchableOpacity
                     onPress={onSave}
-                    style={[styles.item, compact && styles.itemCompact, pillStyle]}
+                    style={[styles.item, compact && styles.itemCompact, pillStyle, distributed && styles.itemDistributed]}
                     disabled={!onSave}
                     activeOpacity={0.7}
                     accessibilityLabel={isSaved ? 'Saved' : 'Save post'}
@@ -181,8 +197,20 @@ export default function FeedEngagementRow({
                 </TouchableOpacity>
             ) : null}
 
+            {showShare && onShare ? (
+                <TouchableOpacity
+                    onPress={onShare}
+                    style={[styles.item, compact && styles.itemCompact, pillStyle, distributed && styles.itemDistributed]}
+                    activeOpacity={0.7}
+                    accessibilityLabel={`Share post, ${shares} shares`}
+                >
+                    <FeedLiveShareIcon size={iconSize} color={iconColor} />
+                    <Text style={[countTextStyle, { color: countColor }]}>{shares}</Text>
+                </TouchableOpacity>
+            ) : null}
+
             {showViews ? (
-                <View style={[styles.item, compact && styles.itemCompact, pillStyle]}>
+                <View style={[styles.item, compact && styles.itemCompact, pillStyle, distributed && styles.itemDistributed]}>
                     <Text style={[countTextStyle, { color: countColor }]}>{views}</Text>
                 </View>
             ) : null}
@@ -202,6 +230,17 @@ const styles = StyleSheet.create({
     },
     rowCompact: {
         columnGap: 6,
+    },
+    rowDistributed: {
+        flex: 1,
+        width: '100%',
+        justifyContent: 'space-between',
+        columnGap: 0,
+    },
+    itemDistributed: {
+        flex: 1,
+        justifyContent: 'center',
+        flexShrink: 1,
     },
     rowPill: {
         columnGap: 4,

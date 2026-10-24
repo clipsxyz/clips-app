@@ -2089,9 +2089,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         ) : null}
 
                         <View style={styles.peekMenu}>
-                            {PEEK_ACTIONS.filter(
-                                (action) => action.key !== 'repost' || !isOwnPeekPost(peekPost),
-                            ).map((action) => {
+                            {PEEK_ACTIONS.map((action) => {
                                 const liked = peekPost?.userLiked === true;
                                 const iconName =
                                     action.key === 'like' && liked && action.activeIcon

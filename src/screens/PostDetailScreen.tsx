@@ -41,7 +41,6 @@ import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.nativ
 import FeedPostHeader from '../components/FeedPostHeader.native';
 import FeedCaptionText from '../components/FeedCaptionText.native';
 import FeedEngagementRow from '../components/FeedEngagementRow';
-import FeedEngagementRightActions from '../components/FeedEngagementRightActions.native';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import {
     hideFeedPostMobile,
@@ -500,48 +499,47 @@ export default function PostDetailScreen({ route, navigation }: any) {
                         ) : null}
 
                         <View style={styles.engagementBar}>
-                            <View style={styles.engagementLeft}>
-                                <FeedEngagementRow
-                                    likes={post.stats?.likes ?? 0}
-                                    comments={post.stats?.comments ?? 0}
-                                    shares={post.stats?.shares ?? 0}
-                                    reclips={post.stats?.reclips ?? 0}
-                                    userLiked={post.userLiked}
-                                    userReclipped={post.userReclipped}
-                                    isSaved={post.isBookmarked}
-                                    onLike={() => {
-                                        void handleLike();
-                                    }}
-                                    onComment={() => setCommentsOpen(true)}
-                                    onReclip={() => {
-                                        void tryReclip();
-                                    }}
-                                    onSave={
-                                        hideSaveAction
-                                            ? undefined
-                                            : () => {
-                                                  void toggleCollectionsSave();
-                                              }
-                                    }
-                                    showShareToStories={false}
-                                    showReclip={!isCurrentUser}
-                                    showSave={!hideSaveAction}
-                                    showSaveLabel={!post.isBoosted}
-                                    compact
-                                    tone="feed"
-                                />
-                            </View>
-                            <FeedEngagementRightActions
+                            <FeedEngagementRow
+                                likes={post.stats?.likes ?? 0}
+                                comments={post.stats?.comments ?? 0}
                                 shares={post.stats?.shares ?? 0}
+                                reclips={post.stats?.reclips ?? 0}
+                                userLiked={post.userLiked}
+                                userReclipped={post.userReclipped}
+                                isSaved={post.isBookmarked}
+                                onLike={() => {
+                                    void handleLike();
+                                }}
+                                onComment={() => setCommentsOpen(true)}
+                                onReclip={() => {
+                                    void tryReclip();
+                                }}
                                 onShare={() => {
                                     void openShare();
                                 }}
+                                onSave={
+                                    hideSaveAction
+                                        ? undefined
+                                        : () => {
+                                              void toggleCollectionsSave();
+                                          }
+                                }
+                                showShareToStories={false}
+                                showShare
+                                showReclip
+                                showSave={!hideSaveAction}
+                                showSaveLabel={false}
+                                distributed
+                                tone="feed"
                             />
                         </View>
 
                         <View style={styles.statsContainer}>
                             <Text style={styles.statsText}>
-                                {post?.stats?.views ?? post?.views_count ?? 0} views • {post?.stats?.reclips ?? 0} reclips
+                                {post?.stats?.views ?? post?.views_count ?? 0} views
+                            </Text>
+                            <Text style={styles.statsText}>
+                                {post?.stats?.reclips ?? 0} reclips
                             </Text>
                         </View>
                     </View>
@@ -865,26 +863,26 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: ox(12),
+        width: '100%',
+        paddingHorizontal: ox(8),
         paddingVertical: ox(6),
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255,255,255,0.06)',
         minWidth: 0,
         backgroundColor: FEED_CARD_BG,
     },
-    engagementLeft: {
-        flex: 1,
-        minWidth: 0,
-        flexShrink: 1,
-        marginRight: ox(8),
-    },
     statsContainer: {
-        paddingHorizontal: ox(12),
-        paddingBottom: ox(8),
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: ox(16),
+        paddingBottom: ox(10),
+        paddingTop: ox(2),
     },
     statsText: {
-        fontSize: ox(14),
-        color: '#9CA3AF',
+        fontSize: ox(13),
+        color: '#94A3B8',
+        fontWeight: '600',
     },
     errorText: {
         fontSize: ox(16),
