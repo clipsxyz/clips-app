@@ -1029,7 +1029,7 @@ export default function ProfilePassportCards({
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.quickBtn} onPress={onPressPhoto}>
                         <Icon name="camera-outline" size={16} color="#FFFFFF" />
-                        <Text style={styles.quickBtnText}>Photo</Text>
+                        <Text style={styles.quickBtnText}>Change Photo</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.quickBtn} onPress={onPressCover}>
                         <Icon name="image-outline" size={16} color="#FFFFFF" />

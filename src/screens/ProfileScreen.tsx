@@ -21,8 +21,6 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import ProfileCoverHero from '../components/ProfileCoverHero.native';
-import { useStoryRingState } from '../hooks/useHasActiveStories';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import { navigateMainTab } from '../navigation/mainTabs';
 import {
@@ -66,7 +64,6 @@ import { getInboxUnreadPollMs } from '../utils/backgroundPollMs';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, getCurrentUser, mapLaravelUserToAppFields, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
-import Avatar from '../components/Avatar';
 import CreateGroupModal from '../components/CreateGroupModal.native';
 import MyFeedModal from '../components/MyFeedModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
@@ -197,10 +194,6 @@ const PEEK_ACTIONS: Array<{
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { height: windowHeight, width: windowWidth } = useWindowDimensions();
     const { user, logout, login } = useAuth();
-    const ownRing = useStoryRingState(user?.handle || '', {
-        viewerId: user?.id != null ? String(user.id) : undefined,
-        isCurrentUser: true,
-    });
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -968,20 +961,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 style={styles.passportCanvas}
             >
             <View style={styles.header}>
-                <TouchableOpacity
-                    onPress={() => setShowProfilePictureModal(true)}
-                    accessibilityLabel="Change profile picture"
-                    style={styles.headerAvatarBtn}
-                >
-                    <Avatar
-                        src={user?.avatarUrl}
-                        name={user?.name || 'User'}
-                        size={ox(32)}
-                    />
-                    <View style={styles.headerAvatarBadge}>
-                        <Icon name="add" size={ox(14)} color="#020B26" />
-                    </View>
-                </TouchableOpacity>
+                <View style={styles.headerSideSlot} />
                 <TouchableOpacity
                     onPress={() => {
                         setOpenPassportCardRequest('name');
@@ -1189,15 +1169,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 renderItem={renderProfileGridItem}
                 ListHeaderComponent={
                     <>
-            <ProfileCoverHero
-                coverUrl={user?.profileBackgroundUrl}
-                avatarUrl={user?.avatarUrl}
-                name={user?.name || user?.handle || 'User'}
-                hasStory={ownRing.hasStory}
-                storyRingState={ownRing.state}
-                onAvatarPress={() => setShowProfilePictureModal(true)}
-            />
-
             <View style={styles.profileSection}>
                 <View style={styles.profileInfoCentered}>
                     <View style={styles.userInfoCentered}>
@@ -2002,6 +1973,17 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 activeOpacity={0.85}
                                 onPress={() => {
                                     closeEditSheet();
+                                    setShowProfilePictureModal(true);
+                                }}
+                            >
+                                <Icon name="person-circle-outline" size={ox(18)} color="#FFFFFF" />
+                                <Text style={styles.editSheetOptionText}>Change Profile Picture</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.editSheetOption}
+                                activeOpacity={0.85}
+                                onPress={() => {
+                                    closeEditSheet();
                                     navigation.navigate('ProfileCover');
                                 }}
                             >
@@ -2177,27 +2159,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         borderWidth: 1,
         borderColor: UEFA_GLASS_BORDER,
     },
-    headerAvatarBtn: {
-        position: 'relative',
-        width: ox(32),
-        height: ox(32),
-        shadowColor: '#FFFFFF',
-        shadowOpacity: 0.35,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 4 },
-    },
-    headerAvatarBadge: {
-        position: 'absolute',
-        right: -2,
-        bottom: -2,
-        width: ox(18),
-        height: ox(18),
-        borderRadius: ox(9),
-        backgroundColor: '#FFFFFF',
-        borderWidth: 2,
-        borderColor: '#020B26',
-        alignItems: 'center',
-        justifyContent: 'center',
+    headerSideSlot: {
+        width: ox(38),
+        height: ox(38),
     },
     title: {
         flexShrink: 1,
@@ -2220,7 +2184,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     profileSection: {
         paddingHorizontal: profilePassportScrollInset,
-        paddingVertical: ox(16),
+        paddingTop: ox(8),
+        paddingBottom: ox(16),
     },
     profileInfoCentered: {
         marginBottom: ox(16),
