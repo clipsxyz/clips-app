@@ -10,6 +10,7 @@ use App\Models\StoryView;
 use App\Models\User;
 use App\Models\Post;
 use App\Services\LinkPreviewService;
+use App\Services\StoryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -21,32 +22,8 @@ use Carbon\Carbon;
 class StoryController extends Controller
 {
     /**
-     * Author IDs visible on the viewer's Stories rail: self + accepted follows.
-     *
-     * @return \Illuminate\Support\Collection<int, string>
-     */
-    private function storyFeedAuthorIds(?User $viewer, ?string $userIdParam = null)
-    {
-        $viewerId = $viewer?->id ?: $userIdParam;
-        if (!$viewerId) {
-            return collect();
-        }
-
-        $author = $viewer ?: User::query()->find($viewerId);
-        $ids = collect([(string) $viewerId]);
-        if ($author) {
-            // allRelatedIds() returns following_id values without ambiguous users.id joins.
-            $ids = $ids->merge(
-                collect($author->following()->allRelatedIds())->map(fn ($id) => (string) $id)
-            );
-        }
-
-        return $ids->filter()->unique()->values();
-    }
-
-    /**
      * Get active stories with keyset cursor pagination.
-     * Scoped to the authenticated viewer (self + following), newest first.
+     * Followed authors always appear; location filter is OR'd, never exclusive.
      */
     public function paged(Request $request): JsonResponse
     {
@@ -54,6 +31,7 @@ class StoryController extends Controller
             'cursor' => 'nullable|string',
             'limit' => 'integer|min:1|max:50',
             'userId' => 'nullable|string',
+            'filter' => 'nullable|string|max:200',
         ]);
 
         if ($validator->fails()) {
@@ -65,18 +43,15 @@ class StoryController extends Controller
         $viewer = Auth::user();
         $userId = $viewer?->id ?: $request->get('userId');
         $hasViewer = !empty($userId);
-        $authorIds = $this->storyFeedAuthorIds($viewer instanceof User ? $viewer : null, $request->get('userId'));
 
-        $query = Story::active()
+        $query = app(StoryService::class)
+            ->getStoriesRail(
+                $viewer instanceof User ? $viewer : null,
+                $request->get('userId'),
+                $request->get('filter')
+            )
             ->with(['user:id,handle,display_name,avatar_url'])
-            ->withCount(['reactions', 'replies', 'views'])
-            ->where('created_at', '>=', now()->subHours(24));
-
-        if ($authorIds->isNotEmpty()) {
-            $query->whereIn('user_id', $authorIds->all());
-        } elseif ($hasViewer) {
-            $query->where('user_id', $userId);
-        }
+            ->withCount(['reactions', 'replies', 'views']);
 
         if ($hasViewer) {
             $query->withExists([
@@ -143,18 +118,15 @@ class StoryController extends Controller
         $viewer = Auth::user();
         $userId = $viewer?->id ?: $request->get('userId');
         $hasViewer = !empty($userId);
-        $authorIds = $this->storyFeedAuthorIds($viewer instanceof User ? $viewer : null, $request->get('userId'));
 
-        $query = Story::active()
+        $query = app(StoryService::class)
+            ->getStoriesRail(
+                $viewer instanceof User ? $viewer : null,
+                $request->get('userId'),
+                $request->get('filter')
+            )
             ->with(['user:id,handle,display_name,avatar_url'])
-            ->withCount(['reactions', 'replies', 'views'])
-            ->where('created_at', '>=', now()->subHours(24));
-
-        if ($authorIds->isNotEmpty()) {
-            $query->whereIn('user_id', $authorIds->all());
-        } elseif ($hasViewer) {
-            $query->where('user_id', $userId);
-        }
+            ->withCount(['reactions', 'replies', 'views']);
 
         if ($hasViewer) {
             $query->withExists([

@@ -8275,7 +8275,11 @@ function FeedPageWrapper() {
       try {
         const { getFollowedUsers } = await import('./api/posts');
         const followedUserHandles = await getFollowedUsers(user.id);
-        const groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles || []);
+        const groups = await fetchFollowedUsersStoryGroups(
+          user.id,
+          followedUserHandles || [],
+          currentFilter,
+        );
         if (cancelled) return;
 
         const nextItems: Stories24RailItem[] = [];
@@ -8350,7 +8354,7 @@ function FeedPageWrapper() {
       window.removeEventListener('storiesViewed', refreshStoriesRail as EventListener);
       window.removeEventListener('followToggled', refreshStoriesRail as EventListener);
     };
-  }, [user?.id, routerLocation.pathname, generateTextStoryPreview]);
+  }, [user?.id, routerLocation.pathname, generateTextStoryPreview, currentFilter]);
 
   const stories24Items = React.useMemo(() => {
     // Only real 24h stories belong here. Do NOT derive cards from feed posts â€” a newsfeed
@@ -8937,7 +8941,7 @@ function FeedPageWrapper() {
           }
           postCounter += 1;
           const showStories24AfterThisPost =
-            !customLocation && stories24Items.length > 0 && postCounter === 1;
+            stories24Items.length > 0 && postCounter === 1;
           const showPreviewBusinessAfterThisPost =
             suggestedCardsV2Enabled &&
             previewSuggestedCards &&
@@ -9158,6 +9162,16 @@ function FeedPageWrapper() {
 
       {end && flat.length === 0 && (
         <div className="p-8 text-center text-gray-600 dark:text-gray-300">
+          {stories24Items.length > 0 && (
+            <div className="mb-6 text-left">
+              <Stories24FeedRail
+                stories24Items={stories24Items}
+                navigate={navigate}
+                onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
+                previewVideosPaused={feedScrolling || !feedTabVisible}
+              />
+            </div>
+          )}
           {showFollowingFeed || currentFilter.toLowerCase() === 'discover' ? (
             <>
               <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>

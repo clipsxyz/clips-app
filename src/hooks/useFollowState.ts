@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { emitStoriesRefresh } from '../utils/storiesRefreshNative';
 
 /**
  * Global follow-state event bus.
@@ -47,6 +48,9 @@ export function emitFollowStatusChanged(payload: FollowStatusPayload): void {
     const entry: FollowStatusPayload = { ...payload, handle: key };
     cache.set(key, entry);
     listeners.forEach((listener) => listener(entry));
+    // Follow graph changed — Stories 24 must refetch so the new author appears
+    // on every location feed without waiting for the (often-disabled) poll.
+    emitStoriesRefresh();
 }
 
 /** Subscribe to follow-state changes. Returns an unsubscribe function. */

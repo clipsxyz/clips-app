@@ -807,11 +807,19 @@ export async function fetchPublicPostByToken(token: string) {
     return apiRequest(`/public/posts/${encodeURIComponent(token)}`);
 }
 
-export async function fetchStoriesPage(cursor: string | null = null, limit: number = 20, userId?: string) {
+export async function fetchStoriesPage(
+    cursor: string | null = null,
+    limit: number = 20,
+    userId?: string,
+    filter?: string,
+) {
     const params = new URLSearchParams({
         limit: limit.toString(),
         ...(cursor ? { cursor } : {}),
         ...(userId ? { userId } : {}),
+        ...(filter ? { filter } : {}),
+        // Bypass stale HTTP/proxy caches after follow/unfollow.
+        t: String(Date.now()),
     });
     return apiRequest(`/stories/paged?${params}`);
 }

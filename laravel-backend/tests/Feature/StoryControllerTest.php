@@ -281,5 +281,79 @@ class StoryControllerTest extends TestCase
         $this->assertContains($followedStory->id, $ids);
         $this->assertNotContains($strangerStory->id, $ids);
     }
+
+    public function test_location_filter_still_includes_followed_author_from_another_city(): void
+    {
+        $viewer = User::factory()->create([
+            'handle' => 'Gazetteer@Dublin',
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $debs = User::factory()->create([
+            'handle' => 'Debs@Manchester',
+            'location_local' => 'Manchester',
+            'location_regional' => 'England',
+            'location_national' => 'UK',
+        ]);
+        $localStranger = User::factory()->create([
+            'handle' => 'Local@Dublin',
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $spainStranger = User::factory()->create([
+            'handle' => 'Pilar@Madrid',
+            'location_local' => 'Madrid',
+            'location_regional' => 'Madrid',
+            'location_national' => 'Spain',
+        ]);
+
+        $debs->followers()->attach($viewer->id, ['status' => 'accepted']);
+
+        $debsStory = Story::factory()->forUser($debs)->create(['expires_at' => now()->addDay()]);
+        $localStory = Story::factory()->forUser($localStranger)->create(['expires_at' => now()->addDay()]);
+        $spainStory = Story::factory()->forUser($spainStranger)->create(['expires_at' => now()->addDay()]);
+
+        foreach (['Ireland', 'Dublin', 'Manchester'] as $filter) {
+            $response = $this->actingAs($viewer, 'sanctum')
+                ->getJson('/api/stories/paged?filter='.urlencode($filter));
+            $response->assertStatus(200);
+
+            $ids = array_column($response->json('items'), 'id');
+            $this->assertContains(
+                $debsStory->id,
+                $ids,
+                "Followed Manchester author must appear on the {$filter} Stories 24 rail"
+            );
+            $this->assertNotContains($spainStory->id, $ids);
+        }
+
+        $ireland = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories/paged?filter=Ireland');
+        $irelandIds = array_column($ireland->json('items'), 'id');
+        $this->assertContains($localStory->id, $irelandIds, 'Unfollowed Dublin author should appear on Ireland via location OR');
+    }
+
+    public function test_pending_follow_does_not_add_story_to_rail(): void
+    {
+        $viewer = User::factory()->create([
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $privateAuthor = User::factory()->create([
+            'is_private' => true,
+            'location_local' => 'Madrid',
+            'location_regional' => 'Madrid',
+            'location_national' => 'Spain',
+        ]);
+        $privateAuthor->followers()->attach($viewer->id, ['status' => 'pending']);
+
+        $story = Story::factory()->forUser($privateAuthor)->create(['expires_at' => now()->addDay()]);
+
+        $response = $this->actingAs($viewer, 'sanctum')->getJson('/api/stories/paged?filter=Ireland');
+        $response->assertStatus(200);
+        $this->assertNotContains($story->id, array_column($response->json('items'), 'id'));
+    }
 }
 

@@ -848,9 +848,14 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
  * Optional paged stories endpoint for large accounts/feeds.
  * Returns flat story items in newest-first order with a keyset cursor.
  */
-export async function fetchStoriesPage(cursor: string | null, limit = 20, userId?: string): Promise<StoriesPage> {
+export async function fetchStoriesPage(
+    cursor: string | null,
+    limit = 20,
+    userId?: string,
+    filter?: string,
+): Promise<StoriesPage> {
     const { fetchStoriesPage: fetchStoriesPageApi } = await import('./client');
-    const response = await fetchStoriesPageApi(cursor, limit, userId);
+    const response = await fetchStoriesPageApi(cursor, limit, userId, filter);
     const rawItems = Array.isArray(response?.items) ? response.items : [];
     const items: Story[] = rawItems.map((story: any) => mapLaravelStoryToStory(story));
 
@@ -1552,7 +1557,11 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string, userId?
 }
 
 // Get stories for followed users only
-export async function fetchFollowedUsersStoryGroups(userId: string, followedUserHandles: string[]): Promise<StoryGroup[]> {
+export async function fetchFollowedUsersStoryGroups(
+    userId: string,
+    followedUserHandles: string[],
+    filter?: string,
+): Promise<StoryGroup[]> {
     if (isLaravelApiEnabled()) {
         try {
             const collected: Story[] = [];
@@ -1561,7 +1570,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
             const maxPages = 5;
 
             do {
-                const page = await fetchStoriesPage(cursor, 50, userId);
+                const page = await fetchStoriesPage(cursor, 50, userId, filter);
                 collected.push(...page.items);
                 cursor = page.nextCursor;
                 pages += 1;

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Notification;
 use App\Services\BoostAnalyticsService;
+use App\Services\StoryService;
 use App\Services\VideoThumbnailService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -223,6 +224,8 @@ class UserController extends Controller
             }
         });
 
+        StoryService::forgetRailCacheForUser((string) $follower->id);
+
         return response()->json($result);
     }
 
@@ -345,6 +348,8 @@ class UserController extends Controller
             return response()->json($result, 404);
         }
 
+        StoryService::forgetRailCacheForUser((string) $requester->id);
+
         return response()->json($result);
     }
 
@@ -393,6 +398,8 @@ class UserController extends Controller
         if (isset($result['error'])) {
             return response()->json($result, 404);
         }
+
+        StoryService::forgetRailCacheForUser((string) $requester->id);
 
         return response()->json($result);
     }

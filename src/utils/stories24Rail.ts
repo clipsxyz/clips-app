@@ -152,9 +152,14 @@ export async function buildStories24RailItems(
     userId: string,
     userHandle?: string | null,
     viewerAvatarUrl?: string | null,
+    filter?: string | null,
 ): Promise<Stories24RailItem[]> {
     const followedUserHandles = await getFollowedUsers(userId);
-    const groups = await fetchFollowedUsersStoryGroups(userId, followedUserHandles || []);
+    const groups = await fetchFollowedUsersStoryGroups(
+        userId,
+        followedUserHandles || [],
+        filter?.trim() || undefined,
+    );
     const normalizedViewerHandle = (userHandle || '').trim().toLowerCase();
     const viewerAvatar = (viewerAvatarUrl || '').trim() || undefined;
 

@@ -2266,6 +2266,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, []),
     );
 
+    const storiesRailFilter =
+        customLocation != null && String(customLocation).trim() !== ''
+            ? customFilterType === 'venue'
+                ? `venue:${customLocation}`
+                : customFilterType === 'landmark'
+                    ? `landmark:${customLocation}`
+                    : customLocation
+            : showFollowingFeed
+                ? 'discover'
+                : active;
+
     React.useEffect(() => {
         if (!user?.id) {
             setStories24Items([]);
@@ -2273,7 +2284,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }
         let cancelled = false;
         const load = () => {
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl).then((items) => {
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, storiesRailFilter).then((items) => {
                 if (!cancelled) setStories24Items(items);
             });
         };
@@ -2286,13 +2297,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (interval) clearInterval(interval);
             unsubRefresh();
         };
-    }, [user?.id, user?.handle, user?.avatarUrl]);
+    }, [user?.id, user?.handle, user?.avatarUrl, storiesRailFilter]);
 
     useFocusEffect(
         React.useCallback(() => {
             if (!user?.id) return;
-            void buildStories24RailItems(user.id, user.handle, user.avatarUrl).then(setStories24Items);
-        }, [user?.id, user?.handle, user?.avatarUrl]),
+            void buildStories24RailItems(user.id, user.handle, user.avatarUrl, storiesRailFilter).then(setStories24Items);
+        }, [user?.id, user?.handle, user?.avatarUrl, storiesRailFilter]),
     );
 
     React.useEffect(() => {
@@ -4073,7 +4084,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
         if (!target && user?.id) {
             try {
-                items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl);
+                items = await buildStories24RailItems(user.id, user.handle, user.avatarUrl, storiesRailFilter);
                 setStories24Items(items);
                 target = resolveStories24OpenTarget(items);
             } catch (err) {
@@ -4090,7 +4101,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
         void persistStories24RailOpenHandle(target.item.handle);
         navigation.navigate('Stories', buildStories24StoryNavParams(target.item, target.railHandles));
-    }, [stories24Items, user?.id, user?.handle, navigation]);
+    }, [stories24Items, user?.id, user?.handle, navigation, storiesRailFilter]);
 
     const previewLocalBusinessPosts = React.useMemo(() => {
         const posts = flatStream
