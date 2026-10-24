@@ -21,7 +21,11 @@ import { createStory } from '../api/stories';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import {
     buildProfileShareUrl,
     formatProfileDisplayHandle,
@@ -211,7 +215,7 @@ export default function ShareProfileSheet({
             label: isSharingStory ? 'Sharing…' : 'Stories',
             keepOpen: true,
             icon: (
-                <IconCircle gradient={[PASSPORT_PALETTE.wavePrimary, PASSPORT_PALETTE.waveMid, PASSPORT_ABYSS]}>
+                <IconCircle backgroundColor="rgba(255,255,255,0.12)">
                     {isSharingStory ? (
                         <ActivityIndicator size="small" color="#fff" />
                     ) : (
@@ -324,7 +328,7 @@ export default function ShareProfileSheet({
                         },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetInner}>
                         <View style={styles.handleWrap}>
                             <View style={styles.handle} />
                         </View>
@@ -335,7 +339,7 @@ export default function ShareProfileSheet({
                                 <Text style={styles.title}>Share profile</Text>
                             </View>
                             <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close">
-                                <Icon name="close" size={22} color="#9CA3AF" />
+                                <Icon name="close" size={22} color={UCL_TEXT_PRIMARY} />
                             </TouchableOpacity>
                         </View>
 
@@ -411,7 +415,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     sheetInner: {
@@ -446,12 +450,12 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 0.8,
         textTransform: 'uppercase',
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_TEXT_PRIMARY,
     },
     title: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
         marginTop: 2,
     },
     closeBtn: {
@@ -477,7 +481,7 @@ const styles = StyleSheet.create({
     avatarRing: {
         borderRadius: 999,
         borderWidth: 2,
-        borderColor: 'rgba(61,155,143,0.45)',
+        borderColor: 'rgba(255,255,255,0.28)',
         padding: 2,
     },
     profileText: {
@@ -491,7 +495,7 @@ const styles = StyleSheet.create({
     },
     profileHandle: {
         fontSize: 13,
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         marginTop: 2,
     },
     copyRow: {
@@ -515,7 +519,7 @@ const styles = StyleSheet.create({
     statusHint: {
         marginTop: 8,
         fontSize: 12,
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_TEXT_PRIMARY,
         fontWeight: '600',
         textAlign: 'center',
     },
@@ -527,7 +531,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
-        color: '#6B7280',
+        color: UCL_TEXT_PLACEHOLDER,
     },
     shareScroll: {
         paddingHorizontal: 12,
@@ -542,7 +546,7 @@ const styles = StyleSheet.create({
     shareLabel: {
         marginTop: 8,
         fontSize: 10,
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         textAlign: 'center',
         maxWidth: 72,
     },

@@ -22,12 +22,14 @@ import { useAuth } from '../context/Auth';
 import { createChatGroup } from '../api/chatGroups';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { uploadFileFromUri } from '../utils/uploadFileNative';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import Avatar from './Avatar.native';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
-
-/** Same wash as web Swal / View Profile passport sheets. */
-const PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
 
 type Props = {
     visible: boolean;
@@ -131,11 +133,11 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
                         size={36}
                     />
                     <View style={styles.headerTitleRow}>
-                        <Icon name="people" size={20} color="#FFF" />
+                        <Icon name="people" size={20} color={UCL_TEXT_PRIMARY} />
                         <Text style={styles.title}>New group</Text>
                     </View>
                     <TouchableOpacity onPress={onClose} disabled={busy} accessibilityLabel="Close">
-                        <Icon name="close" size={24} color="#FFF" />
+                        <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
                 <Text style={styles.hint}>
@@ -151,7 +153,7 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
                         if (formError) setFormError(null);
                     }}
                     placeholder="e.g. Dublin photographers"
-                    placeholderTextColor="#6B7280"
+                    placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                     maxLength={120}
                     editable={!busy}
                     returnKeyType="done"
@@ -209,23 +211,12 @@ export default function CreateGroupModal({ visible, onClose, onCreated }: Props)
         </>
     );
 
-    /** Match SavePostModal: iOS animated ambient, Android parent LinearGradient (OEM-safe). */
-    const sheetInner =
-        Platform.OS === 'ios' ? (
-            <View style={styles.sheetCanvas} collapsable={false}>
-                <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
-                    <DiscoverAmbientCanvas variant="passport" fillParent />
-                </View>
-                <View style={styles.sheetContent} collapsable={false}>
-                    {form}
-                </View>
-            </View>
-        ) : (
+    const sheetInner = (
             <LinearGradient
-                colors={[...PASSPORT_WASH]}
-                locations={[0, 0.28, 0.55, 0.78, 1]}
-                start={{ x: 0.1, y: 1 }}
-                end={{ x: 0.9, y: 0 }}
+                colors={[...UCL_SHEET_GRADIENT]}
+                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                start={{ x: 0.12, y: 0 }}
+                end={{ x: 0.88, y: 1 }}
                 style={styles.sheetCanvas}
             >
                 <View style={styles.sheetContent} collapsable={false}>
@@ -282,13 +273,13 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         overflow: 'hidden',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.12)',
+        borderColor: 'rgba(255,255,255,0.08)',
     },
     sheetCanvas: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     ambientBack: {
@@ -328,10 +319,10 @@ const styles = StyleSheet.create({
         gap: 8,
         minWidth: 0,
     },
-    title: { color: '#FFF', fontSize: 17, fontWeight: '700', flexShrink: 1 },
-    hint: { color: 'rgba(255,255,255,0.5)', fontSize: 12, lineHeight: 18, marginBottom: 12 },
+    title: { color: UCL_TEXT_PRIMARY, fontSize: 17, fontWeight: '600', flexShrink: 1 },
+    hint: { color: UCL_TEXT_PLACEHOLDER, fontSize: 12, lineHeight: 18, marginBottom: 12 },
     label: {
-        color: 'rgba(255,255,255,0.6)',
+        color: '#E2E8F0',
         fontSize: 11,
         fontWeight: '700',
         textTransform: 'uppercase',
@@ -344,7 +335,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.15)',
         padding: 12,
-        color: '#FFF',
+        color: UCL_TEXT_PRIMARY,
     },
     formError: {
         color: '#F87171',

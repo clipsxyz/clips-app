@@ -3,8 +3,14 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { glassPanel } from '../theme/gazetteerAmbientNative';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    glassPanel,
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import { ox } from '../constants/nativeOpticalScale';
 
 const FEATURES = [
@@ -30,12 +36,20 @@ const FEATURES = [
 
 export default function LandingScreen({ navigation }: any) {
   return (
-    <GazetteerScreenShell edges={['top', 'bottom']} ambientVariant="passport">
+    <GazetteerScreenShell edges={['top', 'bottom']} ambient={false} style={styles.shell}>
+      <LinearGradient
+        colors={[...UCL_SHEET_GRADIENT]}
+        locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+        start={{ x: 0.12, y: 0 }}
+        end={{ x: 0.88, y: 1 }}
+        style={styles.canvas}
+      >
       <View style={styles.screen}>
         <LinearGradient
-          colors={['#0a0f1d', '#0d1b2a', '#0a1622']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          colors={[...UCL_SHEET_GRADIENT]}
+          locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+          start={{ x: 0.12, y: 0 }}
+          end={{ x: 0.88, y: 1 }}
           style={styles.card}
         >
           <ScrollView
@@ -54,7 +68,7 @@ export default function LandingScreen({ navigation }: any) {
               {FEATURES.map((feature) => (
                 <View key={feature.title} style={styles.featureRow}>
                   <View style={styles.featureIconWrap}>
-                    <Icon name={feature.icon} size={ox(20)} color={PASSPORT_PALETTE.wavePrimary} />
+                    <Icon name={feature.icon} size={ox(20)} color={UCL_TEXT_PRIMARY} />
                   </View>
                   <View style={styles.featureCopy}>
                     <Text style={styles.featureTitle}>{feature.title}</Text>
@@ -83,11 +97,20 @@ export default function LandingScreen({ navigation }: any) {
           </View>
         </LinearGradient>
       </View>
+      </LinearGradient>
     </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
+  shell: {
+    flex: 1,
+    backgroundColor: UCL_CANVAS_NAVY,
+  },
+  canvas: {
+    flex: 1,
+    backgroundColor: UCL_CANVAS_NAVY,
+  },
   screen: {
     flex: 1,
     justifyContent: 'center',
@@ -110,22 +133,22 @@ const styles = StyleSheet.create({
     paddingBottom: ox(16),
   },
   tagline: {
-    color: PASSPORT_PALETTE.wavePrimary,
+    color: UCL_TEXT_PRIMARY,
     fontSize: ox(13),
-    fontWeight: '700',
+    fontWeight: '600',
     marginBottom: ox(14),
     letterSpacing: 0.2,
   },
   title: {
-    color: '#FFFFFF',
+    color: UCL_TEXT_PRIMARY,
     fontSize: ox(28),
-    fontWeight: '800',
+    fontWeight: '600',
     lineHeight: ox(34),
     letterSpacing: -0.3,
   },
   subtitle: {
     marginTop: ox(12),
-    color: 'rgba(226,232,240,0.78)',
+    color: '#E2E8F0',
     fontSize: ox(14),
     lineHeight: ox(21),
   },
@@ -144,9 +167,9 @@ const styles = StyleSheet.create({
     borderRadius: ox(12),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(61,155,143,0.14)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(61,155,143,0.28)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   featureCopy: {
     flex: 1,
@@ -154,13 +177,13 @@ const styles = StyleSheet.create({
     paddingTop: ox(2),
   },
   featureTitle: {
-    color: '#FFFFFF',
+    color: UCL_TEXT_PRIMARY,
     fontSize: ox(15),
-    fontWeight: '700',
+    fontWeight: '600',
     marginBottom: ox(4),
   },
   featureBody: {
-    color: 'rgba(203,213,225,0.72)',
+    color: UCL_TEXT_PLACEHOLDER,
     fontSize: ox(13),
     lineHeight: ox(18),
   },
@@ -180,7 +203,7 @@ const styles = StyleSheet.create({
     paddingVertical: ox(14),
   },
   primaryText: {
-    color: '#0a0f1d',
+    color: UCL_CANVAS_NAVY,
     fontSize: ox(15),
     fontWeight: '700',
   },
@@ -194,7 +217,7 @@ const styles = StyleSheet.create({
     paddingVertical: ox(13),
   },
   secondaryText: {
-    color: '#E5E7EB',
+    color: UCL_TEXT_PRIMARY,
     fontSize: ox(14),
     fontWeight: '600',
   },

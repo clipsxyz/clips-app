@@ -15,8 +15,14 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { getStickers, STICKER_CATEGORIES, searchStickers } from '../api/stickers';
 import type { Sticker } from '../types';
-import { chipActiveMagenta, chipActiveMagentaText, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_STICKER } from './GazetteerBottomSheetModal.native';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    glassSearch,
+    glassSurface,
+} from '../theme/gazetteerAmbientNative';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
 
 type Props = {
     visible: boolean;
@@ -66,25 +72,25 @@ export default function StickerPickerNative({ visible, onClose, onSelectSticker,
             onDismiss={onClose}
             snapPoints={['82%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_STICKER.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_STICKER.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             backdropOpacity={0.75}
         >
             <BottomSheetView style={styles.headerBlock}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Stickers</Text>
                     <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <Icon name="close" size={24} color="#9CA3AF" />
+                        <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
 
                 <View style={styles.searchRow}>
-                    <Icon name="search" size={18} color="#9CA3AF" />
+                    <Icon name="search" size={18} color={UCL_TEXT_PRIMARY} />
                     <BottomSheetTextInput
                         value={searchQuery}
                         onChangeText={setSearchQuery}
                         placeholder="Search stickers..."
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         style={styles.searchInput}
                     />
                 </View>
@@ -119,7 +125,7 @@ export default function StickerPickerNative({ visible, onClose, onSelectSticker,
 
                 {onAddText ? (
                     <TouchableOpacity style={styles.addTextBtn} onPress={onAddText}>
-                        <Icon name="text" size={18} color="#FFFFFF" />
+                        <Icon name="text" size={18} color={UCL_CANVAS_NAVY} />
                         <Text style={styles.addTextBtnLabel}>Add Text</Text>
                     </TouchableOpacity>
                 ) : null}
@@ -127,7 +133,7 @@ export default function StickerPickerNative({ visible, onClose, onSelectSticker,
 
             {isLoading ? (
                 <BottomSheetView>
-                    <ActivityIndicator color="#f472b6" style={styles.loader} />
+                    <ActivityIndicator color={UCL_TEXT_PRIMARY} style={styles.loader} />
                 </BottomSheetView>
             ) : (
                 <BottomSheetFlatList
@@ -174,7 +180,7 @@ const styles = StyleSheet.create({
         paddingTop: 4,
         paddingBottom: 8,
     },
-    title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
+    title: { color: UCL_TEXT_PRIMARY, fontSize: 18, fontWeight: '600' },
     searchRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -186,7 +192,7 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         ...glassSearch,
     },
-    searchInput: { flex: 1, color: '#FFFFFF', fontSize: 15 },
+    searchInput: { flex: 1, color: UCL_TEXT_PRIMARY, fontSize: 15 },
     categories: { paddingHorizontal: 16, gap: 8, paddingBottom: 10 },
     categoryChip: {
         borderRadius: 999,
@@ -194,9 +200,12 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
         ...glassSurface,
     },
-    categoryChipActive: chipActiveMagenta,
-    categoryChipText: { color: '#D1D5DB', fontSize: 13, fontWeight: '600' },
-    categoryChipTextActive: chipActiveMagentaText,
+    categoryChipActive: {
+        backgroundColor: '#FFFFFF',
+        borderColor: 'rgba(255,255,255,0.9)',
+    },
+    categoryChipText: { color: '#E2E8F0', fontSize: 13, fontWeight: '600' },
+    categoryChipTextActive: { color: UCL_CANVAS_NAVY, fontWeight: '700' },
     addTextBtn: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -206,11 +215,11 @@ const styles = StyleSheet.create({
         marginBottom: 10,
         paddingVertical: 12,
         borderRadius: 12,
-        backgroundColor: 'rgba(244, 114, 182, 0.35)',
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: 'rgba(244, 114, 182, 0.5)',
+        borderColor: 'rgba(255,255,255,0.9)',
     },
-    addTextBtnLabel: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+    addTextBtnLabel: { color: UCL_CANVAS_NAVY, fontWeight: '700', fontSize: 15 },
     loader: { marginVertical: 24 },
     grid: { paddingHorizontal: 12, paddingBottom: 16 },
     gridRow: { gap: 8, marginBottom: 8 },
@@ -224,7 +233,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.06)',
     },
     emoji: { fontSize: 28 },
-    emojiFallback: { color: '#9CA3AF', fontSize: 10, paddingHorizontal: 4, textAlign: 'center' },
+    emojiFallback: { color: '#E2E8F0', fontSize: 10, paddingHorizontal: 4, textAlign: 'center' },
     trendDot: {
         position: 'absolute',
         top: 4,
@@ -234,5 +243,5 @@ const styles = StyleSheet.create({
         borderRadius: 3,
         backgroundColor: '#EF4444',
     },
-    empty: { color: '#6B7280', textAlign: 'center', padding: 24 },
+    empty: { color: UCL_TEXT_PLACEHOLDER, textAlign: 'center', padding: 24 },
 });

@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import {
     UCL_CANVAS_NAVY,
-    UCL_CYAN,
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
 
@@ -171,7 +170,7 @@ const styles = StyleSheet.create({
         backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(0, 242, 255, 0.3)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     sheetInner: {
         paddingHorizontal: 20,
@@ -185,14 +184,14 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: UCL_CYAN,
+        backgroundColor: UCL_TEXT_PRIMARY,
     },
     gazetteerLabel: {
         fontSize: 12,
         fontWeight: '600',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
-        color: UCL_CYAN,
+        color: UCL_TEXT_PRIMARY,
         textAlign: 'center',
         marginBottom: 10,
     },
@@ -234,9 +233,9 @@ const styles = StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: 'rgba(0, 242, 255, 0.12)',
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
         borderWidth: 1,
-        borderColor: 'rgba(0, 242, 255, 0.28)',
+        borderColor: 'rgba(255, 255, 255, 0.2)',
         alignItems: 'center',
         justifyContent: 'center',
     },

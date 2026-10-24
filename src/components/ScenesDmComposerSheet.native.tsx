@@ -20,7 +20,8 @@ import { getAvatarForHandle } from '../api/users';
 import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import { getScenesMediaSlides, resolveScenesVideoUrl } from '../utils/scenesMediaNative';
 import { postHasVideoMedia } from '../utils/postMedia';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_DISCOVER } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
+import { UCL_CANVAS_NAVY, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -67,7 +68,7 @@ export default function ScenesDmComposerSheet({
                             value={message}
                             onChangeText={onChangeMessage}
                             placeholder="Write a message..."
-                            placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                            placeholderTextColor="#94A3B8"
                             style={styles.input}
                             multiline
                         />
@@ -76,7 +77,7 @@ export default function ScenesDmComposerSheet({
                             disabled={!message.trim()}
                             onPress={onSend}
                         >
-                            <Icon name="send" size={18} color="#FFFFFF" />
+                            <Icon name="send" size={18} color={UCL_CANVAS_NAVY} />
                         </TouchableOpacity>
                     </View>
                     <TouchableOpacity style={styles.openChatLink} onPress={onOpenFullChat}>
@@ -94,8 +95,8 @@ export default function ScenesDmComposerSheet({
             onDismiss={onClose}
             enableDynamicSizing
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_DISCOVER.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_DISCOVER.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             backdropOpacity={0.55}
             footerComponent={renderFooter}
             keyboardBehavior="interactive"
@@ -194,7 +195,7 @@ const styles = StyleSheet.create({
     previewCaption: {
         padding: 12,
         fontSize: 13,
-        color: 'rgba(255, 255, 255, 0.6)',
+        color: '#E2E8F0',
         lineHeight: 18,
     },
     footerInner: {
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: '#3D9B8F',
+        backgroundColor: UCL_TEXT_PRIMARY,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -236,7 +237,7 @@ const styles = StyleSheet.create({
         paddingBottom: 4,
     },
     openChatText: {
-        color: '#3D9B8F',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 14,
         fontWeight: '600',
     },

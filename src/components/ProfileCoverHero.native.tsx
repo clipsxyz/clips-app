@@ -13,6 +13,7 @@ import {
     storyRingVisible,
     type StoryRingState,
 } from '../utils/storyRingNative';
+import { UEFA_CYAN, UEFA_CYAN_GLOW, UEFA_GLASS_BG, UEFA_GLASS_BORDER } from '../theme/gazetteerAmbientNative';
 
 type Props = {
     coverUrl?: string | null;
@@ -32,7 +33,8 @@ type Props = {
 
 /** Background-colored standoff between the profile photo and its story ring. */
 const PROFILE_AVATAR_RING_GAP = 3;
-const PROFILE_AVATAR_GAP_COLOR = '#030712';
+const PROFILE_AVATAR_GAP_COLOR = '#020B26';
+
 
 export default function ProfileCoverHero({
     coverUrl,
@@ -85,11 +87,11 @@ export default function ProfileCoverHero({
                     if (customCover) setCoverFailed(true);
                 }}
             />
-<LinearGradient
-                  colors={['rgba(45,212,191,0.05)', 'rgba(0,0,0,0.24)', 'rgba(11,7,17,0.78)']}
-                  style={styles.gradient}
-                  pointerEvents="none"
-              />
+            <LinearGradient
+                colors={['rgba(10,25,78,0.25)', 'rgba(0,56,209,0.35)', 'rgba(2,11,38,0.85)']}
+                style={styles.gradient}
+                pointerEvents="none"
+            />
             {showChangeCover && onPressChangeCover ? (
                 <TouchableOpacity style={styles.changeCoverBtn} onPress={onPressChangeCover}>
                     <Icon name="image-outline" size={14} color="#FFFFFF" />
@@ -100,10 +102,14 @@ export default function ProfileCoverHero({
                 <View style={styles.identityStack}>
                     {onAvatarPress ? (
                         <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
-                            <Avatar {...avatarProps} />
+                            <View style={styles.avatarGlowWrap}>
+                                <Avatar {...avatarProps} ringColor={ringVisible ? UEFA_CYAN : ringColor} />
+                            </View>
                         </TouchableOpacity>
                     ) : (
-                        <Avatar {...avatarProps} />
+                        <View style={styles.avatarGlowWrap}>
+                            <Avatar {...avatarProps} ringColor={ringVisible ? UEFA_CYAN : ringColor} />
+                        </View>
                     )}
                     {children}
                 </View>
@@ -121,9 +127,22 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: '#111827',
+        borderColor: 'rgba(0, 242, 255, 0.35)',
+        backgroundColor: '#020B26',
         position: 'relative',
+        shadowColor: UEFA_CYAN,
+        shadowOpacity: 0.25,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 12,
+    },
+    avatarGlowWrap: {
+        shadowColor: UEFA_CYAN,
+        shadowOpacity: 0.5,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 10,
+        borderRadius: 999,
     },
     coverImage: {
         position: 'absolute',
@@ -158,9 +177,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 7,
         borderRadius: 999,
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        backgroundColor: UEFA_GLASS_BG,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
+        borderColor: UEFA_GLASS_BORDER,
     },
     changeCoverText: {
         color: '#FFFFFF',

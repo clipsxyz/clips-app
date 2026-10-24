@@ -437,7 +437,7 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
 
                     <Pressable style={styles.newCollectionRow} onPress={openCreate}>
                         <View style={styles.newCollectionIcon}>
-                            <Icon name="add" size={20} color={P.accent} />
+                            <Icon name="add" size={20} color={P.text} />
                         </View>
                         <Text style={styles.newCollectionText}>New collection</Text>
                         <Icon name="chevron-forward" size={18} color={P.muted} />

@@ -43,9 +43,16 @@ import Reanimated, {
     withSequence,
     withTiming,
 } from 'react-native-reanimated';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
 import FeedAmbientCanvas from '../components/FeedAmbientCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_ACTIVE,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    UCL_TEXT_SECONDARY,
+} from '../theme/gazetteerAmbientNative';
 import type { HeaderFeedScope } from '../utils/headerGlassPalette';
 import { useAuth } from '../context/Auth';
 import { searchLocations } from '../api/locations';
@@ -147,13 +154,10 @@ import FeedPageLayout, {
     FEED_HEADER_CENTER,
     FEED_HEADER_DROPDOWN_MENU,
     FEED_HEADER_DROPDOWN_MENU_ITEM,
-    FEED_HEADER_DROPDOWN_MENU_TEXT,
-    FEED_HEADER_DROPDOWN_META,
     FEED_HEADER_DROPDOWN_SEARCH_HINT,
     FEED_HEADER_DROPDOWN_SEARCH_INPUT,
     FEED_HEADER_DROPDOWN_SEARCH_WRAP,
     FEED_HEADER_DROPDOWN_SUGGESTION_ITEM,
-    FEED_HEADER_DROPDOWN_SUGGESTION_TEXT,
     FEED_HEADER_DROPDOWN_SUGGESTIONS_WRAP,
     FEED_HEADER_ICON_BUTTON,
     FEED_HEADER_LOCATION_PILL,
@@ -339,8 +343,6 @@ import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { getAuthToken } from '../utils/authTokenBridge';
 import { ox } from '../constants/nativeOpticalScale';
 
-/** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
-const FEED_SWITCH_PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
 
 /**
  * Content clearance for the floating glass tab bar. The bar is absolutely positioned and
@@ -560,35 +562,30 @@ function PillTabs({
             key: 'nearby',
             label: 'Nearby',
             icon: 'navigate-outline',
-            iconColor: '#34D399',
             onPress: () => onChange(userLocal),
         },
         {
             key: 'regional',
             label: userRegional,
             icon: 'location-outline',
-            iconColor: '#7A8AF0',
             onPress: () => onChange(userRegional),
         },
         {
             key: 'national',
             label: userNational,
             icon: 'earth-outline',
-            iconColor: '#93C5FD',
             onPress: () => onChange(userNational),
         },
         {
             key: 'discover',
             label: 'Discover',
             icon: 'compass-outline',
-            iconColor: '#FFFFFF',
             onPress: onOpenDiscover,
         },
         {
             key: 'following',
             label: 'Following',
             icon: 'person-add-outline',
-            iconColor: '#F472B6',
             onPress: () => onChange('Following'),
         },
     ];
@@ -907,7 +904,7 @@ function PillTabs({
                                                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                                     accessibilityLabel="Close"
                                                 >
-                                                    <Icon name="close" size={ox(24)} color="#FFFFFF" />
+                                                    <Icon name="close" size={ox(24)} color={UCL_TEXT_PRIMARY} />
                                                 </TouchableOpacity>
                                             </View>
                                             <Text style={styles.feedSwitchSheetGazetteer}>Gazetteer says</Text>
@@ -916,12 +913,12 @@ function PillTabs({
                                                 Nearby, city, country, Discover, or Following
                                             </Text>
                                             <View style={styles.feedSwitchSearchWrap}>
-                                                <Icon name="search-outline" size={ox(18)} color="rgba(255,255,255,0.75)" />
+                                                <Icon name="search-outline" size={ox(18)} color={UCL_TEXT_PRIMARY} style={styles.feedSwitchListIcon} />
                                                 <TextInput
                                                     value={locationQuery}
                                                     onChangeText={setLocationQuery}
                                                     placeholder={searchHints[searchHintIndex]}
-                                                    placeholderTextColor="rgba(255,255,255,0.45)"
+                                                    placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                                                     underlineColorAndroid="transparent"
                                                     onFocus={() => setSearchInputFocused(true)}
                                                     onBlur={() => setSearchInputFocused(false)}
@@ -943,7 +940,7 @@ function PillTabs({
                                                 {locationQuery.trim().length >= 2 ? (
                                                     <View style={styles.feedSwitchSuggestionsWrap}>
                                                         {loadingSuggestions ? (
-                                                            <Text style={FEED_HEADER_DROPDOWN_META}>Searching places...</Text>
+                                                            <Text style={styles.feedSwitchMeta}>Searching places...</Text>
                                                         ) : locationSuggestions.length > 0 ? (
                                                             locationSuggestions.map((s, idx) => {
                                                                 const suggestionName = String(s.name || '').trim();
@@ -985,7 +982,7 @@ function PillTabs({
                                                                         }, 80);
                                                                     }}
                                                                 >
-                                                                    <Text style={FEED_HEADER_DROPDOWN_SUGGESTION_TEXT}>
+                                                                    <Text style={styles.feedSwitchSuggestionText}>
                                                                         {suggestionName}
                                                                         {metaLabel}
                                                                     </Text>
@@ -993,7 +990,7 @@ function PillTabs({
                                                                 );
                                                             })
                                                         ) : (
-                                                            <Text style={FEED_HEADER_DROPDOWN_META}>No matches yet</Text>
+                                                            <Text style={styles.feedSwitchMeta}>No matches yet</Text>
                                                         )}
                                                     </View>
                                                 ) : null}
@@ -1005,8 +1002,8 @@ function PillTabs({
                                                             setMenuOpen(false);
                                                         }}
                                                     >
-                                                        <Icon name="home-outline" size={ox(22)} color="rgba(255,255,255,0.8)" />
-                                                        <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>Back to home feed</Text>
+                                                        <Icon name="home-outline" size={ox(22)} color={UCL_TEXT_PRIMARY} style={styles.feedSwitchListIcon} />
+                                                        <Text style={styles.feedSwitchMenuText}>Back to home feed</Text>
                                                     </TouchableOpacity>
                                                 ) : null}
                                                 {menuItems.map((item) => (
@@ -1018,31 +1015,19 @@ function PillTabs({
                                                             setMenuOpen(false);
                                                         }}
                                                     >
-                                                        <Icon name={item.icon} size={ox(22)} color={item.iconColor} />
-                                                        <Text style={FEED_HEADER_DROPDOWN_MENU_TEXT}>{item.label}</Text>
+                                                        <Icon name={item.icon} size={ox(22)} color={UCL_TEXT_PRIMARY} style={styles.feedSwitchListIcon} />
+                                                        <Text style={styles.feedSwitchMenuText}>{item.label}</Text>
                                                     </TouchableOpacity>
                                                 ))}
                                             </ScrollView>
                                         </>
                                     );
-                                    if (Platform.OS === 'ios') {
-                                        return (
-                                            <View style={styles.feedSwitchSheetCanvas} collapsable={false}>
-                                                <View style={styles.feedSwitchSheetAmbient} pointerEvents="none" collapsable={false}>
-                                                    <DiscoverAmbientCanvas variant="passport" fillParent />
-                                                </View>
-                                                <View style={styles.feedSwitchSheetContent} collapsable={false}>
-                                                    {sheetBody}
-                                                </View>
-                                            </View>
-                                        );
-                                    }
                                     return (
                                         <LinearGradient
-                                            colors={[...FEED_SWITCH_PASSPORT_WASH]}
-                                            locations={[0, 0.28, 0.55, 0.78, 1]}
-                                            start={{ x: 0.1, y: 1 }}
-                                            end={{ x: 0.9, y: 0 }}
+                                            colors={[...UCL_SHEET_GRADIENT]}
+                                            locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                                            start={{ x: 0.12, y: 0 }}
+                                            end={{ x: 0.88, y: 1 }}
                                             style={styles.feedSwitchSheetCanvas}
                                         >
                                             <View style={styles.feedSwitchSheetContent} collapsable={false}>
@@ -6309,7 +6294,7 @@ feedSwitchPillBorder: {
     },
     feedSwitchSheet: {
         alignSelf: 'center',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         borderWidth: 1,
@@ -6320,7 +6305,7 @@ feedSwitchPillBorder: {
         overflow: 'hidden',
     },
     feedSwitchSheetCanvas: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     feedSwitchSheetAmbient: {
@@ -6361,9 +6346,9 @@ feedSwitchPillBorder: {
     },
     feedSwitchSheetGazetteer: {
         textAlign: 'center',
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_TEXT_ACTIVE,
         fontSize: ox(13),
-        fontWeight: '700',
+        fontWeight: '600',
         letterSpacing: ox(1.4),
         textTransform: 'uppercase',
         marginBottom: ox(12),
@@ -6371,14 +6356,14 @@ feedSwitchPillBorder: {
     },
     feedSwitchSheetTitle: {
         textAlign: 'center',
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(24),
-        fontWeight: '700',
+        fontWeight: '600',
         paddingHorizontal: ox(20),
     },
     feedSwitchSheetSub: {
         textAlign: 'center',
-        color: '#A3A3A3',
+        color: UCL_TEXT_SECONDARY,
         fontSize: ox(15),
         lineHeight: ox(22),
         marginTop: ox(8),
@@ -6397,19 +6382,37 @@ feedSwitchPillBorder: {
         borderColor: '#FFFFFF',
         backgroundColor: 'transparent',
     },
+    feedSwitchListIcon: { marginRight: ox(6) },
     feedSwitchSearchInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(16),
-        marginLeft: 10,
+        marginLeft: ox(6),
         paddingVertical: 0,
         borderWidth: 0,
     },
     feedSwitchSearchHint: {
         marginHorizontal: ox(20),
         marginBottom: ox(10),
-        color: 'rgba(255,255,255,0.45)',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(12),
+    },
+    feedSwitchMeta: {
+        color: UCL_TEXT_PLACEHOLDER,
+        fontSize: ox(13),
+        paddingHorizontal: ox(14),
+        paddingVertical: ox(10),
+    },
+    feedSwitchSuggestionText: {
+        color: UCL_TEXT_PRIMARY,
+        fontSize: ox(15),
+        fontWeight: '600',
+    },
+    feedSwitchMenuText: {
+        flex: 1,
+        fontSize: ox(18),
+        color: UCL_TEXT_PRIMARY,
+        fontWeight: '600',
     },
     feedSwitchSheetScroll: {
         maxHeight: 360,
@@ -6429,7 +6432,7 @@ feedSwitchPillBorder: {
     feedSwitchMenuItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: ox(12),
+        gap: ox(16),
         paddingHorizontal: ox(20),
         paddingVertical: ox(16),
         minHeight: ox(52),

@@ -132,3 +132,14 @@ export const UCL_TEXT_PRIMARY = '#FFFFFF';
 export const UCL_TEXT_SECONDARY = '#D1E4FF';
 export const UCL_TEXT_PLACEHOLDER = '#94A3B8';
 export const UCL_TEXT_ACTIVE = UCL_CYAN;
+
+/** UEFA Champions League vibrant royal blue gradient */
+export const UEFA_CYAN = '#00F2FF';
+export const UEFA_ROYAL_BLUE_START = '#0A194E';
+export const UEFA_ROYAL_BLUE_MID = '#0038D1';
+export const UEFA_ROYAL_BLUE_END = '#020B26';
+export const UEFA_PASSPORT_GRADIENT = [UEFA_ROYAL_BLUE_START, UEFA_ROYAL_BLUE_MID, UEFA_ROYAL_BLUE_END] as const;
+export const UEFA_PASSPORT_GRADIENT_LOCATIONS = [0, 0.5, 1] as const;
+export const UEFA_GLASS_BG = 'rgba(2, 11, 38, 0.75)';
+export const UEFA_GLASS_BORDER = 'rgba(0, 242, 255, 0.25)';
+export const UEFA_CYAN_GLOW = 'rgba(0, 242, 255, 0.6)';

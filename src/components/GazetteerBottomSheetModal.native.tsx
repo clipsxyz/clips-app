@@ -81,7 +81,22 @@ export const GAZETTEER_SHEET_UCL = {
 };
 export const GAZETTEER_SHEET_STICKER = GAZETTEER_SHEET_DISCOVER;
 export const GAZETTEER_SHEET_SLATE = GAZETTEER_SHEET_DISCOVER;
-export const GAZETTEER_SHEET_GROUP = GAZETTEER_SHEET_DISCOVER;
+/** Inbox / groups navy glass — white chrome, no cyan. */
+export const GAZETTEER_SHEET_INBOX = {
+    background: {
+        backgroundColor: UCL_CANVAS_NAVY,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+    } as ViewStyle,
+    handle: {
+        width: 40,
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    } as ViewStyle,
+};
+export const GAZETTEER_SHEET_GROUP = GAZETTEER_SHEET_INBOX;
 
 type Props = {
     visible: boolean;

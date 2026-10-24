@@ -24,7 +24,6 @@ import CreateSourceAppsCarouselNative from '../components/CreateSourceAppsCarous
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import {
     UCL_CANVAS_NAVY,
-    UCL_CYAN,
     UCL_SHEET_GRADIENT,
     UCL_SHEET_GRADIENT_LOCATIONS,
     UCL_TEXT_PLACEHOLDER,
@@ -767,7 +766,7 @@ const styles = StyleSheet.create({
     },
     modeTileActive: {
         backgroundColor: 'rgba(15, 23, 42, 0.8)',
-        borderColor: 'rgba(0, 242, 255, 0.4)',
+        borderColor: 'rgba(255, 255, 255, 0.4)',
     },
     modeTileIdle: {
         backgroundColor: 'rgba(255, 255, 255, 0.07)',
@@ -783,7 +782,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(14),
         backgroundColor: 'rgba(15, 23, 42, 0.95)',
         borderWidth: 1,
-        borderColor: UCL_CYAN,
+        borderColor: UCL_TEXT_PRIMARY,
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 2,

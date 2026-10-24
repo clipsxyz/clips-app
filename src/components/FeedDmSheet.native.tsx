@@ -6,14 +6,14 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
 import GazetteerBottomSheetModal, {
-    GAZETTEER_SHEET_DM,
+    GAZETTEER_SHEET_INBOX,
     type GazetteerBottomSheetModalHandle,
 } from './GazetteerBottomSheetModal.native';
 import {
-    DISCOVER_SHEET_TEXT,
-    DISCOVER_SHEET_TEXT_MUTED,
-    PASSPORT_PALETTE,
-} from '../utils/discoverAmbientPalette';
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 type Props = {
     open: boolean;
@@ -86,8 +86,8 @@ const FeedDmSheet = forwardRef<FeedDmSheetHandle, Props>(function FeedDmSheet(
             bottomInset={0}
             horizontalInset={0}
             autoPresent={false}
-            backgroundStyle={GAZETTEER_SHEET_DM.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_DM.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             keyboardBehavior="interactive"
             keyboardBlurBehavior="restore"
             android_keyboardInputMode="adjustResize"
@@ -113,7 +113,7 @@ const FeedDmSheet = forwardRef<FeedDmSheetHandle, Props>(function FeedDmSheet(
                         accessibilityLabel="Close message sheet"
                         style={styles.closeBtn}
                     >
-                        <Icon name="close" size={20} color={DISCOVER_SHEET_TEXT} />
+                        <Icon name="close" size={20} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
 
@@ -122,7 +122,7 @@ const FeedDmSheet = forwardRef<FeedDmSheetHandle, Props>(function FeedDmSheet(
                     value={message}
                     onChangeText={onChangeMessage}
                     placeholder="Message…"
-                    placeholderTextColor={DISCOVER_SHEET_TEXT_MUTED}
+                    placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                     multiline
                     textAlignVertical="top"
                     style={styles.input}
@@ -140,7 +140,7 @@ const FeedDmSheet = forwardRef<FeedDmSheetHandle, Props>(function FeedDmSheet(
                     accessibilityRole="button"
                     accessibilityLabel="Send message"
                 >
-                    <Icon name="send" size={16} color="#FFFFFF" />
+                    <Icon name="send" size={16} color={UCL_CANVAS_NAVY} />
                     <Text style={styles.sendLabel}>{sending ? 'Sending…' : 'Send'}</Text>
                 </TouchableOpacity>
             </BottomSheetView>
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        backgroundColor: '#0F172A',
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     header: {
         flexDirection: 'row',
@@ -175,13 +175,13 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
-        color: DISCOVER_SHEET_TEXT_MUTED,
+        color: UCL_TEXT_PLACEHOLDER,
         marginBottom: 2,
     },
     headerHandle: {
         fontSize: 16,
         fontWeight: '600',
-        color: DISCOVER_SHEET_TEXT,
+        color: UCL_TEXT_PRIMARY,
     },
     closeBtn: {
         width: 36,
@@ -203,13 +203,13 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         fontSize: 16,
         lineHeight: 22,
-        color: DISCOVER_SHEET_TEXT,
+        color: UCL_TEXT_PRIMARY,
     },
     sendBtn: {
         marginTop: 14,
         minHeight: 48,
         borderRadius: 14,
-        backgroundColor: PASSPORT_PALETTE.wavePrimary,
+        backgroundColor: UCL_TEXT_PRIMARY,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
         opacity: 0.45,
     },
     sendLabel: {
-        color: '#FFFFFF',
+        color: UCL_CANVAS_NAVY,
         fontSize: 16,
         fontWeight: '600',
     },

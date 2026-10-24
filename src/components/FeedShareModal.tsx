@@ -348,7 +348,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                                         {handle}
                                     </Text>
                                     {selected ? (
-                                        <Icon name="checkmark-circle" size={ox(20)} color={UCL_TEXT_ACTIVE} />
+                                        <Icon name="checkmark-circle" size={ox(20)} color={UCL_TEXT_PRIMARY} />
                                     ) : (
                                         <Icon name="ellipse-outline" size={ox(20)} color={UCL_TEXT_PLACEHOLDER} />
                                     )}
@@ -472,12 +472,12 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                     </ScrollView>
 
                     <TouchableOpacity onPress={handleShareSystem} style={styles.shareOption}>
-                        <Icon name="share-social" size={22} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
+                        <Icon name="share-social" size={22} color={UCL_TEXT_PRIMARY} style={styles.listIcon} />
                         <Text style={styles.shareOptionText}>Share via…</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleCopyLink} style={styles.shareOption}>
-                        <Icon name="link" size={22} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
+                        <Icon name="link" size={22} color={UCL_TEXT_PRIMARY} style={styles.listIcon} />
                         <Text style={styles.shareOptionText}>Copy link</Text>
                     </TouchableOpacity>
                     </DiscoverSheetCanvas>

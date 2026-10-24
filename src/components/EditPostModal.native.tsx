@@ -16,7 +16,12 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Post } from '../types';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_SLATE } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 const TEXT_MAX = 500;
 
@@ -94,8 +99,8 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
             onDismiss={onClose}
             snapPoints={['88%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_SLATE.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_SLATE.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             backdropOpacity={0.6}
             footerComponent={renderFooter}
             keyboardBehavior="interactive"
@@ -105,7 +110,7 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
             <BottomSheetView style={styles.header}>
                 <Text style={styles.title}>Edit Post</Text>
                 <TouchableOpacity onPress={onClose} disabled={isSaving} hitSlop={12}>
-                    <Icon name="close" size={24} color="#FFFFFF" />
+                    <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
                 </TouchableOpacity>
             </BottomSheetView>
 
@@ -126,7 +131,7 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
                     onChangeText={setText}
                     multiline
                     maxLength={TEXT_MAX}
-                    placeholderTextColor="#6B7280"
+                    placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                     editable={!isSaving}
                 />
                 <Text style={styles.counter}>
@@ -135,13 +140,13 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
 
                 <Text style={styles.label}>Location</Text>
                 <View style={styles.inputIconWrap}>
-                    <Icon name="location-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <Icon name="location-outline" size={18} color={UCL_TEXT_PRIMARY} style={styles.inputIcon} />
                     <BottomSheetTextInput
                         style={[styles.input, styles.inputWithIcon]}
                         value={location}
                         onChangeText={setLocation}
                         placeholder="Add location"
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         maxLength={200}
                         editable={!isSaving}
                     />
@@ -149,13 +154,13 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
 
                 <Text style={styles.label}>Venue</Text>
                 <View style={styles.inputIconWrap}>
-                    <Icon name="business-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <Icon name="business-outline" size={18} color={UCL_TEXT_PRIMARY} style={styles.inputIcon} />
                     <BottomSheetTextInput
                         style={[styles.input, styles.inputWithIcon]}
                         value={venue}
                         onChangeText={setVenue}
                         placeholder="Add venue (e.g. café, stadium)"
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         maxLength={200}
                         editable={!isSaving}
                     />
@@ -163,13 +168,13 @@ export default function EditPostModal({ post, visible, onClose, onSave }: Props)
 
                 <Text style={styles.label}>Landmark</Text>
                 <View style={styles.inputIconWrap}>
-                    <Icon name="map-outline" size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <Icon name="map-outline" size={18} color={UCL_TEXT_PRIMARY} style={styles.inputIcon} />
                     <BottomSheetTextInput
                         style={[styles.input, styles.inputWithIcon]}
                         value={landmark}
                         onChangeText={setLandmark}
                         placeholder="Add landmark"
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         maxLength={200}
                         editable={!isSaving}
                     />
@@ -188,16 +193,16 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
     },
     title: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 18,
-        fontWeight: '700',
+        fontWeight: '600',
     },
     scroll: {
         paddingHorizontal: 16,
         paddingBottom: 16,
     },
     label: {
-        color: 'rgba(255,255,255,0.8)',
+        color: '#E2E8F0',
         fontSize: 11,
         fontWeight: '700',
         textTransform: 'uppercase',
@@ -215,11 +220,11 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     input: {
-        backgroundColor: '#1f1f23',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
         borderRadius: 10,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 15,
         paddingHorizontal: 12,
         paddingVertical: 12,
@@ -233,7 +238,7 @@ const styles = StyleSheet.create({
         textAlignVertical: 'top',
     },
     counter: {
-        color: 'rgba(255,255,255,0.5)',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: 11,
         textAlign: 'right',
         marginBottom: 8,
@@ -257,14 +262,14 @@ const styles = StyleSheet.create({
         padding: 16,
         borderTopWidth: 1,
         borderTopColor: 'rgba(255,255,255,0.1)',
-        backgroundColor: '#1a1a1a',
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     cancelBtn: {
         paddingHorizontal: 16,
         paddingVertical: 10,
     },
     cancelText: {
-        color: 'rgba(255,255,255,0.9)',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 15,
         fontWeight: '600',
     },
@@ -280,7 +285,7 @@ const styles = StyleSheet.create({
         opacity: 0.6,
     },
     saveText: {
-        color: '#000000',
+        color: UCL_CANVAS_NAVY,
         fontSize: 15,
         fontWeight: '700',
     },

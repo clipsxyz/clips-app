@@ -15,7 +15,8 @@ import { toggleFollow } from '../../api/client';
 import { getAvatarForHandle } from '../../api/users';
 import type { Story } from '../../types';
 import { timeAgo } from '../../utils/timeAgo';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_CHARCOAL } from '../GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from '../GazetteerBottomSheetModal.native';
+import { UCL_CANVAS_NAVY, UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -130,14 +131,14 @@ export default function StoryInsightsSheet({
             onDismiss={onClose}
             snapPoints={['78%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_CHARCOAL.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_CHARCOAL.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
         >
             <BottomSheetView style={styles.headerBlock}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Story insights</Text>
                     <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                        <Icon name="close" size={22} color="#D1D5DB" />
+                        <Icon name="close" size={22} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
 
@@ -152,7 +153,7 @@ export default function StoryInsightsSheet({
                         </View>
                     ) : (
                         <View style={[styles.storyPreviewThumb, styles.storyPreviewFallback]}>
-                            <Icon name="images-outline" size={20} color="#9CA3AF" />
+                            <Icon name="images-outline" size={20} color={UCL_TEXT_PRIMARY} />
                         </View>
                     )}
                     <View style={styles.storyPreviewMeta}>
@@ -232,9 +233,21 @@ export default function StoryInsightsSheet({
                                         onPress={() => void toggleViewerFollow(handle)}
                                     >
                                         {followLoadingHandle === handle ? (
-                                            <ActivityIndicator size="small" color="#fff" />
+                                            <ActivityIndicator
+                                                size="small"
+                                                color={
+                                                    viewerFollowMap[handle]
+                                                        ? UCL_TEXT_PRIMARY
+                                                        : UCL_CANVAS_NAVY
+                                                }
+                                            />
                                         ) : (
-                                            <Text style={styles.followBtnText}>
+                                            <Text
+                                                style={[
+                                                    styles.followBtnText,
+                                                    viewerFollowMap[handle] && styles.followBtnTextActive,
+                                                ]}
+                                            >
                                                 {viewerFollowMap[handle] ? 'Following' : 'Follow'}
                                             </Text>
                                         )}
@@ -309,7 +322,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         marginBottom: 12,
     },
-    title: { color: '#fff', fontSize: 16, fontWeight: '700' },
+    title: { color: UCL_TEXT_PRIMARY, fontSize: 16, fontWeight: '600' },
     closeBtn: { padding: 8 },
     storyPreviewRow: {
         flexDirection: 'row',
@@ -321,7 +334,7 @@ const styles = StyleSheet.create({
         width: 56,
         height: 72,
         borderRadius: 10,
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(255,255,255,0.08)',
     },
     storyPreviewFallback: {
         alignItems: 'center',
@@ -331,47 +344,54 @@ const styles = StyleSheet.create({
         width: 56,
         height: 72,
         borderRadius: 10,
-        backgroundColor: '#1e3a5f',
+        backgroundColor: 'rgba(255,255,255,0.08)',
         padding: 6,
         justifyContent: 'center',
     },
     storyPreviewText: {
-        color: '#E5E7EB',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 9,
         lineHeight: 11,
         fontWeight: '600',
     },
     storyPreviewMeta: { flex: 1, minWidth: 0 },
     storyPreviewTitle: {
-        color: '#fff',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 14,
         fontWeight: '600',
         marginBottom: 4,
     },
-    storyPreviewSub: { color: '#9CA3AF', fontSize: 12 },
+    storyPreviewSub: { color: '#E2E8F0', fontSize: 12 },
     tabRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
     tab: {
         flex: 1,
         paddingVertical: 9,
         borderRadius: 12,
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
         alignItems: 'center',
         paddingHorizontal: 4,
     },
-    tabActive: { backgroundColor: '#374151' },
-    tabText: { color: '#9CA3AF', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-    tabTextActive: { color: '#fff' },
+    tabActive: {
+        backgroundColor: '#FFFFFF',
+        borderColor: 'rgba(255,255,255,0.9)',
+    },
+    tabText: { color: '#E2E8F0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+    tabTextActive: { color: UCL_CANVAS_NAVY },
     scroll: { flex: 1 },
     scrollContent: { paddingHorizontal: 16, paddingBottom: 40 },
     summaryCard: {
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         borderRadius: 12,
         padding: 12,
         marginBottom: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
     },
-    summaryTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
-    summarySub: { color: '#9CA3AF', fontSize: 12, marginTop: 4 },
-    empty: { color: '#9CA3AF', fontSize: 13, lineHeight: 18, paddingVertical: 16 },
+    summaryTitle: { color: UCL_TEXT_PRIMARY, fontSize: 14, fontWeight: '700' },
+    summarySub: { color: '#E2E8F0', fontSize: 12, marginTop: 4 },
+    empty: { color: UCL_TEXT_PLACEHOLDER, fontSize: 13, lineHeight: 18, paddingVertical: 16 },
     viewerRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -379,17 +399,22 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     viewerMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
-    viewerHandle: { color: '#fff', fontSize: 14, fontWeight: '600', flexShrink: 1 },
+    viewerHandle: { color: UCL_TEXT_PRIMARY, fontSize: 14, fontWeight: '600', flexShrink: 1 },
     followBtn: {
         paddingHorizontal: 12,
         paddingVertical: 7,
         borderRadius: 999,
-        backgroundColor: '#2563EB',
+        backgroundColor: '#FFFFFF',
         minWidth: 84,
         alignItems: 'center',
     },
-    followBtnActive: { backgroundColor: '#374151' },
-    followBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    followBtnActive: {
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.25)',
+    },
+    followBtnText: { color: UCL_CANVAS_NAVY, fontSize: 12, fontWeight: '700' },
+    followBtnTextActive: { color: UCL_TEXT_PRIMARY },
     reactionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -399,20 +424,22 @@ const styles = StyleSheet.create({
         borderBottomColor: 'rgba(255,255,255,0.08)',
     },
     reactionMain: { flex: 1, minWidth: 0 },
-    reactionHint: { color: '#60A5FA', fontSize: 11, marginTop: 2 },
+    reactionHint: { color: UCL_TEXT_PLACEHOLDER, fontSize: 11, marginTop: 2 },
     reactionEmoji: { fontSize: 28 },
     replyCard: {
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         borderRadius: 12,
         padding: 12,
         marginBottom: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
     },
     replyHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         marginBottom: 6,
     },
-    replyUser: { color: '#fff', fontWeight: '700', fontSize: 13 },
-    replyTime: { color: '#9CA3AF', fontSize: 11 },
-    replyText: { color: '#E5E7EB', fontSize: 14, lineHeight: 20 },
+    replyUser: { color: UCL_TEXT_PRIMARY, fontWeight: '700', fontSize: 13 },
+    replyTime: { color: UCL_TEXT_PLACEHOLDER, fontSize: 11 },
+    replyText: { color: '#E2E8F0', fontSize: 14, lineHeight: 20 },
 });

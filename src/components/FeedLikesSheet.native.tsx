@@ -10,17 +10,17 @@ import {
 import Avatar from './Avatar';
 import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
 import GazetteerBottomSheetModal, {
-    GAZETTEER_SHEET_PASSPORT,
+    GAZETTEER_SHEET_INBOX,
 } from './GazetteerBottomSheetModal.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
 const P = {
-    text: '#e8eef2',
-    muted: 'rgba(232, 238, 242, 0.62)',
+    text: UCL_TEXT_PRIMARY,
+    muted: '#E2E8F0',
     border: 'rgba(255,255,255,0.12)',
     chipBg: 'rgba(15, 36, 48, 0.72)',
-    accent: PASSPORT_PALETTE.wavePrimary,
+    placeholder: UCL_TEXT_PLACEHOLDER,
 };
 
 type Props = {
@@ -142,7 +142,7 @@ export default function FeedLikesSheet({
                         hitSlop={8}
                         accessibilityLabel="Close"
                     >
-                        <Icon name="close" size={16} color={P.muted} />
+                        <Icon name="close" size={16} color={P.text} />
                     </TouchableOpacity>
                 </View>
 
@@ -223,10 +223,10 @@ export default function FeedLikesSheet({
             visible={visible}
             onDismiss={onClose}
             snapPoints={['70%']}
-            backgroundStyle={GAZETTEER_SHEET_PASSPORT.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_PASSPORT.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
         >
-            <PassportSheetCanvas style={styles.canvas} contentStyle={styles.canvasContent}>
+            <PassportSheetCanvas tone="ucl" style={styles.canvas} contentStyle={styles.canvasContent}>
                 {/*
                   Column layout (regular View, not BottomSheetView sibling) keeps chrome
                   pinned while FlatList scrolls below — avoids FlatList painting over header.
@@ -352,9 +352,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 999,
-        backgroundColor: 'rgba(61,155,143,0.35)',
+        backgroundColor: 'rgba(255,255,255,0.12)',
         borderWidth: 1,
-        borderColor: 'rgba(61,155,143,0.55)',
+        borderColor: 'rgba(255,255,255,0.2)',
     },
     followBtnActive: {
         backgroundColor: P.chipBg,
@@ -373,7 +373,7 @@ const styles = StyleSheet.create({
     empty: {
         textAlign: 'center',
         fontSize: 12,
-        color: P.muted,
+        color: P.placeholder,
         paddingVertical: 32,
     },
 });

@@ -11,7 +11,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import ProfilePostNotifyBell from './ProfilePostNotifyBell.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 import type { ProfilePostNotifyLevel } from '../utils/profilePostNotifyPrefs';
 
 export type ProfilePostNotifySheetMode = 'menu' | 'confirm';
@@ -42,7 +45,7 @@ export default function ProfilePostNotifySheet({
     const insets = useSafeAreaInsets();
     const { width } = useWindowDimensions();
     const who = displayName.trim() || 'this user';
-    const accent = PASSPORT_PALETTE.wavePrimary;
+    const accent = UCL_TEXT_PRIMARY;
     const sheetLayout = useMemo(() => {
         const sheetWidth = Math.min(width - 32, 400);
         const marginHorizontal = Math.max(16, Math.floor((width - sheetWidth) / 2));
@@ -72,7 +75,7 @@ export default function ProfilePostNotifySheet({
                         },
                     ]}
                 >
-                    <PassportSheetCanvas contentStyle={styles.sheetInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.sheetInner}>
                         <View style={styles.handleWrap}>
                             <View style={styles.handle} />
                         </View>
@@ -113,7 +116,7 @@ export default function ProfilePostNotifySheet({
                                     <Icon
                                         name="notifications-outline"
                                         size={20}
-                                        color={activeLevel === 'off' ? accent : '#9CA3AF'}
+                                        color={activeLevel === 'off' ? accent : UCL_TEXT_PRIMARY}
                                     />
                                     <Text
                                         style={[
@@ -166,10 +169,10 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         overflow: 'hidden',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255,255,255,0.08)',
     },
     sheetInner: {
         paddingHorizontal: 20,
@@ -190,20 +193,20 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         letterSpacing: 0.6,
         textTransform: 'uppercase',
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_TEXT_PRIMARY,
         textAlign: 'center',
         marginBottom: 12,
     },
     title: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
         textAlign: 'center',
         marginBottom: 6,
     },
     subtitle: {
         fontSize: 14,
-        color: 'rgba(232,238,242,0.72)',
+        color: '#E2E8F0',
         textAlign: 'center',
         marginBottom: 16,
         lineHeight: 20,
@@ -221,14 +224,14 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.28)',
     },
     optionRowActive: {
-        borderColor: 'rgba(61,155,143,0.55)',
-        backgroundColor: 'rgba(61,155,143,0.16)',
+        borderColor: 'rgba(255,255,255,0.28)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
     },
     optionText: {
         flex: 1,
         fontSize: 15,
         fontWeight: '600',
-        color: '#D1D5DB',
+        color: '#E2E8F0',
     },
     optionTextActive: {
         color: '#FFFFFF',
@@ -241,7 +244,7 @@ const styles = StyleSheet.create({
     cancelText: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#9CA3AF',
+        color: UCL_TEXT_PRIMARY,
     },
     confirmIconWrap: {
         alignItems: 'center',
@@ -250,7 +253,7 @@ const styles = StyleSheet.create({
     },
     confirmMessage: {
         fontSize: 15,
-        color: 'rgba(232,238,242,0.78)',
+        color: '#E2E8F0',
         textAlign: 'center',
         lineHeight: 22,
         marginBottom: 20,

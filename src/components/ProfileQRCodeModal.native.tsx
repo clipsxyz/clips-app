@@ -12,7 +12,11 @@ import QRCode from 'qrcode';
 import { SvgXml } from 'react-native-svg';
 import { buildProfileShareUrl } from '../utils/profileShareUrl';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -59,7 +63,7 @@ export default function ProfileQRCodeModal({ visible, onClose, handle, name }: P
             <View style={styles.overlay}>
                 <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close QR code" />
                 <View style={styles.card}>
-                    <PassportSheetCanvas contentStyle={styles.cardInner}>
+                    <PassportSheetCanvas tone="ucl" contentStyle={styles.cardInner}>
                     <TouchableOpacity onPress={onClose} style={styles.closeButton} accessibilityLabel="Close">
                         <Icon name="close" size={22} color="#FFFFFF" />
                     </TouchableOpacity>
@@ -67,7 +71,7 @@ export default function ProfileQRCodeModal({ visible, onClose, handle, name }: P
                     <Text style={styles.subtitle}>Scan to view profile</Text>
                     <View style={styles.qrWrap}>
                         {loading ? (
-                            <ActivityIndicator size="large" color={PASSPORT_PALETTE.wavePrimary} />
+                            <ActivityIndicator size="large" color={UCL_TEXT_PRIMARY} />
                         ) : svgXml ? (
                             <SvgXml xml={svgXml} width={256} height={256} />
                         ) : (
@@ -91,7 +95,7 @@ const styles = StyleSheet.create({
     card: {
         borderRadius: 24,
         overflow: 'hidden',
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
     },
@@ -105,13 +109,13 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     title: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 18,
-        fontWeight: '700',
+        fontWeight: '600',
         marginBottom: 4,
     },
     subtitle: {
-        color: 'rgba(232,238,242,0.62)',
+        color: '#E2E8F0',
         fontSize: 13,
         marginBottom: 20,
     },
@@ -125,7 +129,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     errorText: {
-        color: '#6B7280',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: 13,
         textAlign: 'center',
         paddingHorizontal: 16,

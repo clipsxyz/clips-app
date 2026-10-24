@@ -5,7 +5,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { unifiedSearch } from '../api/search';
 import { getAvatarForHandle } from '../api/users';
 import Avatar from './Avatar';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_NAVY } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
+import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
 type TaggedUser = {
     handle: string;
@@ -119,14 +120,14 @@ export default function TaggedUsersBottomSheet({
             visible={visible}
             onDismiss={onClose}
             snapPoints={['80%']}
-            backgroundStyle={GAZETTEER_SHEET_NAVY.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_NAVY.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
         >
             <BottomSheetView style={styles.headerBlock}>
                 <View style={styles.header}>
                     <View style={styles.headerLeft}>
                         <View style={styles.headerIcon}>
-                            <Icon name="people" size={20} color="#E5E7EB" />
+                            <Icon name="people" size={20} color={UCL_TEXT_PRIMARY} />
                         </View>
                         <View>
                             <Text style={styles.title}>Tagged people</Text>
@@ -137,14 +138,14 @@ export default function TaggedUsersBottomSheet({
                         </View>
                     </View>
                     <TouchableOpacity onPress={onClose} hitSlop={8}>
-                        <Icon name="close" size={24} color="#9CA3AF" />
+                        <Icon name="close" size={24} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
             </BottomSheetView>
 
             {loading ? (
                 <BottomSheetView>
-                    <ActivityIndicator color="#7A8AF0" style={styles.loader} />
+                    <ActivityIndicator color={UCL_TEXT_PRIMARY} style={styles.loader} />
                 </BottomSheetView>
             ) : (
                 <BottomSheetFlatList
@@ -188,12 +189,12 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 17,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
     },
     subtitle: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         marginTop: 2,
     },
     loader: {
@@ -221,16 +222,16 @@ const styles = StyleSheet.create({
     name: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#F3F4F6',
+        color: UCL_TEXT_PRIMARY,
     },
     handle: {
         fontSize: 13,
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         marginTop: 2,
     },
     empty: {
         textAlign: 'center',
-        color: '#6B7280',
+        color: UCL_TEXT_PLACEHOLDER,
         paddingVertical: 24,
     },
 });

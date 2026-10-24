@@ -361,7 +361,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                               onPress={() => onSuggestionSelected(s)}
                                               style={styles.resultRow}
                                           >
-                                              <Icon name="location-outline" size={ox(16)} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
+                                              <Icon name="location-outline" size={ox(16)} color={UCL_TEXT_PRIMARY} style={styles.listIcon} />
                                               <View style={styles.resultCopy}>
                                                   <Text style={styles.resultPrimary}>{primary}</Text>
                                                   <Text style={styles.resultSecondary}>{s.name}</Text>
@@ -377,7 +377,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                           onPress={() => selectPopularCity(name)}
                                           style={styles.resultRow}
                                       >
-                                          <Icon name="location-outline" size={ox(16)} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
+                                          <Icon name="location-outline" size={ox(16)} color={UCL_TEXT_PRIMARY} style={styles.listIcon} />
                                           <Text style={styles.resultPrimary}>{name}</Text>
                                       </TouchableOpacity>
                                   ))
@@ -393,7 +393,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 style={styles.promptRow}
                                 accessibilityLabel={item.label}
                             >
-                                <Icon name="return-down-forward-outline" size={ox(18)} color={UCL_TEXT_ACTIVE} style={styles.listIcon} />
+                                <Icon name="return-down-forward-outline" size={ox(18)} color={UCL_TEXT_PRIMARY} style={styles.listIcon} />
                                 <Text style={styles.promptText}>{item.label}</Text>
                             </TouchableOpacity>
                         ))}
@@ -419,7 +419,7 @@ export default function DiscoverScreen({ navigation }: any) {
                     </TouchableOpacity>
                 ) : null}
                 <View style={styles.searchPill}>
-                    <Icon name="add" size={ox(22)} color={UCL_TEXT_ACTIVE} style={styles.searchIcon} />
+                    <Icon name="add" size={ox(22)} color={UCL_TEXT_PRIMARY} style={styles.searchIcon} />
                     <TextInput
                         ref={inputRef}
                         value={query}

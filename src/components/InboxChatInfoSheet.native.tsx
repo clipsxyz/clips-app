@@ -8,11 +8,19 @@ import {
     Pressable,
     ScrollView,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from './Avatar';
 import type { ConversationSummary } from '../api/messages';
 import { ox } from '../constants/nativeOpticalScale';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -68,7 +76,7 @@ export default function InboxChatInfoSheet({
                 onPress={onPress}
                 activeOpacity={0.75}
             >
-                <Icon name={icon} size={ox(16)} color="rgba(255,255,255,0.55)" />
+                <Icon name={icon} size={ox(16)} color={UCL_TEXT_PRIMARY} />
                 <Text style={styles.rowLabel}>{label}</Text>
             </TouchableOpacity>
         );
@@ -79,6 +87,13 @@ export default function InboxChatInfoSheet({
             <View style={styles.root}>
                 <Pressable style={styles.backdrop} onPress={onClose} />
                 <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                    <LinearGradient
+                        colors={[...UCL_SHEET_GRADIENT]}
+                        locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                        start={{ x: 0.12, y: 0 }}
+                        end={{ x: 0.88, y: 1 }}
+                        style={styles.sheetCanvas}
+                    >
                     <View style={styles.handle} />
                     <View style={styles.header}>
                         <Avatar src={isGroup ? undefined : avatarSrc} name={title} size={ox(56)} />
@@ -98,7 +113,7 @@ export default function InboxChatInfoSheet({
                             ) : null}
                         </View>
                         <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={8}>
-                            <Icon name="close" size={ox(20)} color="#FFFFFF" />
+                            <Icon name="close" size={ox(20)} color={UCL_TEXT_PRIMARY} />
                         </TouchableOpacity>
                     </View>
 
@@ -136,6 +151,7 @@ export default function InboxChatInfoSheet({
                             last
                         />
                     </ScrollView>
+                    </LinearGradient>
                 </View>
             </View>
         </Modal>
@@ -152,12 +168,16 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.6)',
     },
     sheet: {
-        backgroundColor: '#000000',
+        backgroundColor: UCL_CANVAS_NAVY,
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
+        borderColor: 'rgba(255,255,255,0.08)',
         maxHeight: '85%',
+        overflow: 'hidden',
+    },
+    sheetCanvas: {
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     handle: {
@@ -165,7 +185,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: 'rgba(255,255,255,0.25)',
+        backgroundColor: 'rgba(255,255,255,0.3)',
         marginTop: 8,
         marginBottom: 4,
     },
@@ -185,17 +205,17 @@ const styles = StyleSheet.create({
         paddingTop: ox(2),
     },
     title: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(18),
         fontWeight: '600',
     },
     handleText: {
-        color: 'rgba(255,255,255,0.5)',
+        color: '#E2E8F0',
         fontSize: ox(14),
         marginTop: 2,
     },
     preview: {
-        color: 'rgba(255,255,255,0.4)',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: ox(12),
         marginTop: ox(4),
     },
@@ -217,7 +237,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 0,
     },
     rowLabel: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: ox(14),
         fontWeight: '500',
     },

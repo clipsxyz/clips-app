@@ -11,7 +11,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { getBoostAnalytics, type BoostAnalytics } from '../api/boost';
 import { buildInstantAnalytics } from '../utils/boostInsightsNative';
-import GazetteerBottomSheetModal, { GAZETTEER_SHEET_BOOST } from './GazetteerBottomSheetModal.native';
+import GazetteerBottomSheetModal, { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
+import { UCL_TEXT_PLACEHOLDER, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 import { getQualityLabel, getQualityReason, estimateReachTeaser } from '../utils/boostPostGrid';
 
 type Props = {
@@ -84,8 +85,8 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
             onDismiss={onClose}
             snapPoints={['88%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_BOOST.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_BOOST.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             backdropOpacity={0.65}
         >
             {/*
@@ -97,7 +98,7 @@ export default function BoostInsightsSheet({ visible, post, range, onClose }: Pr
                     <View style={styles.header}>
                         <Text style={styles.title}>Boost insights</Text>
                         <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.closeBtn}>
-                            <Icon name="close" size={22} color="#FFFFFF" />
+                            <Icon name="close" size={22} color={UCL_TEXT_PRIMARY} />
                         </TouchableOpacity>
                     </View>
 
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
         paddingTop: 4,
         paddingBottom: 10,
     },
-    title: { color: '#FFF', fontSize: 18, fontWeight: '700', flex: 1, paddingRight: 12 },
+    title: { color: UCL_TEXT_PRIMARY, fontSize: 18, fontWeight: '600', flex: 1, paddingRight: 12 },
     closeBtn: {
         width: 36,
         height: 36,
@@ -231,14 +232,14 @@ const styles = StyleSheet.create({
     },
     scroll: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28 },
     loadingBanner: {
-        backgroundColor: 'rgba(14, 165, 233, 0.15)',
+        backgroundColor: 'rgba(255,255,255,0.06)',
         borderRadius: 12,
         padding: 10,
         marginBottom: 10,
         borderWidth: 1,
-        borderColor: 'rgba(56, 189, 248, 0.35)',
+        borderColor: 'rgba(255,255,255,0.08)',
     },
-    loadingText: { color: '#BAE6FD', fontSize: 12 },
+    loadingText: { color: '#E2E8F0', fontSize: 12 },
     previewCard: {
         flexDirection: 'row',
         gap: 12,
@@ -260,19 +261,19 @@ const styles = StyleSheet.create({
         padding: 4,
     },
     previewImg: { width: '100%', height: '100%' },
-    previewText: { color: 'rgba(255,255,255,0.9)', fontSize: 9, textAlign: 'center' },
+    previewText: { color: UCL_TEXT_PRIMARY, fontSize: 9, textAlign: 'center' },
     previewMeta: { flex: 1, minWidth: 0 },
     previewLabel: {
         fontSize: 10,
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         fontWeight: '700',
         textTransform: 'uppercase',
         letterSpacing: 1,
     },
-    previewHandle: { color: '#FFF', fontSize: 13, fontWeight: '600' },
-    previewHint: { color: '#94A3B8', fontSize: 11, marginTop: 2 },
+    previewHandle: { color: UCL_TEXT_PRIMARY, fontSize: 13, fontWeight: '600' },
+    previewHint: { color: '#E2E8F0', fontSize: 11, marginTop: 2 },
     reasonText: {
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         fontSize: 12,
         lineHeight: 17,
         marginBottom: 12,
@@ -299,10 +300,10 @@ const styles = StyleSheet.create({
     matchedPill: {
         fontSize: 10,
         fontWeight: '700',
-        color: '#7DD3FC',
+        color: UCL_TEXT_PRIMARY,
         borderWidth: 1,
-        borderColor: 'rgba(56, 189, 248, 0.4)',
-        backgroundColor: 'rgba(14, 165, 233, 0.12)',
+        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 16,
@@ -316,24 +317,24 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.12)',
     },
     spendBlock: {
-        borderColor: 'rgba(56, 189, 248, 0.35)',
-        backgroundColor: 'rgba(14, 165, 233, 0.1)',
+        borderColor: 'rgba(255,255,255,0.16)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
     },
     blockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     blockTitle: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         textTransform: 'uppercase',
         letterSpacing: 0.8,
         marginBottom: 8,
     },
-    spark: { color: '#7DD3FC', fontSize: 14, fontWeight: '700' },
+    spark: { color: UCL_TEXT_PRIMARY, fontSize: 14, fontWeight: '700' },
     metricRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         paddingVertical: 4,
     },
-    metricLabel: { color: '#E5E7EB', fontSize: 14 },
-    metricValue: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+    metricLabel: { color: '#E2E8F0', fontSize: 14 },
+    metricValue: { color: UCL_TEXT_PRIMARY, fontSize: 14, fontWeight: '700' },
 });

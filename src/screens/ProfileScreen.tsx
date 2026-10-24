@@ -33,6 +33,15 @@ import {
     profilePassportDivider,
     profilePassportChipBorder,
     profilePassportScrollInset,
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+    UEFA_GLASS_BG,
+    UEFA_GLASS_BORDER,
+    UEFA_CYAN,
+    UEFA_ROYAL_BLUE_END,
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -723,14 +732,30 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     if (loading) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+                <LinearGradient
+                    colors={[...UEFA_PASSPORT_GRADIENT]}
+                    locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={[styles.passportCanvas, styles.loadingShell]}
+                >
+                    <ActivityIndicator size="large" color={UEFA_CYAN} />
+                </LinearGradient>
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell ambientVariant="passport" style={styles.passportShell}>
+        <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+            {/* Page canvas only — UEFA Champions League vibrant royal blue gradient. */}
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.passportCanvas}
+            >
             <View style={styles.header}>
                 <TouchableOpacity
                     onPress={() => setShowProfilePictureModal(true)}
@@ -746,28 +771,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Icon name="add" size={ox(14)} color="#FFFFFF" />
                     </View>
                 </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={() => setOpenPassportCardRequest('name')}
-                    accessibilityLabel="Edit display name"
-                    style={styles.headerNameBtn}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                    <Text style={styles.title} numberOfLines={1}>
-                        {user?.name || 'Passport'}
-                    </Text>
-                    <Icon name="create-outline" size={ox(16)} color="rgba(255,255,255,0.7)" />
-                </TouchableOpacity>
+            <TouchableOpacity
+                onPress={() => setOpenPassportCardRequest('name')}
+                accessibilityLabel="Edit display name"
+                style={styles.headerNameBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+                <Text style={styles.title} numberOfLines={1}>
+                    {user?.name || 'Passport'}
+                </Text>
+                <Icon name="create-outline" size={ox(16)} color={UEFA_CYAN} />
+            </TouchableOpacity>
                 <TouchableOpacity
                     onPress={handleTogglePrivacy}
                     disabled={isTogglingPrivacy}
                     accessibilityLabel={isPrivate ? 'Make profile public' : 'Make profile private'}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    style={isTogglingPrivacy ? styles.headerPrivacyBtnDisabled : undefined}
+                    style={[isTogglingPrivacy ? styles.headerPrivacyBtnDisabled : undefined, styles.headerGlassBtn]}
                 >
                     <Icon
                         name={isPrivate ? 'lock-closed' : 'lock-open'}
-                        size={ox(24)}
-                        color="#FFFFFF"
+                        size={ox(22)}
+                        color={UEFA_CYAN}
                     />
                 </TouchableOpacity>
             </View>
@@ -970,31 +995,31 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             />
 
             <View style={styles.profileSection}>
-                <View style={styles.profileInfo}>
-                    <View style={styles.userInfo}>
+                <View style={styles.profileInfoCentered}>
+                    <View style={styles.userInfoCentered}>
                         <Text style={styles.userName}>{user?.name || user?.handle}</Text>
                         <Text style={styles.userHandle}>{user?.handle}</Text>
                         {user?.accountType === 'business' ? (
-                            <View style={styles.accountBadgeWrap}>
+                            <View style={styles.accountBadgeWrapCentered}>
                                 <AccountTypeBadge accountType="business" compact />
                             </View>
                         ) : null}
                         {user?.bio && (
-                            <Text style={styles.userBio}>{user.bio}</Text>
+                            <Text style={styles.userBioCentered}>{user.bio}</Text>
                         )}
                     </View>
                 </View>
 
                 <View style={styles.statsContainer}>
-                    <View style={styles.statItem}>
+                    <View style={styles.statItemGlass}>
                         <Text style={styles.statNumber}>{posts.length}</Text>
                         <Text style={styles.statLabel}>Posts</Text>
                     </View>
-                    <View style={styles.statItem}>
+                    <View style={styles.statItemGlass}>
                         <Text style={styles.statNumber}>{audienceCounts.followers}</Text>
                         <Text style={styles.statLabel}>Followers</Text>
                     </View>
-                    <View style={styles.statItem}>
+                    <View style={styles.statItemGlass}>
                         <Text style={styles.statNumber}>{audienceCounts.following}</Text>
                         <Text style={styles.statLabel}>Following</Text>
                     </View>
@@ -1021,7 +1046,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Icon 
                             name="grid" 
                             size={ox(20)} 
-                            color={activeTab === 'posts' ? "#f472b6" : "#6B7280"} 
+                            color={activeTab === 'posts' ? UEFA_CYAN : "#94A3B8"} 
                         />
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -1031,7 +1056,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Icon 
                             name="bookmark" 
                             size={ox(20)} 
-                            color={activeTab === 'collections' ? "#f472b6" : "#6B7280"} 
+                            color={activeTab === 'collections' ? UEFA_CYAN : "#94A3B8"} 
                         />
                     </TouchableOpacity>
                 </View>
@@ -1742,14 +1767,19 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 }}
                 onDismiss={dismissProfileAlert}
             />
+            </LinearGradient>
         </GazetteerScreenShell>
     );
 };
 
-const styles = StyleSheet.create({
-    passportShell: {
-        backgroundColor: 'transparent',
-    },
+    const styles = StyleSheet.create({
+        passportShell: {
+            backgroundColor: UEFA_ROYAL_BLUE_END,
+        },
+        passportCanvas: {
+            flex: 1,
+            backgroundColor: 'transparent',
+        },
     loadingShell: {
         justifyContent: 'center',
         alignItems: 'center',
@@ -1765,14 +1795,28 @@ const styles = StyleSheet.create({
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
         borderBottomWidth: 1,
-        borderBottomColor: profilePassportDivider,
+        borderBottomColor: UEFA_GLASS_BORDER,
         backgroundColor: 'transparent',
         gap: ox(12),
+    },
+    headerGlassBtn: {
+        width: ox(38),
+        height: ox(38),
+        borderRadius: ox(19),
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: UEFA_GLASS_BG,
+        borderWidth: 1,
+        borderColor: UEFA_GLASS_BORDER,
     },
     headerAvatarBtn: {
         position: 'relative',
         width: ox(32),
         height: ox(32),
+        shadowColor: UEFA_CYAN,
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
     },
     headerAvatarBadge: {
         position: 'absolute',
@@ -1781,9 +1825,9 @@ const styles = StyleSheet.create({
         width: ox(18),
         height: ox(18),
         borderRadius: ox(9),
-        backgroundColor: '#f472b6',
+        backgroundColor: UEFA_CYAN,
         borderWidth: 2,
-        borderColor: '#030712',
+        borderColor: '#020B26',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1810,48 +1854,58 @@ const styles = StyleSheet.create({
         paddingHorizontal: profilePassportScrollInset,
         paddingVertical: ox(16),
     },
-    profileInfo: {
+    profileInfoCentered: {
         marginBottom: ox(16),
+        alignItems: 'center',
     },
-    userInfo: {
-        flex: 1,
-        justifyContent: 'center',
+    userInfoCentered: {
+        alignItems: 'center',
     },
     userName: {
-        fontSize: ox(19),
-        fontWeight: '600',
+        fontSize: ox(20),
+        fontWeight: '700',
         color: '#FFFFFF',
+        textAlign: 'center',
     },
     userHandle: {
         fontSize: ox(15),
-        color: '#9CA3AF',
+        color: '#D1E4FF',
         marginTop: ox(2),
+        textAlign: 'center',
     },
-    accountBadgeWrap: {
+    accountBadgeWrapCentered: {
         marginTop: ox(8),
-        alignSelf: 'flex-start',
     },
-    userBio: {
+    userBioCentered: {
         fontSize: ox(13),
-        color: '#D1D5DB',
-        marginTop: ox(4),
+        color: '#FFFFFF',
+        marginTop: ox(6),
+        textAlign: 'center',
+        opacity: 0.9,
     },
     statsContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
+        justifyContent: 'space-between',
+        gap: ox(10),
         marginBottom: ox(16),
     },
-    statItem: {
+    statItemGlass: {
+        flex: 1,
         alignItems: 'center',
+        paddingVertical: ox(12),
+        borderRadius: ox(14),
+        backgroundColor: UEFA_GLASS_BG,
+        borderWidth: 1,
+        borderColor: UEFA_GLASS_BORDER,
     },
     statNumber: {
         fontSize: ox(18),
-        fontWeight: '600',
+        fontWeight: '700',
         color: '#FFFFFF',
     },
     statLabel: {
-        fontSize: ox(14),
-        color: '#9CA3AF',
+        fontSize: ox(13),
+        color: '#D1E4FF',
         marginTop: ox(2),
     },
     editButton: {
@@ -1895,7 +1949,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingVertical: ox(12),
         borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+        borderTopColor: UEFA_GLASS_BORDER,
         gap: ox(32),
     },
     postsTab: {
@@ -1904,7 +1958,7 @@ const styles = StyleSheet.create({
     },
     postsTabActive: {
         borderBottomWidth: 2,
-        borderBottomColor: '#f472b6',
+        borderBottomColor: UEFA_CYAN,
     },
     postItem: {
         width: '33.33%',

@@ -25,11 +25,11 @@ import {
     type BottomSheetFlatListMethods,
 } from '@gorhom/bottom-sheet';
 import GazetteerBottomSheetModal, {
-    GAZETTEER_SHEET_UCL,
+    GAZETTEER_SHEET_INBOX,
 } from './GazetteerBottomSheetModal.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
 import {
-    UCL_TEXT_ACTIVE,
+    UCL_CANVAS_NAVY,
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
     UCL_TEXT_SECONDARY,
@@ -68,9 +68,9 @@ const COMMENT_EMOJIS = [
 ];
 const HANDLE_REGEX = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 const SHEET_HEIGHT = Math.min(Dimensions.get('window').height * 0.58, 520);
-const BRAND_600 = UCL_TEXT_ACTIVE;
+const BRAND_600 = UCL_TEXT_PRIMARY;
 const COMMENT_LIKE_ACTIVE = UCL_TEXT_PRIMARY;
-const MENTION_COLOR = UCL_TEXT_ACTIVE;
+const MENTION_COLOR = UCL_TEXT_PRIMARY;
 /** High-contrast type on the navy canvas. */
 const P = {
     text: UCL_TEXT_PRIMARY,
@@ -319,7 +319,7 @@ function CommentItem({
                             style={styles.repliesToggleButton}
                             onPress={() => setShowReplies((v) => !v)}
                         >
-                            <FeedChevronIcon direction={showReplies ? 'up' : 'down'} size={14} />
+                            <FeedChevronIcon direction={showReplies ? 'up' : 'down'} size={14} color={P.text} />
                             <Text style={styles.repliesToggleText}>
                                 {showReplies
                                     ? `Hide replies (${replyCount})`
@@ -429,7 +429,7 @@ function CommentInput({
                         Replying to {replyingToHandle}
                     </Text>
                     <TouchableOpacity onPress={onCancelReply} hitSlop={8} accessibilityLabel="Cancel reply">
-                        <FeedCloseIcon size={16} color={P.muted} />
+                        <FeedCloseIcon size={16} color={P.text} />
                     </TouchableOpacity>
                 </View>
             ) : null}
@@ -458,7 +458,7 @@ function CommentInput({
                 >
                     <FeedSmileIcon
                         size={20}
-                        color={showEmojiPicker ? BRAND_600 : P.muted}
+                        color={showEmojiPicker ? P.text : P.muted}
                     />
                 </TouchableOpacity>
                 <View style={styles.commentInputGradientWrap}>
@@ -479,7 +479,7 @@ function CommentInput({
                     disabled={!text.trim() || isLoading}
                     onPress={handleSubmit}
                 >
-                    <FeedSendIcon size={16} color="#FFFFFF" />
+                    <FeedSendIcon size={16} color={UCL_CANVAS_NAVY} />
                 </TouchableOpacity>
             </View>
         </View>
@@ -1005,7 +1005,7 @@ export default function PostCommentsSheet({
                     </TouchableOpacity>
                 </View>
                 <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                    <FeedCloseIcon size={20} color={P.muted} />
+                    <FeedCloseIcon size={20} color={P.text} />
                 </TouchableOpacity>
             </View>
         </View>
@@ -1206,8 +1206,8 @@ export default function PostCommentsSheet({
             onDismiss={handleClose}
             snapPoints={['75%']}
             horizontalInset={0}
-            backgroundStyle={GAZETTEER_SHEET_UCL.background}
-            handleIndicatorStyle={GAZETTEER_SHEET_UCL.handle}
+            backgroundStyle={GAZETTEER_SHEET_INBOX.background}
+            handleIndicatorStyle={GAZETTEER_SHEET_INBOX.handle}
             footerComponent={renderCommentsFooter}
             keyboardBehavior="interactive"
             keyboardBlurBehavior="restore"
@@ -1449,6 +1449,7 @@ const styles = StyleSheet.create({
     },
     mentionText: {
         color: MENTION_COLOR,
+        fontWeight: '700',
     },
     emptyState: {
         alignItems: 'center',
@@ -1706,8 +1707,8 @@ const styles = StyleSheet.create({
     },
     sendButton: {
         padding: 10,
-        borderRadius: 8,
-        backgroundColor: BRAND_600,
+        borderRadius: 12,
+        backgroundColor: UCL_TEXT_PRIMARY,
     },
     sendButtonDisabled: {
         opacity: 0.5,

@@ -14,11 +14,15 @@ import LinearGradient from 'react-native-linear-gradient';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import type { FeedScope } from '../utils/placeFeedLevels';
-import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
-import { PASSPORT_ABYSS, PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
-
-/** Stronger wash for short sheets — flat #060d16 reads as unchanged black on Android. */
-const PASSPORT_WASH = ['#060d16', '#0f3a42', '#1f6b63', '#164858', '#060d16'] as const;
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_ACTIVE,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+    UCL_TEXT_SECONDARY,
+} from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -68,29 +72,19 @@ export default function PlaceFeedScopePickerModal({
         </>
     );
 
-    const cardInner =
-        Platform.OS === 'ios' ? (
-            <View style={styles.cardCanvas} collapsable={false}>
-                <View style={styles.ambientBack} pointerEvents="none" collapsable={false}>
-                    <DiscoverAmbientCanvas variant="passport" fillParent />
-                </View>
-                <View style={styles.cardContent} collapsable={false}>
-                    {cardBody}
-                </View>
+    const cardInner = (
+        <LinearGradient
+            colors={[...UCL_SHEET_GRADIENT]}
+            locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+            start={{ x: 0.12, y: 0 }}
+            end={{ x: 0.88, y: 1 }}
+            style={styles.cardCanvas}
+        >
+            <View style={styles.cardContent} collapsable={false}>
+                {cardBody}
             </View>
-        ) : (
-            <LinearGradient
-                colors={[...PASSPORT_WASH]}
-                locations={[0, 0.28, 0.55, 0.78, 1]}
-                start={{ x: 0.1, y: 1 }}
-                end={{ x: 0.9, y: 0 }}
-                style={styles.cardCanvas}
-            >
-                <View style={styles.cardContent} collapsable={false}>
-                    {cardBody}
-                </View>
-            </LinearGradient>
-        );
+        </LinearGradient>
+    );
 
     return (
         <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -116,7 +110,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.72)',
     },
     card: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         borderRadius: 16,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.1)',
@@ -126,7 +120,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     cardCanvas: {
-        backgroundColor: PASSPORT_ABYSS,
+        backgroundColor: UCL_CANVAS_NAVY,
         overflow: 'hidden',
     },
     ambientBack: {
@@ -141,19 +135,19 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
     },
     subtitle: {
         marginTop: 4,
         fontSize: 14,
-        color: 'rgba(232, 238, 242, 0.62)',
+        color: UCL_TEXT_SECONDARY,
     },
     hint: {
         marginTop: 8,
         fontSize: 12,
         lineHeight: 17,
-        color: 'rgba(232, 238, 242, 0.45)',
+        color: UCL_TEXT_PLACEHOLDER,
     },
     options: {
         marginTop: 16,
@@ -170,7 +164,7 @@ const styles = StyleSheet.create({
     optionText: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#F3F4F6',
+        color: UCL_TEXT_PRIMARY,
     },
     cancelBtn: {
         marginTop: 12,
@@ -179,6 +173,7 @@ const styles = StyleSheet.create({
     },
     cancelText: {
         fontSize: 14,
-        color: PASSPORT_PALETTE.wavePrimary,
+        fontWeight: '600',
+        color: UCL_TEXT_ACTIVE,
     },
 });

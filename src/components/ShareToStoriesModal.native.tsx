@@ -21,8 +21,7 @@ import ShareTextStoryCapture, {
     type ShareTextStoryCaptureHandle,
 } from './ShareTextStoryCapture.native';
 import PassportSheetCanvas from './PassportSheetCanvas.native';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
-import { UCL_CANVAS_NAVY } from '../theme/gazetteerAmbientNative';
+import { UCL_CANVAS_NAVY, UCL_TEXT_PRIMARY } from '../theme/gazetteerAmbientNative';
 
 type Props = {
     visible: boolean;
@@ -255,7 +254,7 @@ const styles = StyleSheet.create({
     },
     kicker: {
         textAlign: 'center',
-        color: PASSPORT_PALETTE.wavePrimary,
+        color: UCL_TEXT_PRIMARY,
         fontSize: 11,
         fontWeight: '700',
         letterSpacing: 1.2,

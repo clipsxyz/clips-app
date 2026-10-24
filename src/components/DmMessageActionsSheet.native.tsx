@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { GAZETTEER_SHEET_DISCOVER } from './GazetteerBottomSheetModal.native';
+import { GAZETTEER_SHEET_INBOX } from './GazetteerBottomSheetModal.native';
 import { ox } from '../constants/nativeOpticalScale';
 
 export type DmMessageAction = {
@@ -61,7 +61,7 @@ export default function DmMessageActionsSheet({
                 <View
                     style={[
                         styles.sheet,
-                        GAZETTEER_SHEET_DISCOVER.background,
+                        GAZETTEER_SHEET_INBOX.background,
                         {
                             marginHorizontal: sheetLayout.marginHorizontal,
                             width: sheetLayout.sheetWidth,
@@ -71,7 +71,7 @@ export default function DmMessageActionsSheet({
                     ]}
                 >
                     <View style={styles.handleWrap}>
-                        <View style={[styles.handle, GAZETTEER_SHEET_DISCOVER.handle]} />
+                        <View style={[styles.handle, GAZETTEER_SHEET_INBOX.handle]} />
                     </View>
 
                     {timestampLabel ? <Text style={styles.timestamp}>{timestampLabel}</Text> : null}
@@ -110,7 +110,7 @@ export default function DmMessageActionsSheet({
                                     <Icon
                                         name={action.icon}
                                         size={ox(20)}
-                                        color={action.destructive ? '#EF4444' : '#F9FAFB'}
+                                        color={action.destructive ? '#EF4444' : '#FFFFFF'}
                                     />
                                 ) : null}
                                 <Text

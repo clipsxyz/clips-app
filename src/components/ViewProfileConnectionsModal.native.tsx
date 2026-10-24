@@ -16,8 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
-import { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
-import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
+import {
+    UCL_CANVAS_NAVY,
+    UCL_SHEET_GRADIENT,
+    UCL_SHEET_GRADIENT_LOCATIONS,
+    UCL_TEXT_PLACEHOLDER,
+    UCL_TEXT_PRIMARY,
+} from '../theme/gazetteerAmbientNative';
 
 export type ConnectionsScope = 'mutual' | 'followers' | 'following' | 'suggested';
 
@@ -110,11 +115,17 @@ export default function ViewProfileConnectionsModal({
 
     return (
         <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-            <View style={[styles.root, { paddingTop: topPad }]}>
+            <LinearGradient
+                colors={[...UCL_SHEET_GRADIENT]}
+                locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
+                start={{ x: 0.1, y: 0 }}
+                end={{ x: 0.9, y: 1 }}
+                style={[styles.root, { paddingTop: topPad }]}
+            >
                 <View style={styles.header}>
                     <Text style={styles.title}>{scopeTitle(scope)}</Text>
                     <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close connections">
-                        <Icon name="close" size={20} color="#FFFFFF" />
+                        <Icon name="close" size={20} color={UCL_TEXT_PRIMARY} />
                     </TouchableOpacity>
                 </View>
 
@@ -143,12 +154,12 @@ export default function ViewProfileConnectionsModal({
                 </View>
 
                 <View style={styles.searchWrap}>
-                    <Icon name="search" size={16} color="#9CA3AF" />
+                    <Icon name="search" size={16} color={UCL_TEXT_PRIMARY} />
                     <TextInput
                         value={search}
                         onChangeText={onSearchChange}
                         placeholder={`Search ${scope}`}
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={UCL_TEXT_PLACEHOLDER}
                         style={styles.searchInput}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -213,7 +224,7 @@ export default function ViewProfileConnectionsModal({
                                             ) : null}
                                             {requested && !following ? (
                                                 <View style={styles.privateBadge}>
-                                                    <Icon name="lock-closed" size={10} color="#CBD5E1" />
+                                                    <Icon name="lock-closed" size={10} color="#E2E8F0" />
                                                     <Text style={styles.privateBadgeText}>Private account</Text>
                                                 </View>
                                             ) : null}
@@ -230,17 +241,15 @@ export default function ViewProfileConnectionsModal({
                                             onPress={() => onToggleFollow(key)}
                                             activeOpacity={0.85}
                                         >
-                                            {!following && !requested ? (
-                                                <LinearGradient
-                                                    colors={[...PASSPORT_SHEET_WASH]}
-                                                    locations={[0, 0.22, 0.52, 0.78, 1]}
-                                                    start={{ x: 0.1, y: 0 }}
-                                                    end={{ x: 0.9, y: 1 }}
-                                                    style={StyleSheet.absoluteFill}
-                                                />
-                                            ) : null}
                                             {actionLoading ? (
-                                                <ActivityIndicator size="small" color="#FFFFFF" />
+                                                <ActivityIndicator
+                                                    size="small"
+                                                    color={
+                                                        following || requested
+                                                            ? UCL_TEXT_PRIMARY
+                                                            : UCL_CANVAS_NAVY
+                                                    }
+                                                />
                                             ) : (
                                                 <Text
                                                     style={[
@@ -273,7 +282,7 @@ export default function ViewProfileConnectionsModal({
                         </TouchableOpacity>
                     ) : null}
                 </ScrollView>
-            </View>
+            </LinearGradient>
         </Modal>
     );
 }
@@ -281,7 +290,7 @@ export default function ViewProfileConnectionsModal({
 const styles = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: UCL_CANVAS_NAVY,
     },
     header: {
         flexDirection: 'row',
@@ -292,8 +301,8 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
+        fontWeight: '600',
+        color: UCL_TEXT_PRIMARY,
     },
     closeBtn: {
         padding: 8,
@@ -315,11 +324,11 @@ const styles = StyleSheet.create({
     tabText: {
         fontSize: 14,
         fontWeight: '600',
-        color: 'rgba(255,255,255,0.65)',
+        color: '#E2E8F0',
     },
     tabTextActive: {
         fontSize: 16,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
     },
     tabIndicatorTrack: {
         flexDirection: 'row',
@@ -351,7 +360,7 @@ const styles = StyleSheet.create({
     },
     searchInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 14,
         paddingVertical: 10,
     },
@@ -406,7 +415,7 @@ const styles = StyleSheet.create({
     },
     emptyText: {
         textAlign: 'center',
-        color: '#6B7280',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: 14,
         marginTop: 64,
     },
@@ -434,17 +443,17 @@ const styles = StyleSheet.create({
         minWidth: 0,
     },
     rowName: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 14,
         fontWeight: '700',
     },
     rowHandle: {
-        color: '#9CA3AF',
+        color: '#E2E8F0',
         fontSize: 12,
         marginTop: 1,
     },
     rowMeta: {
-        color: '#9CA3AF',
+        color: UCL_TEXT_PLACEHOLDER,
         fontSize: 11,
         marginTop: 2,
     },
@@ -462,7 +471,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.12)',
     },
     privateBadgeText: {
-        color: '#CBD5E1',
+        color: '#E2E8F0',
         fontSize: 10,
         fontWeight: '600',
     },
@@ -471,32 +480,32 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 7,
         borderRadius: 999,
-        backgroundColor: PASSPORT_PALETTE.waveDeep,
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: 'rgba(61,155,143,0.45)',
+        borderColor: 'rgba(255,255,255,0.9)',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
     },
     followBtnFollowing: {
-        backgroundColor: '#000000',
+        backgroundColor: 'rgba(255,255,255,0.08)',
         borderColor: 'rgba(255,255,255,0.25)',
     },
     followBtnRequested: {
-        backgroundColor: 'rgba(61,155,143,0.14)',
-        borderColor: 'rgba(61,155,143,0.5)',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderColor: 'rgba(255,255,255,0.2)',
     },
     followBtnText: {
-        color: '#FFFFFF',
+        color: UCL_CANVAS_NAVY,
         fontSize: 12,
         fontWeight: '700',
         zIndex: 1,
     },
     followBtnTextFollowing: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
     },
     followBtnTextRequested: {
-        color: '#9FE0D6',
+        color: '#E2E8F0',
     },
     loadMoreBtn: {
         marginTop: 8,
@@ -510,7 +519,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.06)',
     },
     loadMoreText: {
-        color: '#FFFFFF',
+        color: UCL_TEXT_PRIMARY,
         fontSize: 13,
         fontWeight: '600',
     },
