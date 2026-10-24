@@ -258,7 +258,7 @@ const FeedNativeVideo = React.memo(function FeedNativeVideo({
             controls={false}
             paused={paused || (mode === 'feed' && scrollPaused)}
             muted={muted}
-            volume={mode === 'detail' || opaqueSurface ? 1 : soundOn ? 1 : 0}
+            volume={muted || !soundOn ? 0 : 1}
             repeat={repeat}
             playInBackground={false}
             playWhenInactive={false}
@@ -1363,7 +1363,7 @@ const FeedPostMedia = React.memo(
                         ? paused
                         : !isAudioPrimary || slideDragHeld || feedVideoHeld
                 }
-                muted={viewerSurface ? false : !soundOn || !videoSurfaceReady}
+                muted={viewerSurface ? muted : !soundOn || !videoSurfaceReady}
                 soundOn={soundOn}
                 repeat
                 mode={mode}

@@ -69,6 +69,7 @@ import MyFeedModal from '../components/MyFeedModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import VideoMuteToggle from '../components/VideoMuteToggle.native';
 import CachedImage from '../components/CachedImage.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
 import Video from 'react-native-video';
@@ -125,7 +126,7 @@ function resolvePeekVideoUri(post: Post): string | undefined {
     return uri;
 }
 
-function PeekPreviewMedia({ post }: { post: Post }) {
+function PeekPreviewMedia({ post, muted }: { post: Post; muted: boolean }) {
     const imageUri = resolvePostThumbnail(post);
     const bodyText = getPostBodyText(post);
     const videoPost = isVideoPost(post);
@@ -140,7 +141,8 @@ function PeekPreviewMedia({ post }: { post: Post }) {
                 resizeMode="cover"
                 paused={false}
                 repeat
-                muted
+                muted={muted}
+                volume={muted ? 0 : 1}
                 controls={false}
                 poster={imageUri}
                 playInBackground={false}
@@ -208,6 +210,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const closeMyFeed = useCallback(() => setMyFeedOpen(false), []);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [peekPost, setPeekPost] = useState<Post | null>(null);
+    const [peekMuted, setPeekMuted] = useState(true);
     const peekAnim = React.useRef(new Animated.Value(0)).current;
     const editSheetAnim = React.useRef(new Animated.Value(0)).current;
     const handleMyFeedPostUpdated = useCallback((updated: Post) => {
@@ -808,6 +811,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     const openPeek = useCallback((item: Post) => {
         Vibration.vibrate(Platform.OS === 'android' ? 18 : 10);
+        setPeekMuted(true);
         setPeekPost(item);
     }, []);
 
@@ -1024,14 +1028,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 >
                     <Icon name="people-outline" size={ox(20)} color="#FFFFFF" />
                     <Text style={[styles.tabLabel, styles.tabLabelCyan]}>Invite Friends</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.tab, styles.tabChip]}
-                    onPress={() => navigation.navigate('ProfileCover')}
-                >
-                    <Icon name="image-outline" size={ox(20)} color="#F3F4F6" />
-                    <Text style={styles.tabLabel}>Cover</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -2045,7 +2041,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     >
                         {peekPost ? (
                             <View style={[styles.peekCard, { width: Math.min(windowWidth * 0.82, ox(340)) }]}>
-                                <PeekPreviewMedia post={peekPost} />
+                                <PeekPreviewMedia post={peekPost} muted={peekMuted} />
+                                {resolvePeekVideoUri(peekPost) ? (
+                                    <VideoMuteToggle
+                                        muted={peekMuted}
+                                        onToggle={() => setPeekMuted((prev) => !prev)}
+                                    />
+                                ) : null}
                                 {peekLocationLabel(peekPost) ? (
                                     <View style={styles.peekLocationPill} pointerEvents="none">
                                         <Icon name="location-outline" size={ox(11)} color="#FFFFFF" />

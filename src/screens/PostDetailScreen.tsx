@@ -36,6 +36,7 @@ import {
 } from '../utils/feedEngagementPrefsMobile';
 import { isLikelyImageUri } from '../utils/imageDimensions';
 import FeedPostMedia from '../components/FeedPostMedia.native';
+import VideoMuteToggle from '../components/VideoMuteToggle.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedPostHeader from '../components/FeedPostHeader.native';
 import FeedCaptionText from '../components/FeedCaptionText.native';
@@ -93,6 +94,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
         Math.round(screenWidth / RATIO_PORTRAIT_9_16),
     );
     const [mediaStageHeight, setMediaStageHeight] = useState(0);
+    const [isMuted, setIsMuted] = useState(false);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
     const [overflowVisible, setOverflowVisible] = useState(false);
@@ -107,6 +109,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     useEffect(() => {
         loadPost();
+        setIsMuted(false);
     }, [postId]);
 
     useEffect(() => {
@@ -456,8 +459,14 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                 mode="detail"
                                 isActive
                                 immediateVideoSurface
-                                muted={false}
+                                muted={isMuted}
                             />
+                            {isVideoPost(post) ? (
+                                <VideoMuteToggle
+                                    muted={isMuted}
+                                    onToggle={() => setIsMuted((prev) => !prev)}
+                                />
+                            ) : null}
                         </View>
                     ) : null}
                     {carouselThumbItems.length > 1 ? (
