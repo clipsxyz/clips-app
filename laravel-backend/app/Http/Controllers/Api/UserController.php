@@ -74,7 +74,7 @@ class UserController extends Controller
             );
         }
 
-        $userData = $user->toArray();
+        $userData = $user->toApiArray();
         // Counts are also denormalized on the row; recompute from the follow graph so every
         // surface (header, Audience card, connections modal) agrees and stale columns self-heal.
         $liveCounts = $user->syncLiveAudienceCounts();

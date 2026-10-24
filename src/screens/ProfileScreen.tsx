@@ -988,7 +988,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     return (
         <GazetteerScreenShell ambient={false} style={styles.passportShell}>
-            {/* Always the Champions League grid passport — no user-flag / legacy card fallback. */}
+            {/* Always the Champions League grid passport — register/me emit passport_layout=grid and this screen never branches on it. */}
             {/* Page canvas only — UEFA Champions League vibrant royal blue gradient. */}
             <LinearGradient
                 colors={[...UEFA_PASSPORT_GRADIENT]}
@@ -1055,14 +1055,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         }}
                         scrollEventThrottle={16}
                     >
-                <TouchableOpacity
-                    style={[styles.tab, styles.tabInvite]}
-                    onPress={() => setInviteFriendsOpen(true)}
-                >
-                    <Icon name="people-outline" size={ox(20)} color="#FFFFFF" />
-                    <Text style={[styles.tabLabel, styles.tabLabelCyan]}>Invite Friends</Text>
-                </TouchableOpacity>
-
                 <TouchableOpacity
                     style={[styles.tab, styles.tabNewGroup]}
                     onPress={() => setCreateGroupOpen(true)}
@@ -1754,6 +1746,20 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             keyboardShouldPersistTaps="handled"
                             nestedScrollEnabled
                         >
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Invite Friends</Text>
+                                <Text style={styles.toggleDescription}>Share Gazetteer with people you want on here</Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: ox(10) }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        setInviteFriendsOpen(true);
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Invite friends</Text>
+                                </TouchableOpacity>
+                            </View>
+
                             <View style={styles.safetySection}>
                                 <Text style={styles.safetySectionTitle}>Content preferences</Text>
                                 <Text style={styles.toggleDescription}>Edit preferred locations for feed suggestions</Text>
@@ -2627,11 +2633,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         borderWidth: 1,
         borderColor: profilePassportChipBorder,
         backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    },
-    tabInvite: {
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.3)',
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     tabCommentSafety: {
         borderWidth: 1,

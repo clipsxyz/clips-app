@@ -28,7 +28,7 @@ class AuthControllerTest extends TestCase
 
         $response->assertStatus(201)
             ->assertJsonStructure([
-                'user' => ['id', 'username', 'email', 'handle', 'display_name', 'location_local', 'location_regional', 'location_national'],
+                'user' => ['id', 'username', 'email', 'handle', 'display_name', 'location_local', 'location_regional', 'location_national', 'passport_layout'],
                 'token',
             ])
             ->assertJson([
@@ -39,8 +39,12 @@ class AuthControllerTest extends TestCase
                     'location_local' => 'Finglas',
                     'location_regional' => 'Dublin',
                     'location_national' => 'Ireland',
+                    'passport_layout' => 'grid',
                 ],
-            ]);
+            ])
+            ->assertJsonMissingPath('user.profile_layout')
+            ->assertJsonMissingPath('user.is_legacy')
+            ->assertJsonMissingPath('user.onboarding_step');
 
         $this->assertDatabaseHas('users', [
             'username' => 'newuser',
@@ -92,7 +96,10 @@ class AuthControllerTest extends TestCase
             ->getJson('/api/auth/me');
 
         $response->assertStatus(200)
-            ->assertJsonStructure(['id', 'username', 'email', 'handle'])
-            ->assertJson(['id' => $user->id]);
+            ->assertJsonStructure(['id', 'username', 'email', 'handle', 'passport_layout'])
+            ->assertJson([
+                'id' => $user->id,
+                'passport_layout' => 'grid',
+            ]);
     }
 }

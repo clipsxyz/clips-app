@@ -312,38 +312,6 @@ export default function ProfilePassportCards({
         onOpenCardRequestHandled?.();
     }, [openCardRequest, onOpenCardRequestHandled]);
 
-    const profileCompletion = useMemo(() => {
-        const checks = [
-            Boolean(user?.avatarUrl),
-            Boolean(user?.profileBackgroundUrl),
-            Boolean((bio || '').trim()),
-            Boolean(
-                (socialLinks.website ||
-                    socialLinks.instagram ||
-                    socialLinks.tiktok ||
-                    socialLinks.x ||
-                    socialLinks.podcast ||
-                    ''
-                ).trim(),
-            ),
-            Boolean((national || regional || local || '').trim()),
-        ];
-        const completed = checks.filter(Boolean).length;
-        return { completed, total: checks.length, percent: Math.round((completed / checks.length) * 100) };
-    }, [
-        user?.avatarUrl,
-        user?.profileBackgroundUrl,
-        bio,
-        socialLinks.website,
-        socialLinks.instagram,
-        socialLinks.tiktok,
-        socialLinks.x,
-        socialLinks.podcast,
-        national,
-        regional,
-        local,
-    ]);
-
     const persistLaravelProfile = useCallback(
         async (patch: Parameters<typeof updateAuthProfile>[0]): Promise<boolean> => {
             if (!isLaravelApiEnabled() || !user) return false;
@@ -1015,12 +983,6 @@ export default function ProfilePassportCards({
                         <Text style={styles.editHubTitle}>Edit Profile</Text>
                         <Text style={styles.editHubSubtitle}>Quickly update your identity and profile presence.</Text>
                     </View>
-                    <View style={styles.completionBadge}>
-                        <Text style={styles.completionBadgeText}>{profileCompletion.percent}% complete</Text>
-                    </View>
-                </View>
-                <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${profileCompletion.percent}%` }]} />
                 </View>
                 <View style={styles.quickGrid}>
                     <TouchableOpacity style={styles.quickBtn} onPress={() => setSelectedCard('name')}>
@@ -1189,27 +1151,6 @@ const styles = StyleSheet.create({
     editHubTitles: { flex: 1 },
     editHubTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
     editHubSubtitle: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-    completionBadge: {
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.2)',
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-    },
-    completionBadgeText: { color: '#E5E7EB', fontSize: 11, fontWeight: '600' },
-    progressTrack: {
-        height: 8,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        overflow: 'hidden',
-        marginTop: 12,
-    },
-    progressFill: {
-        height: '100%',
-        borderRadius: 999,
-        backgroundColor: '#FFFFFF',
-    },
     quickGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',

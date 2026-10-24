@@ -499,23 +499,6 @@ export default function ProfilePage() {
     }
   }, [user?.socialLinks]);
 
-  const profileCompletion = React.useMemo(() => {
-    const checks = [
-      Boolean(user?.avatarUrl),
-      Boolean((user as any)?.profileBackgroundUrl),
-      Boolean((bio || '').trim()),
-      Boolean((socialLinks.website || socialLinks.instagram || socialLinks.tiktok || socialLinks.x || socialLinks.podcast || '').trim()),
-      Boolean((national || regional || local || '').trim()),
-    ];
-    const completed = checks.filter(Boolean).length;
-    const total = checks.length;
-    return {
-      completed,
-      total,
-      percent: Math.round((completed / total) * 100),
-    };
-  }, [user?.avatarUrl, (user as any)?.profileBackgroundUrl, bio, socialLinks.website, socialLinks.instagram, socialLinks.tiktok, socialLinks.x, socialLinks.podcast, national, regional, local]);
-
   React.useEffect(() => {
     setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
     setEmailDigestEnabled(user?.emailDigestEnabled !== false);
@@ -1256,20 +1239,6 @@ export default function ProfilePage() {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  setInviteFriendsOpen(true);
-                }}
-                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-cyan-300/40 bg-cyan-900/30 text-cyan-100 hover:bg-cyan-900/45 transition-colors flex items-center gap-2"
-                style={{ scrollSnapAlign: 'start' }}
-              >
-                <FiUsers className="w-4 h-4" />
-                <span className="text-xs font-semibold">Invite Friends</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
                   if (!ownProfileHandle) return;
                   setSettingsOpen(false);
                   setCommentSafetyOpen(false);
@@ -1284,20 +1253,6 @@ export default function ProfilePage() {
               >
                 <FiGrid className="w-4 h-4" />
                 <span className="text-xs font-semibold">My feed</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  nav('/profile/cover');
-                }}
-                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
-                style={{ scrollSnapAlign: 'start' }}
-              >
-                <FiCamera className="w-4 h-4" />
-                <span className="text-xs font-semibold">Cover</span>
               </button>
 
               <button
@@ -1660,21 +1615,9 @@ export default function ProfilePage() {
               </div>
         <div className="px-1 mb-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
+            <div>
                 <h3 className="text-sm font-semibold text-white">Profile details</h3>
                 <p className="text-xs text-gray-400 mt-0.5">Update identity and presence from this sheet.</p>
-              </div>
-              <span className="text-xs px-2 py-1 rounded-full border border-white/20 bg-black/50 text-gray-200">
-                {profileCompletion.percent}% complete
-              </span>
-            </div>
-
-            <div className="mt-3 h-2 w-full rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-white transition-all duration-300"
-                style={{ width: `${profileCompletion.percent}%` }}
-              />
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -3100,6 +3043,22 @@ export default function ProfilePage() {
                 </button>
               </div>
               <div className="p-6 space-y-6">
+                <div>
+                  <button
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      setInviteFriendsOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="text-left">
+                      <p className="text-sm font-semibold text-gray-900">Invite Friends</p>
+                      <p className="text-xs text-gray-500">Share Gazetteer with people you want on here</p>
+                    </div>
+                    <FiUsers className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
+
                 <div>
                   <button
                     onClick={() => {

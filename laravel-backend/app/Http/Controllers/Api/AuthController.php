@@ -150,7 +150,7 @@ class AuthController extends Controller
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([
-            'user' => $user->makeHidden(['password']),
+            'user' => $user->toApiArray(),
             'token' => $token
         ], 201);
     }
@@ -181,7 +181,7 @@ class AuthController extends Controller
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([
-            'user' => $user->makeHidden(['password']),
+            'user' => $user->toApiArray(),
             'token' => $token
         ]);
     }
@@ -217,7 +217,7 @@ class AuthController extends Controller
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([
-            'user' => $user->fresh()?->makeHidden(['password']) ?? $user->makeHidden(['password']),
+            'user' => ($user->fresh() ?? $user)->toApiArray(),
             'token' => $token,
         ]);
     }
@@ -312,7 +312,7 @@ class AuthController extends Controller
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([
-            'user' => $user->fresh()?->makeHidden(['password']) ?? $user->makeHidden(['password']),
+            'user' => ($user->fresh() ?? $user)->toApiArray(),
             'token' => $token,
         ]);
     }
@@ -344,7 +344,7 @@ class AuthController extends Controller
             $user->syncLiveAudienceCounts(true);
         }
 
-        return response()->json($user->makeHidden(['password']));
+        return response()->json($user instanceof User ? $user->toApiArray() : $user);
     }
 
     /**
@@ -473,7 +473,7 @@ class AuthController extends Controller
         $vk = 'user_profile_sig_version:'.$user->id;
         Cache::put($vk, (int) Cache::get($vk, 0) + 1, now()->addDays(365));
 
-        return response()->json($user->makeHidden(['password'])->fresh());
+        return response()->json(($user->fresh() ?? $user)->toApiArray());
     }
 
     /**

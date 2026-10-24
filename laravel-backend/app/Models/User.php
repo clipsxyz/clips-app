@@ -194,6 +194,28 @@ class User extends Authenticatable
         ];
     }
 
+    /**
+     * Public auth / profile JSON. Registration never seeds a layout flag — every
+     * account advertises the modern grid passport, and leftover legacy keys are dropped.
+     *
+     * @return array<string, mixed>
+     */
+    public function toApiArray(): array
+    {
+        $data = $this->makeHidden(['password', 'remember_token'])->toArray();
+        unset(
+            $data['password'],
+            $data['remember_token'],
+            $data['profile_layout'],
+            $data['is_legacy'],
+            $data['onboarding_step'],
+            $data['onboarding_version']
+        );
+        $data['passport_layout'] = 'grid';
+
+        return $data;
+    }
+
     public function canViewProfile(User $viewer)
     {
         // Users can always view their own profile
