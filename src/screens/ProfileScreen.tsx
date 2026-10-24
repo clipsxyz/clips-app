@@ -898,9 +898,32 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         navigation.navigate('PostDetail', { postId: target.id, initialPost: target });
     }, [peekPost, closePeek, navigation]);
 
+    const isOwnPeekPost = useCallback(
+        (post: Post | null | undefined) => {
+            if (!post || !user) return false;
+            const norm = (value?: string) => String(value || '').replace(/^@/, '').trim().toLowerCase();
+            if (norm(user.handle) && norm(post.userHandle) && norm(user.handle) === norm(post.userHandle)) {
+                return true;
+            }
+            const extra = post as Post & { user_id?: string; userId?: string };
+            const postUserId = String(extra.user_id ?? extra.userId ?? '');
+            return Boolean(user.id && postUserId && String(user.id) === postUserId);
+        },
+        [user],
+    );
+
     const handlePeekRepost = useCallback(async () => {
         const target = peekPost;
         if (!target || !user) return;
+        if (isOwnPeekPost(target)) {
+            showProfileAlert({
+                title: 'Your post',
+                message: 'You cannot reclip your own post.',
+                icon: 'info',
+                confirmButtonText: 'OK',
+            });
+            return;
+        }
         try {
             await reclipPost(String(user.id), target.id, user.handle);
             showProfileAlert({
@@ -911,14 +934,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             });
             closePeek();
         } catch (error) {
-            console.error('Failed to repost:', error);
+            const message = error instanceof Error ? error.message : '';
+            if (/cannot reclip your own post/i.test(message)) {
+                showProfileAlert({
+                    title: 'Your post',
+                    message: 'You cannot reclip your own post.',
+                    icon: 'info',
+                    confirmButtonText: 'OK',
+                });
+                return;
+            }
             showProfileAlert({
                 title: 'Repost failed',
                 message: 'Could not repost this post right now.',
                 icon: 'alert',
             });
         }
-    }, [peekPost, user, showProfileAlert, closePeek]);
+    }, [peekPost, user, isOwnPeekPost, showProfileAlert, closePeek]);
 
     const handlePeekShare = useCallback(async () => {
         const target = peekPost;
@@ -1066,25 +1098,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </Text>
                         </View>
                     )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.tab, styles.tabChip]}
-                    onPress={() => {
-                        loadCollections();
-                        setCollectionsOpen(true);
-                    }}
-                >
-                    <Icon name="bookmark" size={ox(20)} color="#FFFFFF" />
-                    <Text style={styles.tabLabel}>Collections</Text>
-                    {collections.length > 0 && (
-                        <View style={styles.badge}>
-                            <Text style={styles.badgeText}>
-                                {collections.length > 9 ? '9+' : collections.length}
-                            </Text>
-                        </View>
-                    )}
-                </TouchableOpacity>
+                    </TouchableOpacity>
 
                 <TouchableOpacity
                     style={[styles.tab, styles.tabCommentSafety]}
@@ -2075,7 +2089,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         ) : null}
 
                         <View style={styles.peekMenu}>
-                            {PEEK_ACTIONS.map((action) => {
+                            {PEEK_ACTIONS.filter(
+                                (action) => action.key !== 'repost' || !isOwnPeekPost(peekPost),
+                            ).map((action) => {
                                 const liked = peekPost?.userLiked === true;
                                 const iconName =
                                     action.key === 'like' && liked && action.activeIcon
