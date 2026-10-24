@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\LocationHierarchy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -47,6 +48,9 @@ class Post extends Model
         'media_type',
         'thumbnail_url',
         'location_label',
+        'location_local',
+        'location_regional',
+        'location_national',
         'place_id',
         'width',
         'height',
@@ -320,14 +324,56 @@ class Post extends Model
 
         $needle = $raw;
         $regionIds = $this->regionIdsMatchingLocationName($needle);
+        $hasPostTiers = Schema::hasColumn($this->getTable(), 'location_national');
+        $hasGazetteer = Schema::hasColumn($this->getTable(), 'gazetteer_region_id');
 
-        return $query->where(function ($q) use ($needle, $regionIds) {
+        if (LocationHierarchy::isCountry($needle)) {
+            $aliases = LocationHierarchy::countryAliases($needle);
+            $cities = LocationHierarchy::citiesForCountry($needle);
+
+            return $query->where(function ($q) use ($aliases, $cities, $regionIds, $hasPostTiers, $hasGazetteer) {
+                foreach ($aliases as $alias) {
+                    $q->orWhere('location_label', 'LIKE', "%{$alias}%")
+                        ->orWhere('venue', 'LIKE', "%{$alias}%")
+                        ->orWhere('landmark', 'LIKE', "%{$alias}%");
+                    if ($hasPostTiers) {
+                        $q->orWhere('location_national', 'LIKE', "%{$alias}%");
+                    }
+                }
+                foreach ($cities as $city) {
+                    $q->orWhere('location_label', 'LIKE', "%{$city}%")
+                        ->orWhere('venue', 'LIKE', "%{$city}%")
+                        ->orWhere('landmark', 'LIKE', "%{$city}%");
+                    if ($hasPostTiers) {
+                        $q->orWhere('location_local', 'LIKE', "%{$city}%")
+                            ->orWhere('location_regional', 'LIKE', "%{$city}%");
+                    }
+                }
+                if ($regionIds !== [] && $hasGazetteer) {
+                    $q->orWhereIn($this->getTable().'.gazetteer_region_id', $regionIds);
+                }
+                $q->orWhereHas('user', function ($uq) use ($aliases) {
+                    $uq->where(function ($national) use ($aliases) {
+                        foreach ($aliases as $alias) {
+                            $national->orWhere('location_national', 'LIKE', "%{$alias}%");
+                        }
+                    });
+                });
+            });
+        }
+
+        return $query->where(function ($q) use ($needle, $regionIds, $hasPostTiers, $hasGazetteer) {
             $q->where('location_label', 'LIKE', "%{$needle}%")
                 ->orWhere('venue', 'LIKE', "%{$needle}%")
                 ->orWhere('landmark', 'LIKE', "%{$needle}%")
                 ->orWhere('place_id', $needle);
 
-            if ($regionIds !== [] && Schema::hasColumn($this->getTable(), 'gazetteer_region_id')) {
+            if ($hasPostTiers) {
+                $q->orWhere('location_local', 'LIKE', "%{$needle}%")
+                    ->orWhere('location_regional', 'LIKE', "%{$needle}%");
+            }
+
+            if ($regionIds !== [] && $hasGazetteer) {
                 $q->orWhereIn($this->getTable().'.gazetteer_region_id', $regionIds);
             }
         });

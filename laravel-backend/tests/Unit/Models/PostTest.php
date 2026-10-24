@@ -215,7 +215,7 @@ class PostTest extends TestCase
         $galwayPost = Post::factory()->create([
             'user_id' => $galway->id,
             'user_handle' => $galway->handle,
-            'location_label' => 'Galway, Ireland',
+            'location_label' => 'Galway',
         ]);
 
         $english = User::factory()->create([
@@ -241,6 +241,43 @@ class PostTest extends TestCase
             $galwayPost->id,
             Post::notReclipped()->byLocation('Dublin')->pluck('id')->all()
         );
+        $this->assertNotContains(
+            $galwayPost->id,
+            Post::notReclipped()->byLocation('Spain')->pluck('id')->all()
+        );
+    }
+
+    public function test_by_location_country_rolls_up_spanish_cities(): void
+    {
+        $author = User::factory()->create([
+            'location_local' => 'Madrid',
+            'location_regional' => 'Madrid',
+            'location_national' => 'Spain',
+        ]);
+        $madrid = Post::factory()->create([
+            'user_id' => $author->id,
+            'location_label' => 'Madrid',
+        ]);
+        $barcelona = Post::factory()->create([
+            'user_id' => $author->id,
+            'location_label' => 'Barcelona',
+        ]);
+        $irish = User::factory()->create([
+            'location_local' => 'Dublin',
+            'location_regional' => 'Dublin',
+            'location_national' => 'Ireland',
+        ]);
+        $dublin = Post::factory()->create([
+            'user_id' => $irish->id,
+            'location_label' => 'Temple Bar, Dublin',
+            'location_national' => 'Ireland',
+        ]);
+
+        $spainIds = Post::byLocation('Spain')->pluck('id')->all();
+
+        $this->assertContains($madrid->id, $spainIds);
+        $this->assertContains($barcelona->id, $spainIds);
+        $this->assertNotContains($dublin->id, $spainIds);
     }
 
     public function test_resolved_thumbnail_url_prefers_column_then_media_items_poster(): void

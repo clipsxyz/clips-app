@@ -94,6 +94,10 @@ export type Post = {
   /** Author profile picture from API (`avatar_url` / nested `user.avatar_url`). */
   avatarUrl?: string;
   locationLabel: string;
+  /** Post-level place hierarchy (not the author's home city). */
+  locationLocal?: string;
+  locationRegional?: string;
+  locationNational?: string;
   /** Venue / place name (e.g. café, stadium); shown in metadata carousel on feed */
   venue?: string;
   /** Named landmark (e.g. Eiffel Tower, River Liffey); optional; carousel + landmark feeds */

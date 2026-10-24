@@ -1421,6 +1421,9 @@ export function transformLaravelPost(response: any): Post {
     userHandle: response.user_handle || response.userHandle,
     avatarUrl: resolvedAvatarUrl,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
+    locationLocal: response.location_local || response.locationLocal || existing?.locationLocal,
+    locationRegional: response.location_regional || response.locationRegional || existing?.locationRegional,
+    locationNational: response.location_national || response.locationNational || existing?.locationNational,
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
     placeId: response.place_id || response.placeId || existing?.placeId || null,
@@ -1795,17 +1798,79 @@ function locationFieldMatchesQuery(raw: unknown, query: string): boolean {
   return new RegExp(`(?:^|[\\s,./·|])${escapeLocationQueryRe(q)}(?:[\\s,./·]|$)`).test(value);
 }
 
-function postExplicitLocationMatches(p: Post, query: string): boolean {
-  const fields = [
+const COUNTRY_CITIES: Record<string, string[]> = {
+  ireland: ['dublin', 'cork', 'galway', 'limerick', 'waterford', 'kilkenny', 'belfast', 'finglas', 'artane', 'ballymun', 'oranmore'],
+  spain: ['madrid', 'barcelona', 'valencia', 'seville', 'sevilla', 'malaga', 'bilbao', 'granada'],
+  uk: ['london', 'manchester', 'birmingham', 'edinburgh', 'glasgow', 'liverpool', 'bristol', 'leeds', 'cardiff', 'belfast'],
+  'united kingdom': ['london', 'manchester', 'birmingham', 'edinburgh', 'glasgow', 'liverpool', 'bristol', 'leeds', 'cardiff', 'belfast'],
+  england: ['london', 'manchester', 'birmingham', 'liverpool', 'bristol', 'leeds'],
+  scotland: ['edinburgh', 'glasgow'],
+  wales: ['cardiff'],
+  france: ['paris', 'lyon', 'marseille'],
+  germany: ['berlin', 'munich', 'hamburg', 'frankfurt', 'cologne'],
+  italy: ['rome', 'milan', 'naples', 'florence', 'venice'],
+  usa: ['new york', 'los angeles', 'chicago', 'houston', 'miami', 'boston', 'seattle'],
+  'united states': ['new york', 'los angeles', 'chicago', 'houston', 'miami', 'boston', 'seattle'],
+};
+
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  ireland: ['ireland', 'éire', 'eire'],
+  spain: ['spain', 'españa', 'espana'],
+  uk: ['uk', 'united kingdom', 'great britain', 'britain'],
+  'united kingdom': ['uk', 'united kingdom', 'great britain', 'britain'],
+  usa: ['usa', 'us', 'united states'],
+  'united states': ['usa', 'us', 'united states'],
+};
+
+function countryAliases(query: string): string[] {
+  return COUNTRY_ALIASES[query] ?? (LOCATION_COUNTRIES.has(query) ? [query] : []);
+}
+
+function isCountryFeedQuery(query: string): boolean {
+  return countryAliases(query).length > 0;
+}
+
+function postLocationFields(p: Post): Array<string | undefined> {
+  return [
     (p as { locationLabel?: string }).locationLabel,
     (p as { location_label?: string }).location_label,
+    p.locationLocal,
+    p.locationRegional,
+    p.locationNational,
     (p as { venue?: string }).venue,
     (p as { landmark?: string }).landmark,
   ];
-  return fields.some((field) => locationFieldMatchesQuery(field, query));
 }
 
-/** Returns true if the post's explicit place tag matches the feed tab. Author home city is ignored. */
+function postExplicitLocationMatches(p: Post, query: string): boolean {
+  return postLocationFields(p).some((field) => locationFieldMatchesQuery(field, query));
+}
+
+function postMatchesCountryFeed(p: Post, query: string): boolean {
+  const aliases = countryAliases(query);
+  if (aliases.some((alias) => postExplicitLocationMatches(p, alias))) {
+    return true;
+  }
+  const cities = COUNTRY_CITIES[query] ?? [];
+  if (cities.some((city) => postExplicitLocationMatches(p, city))) {
+    return true;
+  }
+  const national = String(p.locationNational || '').trim().toLowerCase();
+  if (aliases.includes(national)) {
+    return true;
+  }
+  const userNational = String(p.userNational || '').trim().toLowerCase();
+  if (!aliases.includes(userNational)) {
+    return false;
+  }
+  const namedForeignCity = Object.entries(COUNTRY_CITIES).some(([country, cities]) => {
+    if (countryAliases(query).includes(country) || country === query) return false;
+    return cities.some((city) => postExplicitLocationMatches(p, city));
+  });
+  return !namedForeignCity;
+}
+
+/** City feeds match the post tag/hierarchy only. Country feeds roll up child cities. */
 export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const normalize = (v?: string) => (v || '').trim().toLowerCase();
@@ -1815,7 +1880,6 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
       .trim()
       .replace(/\s+(railway station|train station|bus station|metro station|airport|international airport|station)$/i, '')
       .trim();
-  /** Match post.venue / post.landmark against a Discover venue:/landmark: feed query. */
   const placeTagMatches = (stored: string | undefined, query: string): boolean => {
     const s = primaryTag(stored);
     const q = primaryTag(query);
@@ -1836,6 +1900,9 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   if (t === 'discover') return false;
   const query = t.trim().toLowerCase();
   if (!query) return false;
+  if (isCountryFeedQuery(query)) {
+    return postMatchesCountryFeed(p, query);
+  }
   return postExplicitLocationMatches(p, query);
 }
 

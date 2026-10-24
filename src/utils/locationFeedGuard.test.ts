@@ -166,7 +166,7 @@ describe('national scope resolves sub-locations from the post tag', () => {
         expect(postMatchesLocationTab(taggedAbroad, 'ireland')).toBe(true);
     });
 
-    it('drops posts whose tag never names the country', () => {
+    it('rolls city-only tags up to their country and never across cities', () => {
         const galwayOnly = post({
             id: 'galway-only',
             userHandle: 'Barry@Galway',
@@ -175,9 +175,21 @@ describe('national scope resolves sub-locations from the post tag', () => {
             userRegional: undefined,
             userNational: undefined,
         });
-        expect(postMatchesLocationTab(galwayOnly, 'ireland')).toBe(false);
+        const madridOnly = post({
+            id: 'madrid-only',
+            userHandle: 'Ana@Madrid',
+            locationLabel: 'Madrid',
+            userLocal: undefined,
+            userRegional: undefined,
+            userNational: undefined,
+        });
+        expect(postMatchesLocationTab(galwayOnly, 'ireland')).toBe(true);
         expect(postMatchesLocationTab(galwayOnly, 'galway')).toBe(true);
         expect(postMatchesLocationTab(galwayOnly, 'dublin')).toBe(false);
+        expect(postMatchesLocationTab(galwayOnly, 'spain')).toBe(false);
+        expect(postMatchesLocationTab(madridOnly, 'spain')).toBe(true);
+        expect(postMatchesLocationTab(madridOnly, 'ireland')).toBe(false);
+        expect(postMatchesLocationTab(madridOnly, 'dublin')).toBe(false);
     });
 });
 

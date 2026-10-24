@@ -13,6 +13,7 @@ use App\Services\InteractionPushService;
 use App\Services\LinkPreviewService;
 use App\Services\VideoThumbnailService;
 use App\Support\DominantColor;
+use App\Support\LocationHierarchy;
 use App\Support\VideoDimensions;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -137,11 +138,15 @@ class PostController extends Controller
     }
 
     /**
-     * Resolve place_id / location label to lat/lng via Google (cached in location_centroids).
+     * Resolve place_id / location label to lat/lng plus local/regional/national tiers.
      *
-     * @return array{place_id: ?string, latitude: ?float, longitude: ?float, location_label: ?string}
+     * Always geocodes when a place or label is present — even if the client already
+     * sent lat/lng — so new MP4s get a country roll-up instead of a venue-only tag
+     * that matches no feed.
+     *
+     * @return array{place_id: ?string, latitude: ?float, longitude: ?float, location_label: ?string, location_local: ?string, location_regional: ?string, location_national: ?string}
      */
-    private function resolvePostGeoFields(Request $request): array
+    private function resolvePostGeoFields(Request $request, ?User $author = null): array
     {
         $placeId = trim((string) ($request->input('placeId') ?? $request->input('place_id') ?? ''));
         $location = trim((string) ($request->input('location') ?? ''));
@@ -153,26 +158,51 @@ class PostController extends Controller
             'latitude' => is_numeric($latIn) ? (float) $latIn : null,
             'longitude' => is_numeric($lngIn) ? (float) $lngIn : null,
             'location_label' => $location !== '' ? $location : null,
+            'location_local' => null,
+            'location_regional' => null,
+            'location_national' => null,
         ];
-
-        if ($out['latitude'] !== null && $out['longitude'] !== null && $out['place_id'] !== null) {
-            return $out;
-        }
 
         $maps = new GoogleMapsLocationService;
         $resolved = $maps->resolve($out['place_id'], $out['location_label']);
-        if ($resolved === null) {
-            return $out;
+        if (is_array($resolved)) {
+            $out['place_id'] = $out['place_id'] ?: ($resolved['place_id'] ?? null);
+            $out['latitude'] = $out['latitude'] ?? ($resolved['latitude'] ?? null);
+            $out['longitude'] = $out['longitude'] ?? ($resolved['longitude'] ?? null);
+            $out['location_label'] = $out['location_label']
+                ?: (isset($resolved['formatted_address']) ? (string) $resolved['formatted_address'] : null)
+                ?: (isset($resolved['display_name']) ? (string) $resolved['display_name'] : null)
+                ?: (isset($resolved['label']) ? (string) $resolved['label'] : null);
+            $out['location_local'] = isset($resolved['local']) ? (string) $resolved['local'] : null;
+            $out['location_regional'] = isset($resolved['regional']) ? (string) $resolved['regional'] : null;
+            $out['location_national'] = isset($resolved['national']) ? (string) $resolved['national'] : null;
         }
 
-        return [
-            'place_id' => $out['place_id'] ?: ($resolved['place_id'] ?? null),
-            'latitude' => $out['latitude'] ?? ($resolved['latitude'] ?? null),
-            'longitude' => $out['longitude'] ?? ($resolved['longitude'] ?? null),
-            'location_label' => $out['location_label']
-                ?: (isset($resolved['display_name']) ? (string) $resolved['display_name'] : null)
-                ?: (isset($resolved['label']) ? (string) $resolved['label'] : null),
-        ];
+        if ($out['location_label']) {
+            $parsed = LocationHierarchy::parseLabel($out['location_label']);
+            $out['location_local'] = $out['location_local'] ?: ($parsed['local'] ?: null);
+            $out['location_regional'] = $out['location_regional'] ?: ($parsed['regional'] ?: null);
+            $out['location_national'] = $out['location_national'] ?: ($parsed['national'] ?: null);
+        }
+
+        $hasPlace = $out['location_label'] || $out['place_id'];
+        if (! $hasPlace && $author) {
+            $out['location_local'] = $author->location_local ? (string) $author->location_local : null;
+            $out['location_regional'] = $author->location_regional ? (string) $author->location_regional : null;
+            $out['location_national'] = $author->location_national ? (string) $author->location_national : null;
+        }
+
+        $composed = LocationHierarchy::composeLabel(
+            $out['location_label'],
+            $out['location_local'],
+            $out['location_regional'],
+            $out['location_national']
+        );
+        if ($composed !== '') {
+            $out['location_label'] = $composed;
+        }
+
+        return $out;
     }
 
     /**
@@ -228,6 +258,12 @@ class PostController extends Controller
         $postData['latitude'] = $post->latitude;
         $postData['longitude'] = $post->longitude;
         $postData['placeId'] = $post->place_id;
+        $postData['location_local'] = $post->location_local;
+        $postData['location_regional'] = $post->location_regional;
+        $postData['location_national'] = $post->location_national;
+        $postData['locationLocal'] = $post->location_local;
+        $postData['locationRegional'] = $post->location_regional;
+        $postData['locationNational'] = $post->location_national;
         // Intrinsic media dimensions. camelCase duplicates because the RN Post type reads
         // `width`/`height`/`aspectRatio`; the snake_case originals come through $post->toArray()
         // and are kept for any existing consumer. The client trusts width/height and only
@@ -687,7 +723,7 @@ class PostController extends Controller
         $linkPreview = $this->resolveLinkPreview($request);
 
         $post = DB::transaction(function () use ($request, $user, $linkPreview) {
-            $geo = $this->resolvePostGeoFields($request);
+            $geo = $this->resolvePostGeoFields($request, $user);
             $dimensions = $this->resolveMediaDimensions($request);
 
             $mediaItems = $request->mediaItems;
@@ -725,6 +761,9 @@ class PostController extends Controller
                 'aspect_ratio' => $dimensions['aspect_ratio'],
                 'thumbnail_url' => $posterUrl !== '' ? $posterUrl : null,
                 'location_label' => $geo['location_label'] ?? $request->location,
+                'location_local' => $geo['location_local'] ?? null,
+                'location_regional' => $geo['location_regional'] ?? null,
+                'location_national' => $geo['location_national'] ?? null,
                 'place_id' => $geo['place_id'],
                 'latitude' => $geo['latitude'],
                 'longitude' => $geo['longitude'],
@@ -857,11 +896,20 @@ class PostController extends Controller
         }
         if ($request->has('location') || $request->has('placeId') || $request->has('place_id')
             || $request->has('latitude') || $request->has('longitude')) {
-            $geo = $this->resolvePostGeoFields($request);
+            $geo = $this->resolvePostGeoFields($request, $user);
             if ($geo['location_label'] !== null) {
                 $post->location_label = $geo['location_label'];
             } elseif ($request->has('location')) {
                 $post->location_label = $request->location;
+            }
+            if (array_key_exists('location_local', $geo)) {
+                $post->location_local = $geo['location_local'];
+            }
+            if (array_key_exists('location_regional', $geo)) {
+                $post->location_regional = $geo['location_regional'];
+            }
+            if (array_key_exists('location_national', $geo)) {
+                $post->location_national = $geo['location_national'];
             }
             if ($geo['place_id'] !== null || $request->has('placeId') || $request->has('place_id')) {
                 $post->place_id = $geo['place_id'];
