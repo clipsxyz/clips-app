@@ -988,6 +988,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     return (
         <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+            {/* Always the Champions League grid passport — no user-flag / legacy card fallback. */}
             {/* Page canvas only — UEFA Champions League vibrant royal blue gradient. */}
             <LinearGradient
                 colors={[...UEFA_PASSPORT_GRADIENT]}

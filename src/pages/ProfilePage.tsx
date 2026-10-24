@@ -130,6 +130,8 @@ export default function ProfilePage() {
   const [countryFlag, setCountryFlag] = React.useState(user?.countryFlag || '');
   const [collections, setCollections] = React.useState<Collection[]>([]);
   const [collectionsOpen, setCollectionsOpen] = React.useState(false);
+  const [editHubOpen, setEditHubOpen] = React.useState(false);
+  const [passportTab, setPassportTab] = React.useState<'posts' | 'collections'>('posts');
   /** Collection modal thumbs that failed to load — show bookmark/text fallback */
   const [brokenCollectionThumbs, setBrokenCollectionThumbs] = React.useState<Record<string, true>>({});
   const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -1512,13 +1514,156 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Edit profile hub (Instagram/TikTok-style quick management) */}
-        <div className="px-4 mb-4">
+        <div className="text-center px-2 mb-4">
+          <p className="text-lg font-semibold text-white">{user?.name || user?.handle}</p>
+          <p className="text-sm text-slate-300">{user?.handle}</p>
+          {bio.trim() ? (
+            <p className="mt-2 text-sm text-slate-200 whitespace-pre-wrap">{bio}</p>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-center gap-8 mb-4">
+          <div className="text-center min-w-[72px]">
+            <div className="text-lg font-bold text-white">{myFeedPosts.length}</div>
+            <div className="text-xs font-semibold text-slate-400">Posts</div>
+          </div>
+          <button type="button" onClick={() => setSelectedCard('followers')} className="text-center min-w-[72px]">
+            <div className="text-lg font-bold text-white">{followersCount}</div>
+            <div className="text-xs font-semibold text-slate-400">Followers</div>
+          </button>
+          <button type="button" onClick={() => setSelectedCard('following')} className="text-center min-w-[72px]">
+            <div className="text-lg font-bold text-white">{followingCount}</div>
+            <div className="text-xs font-semibold text-slate-400">Following</div>
+          </button>
+        </div>
+
+        <div className="flex justify-center mb-5">
+          <button
+            type="button"
+            onClick={() => setEditHubOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-[#0A194E] hover:bg-slate-100"
+          >
+            <FiEdit3 className="w-4 h-4" />
+            Edit Profile
+          </button>
+        </div>
+
+        <div className="flex items-center justify-center gap-10 border-t border-white/10 pt-3 mb-3">
+          <button
+            type="button"
+            onClick={() => setPassportTab('posts')}
+            className={passportTab === 'posts' ? 'text-white' : 'text-slate-500'}
+            aria-label="Posts grid"
+          >
+            <FiGrid className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPassportTab('collections')}
+            className={passportTab === 'collections' ? 'text-white' : 'text-slate-500'}
+            aria-label="Collections"
+          >
+            <FiBookmark className="w-5 h-5" />
+          </button>
+        </div>
+
+        {passportTab === 'posts' ? (
+          myFeedPosts.length === 0 ? (
+            <p className="text-center text-slate-400 py-12">No posts yet</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-0.5">
+              {myFeedPosts.map((post) => {
+                const firstMedia = post.mediaItems?.[0];
+                const thumb = firstMedia?.url || post.videoPosterUrl || post.thumbnailUrl || post.mediaUrl || '';
+                const isVideo = firstMedia?.type === 'video' || post.mediaType === 'video';
+                const textPreview = (post.text || post.caption || '').trim();
+                return (
+                  <button
+                    key={post.id}
+                    type="button"
+                    onClick={() => {
+                      setMyFeedOpen(true);
+                      openMyFeedPost(post);
+                    }}
+                    className="relative aspect-[3/4] overflow-hidden bg-black"
+                  >
+                    {thumb ? (
+                      isVideo ? (
+                        <video src={thumb} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={thumb} alt="" className="h-full w-full object-cover" />
+                      )
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-[#071330] px-2">
+                        <p className="line-clamp-6 text-center text-xs text-white">{textPreview || 'Post'}</p>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )
+        ) : collections.length === 0 ? (
+          <p className="text-center text-slate-400 py-12">No collections yet</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 px-1">
+            {collections.map((collection) => {
+              const postCount = collection.postIds?.length || 0;
+              const thumbSrc = getCollectionThumbnailUrl(collection);
+              return (
+                <button
+                  key={collection.id}
+                  type="button"
+                  onClick={() => nav(`/collection/${encodeURIComponent(String(collection.id))}`)}
+                  className="overflow-hidden rounded-2xl border border-white/10 bg-black/40 text-left"
+                >
+                  <div className="aspect-[3/4] bg-[#071330]">
+                    {thumbSrc ? (
+                      <img src={thumbSrc} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-slate-500">
+                        <FiBookmark className="w-7 h-7" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-3 py-2">
+                    <p className="truncate text-sm font-semibold text-white">{collection.name}</p>
+                    <p className="text-xs text-slate-400">
+                      {postCount} {postCount === 1 ? 'post' : 'posts'}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {editHubOpen ? (
+          <div
+            className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm"
+            onClick={() => setEditHubOpen(false)}
+          >
+            <div
+              className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-3xl border-t border-white/15 bg-[#071330] p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-white">Edit Profile</h2>
+                <button
+                  type="button"
+                  onClick={() => setEditHubOpen(false)}
+                  className="rounded-full p-2 text-white hover:bg-white/10"
+                  aria-label="Close edit profile"
+                >
+                  <FiX className="w-5 h-5" />
+                </button>
+              </div>
+        <div className="px-1 mb-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-white">Edit Profile</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Quickly update your identity and profile presence.</p>
+                <h3 className="text-sm font-semibold text-white">Profile details</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Update identity and presence from this sheet.</p>
               </div>
               <span className="text-xs px-2 py-1 rounded-full border border-white/20 bg-black/50 text-gray-200">
                 {profileCompletion.percent}% complete
@@ -1569,8 +1714,7 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Profile cards grouped by function (cleaner hierarchy) */}
-        <div className="px-4 py-4 space-y-4">
+        <div className="px-1 pb-6 space-y-4">
           <section className="space-y-2">
             <div className="px-1 text-[11px] uppercase tracking-[0.16em] text-gray-500 font-semibold">Audience</div>
             <div className="grid grid-cols-2 gap-3">
@@ -1714,6 +1858,9 @@ export default function ProfilePage() {
             </div>
           </section>
         </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Bottom Sheet Modal */}
