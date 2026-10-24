@@ -481,7 +481,7 @@ class Post extends Model
     // Collections relationships
     public function collections()
     {
-        return $this->belongsToMany(Collection::class, 'collection_posts')
+        return $this->belongsToMany(Collection::class, 'collection_posts', 'post_id', 'collection_id')
             ->withTimestamps()
             ->orderBy('collection_posts.created_at', 'desc');
     }

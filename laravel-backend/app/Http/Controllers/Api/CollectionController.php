@@ -220,8 +220,7 @@ class CollectionController extends Controller
      */
     public function addPost(Request $request, string $id): JsonResponse
     {
-        $validator = Validator::make(array_merge($request->all(), ['id' => $id]), [
-            'id' => 'required|integer|exists:collections,id',
+        $validator = Validator::make($request->all(), [
             'post_id' => 'required|uuid|exists:posts,id',
         ]);
 
@@ -230,20 +229,33 @@ class CollectionController extends Controller
         }
 
         $user = Auth::user();
-        $collection = Collection::where('id', $id)
-            ->where('user_id', $user->id)
-            ->firstOrFail();
+        $collection = Collection::where('user_id', $user->id)
+            ->where(function ($query) use ($id) {
+                $query->where('id', $id);
+                if (ctype_digit((string) $id)) {
+                    $query->orWhere('id', (int) $id);
+                }
+            })
+            ->first();
+
+        if (!$collection) {
+            return response()->json(['error' => 'Collection not found'], 404);
+        }
 
         $post = Post::findOrFail($request->post_id);
 
-        // Check if post is already in collection
-        if ($collection->posts()->where('post_id', $post->id)->exists()) {
-            return response()->json(['message' => 'Post already in collection'], 200);
-        }
-
         DB::beginTransaction();
         try {
-            $collection->posts()->attach($post->id);
+            $collection->posts()->syncWithoutDetaching([$post->id]);
+
+            $default = Collection::findOrCreateDefaultForUser($user->id);
+            if ((int) $default->id !== (int) $collection->id) {
+                $default->posts()->syncWithoutDetaching([$post->id]);
+                if (!$default->thumbnail_url && $post->media_url) {
+                    $default->thumbnail_url = $post->media_url;
+                    $default->save();
+                }
+            }
 
             // Update thumbnail if collection is empty
             if (!$collection->thumbnail_url && $post->media_url) {
@@ -255,11 +267,19 @@ class CollectionController extends Controller
 
             DB::commit();
 
+            $collection->load(['posts' => function ($query) {
+                $query->select('posts.id');
+            }]);
+
             return response()->json([
                 'message' => 'Post added to collection',
                 'collection' => [
                     'id' => (string) $collection->id,
+                    'userId' => $collection->user_id,
+                    'name' => $collection->name,
+                    'isPrivate' => $collection->is_private,
                     'thumbnailUrl' => $collection->thumbnail_url,
+                    'postIds' => $collection->posts->pluck('id')->values()->all(),
                     'updatedAt' => $collection->updated_at->timestamp * 1000,
                 ]
             ]);

@@ -30,15 +30,23 @@ class Collection extends Model
 
     public function posts()
     {
-        return $this->belongsToMany(Post::class, 'collection_posts')
+        return $this->belongsToMany(Post::class, 'collection_posts', 'collection_id', 'post_id')
                     ->withTimestamps()
                     ->orderBy('collection_posts.created_at', 'desc');
+    }
+
+    public static function findOrCreateDefaultForUser(int|string $userId): self
+    {
+        return static::firstOrCreate(
+            ['user_id' => $userId, 'name' => 'All Posts'],
+            ['is_private' => true]
+        );
     }
 
     // Helper methods
     public function containsPost(Post $post)
     {
-        return $this->posts()->where('post_id', $post->id)->exists();
+        return $this->posts()->where('posts.id', $post->id)->exists();
     }
 
     public function updateThumbnail()

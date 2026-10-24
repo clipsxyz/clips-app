@@ -446,6 +446,21 @@ function ensureDefaultCollection(collections: Collection[], userId: string): Col
 /**
  * Create a new collection
  */
+async function findOrCreateLaravelDefaultCollection(userId: string): Promise<Collection> {
+    const payload = await apiClient.fetchCollections();
+    const list = mapApiCollections(payload, userId);
+    const existing = list.find(
+        (c) => String(c.name || '').trim().toLowerCase() === DEFAULT_COLLECTION_NAME.toLowerCase(),
+    );
+    if (existing) return existing;
+    const created = await apiClient.createCollectionApi({
+        name: DEFAULT_COLLECTION_NAME,
+        isPrivate: true,
+        is_private: true,
+    });
+    return mapApiCollection(created?.data ?? created?.collection ?? created, userId);
+}
+
 export async function createCollection(userId: string, name: string, isPrivate: boolean = true, initialPostId?: string, initialPost?: Partial<Post>): Promise<Collection> {
     if (isLaravelApiEnabled()) {
         try {
@@ -563,6 +578,9 @@ export async function addPostToCollection(collectionId: string, postId: string, 
         try {
             const payload = await apiClient.addPostToCollectionApi(collectionId, postId);
             const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+            if (!mapped.postIds.includes(postId)) {
+                mapped.postIds = [postId, ...mapped.postIds];
+            }
             emitCollectionsUpdated(mapped.userId);
             return mapped;
         } catch (error) {
@@ -689,8 +707,17 @@ export async function getCollection(
 }
 
 export async function savePostToDefaultCollection(userId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
-    await delay(120);
     const normalizedUserId = normalizeUserId(userId);
+    if (isLaravelApiEnabled()) {
+        try {
+            const defaults = await findOrCreateLaravelDefaultCollection(normalizedUserId);
+            return await addPostToCollection(defaults.id, postId, postSnapshot);
+        } catch (error) {
+            console.warn('Laravel savePostToDefaultCollection failed, falling back to local collections:', error);
+        }
+    }
+
+    await delay(120);
     const collections = await loadCollectionsFromPersistence();
     const defaults = ensureDefaultCollection(collections, normalizedUserId);
     if (!defaults.postIds.includes(postId)) {

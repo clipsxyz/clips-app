@@ -193,7 +193,8 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                 await addPostToCollection(collectionId, post.id, post);
             }
             await load();
-            onSaved?.(postCollectionIds.length > 0);
+            const withPost = await getCollectionsForPost(userId, post.id);
+            onSaved?.(withPost.length > 0);
         } catch {
             Alert.alert('Save', 'Could not update collection.');
         } finally {
