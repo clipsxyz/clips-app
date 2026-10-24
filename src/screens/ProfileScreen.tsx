@@ -40,7 +40,6 @@ import {
     UEFA_PASSPORT_GRADIENT_LOCATIONS,
     UEFA_GLASS_BG,
     UEFA_GLASS_BORDER,
-    UEFA_CYAN,
     UEFA_ROYAL_BLUE_END,
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -740,7 +739,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     end={{ x: 0.5, y: 1 }}
                     style={[styles.passportCanvas, styles.loadingShell]}
                 >
-                    <ActivityIndicator size="large" color={UEFA_CYAN} />
+                    <ActivityIndicator size="large" color="#FFFFFF" />
                 </LinearGradient>
             </GazetteerScreenShell>
         );
@@ -768,7 +767,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         size={ox(32)}
                     />
                     <View style={styles.headerAvatarBadge}>
-                        <Icon name="add" size={ox(14)} color="#FFFFFF" />
+                        <Icon name="add" size={ox(14)} color="#020B26" />
                     </View>
                 </TouchableOpacity>
             <TouchableOpacity
@@ -780,7 +779,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 <Text style={styles.title} numberOfLines={1}>
                     {user?.name || 'Passport'}
                 </Text>
-                <Icon name="create-outline" size={ox(16)} color={UEFA_CYAN} />
+                <Icon name="create-outline" size={ox(16)} color="#FFFFFF" />
             </TouchableOpacity>
                 <TouchableOpacity
                     onPress={handleTogglePrivacy}
@@ -792,7 +791,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <Icon
                         name={isPrivate ? 'lock-closed' : 'lock-open'}
                         size={ox(22)}
-                        color={UEFA_CYAN}
+                        color="#FFFFFF"
                     />
                 </TouchableOpacity>
             </View>
@@ -828,7 +827,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabInvite]}
                     onPress={() => setInviteFriendsOpen(true)}
                 >
-                    <Icon name="people-outline" size={ox(20)} color="#A5F3FC" />
+                    <Icon name="people-outline" size={ox(20)} color="#FFFFFF" />
                     <Text style={[styles.tabLabel, styles.tabLabelCyan]}>Invite Friends</Text>
                 </TouchableOpacity>
 
@@ -852,7 +851,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     style={[styles.tab, styles.tabNewGroup]}
                     onPress={() => setCreateGroupOpen(true)}
                 >
-                    <Icon name="people" size={ox(20)} color="#A5F3FC" />
+                    <Icon name="people" size={ox(20)} color="#FFFFFF" />
                     <Text style={[styles.tabLabel, styles.tabLabelCyan]}>New group</Text>
                 </TouchableOpacity>
 
@@ -1039,26 +1038,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
             <View style={styles.postsSection}>
                 <View style={styles.postsHeader}>
-                    <TouchableOpacity
-                        onPress={() => setActiveTab('posts')}
-                        style={[styles.postsTab, activeTab === 'posts' && styles.postsTabActive]}
-                    >
-                        <Icon 
-                            name="grid" 
-                            size={ox(20)} 
-                            color={activeTab === 'posts' ? UEFA_CYAN : "#94A3B8"} 
-                        />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={() => setActiveTab('collections')}
-                        style={[styles.postsTab, activeTab === 'collections' && styles.postsTabActive]}
-                    >
-                        <Icon 
-                            name="bookmark" 
-                            size={ox(20)} 
-                            color={activeTab === 'collections' ? UEFA_CYAN : "#94A3B8"} 
-                        />
-                    </TouchableOpacity>
+            <TouchableOpacity
+                onPress={() => setActiveTab('posts')}
+                style={[styles.postsTab, activeTab === 'posts' && styles.postsTabActive]}
+            >
+                <Icon 
+                    name="grid" 
+                    size={ox(20)} 
+                    color={activeTab === 'posts' ? "#FFFFFF" : "#94A3B8"} 
+                />
+            </TouchableOpacity>
+            <TouchableOpacity
+                onPress={() => setActiveTab('collections')}
+                style={[styles.postsTab, activeTab === 'collections' && styles.postsTabActive]}
+            >
+                <Icon 
+                    name="bookmark" 
+                    size={ox(20)} 
+                    color={activeTab === 'collections' ? "#FFFFFF" : "#94A3B8"} 
+                />
+            </TouchableOpacity>
                 </View>
 
                 {activeTab === 'collections' ? (
@@ -1813,7 +1812,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         position: 'relative',
         width: ox(32),
         height: ox(32),
-        shadowColor: UEFA_CYAN,
+        shadowColor: '#FFFFFF',
         shadowOpacity: 0.35,
         shadowRadius: 10,
         shadowOffset: { width: 0, height: 4 },
@@ -1825,7 +1824,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         width: ox(18),
         height: ox(18),
         borderRadius: ox(9),
-        backgroundColor: UEFA_CYAN,
+        backgroundColor: '#FFFFFF',
         borderWidth: 2,
         borderColor: '#020B26',
         alignItems: 'center',
@@ -1869,7 +1868,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     userHandle: {
         fontSize: ox(15),
-        color: '#D1E4FF',
+        color: '#E2E8F0',
         marginTop: ox(2),
         textAlign: 'center',
     },
@@ -1905,7 +1904,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     statLabel: {
         fontSize: ox(13),
-        color: '#D1E4FF',
+        color: '#E2E8F0',
         marginTop: ox(2),
     },
     editButton: {
@@ -1958,7 +1957,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     postsTabActive: {
         borderBottomWidth: 2,
-        borderBottomColor: UEFA_CYAN,
+        borderBottomColor: '#FFFFFF',
     },
     postItem: {
         width: '33.33%',
@@ -2051,8 +2050,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     },
     tabInvite: {
         borderWidth: 1,
-        borderColor: 'rgba(103, 232, 249, 0.4)',
-        backgroundColor: 'rgba(22, 78, 99, 0.3)',
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     tabCommentSafety: {
         borderWidth: 1,
@@ -2077,11 +2076,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     tabNewGroup: {
         borderRadius: ox(12),
         borderWidth: 1,
-        borderColor: 'rgba(6, 182, 212, 0.35)',
-        backgroundColor: 'rgba(8, 51, 68, 0.4)',
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     tabLabelCyan: {
-        color: '#A5F3FC',
+        color: '#FFFFFF',
         fontWeight: '600',
     },
     tabsHintChipColumn: {
@@ -2119,9 +2118,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         width: ox(36),
         height: ox(38),
         borderRadius: ox(19),
-        backgroundColor: 'rgba(217, 27, 92, 0.35)',
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
         borderWidth: 1.5,
-        borderColor: 'rgba(244, 114, 182, 0.45)',
+        borderColor: 'rgba(255, 255, 255, 0.3)',
         alignItems: 'center',
         justifyContent: 'center',
     },

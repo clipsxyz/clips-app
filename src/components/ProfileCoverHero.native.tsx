@@ -13,7 +13,7 @@ import {
     storyRingVisible,
     type StoryRingState,
 } from '../utils/storyRingNative';
-import { UEFA_CYAN, UEFA_CYAN_GLOW, UEFA_GLASS_BG, UEFA_GLASS_BORDER } from '../theme/gazetteerAmbientNative';
+import { UEFA_GLASS_BG, UEFA_GLASS_BORDER } from '../theme/gazetteerAmbientNative';
 
 type Props = {
     coverUrl?: string | null;
@@ -103,12 +103,12 @@ export default function ProfileCoverHero({
                     {onAvatarPress ? (
                         <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
                             <View style={styles.avatarGlowWrap}>
-                                <Avatar {...avatarProps} ringColor={ringVisible ? UEFA_CYAN : ringColor} />
+                                <Avatar {...avatarProps} ringColor={ringVisible ? '#FFFFFF' : ringColor} />
                             </View>
                         </TouchableOpacity>
                     ) : (
                         <View style={styles.avatarGlowWrap}>
-                            <Avatar {...avatarProps} ringColor={ringVisible ? UEFA_CYAN : ringColor} />
+                            <Avatar {...avatarProps} ringColor={ringVisible ? '#FFFFFF' : ringColor} />
                         </View>
                     )}
                     {children}
@@ -127,17 +127,17 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: 'rgba(0, 242, 255, 0.35)',
+        borderColor: 'rgba(255, 255, 255, 0.3)',
         backgroundColor: '#020B26',
         position: 'relative',
-        shadowColor: UEFA_CYAN,
+        shadowColor: '#FFFFFF',
         shadowOpacity: 0.25,
         shadowRadius: 16,
         shadowOffset: { width: 0, height: 8 },
         elevation: 12,
     },
     avatarGlowWrap: {
-        shadowColor: UEFA_CYAN,
+        shadowColor: '#FFFFFF',
         shadowOpacity: 0.5,
         shadowRadius: 18,
         shadowOffset: { width: 0, height: 6 },
