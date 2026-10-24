@@ -7,6 +7,7 @@ import {
     TouchableOpacity,
     ActivityIndicator,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -90,14 +91,16 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <GazetteerScreenShell ambientVariant="passport" contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell ambient={false} style={styles.shell} contentStyle={styles.loadingShell}>
+                <LinearGradient colors={['#05050A', '#0B0F19']} style={StyleSheet.absoluteFill} />
+                <ActivityIndicator size="large" color="#FFFFFF" />
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell ambientVariant="passport">
+        <GazetteerScreenShell ambient={false} style={styles.shell}>
+            <LinearGradient colors={['#05050A', '#0B0F19']} style={styles.canvas}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12}>
                     <Icon name="arrow-back" size={ox(24)} color="#FFFFFF" />
@@ -137,24 +140,33 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
                             });
                         }}
                     >
-                        <ProfileGridThumb post={item} />
+                        <ProfileGridThumb post={item} overlay="playViews" />
                     </TouchableOpacity>
                 )}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
-                        <Icon name="bookmark-outline" size={ox(48)} color="#9CA3AF" />
+                        <Icon name="bookmark-outline" size={ox(48)} color="#94A3B8" />
                         <Text style={styles.emptyText}>No posts in this collection yet</Text>
                     </View>
                 }
             />
+            </LinearGradient>
         </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
+    shell: {
+        flex: 1,
+        backgroundColor: '#05050A',
+    },
+    canvas: {
+        flex: 1,
+    },
     loadingShell: {
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: '#05050A',
     },
     header: {
         flexDirection: 'row',
@@ -164,7 +176,7 @@ const styles = StyleSheet.create({
         paddingVertical: ox(14),
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: 'rgba(255,255,255,0.12)',
-        backgroundColor: 'transparent',
+        backgroundColor: 'rgba(15, 23, 42, 0.85)',
         gap: ox(12),
     },
     headerTitle: {
@@ -177,11 +189,13 @@ const styles = StyleSheet.create({
     infoContainer: {
         paddingHorizontal: ox(16),
         paddingVertical: ox(12),
-        backgroundColor: 'transparent',
+        backgroundColor: 'rgba(15, 23, 42, 0.85)',
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
     },
     postCount: {
         fontSize: ox(14),
-        color: '#9CA3AF',
+        color: '#94A3B8',
         fontWeight: '500',
     },
     list: {
@@ -192,9 +206,9 @@ const styles = StyleSheet.create({
         flexGrow: 1,
     },
     postItem: {
-        width: '33.33%',
-        aspectRatio: 1,
-        padding: 1,
+        width: '33.3333%',
+        aspectRatio: 3 / 4,
+        padding: 1.5,
     },
     emptyContainer: {
         flex: 1,

@@ -12,6 +12,8 @@ import {
 import { resolvePostThumbnail } from '../api/collections';
 import { mediaItemsEqual } from '../utils/feedPostCompareNative';
 import { formatViewCount } from '../utils/feedPostNewsTicker';
+import { siblingJpegFromVideoUrl } from '../utils/postMedia';
+import LinearGradient from 'react-native-linear-gradient';
 import CachedImage from './CachedImage.native';
 import {
     FEED_GRID_TILE_BG,
@@ -22,6 +24,8 @@ import {
 
 type Props = {
     post: Post;
+    /** Passport uses views only; collection feed shows play + views. */
+    overlay?: 'views' | 'playViews';
 };
 
 function looksLikeVideoUri(url: string): boolean {
@@ -35,6 +39,8 @@ function resolveGridImageUri(post: Post): string | undefined {
         poster_url?: string;
         posterUrl?: string;
         media_url?: string;
+        video_url?: string;
+        videoUrl?: string;
     };
     const item = (post.mediaItems || []).find(
         (entry) => entry?.type === 'image' || entry?.type === 'video',
@@ -60,6 +66,17 @@ function resolveGridImageUri(post: Post): string | undefined {
         if (!uri || looksLikeVideoUri(uri)) continue;
         return uri;
     }
+    const videoCandidates = [
+        extra.video_url,
+        extra.videoUrl,
+        extra.media_url,
+        post.mediaUrl,
+        item?.url,
+    ];
+    for (const raw of videoCandidates) {
+        const jpeg = siblingJpegFromVideoUrl(raw);
+        if (jpeg) return jpeg;
+    }
     return undefined;
 }
 
@@ -68,19 +85,31 @@ function getPostViewCount(post: Post): number {
     return Math.max(0, Number(extra.views_count ?? post.stats?.views ?? extra.views ?? 0) || 0);
 }
 
-function ViewsBadge({ post }: { post: Post }) {
+function ViewsBadge({ post, overlay = 'views' }: { post: Post; overlay?: Props['overlay'] }) {
     return (
         <View style={styles.viewsBadge} pointerEvents="none">
-            <Icon name="eye-outline" size={12} color="#FFFFFF" />
+            <Icon
+                name={overlay === 'playViews' ? 'play-outline' : 'eye-outline'}
+                size={12}
+                color="#FFFFFF"
+            />
             <Text style={styles.viewsText}>{formatViewCount(getPostViewCount(post))}</Text>
         </View>
     );
 }
 
-function ProfileGridThumb({ post }: Props) {
+function ProfileGridThumb({ post, overlay = 'views' }: Props) {
     const bodyText = getPostBodyText(post);
     const imageUri = resolveGridImageUri(post);
     const videoPost = isVideoPost(post);
+    const bottomFade =
+        overlay === 'playViews' ? (
+            <LinearGradient
+                pointerEvents="none"
+                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']}
+                style={styles.bottomFade}
+            />
+        ) : null;
 
     if (imageUri) {
         return (
@@ -91,7 +120,8 @@ function ProfileGridThumb({ post }: Props) {
                     resizeMode="cover"
                     pointerEvents="none"
                 />
-                <ViewsBadge post={post} />
+                {bottomFade}
+                <ViewsBadge post={post} overlay={overlay} />
             </View>
         );
     }
@@ -101,7 +131,8 @@ function ProfileGridThumb({ post }: Props) {
         return (
             <View style={[styles.cell, styles.placeholder]}>
                 <Icon name="play-outline" size={22} color="#FFFFFF" />
-                <ViewsBadge post={post} />
+                {bottomFade}
+                <ViewsBadge post={post} overlay={overlay} />
             </View>
         );
     }
@@ -115,7 +146,8 @@ function ProfileGridThumb({ post }: Props) {
                 >
                     {bodyText || 'Post'}
                 </Text>
-                <ViewsBadge post={post} />
+                {bottomFade}
+                <ViewsBadge post={post} overlay={overlay} />
             </View>
         );
     }
@@ -129,7 +161,8 @@ function ProfileGridThumb({ post }: Props) {
             ) : (
                 <Icon name="image-outline" size={22} color="#6B7280" />
             )}
-            <ViewsBadge post={post} />
+            {bottomFade}
+            <ViewsBadge post={post} overlay={overlay} />
         </View>
     );
 }
@@ -138,6 +171,7 @@ function profileGridThumbsEqual(prev: Props, next: Props): boolean {
     const a = prev.post;
     const b = next.post;
     return (
+        prev.overlay === next.overlay &&
         a.id === b.id &&
         a.mediaUrl === b.mediaUrl &&
         a.mediaType === b.mediaType &&
@@ -174,6 +208,13 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         padding: 6,
         lineHeight: 13,
+    },
+    bottomFade: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 44,
     },
     viewsBadge: {
         position: 'absolute',
