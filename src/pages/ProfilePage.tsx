@@ -10,8 +10,9 @@ import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import { FaFacebook } from 'react-icons/fa';
 import QRCode from 'qrcode';
 import Flag from '../components/Flag';
-import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
+import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
+import CollectionCoverThumb from '../components/CollectionCoverThumb';
 import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -133,7 +134,6 @@ export default function ProfilePage() {
   const [editHubOpen, setEditHubOpen] = React.useState(false);
   const [passportTab, setPassportTab] = React.useState<'posts' | 'collections'>('posts');
   /** Collection modal thumbs that failed to load — show bookmark/text fallback */
-  const [brokenCollectionThumbs, setBrokenCollectionThumbs] = React.useState<Record<string, true>>({});
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [commentSafetyOpen, setCommentSafetyOpen] = React.useState(false);
   const [inviteFriendsOpen, setInviteFriendsOpen] = React.useState(false);
@@ -609,10 +609,6 @@ export default function ProfilePage() {
     window.addEventListener('collectionsUpdated', handleCollectionsUpdated as EventListener);
     return () => window.removeEventListener('collectionsUpdated', handleCollectionsUpdated as EventListener);
   }, [user?.id]);
-
-  React.useEffect(() => {
-    if (collectionsOpen) setBrokenCollectionThumbs({});
-  }, [collectionsOpen]);
 
   React.useEffect(() => {
     loadDrafts();
@@ -1564,7 +1560,6 @@ export default function ProfilePage() {
           <div className="grid grid-cols-2 gap-3 px-1">
             {collections.map((collection) => {
               const postCount = collection.postIds?.length || 0;
-              const thumbSrc = getCollectionThumbnailUrl(collection);
               return (
                 <button
                   key={collection.id}
@@ -1573,13 +1568,11 @@ export default function ProfilePage() {
                   className="overflow-hidden rounded-2xl border border-white/10 bg-black/40 text-left"
                 >
                   <div className="aspect-[3/4] bg-[#071330]">
-                    {thumbSrc ? (
-                      <img src={thumbSrc} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-slate-500">
-                        <FiBookmark className="w-7 h-7" />
-                      </div>
-                    )}
+                    <CollectionCoverThumb
+                      collection={collection}
+                      className="h-full w-full"
+                      iconClassName="w-7 h-7 text-slate-500"
+                    />
                   </div>
                   <div className="px-3 py-2">
                     <p className="truncate text-sm font-semibold text-white">{collection.name}</p>
@@ -2842,19 +2835,6 @@ export default function ProfilePage() {
                   <div className="space-y-3">
                     {collections.map((collection) => {
                       const postCount = collection.postIds?.length || 0;
-                      const thumbSrc = getCollectionThumbnailUrl(collection);
-                      const firstPost =
-                        collection.postIds?.length
-                          ? posts.find((p) => p.id === collection.postIds[0])
-                          : undefined;
-                      const isVideoThumb =
-                        !!thumbSrc &&
-                        (isVideoUrl(thumbSrc) ||
-                          firstPost?.mediaType === 'video' ||
-                          firstPost?.finalVideoUrl !== undefined);
-                      const thumbBroken = !!brokenCollectionThumbs[collection.id];
-                      const textFallback =
-                        firstPost?.text || firstPost?.caption || firstPost?.text_content;
                       return (
                         <button
                           key={collection.id}
@@ -2865,50 +2845,11 @@ export default function ProfilePage() {
                           className="w-full p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors text-left"
                         >
                           <div className="flex items-center gap-3">
-                            {thumbSrc && !thumbBroken ? (
-                              isVideoThumb ? (
-                                <video
-                                  src={thumbSrc}
-                                  className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                                  muted
-                                  playsInline
-                                  preload="metadata"
-                                  onError={() =>
-                                    setBrokenCollectionThumbs((prev) => ({
-                                      ...prev,
-                                      [collection.id]: true,
-                                    }))
-                                  }
-                                  onLoadedMetadata={(e) => {
-                                    e.currentTarget.currentTime = 0;
-                                  }}
-                                />
-                              ) : (
-                                <img
-                                  src={thumbSrc}
-                                  alt={collection.name}
-                                  className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                                  onError={() =>
-                                    setBrokenCollectionThumbs((prev) => ({
-                                      ...prev,
-                                      [collection.id]: true,
-                                    }))
-                                  }
-                                />
-                              )
-                            ) : postCount > 0 && textFallback ? (
-                              <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden p-1.5">
-                                <p className="text-[10px] text-gray-600 text-center line-clamp-4 leading-tight">
-                                  {textFallback.length > 80
-                                    ? textFallback.slice(0, 80) + '…'
-                                    : textFallback}
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0">
-                                <FiBookmark className="w-8 h-8 text-gray-400" />
-                              </div>
-                            )}
+                            <CollectionCoverThumb
+                              collection={collection}
+                              className="w-16 h-16 rounded-xl flex-shrink-0"
+                              iconClassName="w-7 h-7 text-gray-400"
+                            />
                             <div className="flex-1 min-w-0">
                               <h3 className="font-semibold text-gray-900 mb-1 truncate">{collection.name}</h3>
                               <p className="text-sm text-gray-600">

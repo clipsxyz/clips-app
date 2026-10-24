@@ -51,7 +51,6 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, getFollowedUsers, reclipPost, toggleLike } from '../api/posts';
 import {
-    getCollectionThumbnailUrl,
     getUserCollections,
     resolvePostThumbnail,
     savePostToDefaultCollection,
@@ -69,6 +68,7 @@ import MyFeedModal from '../components/MyFeedModal.native';
 import GazetteerAlertSheet from '../components/GazetteerAlertSheet.native';
 import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import CollectionCoverThumb from '../components/CollectionCoverThumb.native';
 import VideoMuteToggle from '../components/VideoMuteToggle.native';
 import CachedImage from '../components/CachedImage.native';
 import ProfilePassportCards, { type ProfileCardId } from '../components/ProfilePassportCards.native';
@@ -202,7 +202,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'posts' | 'collections'>('posts');
     const [collectionsOpen, setCollectionsOpen] = useState(false);
-    const [brokenCollectionThumbs, setBrokenCollectionThumbs] = useState<Record<string, true>>({});
     const [draftsOpen, setDraftsOpen] = useState(false);
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
@@ -493,10 +492,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             console.error('Error loading collections:', error);
         }
     };
-
-    useEffect(() => {
-        if (collectionsOpen) setBrokenCollectionThumbs({});
-    }, [collectionsOpen]);
 
     useEffect(() => {
         if (!user?.id) return undefined;
@@ -1247,12 +1242,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     ) : (
                     <View style={styles.collectionsGrid}>
                         {collections.map((item) => {
-                            const thumbSrc = getCollectionThumbnailUrl(item, posts);
-                            const firstPost = item.postIds?.length
-                                ? posts.find((p) => p.id === item.postIds[0])
-                                : undefined;
-                            const textFallback = firstPost?.text || firstPost?.caption || firstPost?.text_content;
-                            const thumbBroken = !!brokenCollectionThumbs[item.id];
                             const postCount = item.postIds?.length || 0;
                             return (
                                 <TouchableOpacity
@@ -1267,30 +1256,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 >
                                     <View style={styles.collectionCardSurface}>
                                         <View style={styles.collectionCardThumb}>
-                                            {firstPost ? (
-                                                <ProfileGridThumb post={firstPost} />
-                                            ) : thumbSrc && !thumbBroken ? (
-                                                <Image
-                                                    source={{ uri: thumbSrc }}
-                                                    style={styles.collectionCardImage}
-                                                    onError={() =>
-                                                        setBrokenCollectionThumbs((prev) => ({
-                                                            ...prev,
-                                                            [item.id]: true,
-                                                        }))
-                                                    }
-                                                />
-                                            ) : postCount > 0 && textFallback ? (
-                                                <View style={[styles.collectionCardImage, styles.collectionThumbnailTextFallback]}>
-                                                    <Text style={styles.collectionThumbnailText} numberOfLines={4}>
-                                                        {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
-                                                    </Text>
-                                                </View>
-                                            ) : (
-                                                <View style={styles.collectionCardPlaceholder}>
-                                                    <Icon name="bookmark" size={ox(28)} color="#94A3B8" />
-                                                </View>
-                                            )}
+                                            <CollectionCoverThumb
+                                                collection={item}
+                                                posts={posts}
+                                                style={styles.collectionCardImage}
+                                                iconSize={ox(28)}
+                                            />
                                         </View>
                                         <View style={styles.collectionCardMeta}>
                                             <Text style={styles.collectionName} numberOfLines={1}>
@@ -1637,12 +1608,6 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             {collections.length > 0 ? (
                                 collections.map((collection) => {
                                     const postCount = collection.postIds?.length || 0;
-                                    const thumbSrc = getCollectionThumbnailUrl(collection, posts);
-                                    const firstPost = collection.postIds?.length
-                                        ? posts.find((p) => p.id === collection.postIds[0])
-                                        : undefined;
-                                    const textFallback = firstPost?.text || firstPost?.caption || firstPost?.text_content;
-                                    const thumbBroken = !!brokenCollectionThumbs[collection.id];
                                     return (
                                         <TouchableOpacity
                                             key={collection.id}
@@ -1656,28 +1621,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 });
                                             }}
                                         >
-                                            {thumbSrc && !thumbBroken ? (
-                                                <Image
-                                                    source={{ uri: thumbSrc }}
-                                                    style={styles.collectionModalThumbnail}
-                                                    onError={() =>
-                                                        setBrokenCollectionThumbs((prev) => ({
-                                                            ...prev,
-                                                            [collection.id]: true,
-                                                        }))
-                                                    }
-                                                />
-                                            ) : postCount > 0 && textFallback ? (
-                                                <View style={[styles.collectionModalThumbnail, styles.collectionThumbnailTextFallback]}>
-                                                    <Text style={styles.collectionThumbnailText} numberOfLines={4}>
-                                                        {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
-                                                    </Text>
-                                                </View>
-                                            ) : (
-                                                <View style={styles.collectionModalThumbnailPlaceholder}>
-                                                    <Icon name="bookmark" size={ox(24)} color="#6B7280" />
-                                                </View>
-                                            )}
+                                            <CollectionCoverThumb
+                                                collection={collection}
+                                                posts={posts}
+                                                style={styles.collectionModalThumbnail}
+                                                iconSize={ox(24)}
+                                            />
                                             <View style={styles.collectionModalInfo}>
                                                 <Text style={styles.collectionModalName}>{collection.name}</Text>
                                                 <Text style={styles.collectionModalCount}>

@@ -8,11 +8,10 @@ import {
     removePostFromCollection,
     getCollectionsForPost,
     savePostToDefaultCollection,
-    getCollectionThumbnailUrl,
 } from '../api/collections';
-import { posts } from '../api/posts';
 import { showToast } from '../utils/toast';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
+import CollectionCoverThumb from './CollectionCoverThumb';
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 
 interface SavePostModalProps {
@@ -32,8 +31,6 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     const [isSaving, setIsSaving] = React.useState<string | null>(null); // Collection ID being saved to
     const [showSavedToast, setShowSavedToast] = React.useState(false);
     const autoSavedOnceRef = React.useRef(false);
-    /** Collection IDs whose thumbnail URL failed to load — fall back to text preview / bookmark icon */
-    const [brokenCollectionThumbs, setBrokenCollectionThumbs] = React.useState<Record<string, true>>({});
 
     // Load collections and check which ones contain this post
     React.useEffect(() => {
@@ -304,68 +301,17 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                 {customCollections.map(collection => {
                                     const isInCollection = postCollections.includes(collection.id);
                                     const isSavingToThis = isSaving === collection.id;
-                                    const thumbSrc = getCollectionThumbnailUrl(collection);
-                                    const firstPost =
-                                        collection.postIds.length > 0 ? posts.find((p) => p.id === collection.postIds[0]) : null;
-                                    const isVideoThumb =
-                                        !!thumbSrc &&
-                                        (isLikelyVideoUrl(thumbSrc) ||
-                                            firstPost?.mediaType === 'video' ||
-                                            firstPost?.finalVideoUrl !== undefined);
-                                    const thumbBroken = !!brokenCollectionThumbs[collection.id];
-                                    const textFallback =
-                                        firstPost?.text || firstPost?.caption || firstPost?.text_content;
 
                                     return (
                                         <div
                                             key={collection.id}
                                             className="flex items-center gap-4 p-4 rounded-xl hover:bg-white/5 transition-colors"
                                         >
-                                            <div className="w-16 h-16 rounded-lg bg-[rgba(15,36,48,0.88)] border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                                {thumbSrc && !thumbBroken ? (
-                                                    isVideoThumb ? (
-                                                        <video
-                                                            src={thumbSrc}
-                                                            className="w-full h-full object-cover"
-                                                            muted
-                                                            playsInline
-                                                            preload="metadata"
-                                                            onError={() =>
-                                                                setBrokenCollectionThumbs((prev) => ({
-                                                                    ...prev,
-                                                                    [collection.id]: true,
-                                                                }))
-                                                            }
-                                                            onLoadedMetadata={(e) => {
-                                                                const video = e.currentTarget;
-                                                                video.currentTime = 0;
-                                                            }}
-                                                        />
-                                                    ) : (
-                                                        <img
-                                                            src={thumbSrc}
-                                                            alt={collection.name}
-                                                            className="w-full h-full object-cover"
-                                                            onError={() =>
-                                                                setBrokenCollectionThumbs((prev) => ({
-                                                                    ...prev,
-                                                                    [collection.id]: true,
-                                                                }))
-                                                            }
-                                                        />
-                                                    )
-                                                ) : collection.postIds.length > 0 && textFallback ? (
-                                                    <div className="w-full h-full p-2 flex items-center justify-center">
-                                                        <p className="text-xs text-gray-300 text-center line-clamp-3 leading-tight">
-                                                            {textFallback.length > 50
-                                                                ? textFallback.substring(0, 50) + '...'
-                                                                : textFallback}
-                                                        </p>
-                                                    </div>
-                                                ) : (
-                                                    <FiBookmark className="w-8 h-8 text-white/45" />
-                                                )}
-                                            </div>
+                                            <CollectionCoverThumb
+                                                collection={collection}
+                                                className="w-16 h-16 rounded-xl border border-white/10 flex-shrink-0"
+                                                iconClassName="w-7 h-7 text-white/45"
+                                            />
                                             <div className="flex-1 min-w-0">
                                                 <div className="font-semibold text-white">{collection.name}</div>
                                                 <div className="text-sm text-white/55">

@@ -354,12 +354,26 @@ export type Ad = {
   isActive: boolean;
 };
 
+export type CollectionLatestPost = {
+  id?: string;
+  thumbnailUrl?: string;
+  thumbnail_url?: string;
+  mediaUrl?: string;
+  media_url?: string;
+  mediaType?: string;
+  media_type?: string;
+};
+
 export type Collection = {
   id: string;
   userId: string;
   name: string;
   isPrivate: boolean;
-  thumbnailUrl?: string; // URL of first post's media as thumbnail
+  thumbnailUrl?: string; // Still cover (API also sends cover_url / thumbnail_url)
+  coverUrl?: string;
+  cover_url?: string;
+  thumbnail_url?: string;
+  latestPost?: CollectionLatestPost;
   postIds: string[]; // Array of post IDs in this collection
   createdAt: number; // Epoch timestamp when collection was created
   updatedAt: number; // Epoch timestamp when collection was last updated

@@ -22,7 +22,6 @@ import {
     addPostToCollection,
     createCollection,
     getCollectionsForPost,
-    getCollectionThumbnailUrl,
     getUserCollections,
     removePostFromCollection,
     resolvePostThumbnail,
@@ -45,6 +44,7 @@ import {
     UCL_TEXT_PRIMARY,
     UCL_TEXT_SECONDARY,
 } from '../theme/gazetteerAmbientNative';
+import CollectionCoverThumb from './CollectionCoverThumb.native';
 
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 /** High-contrast type on the navy canvas. */
@@ -394,7 +394,6 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                             ) : null}
 
                             {customCollections.map((c) => {
-                                const thumb = getCollectionThumbnailUrl(c);
                                 const inCol = postCollectionIds.includes(c.id);
                                 return (
                                     <Pressable
@@ -404,18 +403,11 @@ export default function SavePostModal({ post, userId, visible, onClose, onSaved 
                                         disabled={savingId === c.id}
                                     >
                                         <View style={styles.cardThumb}>
-                                            {thumb ? (
-                                                <Image
-                                                    source={{ uri: thumb }}
-                                                    style={styles.cardThumbImg}
-                                                />
-                                            ) : (
-                                                <Icon
-                                                    name="folder-outline"
-                                                    size={28}
-                                                    color={P.muted}
-                                                />
-                                            )}
+                                            <CollectionCoverThumb
+                                                collection={c}
+                                                style={styles.cardThumbImg}
+                                                iconSize={28}
+                                            />
                                             {inCol ? (
                                                 <View style={styles.selectedBadge}>
                                                     <Icon name="checkmark" size={16} color="#FFF" />

@@ -99,4 +99,25 @@ class CollectionTest extends TestCase
 
         $this->assertFalse($collection->containsPost($post));
     }
+
+    public function test_resolved_cover_url_falls_back_to_latest_post_thumbnail(): void
+    {
+        $user = User::factory()->create();
+        $latest = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/latest.mp4',
+            'thumbnail_url' => 'https://example.com/latest.jpg',
+        ]);
+        $collection = Collection::create([
+            'user_id' => $user->id,
+            'name' => 'Debs',
+            'is_private' => true,
+            'thumbnail_url' => null,
+        ]);
+        $collection->posts()->attach($latest->id);
+
+        $this->assertSame('https://example.com/latest.jpg', $collection->fresh()->resolvedCoverUrl());
+    }
 }

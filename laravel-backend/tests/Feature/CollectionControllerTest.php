@@ -89,4 +89,64 @@ class CollectionControllerTest extends TestCase
         $response->assertStatus(400)
             ->assertJsonStructure(['errors']);
     }
+
+    public function test_list_falls_back_cover_url_to_latest_post_thumbnail(): void
+    {
+        $user = User::factory()->create();
+        $older = \App\Models\Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'media_type' => 'image',
+            'media_url' => 'https://example.com/older.jpg',
+            'thumbnail_url' => 'https://example.com/older-thumb.jpg',
+        ]);
+        $latest = \App\Models\Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/debs-clip.mp4',
+            'thumbnail_url' => 'https://example.com/debs-cover.jpg',
+        ]);
+        $collection = \App\Models\Collection::create([
+            'user_id' => $user->id,
+            'name' => 'Debs',
+            'is_private' => true,
+            'thumbnail_url' => null,
+        ]);
+        $collection->posts()->attach($older->id, ['created_at' => now()->subHour(), 'updated_at' => now()->subHour()]);
+        $collection->posts()->attach($latest->id, ['created_at' => now(), 'updated_at' => now()]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/collections');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('0.name', 'Debs')
+            ->assertJsonPath('0.cover_url', 'https://example.com/debs-cover.jpg')
+            ->assertJsonPath('0.thumbnail_url', 'https://example.com/debs-cover.jpg')
+            ->assertJsonPath('0.latest_post.thumbnail_url', 'https://example.com/debs-cover.jpg');
+    }
+
+    public function test_list_ignores_stored_video_cover_and_uses_post_poster(): void
+    {
+        $user = User::factory()->create();
+        $post = \App\Models\Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'media_type' => 'video',
+            'media_url' => 'https://example.com/clip.mp4',
+            'thumbnail_url' => 'https://example.com/clip.jpg',
+        ]);
+        $collection = \App\Models\Collection::create([
+            'user_id' => $user->id,
+            'name' => 'Videos',
+            'is_private' => true,
+            'thumbnail_url' => 'https://example.com/clip.mp4',
+        ]);
+        $collection->posts()->attach($post->id);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/collections');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('0.cover_url', 'https://example.com/clip.jpg')
+            ->assertJsonPath('0.thumbnailUrl', 'https://example.com/clip.jpg');
+    }
 }

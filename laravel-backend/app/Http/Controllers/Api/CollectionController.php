@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\CollectionResource;
 use App\Models\Collection;
 use App\Models\Post;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +15,19 @@ use Illuminate\Support\Facades\Validator;
 
 class CollectionController extends Controller
 {
+    private function eagerLoadCoverPosts(Builder $query): Builder
+    {
+        return $query->with(['posts' => function ($posts) {
+            $posts->select(
+                'posts.id',
+                'posts.media_url',
+                'posts.media_type',
+                'posts.thumbnail_url',
+                'posts.media_items'
+            )->orderByDesc('collection_posts.created_at');
+        }]);
+    }
+
     /**
      * Get all collections for authenticated user
      */
@@ -20,33 +35,13 @@ class CollectionController extends Controller
     {
         $user = Auth::user();
 
-        $collections = Collection::where('user_id', $user->id)
-            ->withCount('posts')
-            ->with(['posts' => function ($query) {
-                $query->select('posts.id', 'posts.media_url');
-            }])
+        $collections = $this->eagerLoadCoverPosts(
+            Collection::where('user_id', $user->id)->withCount('posts')
+        )
             ->orderBy('updated_at', 'desc')
             ->get()
-            ->map(function ($collection) {
-                $thumbnailUrl = $collection->thumbnail_url;
-                if (!$thumbnailUrl && $collection->posts->isNotEmpty()) {
-                    $firstPostWithMedia = $collection->posts->first(function ($post) {
-                        return !empty($post->media_url);
-                    });
-                    $thumbnailUrl = $firstPostWithMedia?->media_url;
-                }
-
-                return [
-                    'id' => (string) $collection->id,
-                    'userId' => $collection->user_id,
-                    'name' => $collection->name,
-                    'isPrivate' => $collection->is_private,
-                    'thumbnailUrl' => $thumbnailUrl,
-                    'postIds' => $collection->posts->pluck('id')->values()->all(),
-                    'createdAt' => $collection->created_at->timestamp * 1000, // Epoch in milliseconds
-                    'updatedAt' => $collection->updated_at->timestamp * 1000,
-                ];
-            });
+            ->map(fn (Collection $collection) => (new CollectionResource($collection))->resolve())
+            ->values();
 
         return response()->json($collections);
     }
@@ -81,25 +76,22 @@ class CollectionController extends Controller
                 $post = Post::findOrFail($request->post_id);
                 $collection->posts()->attach($post->id);
                 
-                // Set thumbnail from post if it has media
-                if ($post->media_url) {
-                    $collection->thumbnail_url = $post->media_url;
-                    $collection->save();
-                }
+                $collection->updateThumbnail();
             }
 
             DB::commit();
 
-            return response()->json([
-                'id' => (string) $collection->id,
-                'userId' => $collection->user_id,
-                'name' => $collection->name,
-                'isPrivate' => $collection->is_private,
-                'thumbnailUrl' => $collection->thumbnail_url,
-                'postIds' => $collection->posts()->pluck('posts.id')->toArray(),
-                'createdAt' => $collection->created_at->timestamp * 1000,
-                'updatedAt' => $collection->updated_at->timestamp * 1000,
-            ], 201);
+            $collection->load(['posts' => function ($query) {
+                $query->select(
+                    'posts.id',
+                    'posts.media_url',
+                    'posts.media_type',
+                    'posts.thumbnail_url',
+                    'posts.media_items'
+                )->orderByDesc('collection_posts.created_at');
+            }]);
+
+            return response()->json($collection->toApiArray(), 201);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['error' => 'Failed to create collection'], 500);
@@ -128,13 +120,9 @@ class CollectionController extends Controller
             return response()->json(['error' => 'Collection not found'], 404);
         }
 
-        return response()->json([
-            'id' => (string) $collection->id,
-            'userId' => $collection->user_id,
-            'name' => $collection->name,
-            'isPrivate' => $collection->is_private,
-            'thumbnailUrl' => $collection->thumbnail_url,
-            'postIds' => $collection->posts->pluck('id')->toArray(),
+        $payload = $collection->toApiArray();
+
+        return response()->json(array_merge($payload, [
             'posts' => $collection->posts->map(function ($post) {
                 return [
                     'id' => $post->id,
@@ -165,7 +153,7 @@ class CollectionController extends Controller
             }),
             'createdAt' => $collection->created_at->timestamp * 1000,
             'updatedAt' => $collection->updated_at->timestamp * 1000,
-        ]);
+        ]));
     }
 
     /**
@@ -198,14 +186,7 @@ class CollectionController extends Controller
 
         $collection->save();
 
-        return response()->json([
-            'id' => (string) $collection->id,
-            'userId' => $collection->user_id,
-            'name' => $collection->name,
-            'isPrivate' => $collection->is_private,
-            'thumbnailUrl' => $collection->thumbnail_url,
-            'updatedAt' => $collection->updated_at->timestamp * 1000,
-        ]);
+        return response()->json($collection->fresh()->toApiArray());
     }
 
     /**
@@ -267,37 +248,28 @@ class CollectionController extends Controller
             $default = Collection::findOrCreateDefaultForUser($user->id);
             if ((int) $default->id !== (int) $collection->id) {
                 $default->posts()->syncWithoutDetaching([$post->id]);
-                if (!$default->thumbnail_url && $post->media_url) {
-                    $default->thumbnail_url = $post->media_url;
-                    $default->save();
-                }
+                $default->updateThumbnail();
             }
 
-            // Update thumbnail if collection is empty
-            if (!$collection->thumbnail_url && $post->media_url) {
-                $collection->thumbnail_url = $post->media_url;
-                $collection->save();
-            }
+            $collection->updateThumbnail();
 
             $collection->touch(); // Update updated_at
 
             DB::commit();
 
             $collection->load(['posts' => function ($query) {
-                $query->select('posts.id');
+                $query->select(
+                    'posts.id',
+                    'posts.media_url',
+                    'posts.media_type',
+                    'posts.thumbnail_url',
+                    'posts.media_items'
+                )->orderByDesc('collection_posts.created_at');
             }]);
 
             return response()->json([
                 'message' => 'Post added to collection',
-                'collection' => [
-                    'id' => (string) $collection->id,
-                    'userId' => $collection->user_id,
-                    'name' => $collection->name,
-                    'isPrivate' => $collection->is_private,
-                    'thumbnailUrl' => $collection->thumbnail_url,
-                    'postIds' => $collection->posts->pluck('id')->values()->all(),
-                    'updatedAt' => $collection->updated_at->timestamp * 1000,
-                ]
+                'collection' => $collection->toApiArray(),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -330,28 +302,15 @@ class CollectionController extends Controller
         try {
             $collection->posts()->detach($post->id);
 
-            // Update thumbnail if collection becomes empty or if removed post was the thumbnail
-            if ($collection->posts()->count() === 0) {
-                $collection->thumbnail_url = null;
-            } else {
-                // Update thumbnail to first post if current thumbnail was removed
-                $firstPost = $collection->posts()->first();
-                if ($firstPost && $firstPost->media_url) {
-                    $collection->thumbnail_url = $firstPost->media_url;
-                }
-            }
-            $collection->save();
+            $collection->unsetRelation('posts');
+            $collection->updateThumbnail();
             $collection->touch(); // Update updated_at
 
             DB::commit();
 
             return response()->json([
                 'message' => 'Post removed from collection',
-                'collection' => [
-                    'id' => (string) $collection->id,
-                    'thumbnailUrl' => $collection->thumbnail_url,
-                    'updatedAt' => $collection->updated_at->timestamp * 1000,
-                ]
+                'collection' => $collection->fresh()->toApiArray(),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -374,26 +333,16 @@ class CollectionController extends Controller
 
         $user = Auth::user();
 
-        $collections = Collection::where('user_id', $user->id)
-            ->whereHas('posts', function ($query) use ($postId) {
-                $query->where('posts.id', $postId);
-            })
-            ->with(['posts' => function ($query) {
-                $query->select('posts.id');
-            }])
+        $collections = $this->eagerLoadCoverPosts(
+            Collection::where('user_id', $user->id)
+                ->whereHas('posts', function ($query) use ($postId) {
+                    $query->where('posts.id', $postId);
+                })
+        )
             ->orderBy('updated_at', 'desc')
             ->get()
-            ->map(function ($collection) {
-                return [
-                    'id' => (string) $collection->id,
-                    'userId' => $collection->user_id,
-                    'name' => $collection->name,
-                    'isPrivate' => $collection->is_private,
-                    'thumbnailUrl' => $collection->thumbnail_url,
-                    'postIds' => $collection->posts->pluck('id')->values()->all(),
-                    'updatedAt' => $collection->updated_at->timestamp * 1000,
-                ];
-            });
+            ->map(fn (Collection $collection) => $collection->toApiArray())
+            ->values();
 
         return response()->json($collections);
     }

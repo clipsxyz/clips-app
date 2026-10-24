@@ -1,7 +1,8 @@
-import { Collection, Post } from '../types';
+import { Collection, CollectionLatestPost, Post } from '../types';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { posts, getPostById, decorateForUser } from './posts';
+import { siblingJpegFromVideoUrl } from '../utils/postMedia';
 
 // Storage key for collections
 const COLLECTIONS_STORAGE_KEY = 'clips_app_collections';
@@ -12,19 +13,45 @@ type CollectionWithPreviewMap = Collection & {
     postPreviewMap?: Record<string, Partial<Post>>;
 };
 
+function mapLatestPost(raw: any): CollectionLatestPost | undefined {
+    const latest = raw?.latest_post ?? raw?.latestPost;
+    if (!latest || typeof latest !== 'object') return undefined;
+    const thumbnail =
+        typeof (latest.thumbnail_url ?? latest.thumbnailUrl) === 'string'
+            ? (latest.thumbnail_url ?? latest.thumbnailUrl)
+            : undefined;
+    const media =
+        typeof (latest.media_url ?? latest.mediaUrl) === 'string'
+            ? (latest.media_url ?? latest.mediaUrl)
+            : undefined;
+    return {
+        id: latest.id != null ? String(latest.id) : undefined,
+        thumbnailUrl: thumbnail,
+        thumbnail_url: thumbnail,
+        mediaUrl: media,
+        media_url: media,
+        mediaType: latest.media_type ?? latest.mediaType,
+        media_type: latest.media_type ?? latest.mediaType,
+    };
+}
+
 function mapApiCollection(raw: any, fallbackUserId?: string): Collection {
     const createdAtRaw = raw?.created_at ?? raw?.createdAt;
     const updatedAtRaw = raw?.updated_at ?? raw?.updatedAt;
     const postIdsRaw = raw?.post_ids ?? raw?.postIds;
     const userIdRaw = raw?.user_id ?? raw?.userId ?? fallbackUserId ?? 'me';
+    const coverRaw = raw?.cover_url ?? raw?.coverUrl ?? raw?.thumbnail_url ?? raw?.thumbnailUrl;
+    const cover = typeof coverRaw === 'string' && coverRaw.trim() ? coverRaw.trim() : undefined;
     return {
         id: String(raw?.id ?? `collection-${Date.now()}`),
         userId: normalizeUserId(userIdRaw),
         name: String(raw?.name ?? 'Untitled Collection'),
         isPrivate: Boolean(raw?.is_private ?? raw?.isPrivate ?? true),
-        thumbnailUrl: typeof (raw?.thumbnail_url ?? raw?.thumbnailUrl) === 'string'
-            ? (raw?.thumbnail_url ?? raw?.thumbnailUrl)
-            : undefined,
+        thumbnailUrl: cover,
+        coverUrl: cover,
+        cover_url: cover,
+        thumbnail_url: cover,
+        latestPost: mapLatestPost(raw),
         postIds: Array.isArray(postIdsRaw) ? postIdsRaw.map((id: any) => String(id)) : [],
         createdAt: typeof createdAtRaw === 'number' ? createdAtRaw : Date.parse(createdAtRaw || '') || Date.now(),
         updatedAt: typeof updatedAtRaw === 'number' ? updatedAtRaw : Date.parse(updatedAtRaw || '') || Date.now(),
@@ -295,21 +322,41 @@ export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     return undefined;
 }
 
-/** List-row thumbnail: prefer live post URL so blobs/API paths stay valid after creating a collection. */
+/** List-row thumbnail: computed cover, then latest saved post still, then local post pool. */
 export function getCollectionThumbnailUrl(collection: Collection, postPool?: Post[]): string | undefined {
     const looksLikeVideo = (url?: string) =>
-        !!url && /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
-    const firstId = collection.postIds[0];
-    if (firstId) {
-        const fp = postPool?.find((p) => p.id === firstId) ?? posts.find((p) => p.id === firstId);
-        const live = resolvePostThumbnail(fp);
-        if (live) return live;
+        !!url && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+    const still = (url?: string | null): string | undefined => {
+        const compact = compactPersistedMediaUrl(url || undefined);
+        if (!compact || isFakeVideoPosterUrl(compact)) return undefined;
+        if (looksLikeVideo(compact)) return siblingJpegFromVideoUrl(compact);
+        return compact;
+    };
+
+    const latest = collection.latestPost;
+    const firstId = collection.postIds?.[0];
+    const fp = firstId
+        ? postPool?.find((p) => p.id === firstId) ?? posts.find((p) => p.id === firstId)
+        : undefined;
+
+    const candidates = [
+        collection.coverUrl,
+        collection.cover_url,
+        collection.thumbnailUrl,
+        collection.thumbnail_url,
+        latest?.thumbnailUrl,
+        latest?.thumbnail_url,
+        latest?.mediaUrl,
+        latest?.media_url,
+        resolvePostThumbnail(fp),
+        fp?.videoPosterUrl,
+        fp?.mediaUrl,
+    ];
+    for (const candidate of candidates) {
+        const img = still(typeof candidate === 'string' ? candidate : undefined);
+        if (img) return img;
     }
-    const t = typeof collection.thumbnailUrl === 'string' ? collection.thumbnailUrl.trim() : '';
-    if (!t || looksLikeVideo(t) || isFakeVideoPosterUrl(t)) {
-        return undefined;
-    }
-    return t;
+    return undefined;
 }
 
 function compactPersistedMediaUrl(url?: string): string | undefined {
