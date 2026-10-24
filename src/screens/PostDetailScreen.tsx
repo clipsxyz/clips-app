@@ -3,9 +3,7 @@ import {
     View,
     Text,
     StyleSheet,
-    ScrollView,
     Image,
-    Dimensions,
     TouchableOpacity,
     ActivityIndicator,
     Alert,
@@ -13,6 +11,7 @@ import {
     Pressable,
     KeyboardAvoidingView,
     Platform,
+    useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -35,8 +34,7 @@ import {
     hasPostNotificationsPrefMobile,
     setPostNotificationsPrefMobile,
 } from '../utils/feedEngagementPrefsMobile';
-import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDimensions';
-import { FEED_UI } from '../constants/feedUiTokens';
+import { isLikelyImageUri } from '../utils/imageDimensions';
 import FeedPostMedia from '../components/FeedPostMedia.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
 import FeedPostHeader from '../components/FeedPostHeader.native';
@@ -52,7 +50,7 @@ import {
 import type { Post } from '../types';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import { getPostDisplayCaption } from '../utils/feedPostMeta';
-import { feedMediaHeight } from '../utils/mediaAspectRatio';
+import { feedMediaHeight, RATIO_PORTRAIT_9_16 } from '../utils/mediaAspectRatio';
 import FeedShareModal from '../components/FeedShareModal';
 import {
     FEED_CARD_BG,
@@ -79,7 +77,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const { postId, openComments, fromCollection, initialPost } = route.params || {};
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
-    const screenWidth = Dimensions.get('window').width;
+    const { width: screenWidth, height: windowHeight } = useWindowDimensions();
     const hideSaveAction = Boolean(fromCollection);
 
     const [post, setPost] = useState<Post | null>(() =>
@@ -91,7 +89,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [loading, setLoading] = useState(
         () => !(initialPost && String(initialPost.id) === String(postId)),
     );
-    const [mediaHeight, setMediaHeight] = useState(screenWidth * FEED_UI.media.maxAspect);
+    const [mediaHeight, setMediaHeight] = useState(() =>
+        Math.round(screenWidth / RATIO_PORTRAIT_9_16),
+    );
+    const [mediaStageHeight, setMediaStageHeight] = useState(0);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(!!openComments);
     const [overflowVisible, setOverflowVisible] = useState(false);
@@ -156,19 +157,19 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     useEffect(() => {
         if (!mediaSizingUrl || !isLikelyImageUri(mediaSizingUrl)) {
-            setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
+            setMediaHeight(Math.round(screenWidth / RATIO_PORTRAIT_9_16));
             return;
         }
         Image.getSize(
             mediaSizingUrl,
             (width, height) => {
-                const dimensions = getInstagramImageDimensions(width, height, screenWidth);
-                const minHeight = screenWidth * FEED_UI.media.minAspect;
-                const maxHeight = screenWidth * FEED_UI.media.maxAspect;
-                setMediaHeight(Math.min(Math.max(dimensions.height, minHeight), maxHeight));
+                const next = feedMediaHeight(screenWidth, width, height, {
+                    fullscreenPortrait: true,
+                });
+                setMediaHeight(next);
             },
             () => {
-                setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
+                setMediaHeight(Math.round(screenWidth / RATIO_PORTRAIT_9_16));
             }
         );
     }, [mediaSizingUrl, screenWidth, postId]);
@@ -367,19 +368,23 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const hasVisualMedia = Boolean(
         post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0),
     );
-    const windowHeight = Dimensions.get('window').height;
     const pageGutter = ox(16);
     const cardMediaWidth = fromCollection
         ? screenWidth - ox(48)
         : screenWidth - pageGutter * 2;
-    const sizedHeight = feedMediaHeight(cardMediaWidth, post.width, post.height, {
-        fitLandscape: true,
+    const portraitFillHeight = feedMediaHeight(cardMediaWidth, post.width, post.height, {
+        fullscreenPortrait: true,
     });
+    const reservedChrome = ox(56) + ox(52) + ox(118) + ox(24);
+    const viewportFillHeight = Math.max(
+        windowHeight - reservedChrome,
+        Math.round(cardMediaWidth / RATIO_PORTRAIT_9_16),
+    );
     const detailMediaHeight = textOnlyPost
         ? Math.min(cardMediaWidth * 0.55, windowHeight * 0.32)
-        : fromCollection
-          ? Math.min(sizedHeight || mediaHeight, windowHeight * 0.46)
-          : sizedHeight || mediaHeight;
+        : mediaStageHeight > 0
+          ? mediaStageHeight
+          : Math.max(portraitFillHeight || mediaHeight, viewportFillHeight);
     const isCurrentUser = Boolean(
         user?.handle &&
             String(user.handle).trim().toLowerCase() ===
@@ -432,9 +437,15 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     </View>
                     {hasVisualMedia ? (
                         <View
-                            style={styles.mediaWrap}
+                            style={styles.mediaStage}
                             collapsable={false}
                             renderToHardwareTextureAndroid={false}
+                            onLayout={(event) => {
+                                const next = Math.round(event.nativeEvent.layout.height);
+                                if (next > 0 && Math.abs(next - mediaStageHeight) > 2) {
+                                    setMediaStageHeight(next);
+                                }
+                            }}
                         >
                             <FeedPostMedia
                                 post={post}
@@ -460,14 +471,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     </>
                     )}
 
-                    <ScrollView
-                        style={styles.content}
-                        contentContainerStyle={styles.contentInner}
-                        keyboardShouldPersistTaps="handled"
-                        showsVerticalScrollIndicator={false}
-                        nestedScrollEnabled
-                        removeClippedSubviews={false}
-                    >
+                    <View style={styles.metaBlock}>
                         {!textOnlyPost && displayCaption.length > 0 && hasVisualMedia ? (
                             <View style={styles.captionWrap}>
                                 <FeedCaptionText caption={displayCaption} />
@@ -502,7 +506,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                     showReclip={!isCurrentUser}
                                     showSave={!hideSaveAction}
                                     showSaveLabel={!post.isBoosted}
-                                    compact={Boolean(post.isBoosted)}
+                                    compact
                                     tone="feed"
                                 />
                             </View>
@@ -519,7 +523,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                                 {post.stats.views} views • {post.stats.reclips} reclips
                             </Text>
                         </View>
-                    </ScrollView>
+                    </View>
                 </View>
             </View>
 
@@ -808,8 +812,8 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: FEED_PAGE_BG,
         paddingHorizontal: ox(16),
-        paddingTop: ox(12),
-        paddingBottom: ox(12),
+        paddingTop: ox(8),
+        paddingBottom: ox(8),
     },
     card: {
         flex: 1,
@@ -817,31 +821,31 @@ const styles = StyleSheet.create({
         borderRadius: FEED_CARD_RADIUS,
         borderWidth: FEED_CARD_SHELL_BORDER_WIDTH,
         borderColor: FEED_CARD_SHELL_BORDER_COLOR,
-        overflow: 'visible',
+        overflow: 'hidden',
     },
-    content: {
+    mediaStage: {
         flex: 1,
-        backgroundColor: FEED_CARD_BG,
-    },
-    contentInner: {
-        flexGrow: 1,
-        paddingBottom: ox(20),
-    },
-    mediaWrap: {
         width: '100%',
+        minHeight: 0,
         backgroundColor: '#000000',
-        overflow: 'visible',
+        overflow: 'hidden',
+    },
+    metaBlock: {
+        flexGrow: 0,
+        flexShrink: 0,
+        backgroundColor: FEED_CARD_BG,
     },
     captionWrap: {
         paddingHorizontal: ox(12),
-        paddingVertical: ox(10),
+        paddingTop: ox(8),
+        paddingBottom: ox(4),
     },
     engagementBar: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: ox(12),
-        paddingVertical: ox(8),
+        paddingVertical: ox(6),
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: 'rgba(255,255,255,0.06)',
         minWidth: 0,
@@ -855,7 +859,7 @@ const styles = StyleSheet.create({
     },
     statsContainer: {
         paddingHorizontal: ox(12),
-        paddingBottom: ox(12),
+        paddingBottom: ox(8),
     },
     statsText: {
         fontSize: ox(14),
