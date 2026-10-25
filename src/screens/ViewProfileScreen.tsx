@@ -16,6 +16,7 @@ import {
     Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import AccountTypeBadge from '../components/AccountTypeBadge.native';
 import VerifiedBadge from '../components/VerifiedBadge.native';
@@ -23,6 +24,8 @@ import {
     glassSearch,
     glassSurface,
     gazetteerHeader,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
 } from '../theme/gazetteerAmbientNative';
 import { PASSPORT_PALETTE } from '../utils/discoverAmbientPalette';
 import { useAuth } from '../context/Auth';
@@ -1004,7 +1007,14 @@ const result = await followOrRequest({
 
     if (loading) {
         return (
-            <GazetteerScreenShell ambientVariant="passport">
+            <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+                <LinearGradient
+                    colors={[...UEFA_PASSPORT_GRADIENT]}
+                    locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={styles.passportCanvas}
+                >
                 <View style={styles.header}>
                     <TouchableOpacity
                         onPress={() => navigation.goBack()}
@@ -1021,15 +1031,23 @@ const result = await followOrRequest({
                     <View style={styles.headerIconBtnPlaceholder} />
                 </View>
                 <View style={styles.loadingShell}>
-                    <ActivityIndicator size="large" color="#3d9b8f" />
+                    <ActivityIndicator size="large" color="#FFFFFF" />
                 </View>
+                </LinearGradient>
             </GazetteerScreenShell>
         );
     }
 
     if (!canView && profileIsPrivate) {
         return (
-            <GazetteerScreenShell ambientVariant="passport">
+            <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+                <LinearGradient
+                    colors={[...UEFA_PASSPORT_GRADIENT]}
+                    locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={styles.passportCanvas}
+                >
                 <View style={styles.header}>
                     <TouchableOpacity
                         onPress={() => navigation.goBack()}
@@ -1065,12 +1083,20 @@ const result = await followOrRequest({
                         <Text style={styles.privatePendingText}>Follow request sent</Text>
                     )}
                 </View>
+                </LinearGradient>
             </GazetteerScreenShell>
         );
     }
 
     return (
-        <GazetteerScreenShell ambientVariant="passport">
+        <GazetteerScreenShell ambient={false} style={styles.passportShell}>
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.passportCanvas}
+            >
             <View style={styles.header}>
                 <TouchableOpacity
                     onPress={() => navigation.goBack()}
@@ -1628,11 +1654,19 @@ const result = await followOrRequest({
                 onConfirm={() => setShowFollowRequestAlert(false)}
                 onDismiss={() => setShowFollowRequestAlert(false)}
             />
+            </LinearGradient>
         </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
+    passportShell: {
+        backgroundColor: '#05050A',
+    },
+    passportCanvas: {
+        flex: 1,
+        backgroundColor: 'transparent',
+    },
     loadingShell: {
         flex: 1,
         justifyContent: 'center',
