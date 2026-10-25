@@ -79,62 +79,60 @@ export default function ProfileCoverHero({
 
     return (
         <View style={styles.wrap}>
-            <Image
-                source={coverSource}
-                style={[styles.coverImage, showMuted && styles.coverImageMuted]}
-                resizeMode="cover"
-                onError={() => {
-                    if (customCover) setCoverFailed(true);
-                }}
-            />
-            <LinearGradient
-                colors={['rgba(10,25,78,0.25)', 'rgba(0,56,209,0.35)', 'rgba(2,11,38,0.85)']}
-                style={styles.gradient}
-                pointerEvents="none"
-            />
-            {showChangeCover && onPressChangeCover ? (
-                <TouchableOpacity style={styles.changeCoverBtn} onPress={onPressChangeCover}>
-                    <Icon name="image-outline" size={14} color="#FFFFFF" />
-                    <Text style={styles.changeCoverText}>Change cover</Text>
-                </TouchableOpacity>
-            ) : null}
-            <View style={styles.centerBlock}>
-                <View style={styles.identityStack}>
-                    {onAvatarPress ? (
-                        <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
-                            <View style={styles.avatarGlowWrap}>
-                                <Avatar {...avatarProps} ringColor={ringVisible ? '#FFFFFF' : ringColor} />
-                            </View>
-                        </TouchableOpacity>
-                    ) : (
+            <View style={styles.banner}>
+                <Image
+                    source={coverSource}
+                    style={[styles.coverImage, showMuted && styles.coverImageMuted]}
+                    resizeMode="cover"
+                    onError={() => {
+                        if (customCover) setCoverFailed(true);
+                    }}
+                />
+                <LinearGradient
+                    colors={['rgba(10,25,78,0.18)', 'rgba(0,56,209,0.22)', 'rgba(2,11,38,0.72)']}
+                    style={styles.gradient}
+                    pointerEvents="none"
+                />
+                {showChangeCover && onPressChangeCover ? (
+                    <TouchableOpacity style={styles.changeCoverBtn} onPress={onPressChangeCover}>
+                        <Icon name="image-outline" size={14} color="#FFFFFF" />
+                        <Text style={styles.changeCoverText}>Change cover</Text>
+                    </TouchableOpacity>
+                ) : null}
+            </View>
+            <View style={styles.identityBlock}>
+                {onAvatarPress ? (
+                    <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.85}>
                         <View style={styles.avatarGlowWrap}>
                             <Avatar {...avatarProps} ringColor={ringVisible ? '#FFFFFF' : ringColor} />
                         </View>
-                    )}
-                    {children}
-                </View>
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.avatarGlowWrap}>
+                        <Avatar {...avatarProps} ringColor={ringVisible ? '#FFFFFF' : ringColor} />
+                    </View>
+                )}
+                {children}
             </View>
         </View>
     );
 }
 
+const BANNER_HEIGHT = 156;
+const AVATAR_OVERLAP = 44;
+
 const styles = StyleSheet.create({
     wrap: {
-        height: 260,
-        borderRadius: 20,
-        marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 12,
+        width: '100%',
+        marginTop: 4,
+        marginBottom: 4,
+    },
+    banner: {
+        width: '100%',
+        height: BANNER_HEIGHT,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.3)',
         backgroundColor: '#020B26',
         position: 'relative',
-        shadowColor: '#FFFFFF',
-        shadowOpacity: 0.25,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 8 },
-        elevation: 12,
     },
     avatarGlowWrap: {
         shadowColor: '#FFFFFF',
@@ -145,25 +143,15 @@ const styles = StyleSheet.create({
         borderRadius: 999,
     },
     coverImage: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
-        zIndex: 0,
     },
     coverImageMuted: {
         opacity: 0.55,
     },
     gradient: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 1,
+        ...StyleSheet.absoluteFill,
     },
     changeCoverBtn: {
         position: 'absolute',
@@ -186,17 +174,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700',
     },
-    centerBlock: {
-        flex: 1,
+    identityBlock: {
+        alignItems: 'center',
+        marginTop: -AVATAR_OVERLAP,
         zIndex: 3,
-        elevation: 3,
-        alignItems: 'center',
-        justifyContent: 'center',
         paddingHorizontal: 16,
-    },
-    identityStack: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        maxWidth: '100%',
+        paddingBottom: 4,
     },
 });

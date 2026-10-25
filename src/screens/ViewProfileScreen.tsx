@@ -1778,7 +1778,7 @@ statsContainer: {
         marginBottom: ox(2),
     },
     coverIdentity: {
-        marginTop: ox(10),
+        marginTop: ox(8),
         alignItems: 'center',
         alignSelf: 'stretch',
         paddingHorizontal: ox(20),
