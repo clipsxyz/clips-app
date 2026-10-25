@@ -722,7 +722,8 @@ export default function LoginPage() {
     <div 
       className="h-full min-h-0 flex-1 flex flex-col overflow-hidden items-center px-4 sm:px-6 py-4 sm:py-6 relative"
       style={{ 
-        backgroundColor: '#151D28',
+        background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)',
+        backgroundColor: '#000000',
         paddingTop: 'max(1rem, env(safe-area-inset-top))',
         paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
       }}
@@ -737,7 +738,7 @@ export default function LoginPage() {
               <form
                 onSubmit={forgotStep === 1 ? handleForgotSendCode : handleForgotSubmit}
                 className="rounded-2xl px-8 py-8 flex flex-col"
-                style={{ backgroundColor: '#151D28' }}
+                style={{ backgroundColor: 'transparent' }}
               >
                 <div className="text-center mb-6">
                   <p className="text-xs text-gray-500 mb-2">Recovery</p>
@@ -832,7 +833,7 @@ export default function LoginPage() {
               <form
                 onSubmit={handleLoginSubmit}
                 className="rounded-2xl px-8 py-8 flex flex-col"
-                style={{ backgroundColor: '#151D28' }}
+                style={{ backgroundColor: 'transparent' }}
               >
               <div className="text-center mb-6">
                 <p className="text-xs text-gray-500 mb-2">No algorithms just places</p>
@@ -927,7 +928,7 @@ export default function LoginPage() {
                   : handleProfilePictureSubmit
           }
           className="flex flex-1 flex-col min-h-0 w-full h-full overflow-hidden"
-          style={{ backgroundColor: '#151D28' }}
+          style={{ backgroundColor: 'transparent' }}
         >
           {/* Header */}
           <div className="flex-shrink-0 px-6 sm:px-10 pt-6 sm:pt-10 pb-2">
@@ -1310,7 +1311,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="flex-shrink-0 border-t border-white/10 px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.65)]" style={{ backgroundColor: '#151D28' }}>
+          <div className="flex-shrink-0 border-t border-white/10 px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.65)]" style={{ backgroundColor: 'transparent' }}>
             <div className="mx-auto w-full max-w-[400px] space-y-3">
               {step === 1 && (
                 <div className="space-y-2.5 rounded-lg border border-white/15 bg-white/5 px-3 py-3">

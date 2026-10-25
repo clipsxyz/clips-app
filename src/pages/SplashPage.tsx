@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 import { useAuth } from '../context/Auth';
 import { getSplashGreetingLine } from '../utils/timeGreeting';
 
@@ -53,13 +52,14 @@ export default function SplashPage() {
 
     return (
         <div
-            className="relative min-h-screen min-h-[100dvh] w-full overflow-hidden bg-[#060d16]"
+            className="relative min-h-screen min-h-[100dvh] w-full overflow-hidden"
             style={{
+                background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)',
+                backgroundColor: '#000000',
                 opacity: exiting ? 0 : 1,
                 transition: `opacity ${EXIT_FADE_MS}ms ease-out`,
             }}
         >
-            <DiscoverAmbientCanvas variant="passport" />
 
             <div
                 className="absolute inset-0 z-[2] flex items-center justify-center pointer-events-none"
@@ -69,7 +69,7 @@ export default function SplashPage() {
                     className={`text-[44px] font-bold tracking-tight text-white text-center splash-brand-breathe ${
                         visible || exiting ? 'splash-brand-in' : 'opacity-0'
                     }`}
-                    style={{ textShadow: '0 2px 12px rgba(6, 13, 22, 0.55)' }}
+                    style={{ textShadow: '0 2px 12px rgba(0, 0, 0, 0.55)' }}
                 >
                     Gazetteer
                 </h1>

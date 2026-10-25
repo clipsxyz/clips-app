@@ -293,7 +293,11 @@ function App(): React.JSX.Element {
               contentStyle: { backgroundColor: GAZETTEER_ABYSS },
             }}
           >
-          <Stack.Screen name="Splash" component={SplashScreen} />
+          <Stack.Screen
+            name="Splash"
+            component={SplashScreen}
+            options={{ contentStyle: { backgroundColor: '#000000' } }}
+          />
           {/* Transparent so FeedAmbientCanvas can bleed under the frosted tab bar. */}
           <Stack.Screen
             name="MainTabs"
@@ -323,7 +327,11 @@ function App(): React.JSX.Element {
             component={LiveStreamScreen}
             options={{ presentation: 'modal' }}
           />
-          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen
+            name="Login"
+            component={LoginScreen}
+            options={{ contentStyle: { backgroundColor: '#000000' } }}
+          />
           <Stack.Screen name="PostDetail" component={PostDetailScreen} />
           <Stack.Screen
             name="Stories"
@@ -405,7 +413,11 @@ function App(): React.JSX.Element {
             component={PaymentSuccessScreen}
             options={{ presentation: 'modal' }}
           />
-          <Stack.Screen name="Landing" component={LandingScreen} />
+          <Stack.Screen
+            name="Landing"
+            component={LandingScreen}
+            options={{ contentStyle: { backgroundColor: '#000000' } }}
+          />
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
           <Stack.Screen
@@ -437,7 +449,7 @@ const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
     // Match share-card Passport abyss / FeedAmbientCanvas.
-    backgroundColor: '#060d16',
+    backgroundColor: '#000000',
   },
   createTabPlaceholder: {
     flex: 1,

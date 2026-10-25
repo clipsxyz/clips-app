@@ -7,9 +7,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas.native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import {
+  UEFA_PASSPORT_GRADIENT,
+  UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import { getSplashGreetingLine } from '../utils/timeGreeting';
 
 const INTRO_FADE_MS = 700;
@@ -21,7 +24,7 @@ const EXIT_FADE_MS = 500;
  */
 export default function SplashScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
-  const { width: screenW, height: screenH } = Dimensions.get('window');
+  const { height: screenH } = Dimensions.get('window');
   const greeting = useMemo(
     () => getSplashGreetingLine(user?.name ?? null),
     [user?.name],
@@ -220,15 +223,14 @@ export default function SplashScreen({ navigation }: { navigation: any }) {
 
   return (
     <Animated.View style={[styles.root, { opacity: screenOpacity }]}>
-      {/* Passport ambient (same View-blob canvas as View Profile iOS / Discover). */}
-      <View style={styles.ambientSlot} pointerEvents="none" collapsable={false}>
-        <DiscoverAmbientCanvas
-          variant="passport"
-          fillParent={false}
-          width={screenW}
-          height={screenH}
-        />
-      </View>
+      <LinearGradient
+        colors={[...UEFA_PASSPORT_GRADIENT]}
+        locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.ambientSlot}
+        pointerEvents="none"
+      />
 
       <View style={[styles.brandWrap, { top: brandTop }]} pointerEvents="none">
         <Animated.Text
@@ -283,7 +285,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     height: '100%',
-    backgroundColor: PASSPORT_ABYSS,
+    backgroundColor: '#000000',
   },
   ambientSlot: {
     ...StyleSheet.absoluteFill,
@@ -305,7 +307,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.9,
     textAlign: 'center',
     includeFontPadding: false,
-    textShadowColor: 'rgba(6, 13, 22, 0.55)',
+    textShadowColor: 'rgba(0, 0, 0, 0.55)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 12,
   },

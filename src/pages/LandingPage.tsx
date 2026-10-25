@@ -20,7 +20,10 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="h-screen bg-[#1a1f2e] text-white overflow-hidden flex flex-col">
+    <div
+      className="h-screen text-white overflow-hidden flex flex-col"
+      style={{ background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)' }}
+    >
       {/* Map Background covering header and pins section */}
       <div className="relative flex-shrink-0">
         {/* World Map Background - extends behind title and pins */}

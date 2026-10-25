@@ -5,9 +5,9 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import {
     glassPanel,
-    UCL_CANVAS_NAVY,
-    UCL_SHEET_GRADIENT,
-    UCL_SHEET_GRADIENT_LOCATIONS,
+    SCREEN_CANVAS_BASE,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
     UCL_TEXT_PLACEHOLDER,
     UCL_TEXT_PRIMARY,
 } from '../theme/gazetteerAmbientNative';
@@ -36,20 +36,22 @@ const FEATURES = [
 
 export default function LandingScreen({ navigation }: any) {
   return (
-    <GazetteerScreenShell edges={['top', 'bottom']} ambient={false} style={styles.shell}>
+    <View style={styles.shell}>
       <LinearGradient
-        colors={[...UCL_SHEET_GRADIENT]}
-        locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
-        start={{ x: 0.12, y: 0 }}
-        end={{ x: 0.88, y: 1 }}
-        style={styles.canvas}
-      >
+        colors={[...UEFA_PASSPORT_GRADIENT]}
+        locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+    <GazetteerScreenShell edges={['top', 'bottom']} ambient={false} style={styles.shellTransparent}>
       <View style={styles.screen}>
         <LinearGradient
-          colors={[...UCL_SHEET_GRADIENT]}
-          locations={[...UCL_SHEET_GRADIENT_LOCATIONS]}
-          start={{ x: 0.12, y: 0 }}
-          end={{ x: 0.88, y: 1 }}
+          colors={[...UEFA_PASSPORT_GRADIENT]}
+          locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
           style={styles.card}
         >
           <ScrollView
@@ -97,19 +99,19 @@ export default function LandingScreen({ navigation }: any) {
           </View>
         </LinearGradient>
       </View>
-      </LinearGradient>
     </GazetteerScreenShell>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
-    backgroundColor: UCL_CANVAS_NAVY,
+    backgroundColor: SCREEN_CANVAS_BASE,
   },
-  canvas: {
+  shellTransparent: {
     flex: 1,
-    backgroundColor: UCL_CANVAS_NAVY,
+    backgroundColor: 'transparent',
   },
   screen: {
     flex: 1,
@@ -203,7 +205,7 @@ const styles = StyleSheet.create({
     paddingVertical: ox(14),
   },
   primaryText: {
-    color: UCL_CANVAS_NAVY,
+    color: SCREEN_CANVAS_BASE,
     fontSize: ox(15),
     fontWeight: '700',
   },

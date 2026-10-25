@@ -2036,7 +2036,6 @@ export default function ViewProfilePage() {
             {/* Passport Title */}
             <div className="w-full text-center pt-4 pb-3">
                 <h1 className="text-[28px] font-semibold tracking-tight text-white">Passport</h1>
-                <p className="mt-1 text-xs text-gray-400 uppercase tracking-[0.2em]">Profile</p>
             </div>
 
             {/* Profile Info with World Map Background */}

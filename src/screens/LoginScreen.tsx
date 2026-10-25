@@ -13,8 +13,14 @@ import {
     Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { glassPanel } from '../theme/gazetteerAmbientNative';
+import {
+    glassPanel,
+    SCREEN_CANVAS_BASE,
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import * as ImagePicker from 'react-native-image-picker';
 import { launchNativeCamera } from '../utils/launchNativeCamera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -913,7 +919,16 @@ export default function LoginScreen({ navigation, route }: any) {
     };
 
     return (
-        <GazetteerScreenShell edges={['top', 'bottom']} ambientVariant="passport">
+        <View style={styles.shell}>
+            <LinearGradient
+                colors={[...UEFA_PASSPORT_GRADIENT]}
+                locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+            />
+        <GazetteerScreenShell edges={['top', 'bottom']} ambient={false} style={styles.shellTransparent}>
             <View style={styles.screen}>
                 <ScrollView
                     style={styles.scroll}
@@ -1724,6 +1739,7 @@ export default function LoginScreen({ navigation, route }: any) {
                 }))}
             />
         </GazetteerScreenShell>
+        </View>
     );
 }
 
@@ -1732,6 +1748,14 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'center',
+    },
+    shell: {
+        flex: 1,
+        backgroundColor: SCREEN_CANVAS_BASE,
+    },
+    shellTransparent: {
+        flex: 1,
+        backgroundColor: 'transparent',
     },
     screen: {
         flex: 1,
@@ -1746,7 +1770,7 @@ const styles = StyleSheet.create({
     },
     form: {
         ...glassPanel,
-        backgroundColor: '#151D28',
+        backgroundColor: 'transparent',
         borderRadius: ox(20),
         maxWidth: 400,
         width: '100%',
@@ -1754,13 +1778,14 @@ const styles = StyleSheet.create({
     },
     loginFormShell: {
         borderRadius: ox(16),
-        padding: ox(2),
-        backgroundColor: '#FFFFFF',
-        borderWidth: 0,
+        padding: 0,
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
     },
     loginFormInner: {
         borderRadius: ox(14),
-        backgroundColor: '#151D28',
+        backgroundColor: 'transparent',
         overflow: 'hidden',
     },
     tagline: {
@@ -2211,7 +2236,7 @@ const styles = StyleSheet.create({
         maxWidth: 400,
         width: '100%',
         alignSelf: 'center',
-        backgroundColor: '#151D28',
+        backgroundColor: 'transparent',
     },
     swalFooter: {
         width: '100%',
@@ -2223,7 +2248,7 @@ const styles = StyleSheet.create({
         paddingTop: ox(6),
         paddingBottom: ox(10),
         gap: ox(6),
-        backgroundColor: '#151D28',
+        backgroundColor: 'transparent',
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: 'rgba(255,255,255,0.14)',
@@ -2268,7 +2293,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: '#151D28',
+        backgroundColor: SCREEN_CANVAS_BASE,
     },
     swalCheckLabel: {
         flex: 1,
@@ -2329,7 +2354,7 @@ const styles = StyleSheet.create({
         borderRadius: ox(12),
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.18)',
-        backgroundColor: '#151D28',
+        backgroundColor: SCREEN_CANVAS_BASE,
     },
     swalCheckLabelCompact: {
         flexShrink: 1,
@@ -2459,7 +2484,7 @@ const styles = StyleSheet.create({
     forgotModalCard: {
         margin: ox(24),
         marginTop: '40%',
-        backgroundColor: '#151D28',
+        backgroundColor: SCREEN_CANVAS_BASE,
         borderRadius: ox(16),
         borderWidth: 1,
         borderColor: '#374151',

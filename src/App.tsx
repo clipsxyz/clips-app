@@ -388,7 +388,14 @@ export default function App() {
               ? 'h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col pb-[calc(56px+theme(spacing.safe))]'
               : 'min-h-screen pb-[calc(56px+theme(spacing.safe))]'
         }`}
-        style={{ backgroundColor: '#030712' }}
+        style={
+          isLoginPage
+            ? {
+                background: 'linear-gradient(180deg, #000000 0%, #23104F 100%)',
+                backgroundColor: '#000000',
+              }
+            : { backgroundColor: '#030712' }
+        }
       >
         {loc.pathname !== '/login'
           && loc.pathname !== '/feed'

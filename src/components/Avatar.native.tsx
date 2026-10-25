@@ -21,7 +21,7 @@ export const AVATAR_IDLE_BORDER_COLOR = 'rgba(255, 255, 255, 0.15)';
  * feed card surface so the ring stands off cleanly (Instagram parity). Callers on a
  * different surface should pass `gapColor` to match their background.
  */
-export const DEFAULT_AVATAR_GAP_COLOR = '#030712';
+export const DEFAULT_AVATAR_GAP_COLOR = 'transparent';
 export function avatarBorderColor(hasStory: boolean): string {
     return hasStory ? AVATAR_STORY_BORDER_COLOR : AVATAR_IDLE_BORDER_COLOR;
 }

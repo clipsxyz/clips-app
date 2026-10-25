@@ -21,8 +21,8 @@ import { storyRingColor, storyRingVisible } from '../utils/storyRingNative';
 /** Outer slot including ring + Instagram standoff so the photo stays ~30px. */
 const FEED_HEADER_AVATAR_SIZE = 36;
 /** Idle hairline; story rings use the thicker Instagram stroke. */
-const FEED_HEADER_AVATAR_IDLE_BORDER = 0.5;
-const FEED_HEADER_AVATAR_STORY_BORDER = 2;
+const FEED_HEADER_AVATAR_IDLE_BORDER = 0.75;
+const FEED_HEADER_AVATAR_STORY_BORDER = 0.75;
 /** Dark gap between the photo and the outer ring (Instagram proportions). */
 const FEED_HEADER_AVATAR_RING_GAP = 2.5;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
@@ -151,8 +151,8 @@ export default function FeedPostHeader({
                     hasStory={hasStory}
                     borderWidth={showRing ? FEED_HEADER_AVATAR_STORY_BORDER : FEED_HEADER_AVATAR_IDLE_BORDER}
                     ringGap={FEED_HEADER_AVATAR_RING_GAP}
-                    gapColor={FEED_CARD_CHROME_BG}
-                    ringColor={showRing ? ringColor : 'rgba(255, 255, 255, 0.15)'}
+                    gapColor="transparent"
+                    ringColor="#FFFFFF"
                     hideBorder={false}
                 />
             </TouchableOpacity>

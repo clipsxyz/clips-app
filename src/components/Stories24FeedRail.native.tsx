@@ -925,7 +925,9 @@ const styles = StyleSheet.create({
         height: '100%',
         borderRadius: 999,
         padding: STORY_RING_GAP,
-        backgroundColor: 'transparent',
+        // Opaque so the gradient ring doesn't fill the standoff — same 2.5px
+        // newsfeed gap, readable over the story thumbnail.
+        backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',

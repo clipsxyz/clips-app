@@ -1,4 +1,4 @@
-export type DiscoverAmbientVariant = 'discover' | 'goldChrome' | 'passport';
+export type DiscoverAmbientVariant = 'discover' | 'goldChrome' | 'passport' | 'auth';
 
 export type AmbientPalette = {
     wavePrimary: string;
@@ -43,6 +43,18 @@ export const PASSPORT_PALETTE: AmbientPalette = {
 
 export const PASSPORT_ABYSS = '#060d16';
 
+/** Landing / login / splash canvas — black → bright purple. */
+export const AUTH_PALETTE: AmbientPalette = {
+    wavePrimary: '#23104F',
+    waveMid: '#12082A',
+    waveDeep: '#000000',
+    wave2Primary: 'rgba(35, 16, 79, 0.55)',
+    wave2Mid: 'rgba(35, 16, 79, 0.22)',
+    wave2End: 'rgba(0, 0, 0, 0)',
+};
+
+export const AUTH_ABYSS = '#000000';
+
 /**
  * Discover Canvas sheet system — every bottom sheet / modal inherits these.
  * Dark vertical gradient: deep near-black at top → rich emerald at bottom.
@@ -84,6 +96,7 @@ export const STORY_LINK_SHARE_CANVAS_CSS = `linear-gradient(135deg, ${PASSPORT_T
 export function getAmbientPalette(variant: DiscoverAmbientVariant): AmbientPalette {
     if (variant === 'goldChrome') return GOLD_CHROME_PALETTE;
     if (variant === 'passport') return PASSPORT_PALETTE;
+    if (variant === 'auth') return AUTH_PALETTE;
     return DISCOVER_PALETTE;
 }
 

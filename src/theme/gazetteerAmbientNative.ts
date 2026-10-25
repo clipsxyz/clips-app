@@ -140,6 +140,10 @@ export const UEFA_ROYAL_BLUE_MID = '#0038D1';
 export const UEFA_ROYAL_BLUE_END = '#020B26';
 export const UEFA_PASSPORT_GRADIENT = ['#000000', '#23104F'] as const;
 export const UEFA_PASSPORT_GRADIENT_LOCATIONS = [0, 1] as const;
+/** Full-screen floor shared by feed, landing, login, and signup. */
+export const SCREEN_CANVAS_BASE = '#000000';
+export const SCREEN_CANVAS_GRADIENT = ['#000000', '#05050A'] as const;
+export const SCREEN_CANVAS_GRADIENT_LOCATIONS = [0, 1] as const;
 export const UEFA_GLASS_BG = 'rgba(2, 11, 38, 0.75)';
 export const UEFA_GLASS_BORDER = 'rgba(255, 255, 255, 0.2)';
 export const UEFA_CYAN_GLOW = 'rgba(0, 242, 255, 0.6)';
