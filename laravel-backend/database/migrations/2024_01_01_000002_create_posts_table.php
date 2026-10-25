@@ -16,6 +16,9 @@ return new class extends Migration
             $table->string('media_url', 500)->nullable();
             $table->string('media_type', 20)->nullable();
             $table->string('location_label', 200)->nullable();
+            $table->string('location_local', 100)->nullable();
+            $table->string('location_regional', 100)->nullable();
+            $table->string('location_national', 100)->nullable();
             $table->json('tags')->nullable();
             $table->integer('likes_count')->default(0);
             $table->integer('views_count')->default(0);
