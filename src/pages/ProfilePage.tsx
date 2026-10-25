@@ -1258,7 +1258,7 @@ export default function ProfilePage() {
                   e.stopPropagation();
                   setCreateGroupOpen(true);
                 }}
-                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-cyan-500/35 bg-cyan-950/40 text-cyan-200 hover:bg-cyan-900/50 transition-colors flex items-center gap-2"
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/25 bg-white/10 text-white hover:bg-white/15 transition-colors flex items-center gap-2"
                 style={{ scrollSnapAlign: 'start' }}
                 title="Create a group chat"
               >
