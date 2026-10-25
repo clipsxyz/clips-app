@@ -29,6 +29,48 @@ export function getAvatarForHandle(handle: string | undefined | null): string | 
     return byLocal ? handleToAvatar[byLocal] : undefined;
 }
 
+type AvatarSource = {
+    avatar_url?: unknown;
+    avatarUrl?: unknown;
+    avatar?: unknown;
+    profile_photo?: unknown;
+    profile_photo_url?: unknown;
+    profilePhoto?: unknown;
+    image_url?: unknown;
+    imageUrl?: unknown;
+};
+
+function firstAvatarString(source?: AvatarSource | null): string | undefined {
+    if (!source) return undefined;
+    const candidates = [
+        source.avatar_url,
+        source.avatarUrl,
+        source.avatar,
+        source.profile_photo,
+        source.profile_photo_url,
+        source.profilePhoto,
+        source.image_url,
+        source.imageUrl,
+    ];
+    for (const value of candidates) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return undefined;
+}
+
+/** Prefer a live user photo URI; cache it, then fall back to the handle directory. */
+export function resolveAvatarForUser(
+    handle: string | undefined | null,
+    source?: AvatarSource | null,
+): string | undefined {
+    const fromSource = firstAvatarString(source);
+    if (fromSource) {
+        if (handle) setAvatarForHandle(handle, fromSource);
+        return fromSource;
+    }
+    return getAvatarForHandle(handle);
+}
+
 export function setAvatarForHandle(handle: string, url: string): void {
     if (!handle) return;
     handleToAvatar[handle] = url;

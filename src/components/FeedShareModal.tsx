@@ -22,6 +22,7 @@ import { useAuth } from '../context/Auth';
 import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
 import { appendMessage } from '../api/messages';
 import * as apiClient from '../api/client';
+import { getAvatarForHandle, resolveAvatarForUser } from '../api/users';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { ox } from '../constants/nativeOpticalScale';
 import Avatar from './Avatar.native';
@@ -33,6 +34,54 @@ import {
     UCL_TEXT_PRIMARY,
     UCL_TEXT_SECONDARY,
 } from '../theme/gazetteerAmbientNative';
+
+type ShareContact = {
+    handle: string;
+    avatarUrl?: string;
+};
+
+type FollowingUser = {
+    handle?: string;
+    user_handle?: string;
+    avatar_url?: unknown;
+    avatarUrl?: unknown;
+    avatar?: unknown;
+    profile_photo?: unknown;
+    profile_photo_url?: unknown;
+    profilePhoto?: unknown;
+    image_url?: unknown;
+    imageUrl?: unknown;
+};
+
+function contactFromFollowingUser(user: FollowingUser | string): ShareContact | null {
+    const handle =
+        typeof user === 'string'
+            ? user.trim()
+            : String(user?.handle ?? user?.user_handle ?? '').trim();
+    if (!handle) return null;
+    return {
+        handle,
+        avatarUrl: resolveAvatarForUser(handle, typeof user === 'string' ? undefined : user),
+    };
+}
+
+function mergeShareContacts(apiUsers: Array<FollowingUser | string>, localHandles: string[]): ShareContact[] {
+    const byHandle = new Map<string, ShareContact>();
+    for (const user of apiUsers) {
+        const contact = contactFromFollowingUser(user);
+        if (!contact) continue;
+        byHandle.set(contact.handle.toLowerCase(), contact);
+    }
+    for (const handle of localHandles) {
+        const key = handle.toLowerCase();
+        if (byHandle.has(key)) continue;
+        byHandle.set(key, {
+            handle,
+            avatarUrl: getAvatarForHandle(handle),
+        });
+    }
+    return [...byHandle.values()];
+}
 
 type Props = {
     post: Post | null;
@@ -46,7 +95,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
     const [shareCaption, setShareCaption] = useState('');
-    const [followedHandles, setFollowedHandles] = useState<string[]>([]);
+    const [followedContacts, setFollowedContacts] = useState<ShareContact[]>([]);
     const [loadingFollowed, setLoadingFollowed] = useState(false);
     const [regeneratingToken, setRegeneratingToken] = useState(false);
     /** Instagram-style multi-select: tapping a person toggles selection; the
@@ -111,15 +160,15 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
         setSelectedHandles([]);
 
         if (!user?.id) {
-            setFollowedHandles([]);
+            setFollowedContacts([]);
             return;
         }
 
         setLoadingFollowed(true);
         const setFromLocal = () => {
             getFollowedUsers(String(user.id))
-                .then(setFollowedHandles)
-                .catch(() => setFollowedHandles([]))
+                .then((handles) => setFollowedContacts(mergeShareContacts([], handles)))
+                .catch(() => setFollowedContacts([]))
                 .finally(() => setLoadingFollowed(false));
         };
 
@@ -127,12 +176,9 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
             apiClient
                 .fetchFollowing(user.handle, 0, 100)
                 .then((res) => {
-                    const apiHandles = (res?.items ?? [])
-                        .map((u: any) => u?.handle ?? u?.user_handle ?? String(u))
-                        .filter(Boolean) as string[];
+                    const apiUsers = (res?.items ?? []) as FollowingUser[];
                     return getFollowedUsers(String(user.id)).then((localHandles) => {
-                        const merged = [...new Set([...apiHandles, ...localHandles])];
-                        setFollowedHandles(merged.length ? merged : apiHandles);
+                        setFollowedContacts(mergeShareContacts(apiUsers, localHandles));
                     });
                 })
                 .catch((err) => {
@@ -146,11 +192,11 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
         }
     }, [isOpen, user?.id, user?.handle]);
 
-    const filteredHandles = useMemo(() => {
+    const filteredContacts = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
-        if (!q) return followedHandles;
-        return followedHandles.filter((h) => h.toLowerCase().includes(q));
-    }, [followedHandles, searchQuery]);
+        if (!q) return followedContacts;
+        return followedContacts.filter((contact) => contact.handle.toLowerCase().includes(q));
+    }, [followedContacts, searchQuery]);
 
     const recordShare = async () => {
         if (!post?.id || !user?.id) return;
@@ -323,10 +369,11 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                     <View style={styles.followListWrap}>
                         {loadingFollowed ? (
                             <Text style={styles.emptyText}>Loading…</Text>
-                        ) : filteredHandles.length === 0 ? (
+                        ) : filteredContacts.length === 0 ? (
                             <Text style={styles.emptyText}>No people you follow yet</Text>
                         ) : (
-                            filteredHandles.map((handle) => {
+                            filteredContacts.map((contact) => {
+                                const handle = contact.handle;
                                 const selected = selectedHandles.includes(handle);
                                 return (
                                 <TouchableOpacity
@@ -341,7 +388,7 @@ export default function FeedShareModal({ post, isOpen, onClose, onShareSuccess }
                                 >
                                     <View style={styles.avatarWrap}>
                                         <Avatar
-                                            src={undefined}
+                                            src={contact.avatarUrl}
                                             name={handle.split('@')[0] || 'User'}
                                             size="sm"
                                             cornerRadius={ox(12)}

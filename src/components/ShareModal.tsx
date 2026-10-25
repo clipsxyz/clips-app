@@ -6,7 +6,7 @@ import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
-import { getAvatarForHandle } from '../api/users';
+import { getAvatarForHandle, resolveAvatarForUser } from '../api/users';
 import { getFollowedUsers, incrementShares, regeneratePublicShareToken } from '../api/posts';
 import * as apiClient from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
@@ -15,6 +15,39 @@ import { buildPublicPostUrl } from '../utils/publicShare';
 import Avatar from './Avatar';
 import type { Post } from '../types';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
+
+type ShareContact = {
+    handle: string;
+    avatarUrl?: string;
+};
+
+type FollowingUser = {
+    handle?: string;
+    user_handle?: string;
+    avatar_url?: unknown;
+    avatarUrl?: unknown;
+    avatar?: unknown;
+    profile_photo?: unknown;
+    image_url?: unknown;
+};
+
+function mapShareContacts(apiUsers: FollowingUser[], localHandles: string[]): ShareContact[] {
+    const byHandle = new Map<string, ShareContact>();
+    for (const user of apiUsers) {
+        const handle = String(user?.handle ?? user?.user_handle ?? '').trim();
+        if (!handle) continue;
+        byHandle.set(handle.toLowerCase(), {
+            handle,
+            avatarUrl: resolveAvatarForUser(handle, user),
+        });
+    }
+    for (const handle of localHandles) {
+        const key = handle.toLowerCase();
+        if (byHandle.has(key)) continue;
+        byHandle.set(key, { handle, avatarUrl: getAvatarForHandle(handle) });
+    }
+    return [...byHandle.values()];
+}
 
 interface ShareModalProps {
     isOpen: boolean;
@@ -26,7 +59,7 @@ interface ShareModalProps {
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
     const [copied, setCopied] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [followedHandles, setFollowedHandles] = useState<string[]>([]);
+    const [followedContacts, setFollowedContacts] = useState<ShareContact[]>([]);
     const [loadingFollowed, setLoadingFollowed] = useState(false);
     const [activeShareToken, setActiveShareToken] = useState<string | undefined>(post.publicShareToken);
     const [regeneratingToken, setRegeneratingToken] = useState(false);
@@ -50,8 +83,8 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
 
         const setFromLocal = () => {
             getFollowedUsers(user.id)
-                .then(setFollowedHandles)
-                .catch(() => setFollowedHandles([]))
+                .then((handles) => setFollowedContacts(mapShareContacts([], handles)))
+                .catch(() => setFollowedContacts([]))
                 .finally(() => setLoadingFollowed(false));
         };
 
@@ -59,11 +92,10 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
         if (useLaravel && user.handle && hasToken) {
             apiClient
                 .fetchFollowing(user.handle, 0, 100)
-                .then((res: { items?: { handle?: string; user_handle?: string }[] }) => {
-                    const apiHandles = (res?.items ?? []).map((u) => u.handle ?? u.user_handle).filter(Boolean) as string[];
+                .then((res: { items?: FollowingUser[] }) => {
+                    const apiUsers = res?.items ?? [];
                     return getFollowedUsers(user.id).then((localHandles) => {
-                        const merged = [...new Set([...apiHandles, ...localHandles])];
-                        setFollowedHandles(merged.length ? merged : apiHandles);
+                        setFollowedContacts(mapShareContacts(apiUsers, localHandles));
                     });
                 })
                 .catch((err) => {
@@ -295,9 +327,9 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
     };
 
     const q = searchQuery.trim().toLowerCase();
-    const filteredHandles = q
-        ? followedHandles.filter(h => h.toLowerCase().includes(q))
-        : followedHandles;
+    const filteredContacts = q
+        ? followedContacts.filter(contact => contact.handle.toLowerCase().includes(q))
+        : followedContacts;
 
     // Horizontal scrollable share options – Simple Icons for recognisable brand logos
     const iconWrap = (children: React.ReactNode, bg: string, className = '') => (
@@ -390,26 +422,26 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post, onShareS
                 <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-0">
                     {loadingFollowed ? (
                         <div className="py-8 text-center text-gray-400 text-sm">Loading...</div>
-                    ) : filteredHandles.length === 0 ? (
+                    ) : filteredContacts.length === 0 ? (
                         <div className="py-8 text-center text-gray-400 text-sm">
                             {q ? 'No matches' : 'No people you follow yet'}
                         </div>
                     ) : (
                         <div className="grid grid-cols-3 gap-4 sm:gap-6">
-                            {filteredHandles.map(handle => (
+                            {filteredContacts.map(contact => (
                                 <button
-                                    key={handle}
+                                    key={contact.handle}
                                     type="button"
-                                    onClick={() => handleShareToDM(handle)}
+                                    onClick={() => handleShareToDM(contact.handle)}
                                     className="flex flex-col items-center gap-2 p-2 rounded-xl hover:bg-gray-800/80 active:bg-gray-800 transition-colors"
                                 >
                                     <Avatar
-                                        src={getAvatarForHandle(handle)}
-                                        name={handle.split('@')[0]}
+                                        src={contact.avatarUrl}
+                                        name={contact.handle.split('@')[0]}
                                         size="lg"
                                     />
-                                    <span className="text-xs text-white text-center truncate w-full" title={handle}>
-                                        {handle.split('@')[0]}
+                                    <span className="text-xs text-white text-center truncate w-full" title={contact.handle}>
+                                        {contact.handle.split('@')[0]}
                                     </span>
                                 </button>
                             ))}
