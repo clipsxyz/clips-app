@@ -40,7 +40,6 @@ import {
     UEFA_PASSPORT_GRADIENT_LOCATIONS,
     UEFA_GLASS_BG,
     UEFA_GLASS_BORDER,
-    UEFA_ROYAL_BLUE_END,
 } from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -2137,7 +2136,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     const styles = StyleSheet.create({
         passportShell: {
-            backgroundColor: UEFA_ROYAL_BLUE_END,
+            backgroundColor: '#05050A',
         },
         passportCanvas: {
             flex: 1,
