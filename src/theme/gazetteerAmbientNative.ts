@@ -141,5 +141,5 @@ export const UEFA_ROYAL_BLUE_END = '#020B26';
 export const UEFA_PASSPORT_GRADIENT = ['#000000', '#23104F'] as const;
 export const UEFA_PASSPORT_GRADIENT_LOCATIONS = [0, 1] as const;
 export const UEFA_GLASS_BG = 'rgba(2, 11, 38, 0.75)';
-export const UEFA_GLASS_BORDER = 'rgba(0, 242, 255, 0.25)';
+export const UEFA_GLASS_BORDER = 'rgba(255, 255, 255, 0.2)';
 export const UEFA_CYAN_GLOW = 'rgba(0, 242, 255, 0.6)';
