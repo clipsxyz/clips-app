@@ -68,7 +68,7 @@ export default function ProfileGridPeekSheet({
     const { width } = useWindowDimensions();
     const [videoMuted, setVideoMuted] = useState(true);
     const previewWidth = Math.min(width - 32, 360);
-    const previewMediaHeight = Math.min(width * 0.52, 420);
+    const previewMediaHeight = Math.min(Math.round(width * 0.34), 200);
 
     const textStyle = useMemo(() => (post ? getEffectiveTextStyleForPost(post) : undefined), [post]);
 
@@ -199,7 +199,7 @@ export default function ProfileGridPeekSheet({
                                         ) : null}
                                         {caption ? (
                                             <View style={styles.captionOverlay}>
-                                                <Text style={styles.captionText} numberOfLines={4}>
+                                                <Text style={styles.captionText} numberOfLines={2}>
                                                     {caption}
                                                 </Text>
                                             </View>
@@ -215,12 +215,12 @@ export default function ProfileGridPeekSheet({
                             </View>
                         </View>
 
-                        <View style={styles.actionsCard}>
+                        <View style={styles.actionsRow}>
                             {actions.map((action) => (
                                 <Pressable
                                     key={action.id}
                                     style={({ pressed }) => [
-                                        styles.actionRow,
+                                        styles.actionCell,
                                         action.disabled && styles.actionRowDisabled,
                                         pressed && !action.disabled && styles.actionRowPressed,
                                     ]}
@@ -229,10 +229,12 @@ export default function ProfileGridPeekSheet({
                                         action.onPress();
                                     }}
                                     disabled={action.disabled}
-                                    android_ripple={{ color: 'rgba(255,255,255,0.12)' }}
+                                    android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: true }}
                                 >
-                                    <Icon name={action.icon} size={20} color="#FFFFFF" />
-                                    <Text style={styles.actionLabel}>{action.label}</Text>
+                                    <Icon name={action.icon} size={22} color="#FFFFFF" />
+                                    <Text style={styles.actionLabel} numberOfLines={1}>
+                                        {action.label}
+                                    </Text>
                                 </Pressable>
                             ))}
                         </View>
@@ -348,21 +350,26 @@ const styles = StyleSheet.create({
         lineHeight: 18,
         fontWeight: '500',
     },
-    actionsCard: {
+    actionsRow: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        justifyContent: 'space-between',
         borderRadius: PEEK_SHEET_RADIUS,
-        overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.15)',
         backgroundColor: 'rgba(10, 10, 20, 0.85)',
+        paddingHorizontal: 6,
+        paddingVertical: 10,
     },
-    actionRow: {
-        flexDirection: 'row',
+    actionCell: {
+        flex: 1,
+        minWidth: 0,
         alignItems: 'center',
-        gap: 14,
-        paddingHorizontal: 18,
-        paddingVertical: 16,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+        justifyContent: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 2,
+        borderRadius: 12,
+        gap: 6,
     },
     actionRowPressed: {
         backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -372,7 +379,9 @@ const styles = StyleSheet.create({
     },
     actionLabel: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: 11,
         fontWeight: '600',
+        textAlign: 'center',
+        width: '100%',
     },
 });
