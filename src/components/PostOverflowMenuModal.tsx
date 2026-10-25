@@ -22,7 +22,7 @@ import {
 } from '../theme/gazetteerAmbientNative';
 
 const ROW_ICON = UCL_TEXT_PRIMARY;
-const ROW_CHEVRON = '#64748B';
+const ROW_CHEVRON = 'rgba(255, 255, 255, 0.55)';
 const ROW_DANGER = '#F43F5E';
 
 export type PostOverflowMenuModalProps = {
@@ -325,7 +325,6 @@ export default function PostOverflowMenuModal({
                             <Row
                                 icon="flag-outline"
                                 label="Report"
-                                danger
                                 onPress={() =>
                                     run(async () => {
                                         await onReport();
@@ -381,13 +380,13 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     sheet: {
-        backgroundColor: UCL_CANVAS_NAVY,
+        backgroundColor: 'rgba(10, 10, 20, 0.92)',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         paddingBottom: 28,
         maxHeight: '72%',
         borderTopWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
+        borderColor: 'rgba(255, 255, 255, 0.15)',
         overflow: 'hidden',
     },
     sheetCanvas: {
@@ -399,7 +398,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 4,
         borderRadius: 2,
-        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+        backgroundColor: 'rgba(255, 255, 255, 0.35)',
         marginTop: 10,
         marginBottom: 8,
     },
@@ -420,7 +419,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         paddingHorizontal: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
         backgroundColor: 'transparent',
     },
     rowDisabled: {
@@ -441,7 +440,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     cancelText: {
-        color: '#CBD5E1',
+        color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '600',
     },

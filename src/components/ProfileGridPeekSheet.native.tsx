@@ -118,9 +118,13 @@ export default function ProfileGridPeekSheet({
     return (
         <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
             <Pressable style={styles.overlay} onPress={onClose}>
-                <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+                <Pressable
+                    style={[styles.sheet, { width: previewWidth }]}
+                    onPress={(e) => e.stopPropagation()}
+                >
+                    <View style={styles.handle} />
                     <ScrollView bounces={false} showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
-                        <View style={[styles.previewCard, { width: previewWidth }]}>
+                        <View style={styles.previewCard}>
                             <View style={styles.previewHeader}>
                                 <Avatar
                                     src={profileAvatarUrl || getAvatarForHandle(profileHandle || post.userHandle)}
@@ -189,7 +193,7 @@ export default function ProfileGridPeekSheet({
                                                 <Icon
                                                     name={videoMuted ? 'volume-mute' : 'volume-high'}
                                                     size={16}
-                                                    color="#111827"
+                                                    color="#FFFFFF"
                                                 />
                                             </TouchableOpacity>
                                         ) : null}
@@ -211,31 +215,25 @@ export default function ProfileGridPeekSheet({
                             </View>
                         </View>
 
-                        <View style={[styles.actionsCard, { width: previewWidth }]}>
+                        <View style={styles.actionsCard}>
                             {actions.map((action) => (
-                                <TouchableOpacity
+                                <Pressable
                                     key={action.id}
-                                    style={[styles.actionRow, action.disabled && styles.actionRowDisabled]}
+                                    style={({ pressed }) => [
+                                        styles.actionRow,
+                                        action.disabled && styles.actionRowDisabled,
+                                        pressed && !action.disabled && styles.actionRowPressed,
+                                    ]}
                                     onPress={() => {
                                         if (action.disabled) return;
                                         action.onPress();
                                     }}
                                     disabled={action.disabled}
+                                    android_ripple={{ color: 'rgba(255,255,255,0.12)' }}
                                 >
-                                    <Icon
-                                        name={action.icon}
-                                        size={20}
-                                        color={action.destructive ? 'rgba(255,255,255,0.75)' : '#FFFFFF'}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.actionLabel,
-                                            action.destructive && styles.actionLabelMuted,
-                                        ]}
-                                    >
-                                        {action.label}
-                                    </Text>
-                                </TouchableOpacity>
+                                    <Icon name={action.icon} size={20} color="#FFFFFF" />
+                                    <Text style={styles.actionLabel}>{action.label}</Text>
+                                </Pressable>
                             ))}
                         </View>
                     </ScrollView>
@@ -248,26 +246,39 @@ export default function ProfileGridPeekSheet({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        backgroundColor: 'rgba(3, 9, 27, 0.72)',
         justifyContent: 'center',
         alignItems: 'center',
         padding: 16,
     },
     sheet: {
-        width: '100%',
         maxHeight: '92%',
+        borderRadius: 20,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(10, 10, 20, 0.92)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    handle: {
+        alignSelf: 'center',
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255, 255, 255, 0.35)',
+        marginTop: 10,
+        marginBottom: 8,
     },
     sheetContent: {
-        alignItems: 'center',
         gap: 10,
-        paddingVertical: 8,
+        paddingHorizontal: 10,
+        paddingBottom: 12,
     },
     previewCard: {
         borderRadius: PEEK_SHEET_RADIUS,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        backgroundColor: FEED_CARD_MEDIA_BG,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: '#0B1021',
     },
     previewHeader: {
         flexDirection: 'row',
@@ -276,7 +287,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 10,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.2)',
+        borderBottomColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(10, 10, 20, 0.85)',
     },
     previewHandle: {
         flex: 1,
@@ -314,7 +326,9 @@ const styles = StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: 'rgba(255,255,255,0.95)',
+        backgroundColor: 'rgba(10, 10, 20, 0.72)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -338,27 +352,27 @@ const styles = StyleSheet.create({
         borderRadius: PEEK_SHEET_RADIUS,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        backgroundColor: FEED_CARD_MEDIA_BG,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+        backgroundColor: 'rgba(10, 10, 20, 0.85)',
     },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.12)',
+        gap: 14,
+        paddingHorizontal: 18,
+        paddingVertical: 16,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+    },
+    actionRowPressed: {
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     actionRowDisabled: {
         opacity: 0.4,
     },
     actionLabel: {
         color: '#FFFFFF',
-        fontSize: 15,
-        fontWeight: '500',
-    },
-    actionLabelMuted: {
-        color: 'rgba(255,255,255,0.85)',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
