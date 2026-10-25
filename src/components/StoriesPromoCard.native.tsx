@@ -9,6 +9,7 @@ import {
     STORY_GRADIENT_RING_COLORS,
     STORY_GRADIENT_RING_END,
     STORY_GRADIENT_RING_START,
+    STORY_RING_GAP,
 } from '../utils/storyRingNative';
 import Avatar from './Avatar';
 
@@ -60,7 +61,7 @@ const WASH = ['rgba(16, 185, 129, 0.12)', 'rgba(0, 242, 254, 0.08)', 'rgba(18, 2
 /** Inner photo diameter; 2px gradient ring matches Inbox header story avatars. */
 const AVATAR_SIZE = 32;
 const RING_PAD = 2;
-const RING_SIZE = AVATAR_SIZE + RING_PAD * 2;
+const RING_SIZE = AVATAR_SIZE + RING_PAD * 2 + STORY_RING_GAP * 2;
 const AVATAR_OVERLAP = -10;
 const STACK_MAX = 3;
 
@@ -251,6 +252,7 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         borderRadius: 999,
+        padding: STORY_RING_GAP,
         backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',

@@ -18,12 +18,13 @@ import { resolveVerifiedAccountType } from '../utils/verifiedBadge';
 import { FEED_CARD_CHROME_BG } from './FeedPageLayout.native';
 import { storyRingColor, storyRingVisible } from '../utils/storyRingNative';
 
-/** Outer ring on newsfeed cards. Smaller than the 38px header so the photo doesn't dominate the row. */
-const FEED_HEADER_AVATAR_SIZE = 25;
-/** Same 2px ring thickness / gap as the Inbox story avatars. */
-const FEED_HEADER_AVATAR_RING_PAD = 2;
-/** Rounded square, not a circle. Corners stay concentric inside the ring. */
-const FEED_HEADER_AVATAR_RADIUS = 5;
+/** Outer slot including ring + Instagram standoff so the photo stays ~30px. */
+const FEED_HEADER_AVATAR_SIZE = 36;
+/** Idle hairline; story rings use the thicker Instagram stroke. */
+const FEED_HEADER_AVATAR_IDLE_BORDER = 0.5;
+const FEED_HEADER_AVATAR_STORY_BORDER = 2;
+/** Dark gap between the photo and the outer ring (Instagram proportions). */
+const FEED_HEADER_AVATAR_RING_GAP = 2.5;
 /** Compact overlay badge (follow +, DM, follow check, request pill). */
 const FEED_HEADER_BADGE_SIZE = 10;
 const FEED_HEADER_BADGE_ICON = 6;
@@ -147,12 +148,12 @@ export default function FeedPostHeader({
                     src={avatarSrc}
                     name={safeHandle.replace(/^@/, '').split('@')[0] || 'User'}
                     size={FEED_HEADER_AVATAR_SIZE}
-                    cornerRadius={FEED_HEADER_AVATAR_RADIUS}
                     hasStory={hasStory}
-                    ringGap={showRing ? FEED_HEADER_AVATAR_RING_PAD : 0}
+                    borderWidth={showRing ? FEED_HEADER_AVATAR_STORY_BORDER : FEED_HEADER_AVATAR_IDLE_BORDER}
+                    ringGap={FEED_HEADER_AVATAR_RING_GAP}
                     gapColor={FEED_CARD_CHROME_BG}
-                    ringColor={showRing ? ringColor : undefined}
-                    hideBorder={!showRing}
+                    ringColor={showRing ? ringColor : 'rgba(255, 255, 255, 0.15)'}
+                    hideBorder={false}
                 />
             </TouchableOpacity>
             {!isCurrentUser && onFollow && !isFollowing && !hasPendingRequest ? (

@@ -17,6 +17,8 @@ export type AvatarProps = {
      * Inbox story gradient). Defaults to the standard 2px border.
      */
     hideBorder?: boolean;
+    /** Outline thickness in px. Defaults to the standard 2px story/idle ring. */
+    borderWidth?: number;
     /**
      * Opt-in squircle radius. When set, the avatar (inner image + story ring)
      * renders as a rounded square instead of a full circle. Defaults to a circle

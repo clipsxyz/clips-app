@@ -39,6 +39,8 @@ import {
     STORY_GRADIENT_RING_COLORS,
     STORY_GRADIENT_RING_END,
     STORY_GRADIENT_RING_START,
+    STORY_RING_GAP,
+    STORY_RING_WIDTH,
 } from '../utils/storyRingNative';
 const CARD_W = 175;
 const CARD_H = 102;
@@ -903,10 +905,10 @@ const styles = StyleSheet.create({
         paddingBottom: 10,
     },
     cardAvatarRing: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        padding: 2,
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        padding: STORY_RING_WIDTH,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
@@ -919,6 +921,7 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         borderRadius: 999,
+        padding: STORY_RING_GAP,
         backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',

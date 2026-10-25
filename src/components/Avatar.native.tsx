@@ -32,6 +32,7 @@ export default function Avatar({
     size = 'md',
     hasStory = false,
     hideBorder = false,
+    borderWidth: borderWidthProp,
     cornerRadius,
     ringGap = 0,
     gapColor = DEFAULT_AVATAR_GAP_COLOR,
@@ -55,7 +56,7 @@ export default function Avatar({
     // same footprint; the border and the gap are both drawn INSIDE it, and each
     // inner radius recedes by exactly the inset it sits under — so the rounded
     // corners stay concentric at every layer with no distortion.
-    const borderWidth = hideBorder ? 0 : AVATAR_STORY_BORDER_WIDTH;
+    const borderWidth = hideBorder ? 0 : borderWidthProp ?? AVATAR_STORY_BORDER_WIDTH;
     const gap = hideBorder ? 0 : Math.max(0, ringGap);
     const inset = borderWidth + gap;
     const innerDim = Math.max(0, dim - inset * 2);
@@ -159,12 +160,12 @@ const styles = StyleSheet.create({
     },
     innerClip: {
         overflow: 'hidden',
-        backgroundColor: '#2A2F38',
+        backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',
     },
     initialsWrap: {
-        backgroundColor: '#2A2F38',
+        backgroundColor: '#000000',
         alignItems: 'center',
         justifyContent: 'center',
     },
