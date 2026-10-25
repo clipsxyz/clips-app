@@ -3,18 +3,17 @@ import { StyleSheet, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 /**
- * Champions League floor for the feed canvas — pure black → bright purple.
+ * Deep dark floor for the feed canvas. Saturated purple lives on inner cards only.
  */
 export const FEED_AMBIENT_STATIC_HEX = '#000000';
 
-/** Champions League vertical wash — pure black → bright purple. */
-const FEED_AMBIENT_WASH = ['#000000', '#23104F'] as const;
+const FEED_AMBIENT_WASH = ['#000000', '#05050A'] as const;
 
-/** Faint sheen so cards read as floating on smoked glass rather than sitting on flat paint. */
+/** Faint sheen so cards read as floating rather than sitting on flat paint. */
 const FEED_AMBIENT_FROST = 'rgba(255, 255, 255, 0.02)';
 
 type Props = {
-    /** Ignored — the canvas is a fixed neutral wash, never sampled per post. */
+    /** Ignored — the canvas is a fixed dark wash, never sampled per post. */
     dominantColor?: string | null;
 };
 

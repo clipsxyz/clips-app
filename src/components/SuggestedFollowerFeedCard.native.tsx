@@ -14,8 +14,10 @@ import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
 import type { SuggestedFollowerSuggestion } from '../utils/suggestedFollowerFeed';
-import PassportSheetCanvas, { PASSPORT_SHEET_WASH } from './PassportSheetCanvas.native';
-import { PASSPORT_ABYSS } from '../utils/discoverAmbientPalette';
+import {
+    UEFA_PASSPORT_GRADIENT,
+    UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import Video, { type VideoRef } from 'react-native-video';
 import {
     isMockDemoVideoPath,
@@ -101,7 +103,15 @@ export default function SuggestedFollowerFeedCard({
 
   return (
     <View style={styles.card}>
-      <PassportSheetCanvas contentStyle={styles.content}>
+      <LinearGradient
+        colors={[...UEFA_PASSPORT_GRADIENT]}
+        locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      <View style={styles.content}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => setInfoOpen((v) => !v)} accessibilityLabel="Info">
           <Icon name="information-circle-outline" size={20} color="rgba(232,238,242,0.62)" />
         </TouchableOpacity>
@@ -183,8 +193,8 @@ export default function SuggestedFollowerFeedCard({
           </TouchableOpacity>
           <TouchableOpacity style={styles.primaryBtnWrap} onPress={handleFollow} disabled={followBusy}>
             <LinearGradient
-              colors={[...PASSPORT_SHEET_WASH]}
-              locations={[0, 1]}
+              colors={[...UEFA_PASSPORT_GRADIENT]}
+              locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
               start={{ x: 0.5, y: 0 }}
               end={{ x: 0.5, y: 1 }}
               style={StyleSheet.absoluteFill}
@@ -196,7 +206,7 @@ export default function SuggestedFollowerFeedCard({
             )}
           </TouchableOpacity>
         </View>
-      </PassportSheetCanvas>
+      </View>
     </View>
   );
 }
@@ -208,7 +218,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
-    backgroundColor: PASSPORT_ABYSS,
+    backgroundColor: '#000000',
     overflow: 'hidden',
     minHeight: 300,
   },

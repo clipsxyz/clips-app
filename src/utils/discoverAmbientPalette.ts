@@ -33,26 +33,26 @@ export const GOLD_CHROME_PALETTE: AmbientPalette = {
  * Sea-glass + brass on deep navy (not Instagram purple/magenta).
  */
 export const PASSPORT_PALETTE: AmbientPalette = {
-    wavePrimary: '#23104F',
-    waveMid: '#12082A',
-    waveDeep: '#000000',
-    wave2Primary: 'rgba(35, 16, 79, 0.55)',
-    wave2Mid: 'rgba(35, 16, 79, 0.22)',
-    wave2End: 'rgba(0, 0, 0, 0)',
+    wavePrimary: '#3d9b8f',
+    waveMid: '#12263a',
+    waveDeep: '#060d16',
+    wave2Primary: 'rgba(196, 165, 116, 0.4)',
+    wave2Mid: 'rgba(61, 155, 143, 0.22)',
+    wave2End: 'rgba(6, 13, 22, 0)',
 };
 
-export const PASSPORT_ABYSS = '#000000';
+export const PASSPORT_ABYSS = '#060d16';
 
 /**
  * Discover Canvas sheet system — every bottom sheet / modal inherits these.
- * Champions League vertical wash: pure black → bright purple.
+ * Dark vertical gradient: deep near-black at top → rich emerald at bottom.
  */
-export const DISCOVER_SHEET_GRADIENT = ['#000000', '#23104F'] as const;
-export const DISCOVER_SHEET_GRADIENT_LOCATIONS = [0, 1] as const;
+export const DISCOVER_SHEET_GRADIENT = ['#061210', '#0A1815', '#0F2E28', '#133D35'] as const;
+export const DISCOVER_SHEET_GRADIENT_LOCATIONS = [0, 0.35, 0.7, 1] as const;
 /** Solid fallback where a gradient can't paint (e.g. gorhom sheet background). */
-export const DISCOVER_SHEET_BASE = '#000000';
+export const DISCOVER_SHEET_BASE = '#0A1815';
 export const DISCOVER_SHEET_SURFACE = 'rgba(255, 255, 255, 0.05)';
-export const DISCOVER_SHEET_BORDER = 'rgba(255, 255, 255, 0.15)';
+export const DISCOVER_SHEET_BORDER = 'rgba(255, 255, 255, 0.1)';
 export const DISCOVER_SHEET_TEXT = '#FFFFFF';
 export const DISCOVER_SHEET_TEXT_MUTED = 'rgba(255, 255, 255, 0.6)';
 /** Sea-glass accent for active states (selection, primary actions). */

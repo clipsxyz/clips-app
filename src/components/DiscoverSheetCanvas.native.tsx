@@ -27,13 +27,13 @@ type Props = {
     children: React.ReactNode;
     style?: StyleProp<ViewStyle>;
     contentStyle?: StyleProp<ViewStyle>;
-    /** `ucl` = Champions League navy canvas; default is black → purple. */
+    /** `ucl` = Champions League navy canvas; default remains Discover emerald. */
     tone?: 'discover' | 'ucl';
 };
 
 /**
  * Shared Discover Canvas wrapper for bottom sheets / pop-up modals.
- * Dark vertical LinearGradient (pure black → bright purple); content sits above it.
+ * Dark vertical LinearGradient (near-black → emerald); content sits above it.
  * All current and future sheets should render through this (directly, or via
  * the backwards-compatible PassportSheetCanvas alias).
  */

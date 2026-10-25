@@ -8,6 +8,10 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
+import {
+  UEFA_PASSPORT_GRADIENT,
+  UEFA_PASSPORT_GRADIENT_LOCATIONS,
+} from '../theme/gazetteerAmbientNative';
 import Avatar from './Avatar.native';
 import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
@@ -162,6 +166,14 @@ export default function LocalBusinessSuggestionCard({
   if (!posts.length) {
     return (
       <View style={styles.section}>
+        <LinearGradient
+          colors={[...UEFA_PASSPORT_GRADIENT]}
+          locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
         <Text style={styles.title}>Local business you might like</Text>
         <Text style={styles.emptyText}>No strong local business matches yet. Check back soon.</Text>
       </View>
@@ -184,6 +196,14 @@ export default function LocalBusinessSuggestionCard({
 
   return (
     <View style={styles.section}>
+      <LinearGradient
+        colors={[...UEFA_PASSPORT_GRADIENT]}
+        locations={[...UEFA_PASSPORT_GRADIENT_LOCATIONS]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
           <Text style={styles.title}>Local business you might like</Text>
@@ -323,6 +343,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     backgroundColor: '#000000',
+    overflow: 'hidden',
     padding: 12,
   },
   headerRow: {
