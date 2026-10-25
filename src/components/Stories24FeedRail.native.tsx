@@ -45,6 +45,9 @@ import {
 const CARD_W = 175;
 const CARD_H = 102;
 const CARD_RADIUS = 10;
+/** Outer story-card avatar slot; stroke + gap match the newsfeed header. */
+const CARD_AVATAR_RING = 58;
+const CARD_AVATAR_PHOTO = CARD_AVATAR_RING - (STORY_RING_WIDTH + STORY_RING_GAP) * 2;
 /** Idle / missing poster — never the old BBB rainbow test card. */
 const PREVIEW_POSTER_FALLBACK = '#121212';
 
@@ -257,7 +260,7 @@ function StoryCard({
                             <Avatar
                                 src={avatarSrc}
                                 name={displayHandle.replace(/^@/, '').split('@')[0] || 'User'}
-                                size={48}
+                                size={CARD_AVATAR_PHOTO}
                                 hideBorder
                             />
                         </View>
@@ -905,9 +908,9 @@ const styles = StyleSheet.create({
         paddingBottom: 10,
     },
     cardAvatarRing: {
-        width: 58,
-        height: 58,
-        borderRadius: 29,
+        width: CARD_AVATAR_RING,
+        height: CARD_AVATAR_RING,
+        borderRadius: CARD_AVATAR_RING / 2,
         padding: STORY_RING_WIDTH,
         alignItems: 'center',
         justifyContent: 'center',
@@ -922,7 +925,7 @@ const styles = StyleSheet.create({
         height: '100%',
         borderRadius: 999,
         padding: STORY_RING_GAP,
-        backgroundColor: '#000000',
+        backgroundColor: 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',

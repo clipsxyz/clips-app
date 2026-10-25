@@ -10,6 +10,7 @@ import {
     STORY_GRADIENT_RING_END,
     STORY_GRADIENT_RING_START,
     STORY_RING_GAP,
+    STORY_RING_WIDTH,
 } from '../utils/storyRingNative';
 import Avatar from './Avatar';
 
@@ -58,10 +59,9 @@ type Props = {
 const SCRIM = ['rgba(18, 28, 26, 0.82)', 'rgba(14, 22, 20, 0.72)'] as const;
 const WASH = ['rgba(16, 185, 129, 0.12)', 'rgba(0, 242, 254, 0.08)', 'rgba(18, 28, 26, 0.04)'] as const;
 
-/** Inner photo diameter; 2px gradient ring matches Inbox header story avatars. */
+/** Inner photo diameter. Ring stroke + gap match the newsfeed header avatar. */
 const AVATAR_SIZE = 32;
-const RING_PAD = 2;
-const RING_SIZE = AVATAR_SIZE + RING_PAD * 2 + STORY_RING_GAP * 2;
+const RING_SIZE = AVATAR_SIZE + STORY_RING_WIDTH * 2 + STORY_RING_GAP * 2;
 const AVATAR_OVERLAP = -10;
 const STACK_MAX = 3;
 
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
         width: RING_SIZE,
         height: RING_SIZE,
         borderRadius: RING_SIZE / 2,
-        padding: RING_PAD,
+        padding: STORY_RING_WIDTH,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
         height: '100%',
         borderRadius: 999,
         padding: STORY_RING_GAP,
-        backgroundColor: '#000000',
+        backgroundColor: 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',

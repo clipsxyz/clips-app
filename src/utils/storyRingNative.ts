@@ -25,10 +25,10 @@ export const STORY_GRADIENT_RING_COLORS = ['#2DD4BF', '#0EA5E9', '#D946EF'] as c
 export const STORY_GRADIENT_RING_START = { x: 0, y: 1 } as const;
 export const STORY_GRADIENT_RING_END = { x: 1, y: 0 } as const;
 
-/** Ring thickness shared with the feed header / inbox story rails. */
-export const STORY_RING_WIDTH = 2;
-/** Background-colored standoff between the ring and the photo (Instagram parity). */
-export const STORY_RING_GAP = 3;
+/** Ring thickness — matches the newsfeed header avatar stroke. */
+export const STORY_RING_WIDTH = 0.75;
+/** Transparent standoff between the ring and the photo — matches the newsfeed header. */
+export const STORY_RING_GAP = 2.5;
 
 export function storyRingState(input: { any: boolean; unviewed: boolean }): StoryRingState {
     if (!input.any) return 'none';
